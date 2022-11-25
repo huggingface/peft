@@ -1,12 +1,14 @@
-from collections import OrderedDict
 import enum
 import warnings
+from collections import OrderedDict
+
 import torch
+from accelerate.state import AcceleratorState
 from transformers import PreTrainedModel
+
 from tuners.p_tuning import PromptEncoder
 from tuners.prefix_tuning import PrefixEncoder
 from tuners.prompt_tuning import PromptEmbedding
-from accelerate.state import AcceleratorState
 
 
 class PromptEncoderType(str, enum.Enum):
@@ -88,8 +90,8 @@ class ParameterEfficientTuningModel(torch.nn.Module):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """
-        Custom load state dict method that only loads prompt table and prompt encoder
-        parameters. Matching load method for this class' custom state dict method.
+        Custom load state dict method that only loads prompt table and prompt encoder parameters. Matching load method
+        for this class' custom state dict method.
         """
         self.prompt_encoder.embedding.load_state_dict({"weight": state_dict["prompt_embeddings"]}, strict)
 
@@ -187,8 +189,8 @@ class ParameterEfficientTuningModelForSequenceClassification(ParameterEfficientT
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """
-        Custom load state dict method that only loads prompt table and prompt encoder
-        parameters. Matching load method for this class' custom state dict method.
+        Custom load state dict method that only loads prompt table and prompt encoder parameters. Matching load method
+        for this class' custom state dict method.
         """
         super().load_state_dict(state_dict["prompt_encoder"], strict)
         self.model.classifier.load_state_dict(state_dict["classifier"], strict)
