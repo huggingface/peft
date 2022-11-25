@@ -1,5 +1,6 @@
 import torch
 
+
 # Based on https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
 # with some refactor
 class PrefixEncoder(torch.nn.Module):
@@ -20,11 +21,15 @@ class PrefixEncoder(torch.nn.Module):
             self.trans = torch.nn.Sequential(
                 torch.nn.Linear(config["token_dim"], config["prompt_hidden_size"]),
                 torch.nn.Tanh(),
-                torch.nn.Linear(config["prompt_hidden_size"], config["num_layers"] * 2 * config["token_dim"]),
+                torch.nn.Linear(
+                    config["prompt_hidden_size"],
+                    config["num_layers"] * 2 * config["token_dim"],
+                ),
             )
         else:
             self.embedding = torch.nn.Embedding(
-                config["num_virtual_tokens"], config["num_layers"] * 2 * config["token_dim"]
+                config["num_virtual_tokens"],
+                config["num_layers"] * 2 * config["token_dim"],
             )
 
     def forward(self, prefix: torch.Tensor):

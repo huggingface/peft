@@ -1,34 +1,27 @@
 import enum
-import torch
+import functools
 import math
 import os
+from collections import OrderedDict
 
-from torch.nn import CrossEntropyLoss, MSELoss, BCEWithLogitsLoss
-from transformers import PreTrainedModel
-from transformers.modeling_outputs import SequenceClassifierOutput
-from transformers import AutoModelForSequenceClassification
-from datasets import load_dataset
-import evaluate
 import torch
-from transformers import AutoTokenizer, get_linear_schedule_with_warmup, set_seed
-from torch.utils.data import DataLoader
 from accelerate import Accelerator
 from accelerate.state import AcceleratorState
 from accelerate.utils.dataclasses import FullyShardedDataParallelPlugin
-import functools
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel,
-    CPUOffload,
+from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch.utils.data import DataLoader
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    PreTrainedModel,
+    get_linear_schedule_with_warmup,
+    set_seed,
 )
-from torch.distributed.fsdp.wrap import (
-    enable_wrap,
-    wrap,
-    ModuleWrapPolicy,
-    transformer_auto_wrap_policy,
-    lambda_auto_wrap_policy,
-    _or_policy,
-)
-from collections import OrderedDict
+from transformers.modeling_outputs import SequenceClassifierOutput
+
+import evaluate
+from datasets import load_dataset
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
@@ -49,8 +42,7 @@ class PromptTuningInit(str, enum.Enum):
 
 class PromptEncoder(torch.nn.Module):
     """
-    The prompt encoder network that is used to generate the virtual
-    token embeddings for p-tuning.
+    The prompt encoder network that is used to generate the virtual token embeddings for p-tuning.
     """
 
     def __init__(self, config):
@@ -92,13 +84,23 @@ class PromptEncoder(torch.nn.Module):
                 )
 
             elif self.encoder_type == PromptEncoderReparameterizationType.MLP:
-                layers = [torch.nn.Linear(self.input_size, self.hidden_size), torch.nn.ReLU()]
-                layers.extend([torch.nn.Linear(self.hidden_size, self.hidden_size), torch.nn.ReLU()])
+                layers = [
+                    torch.nn.Linear(self.input_size, self.hidden_size),
+                    torch.nn.ReLU(),
+                ]
+                layers.extend(
+                    [
+                        torch.nn.Linear(self.hidden_size, self.hidden_size),
+                        torch.nn.ReLU(),
+                    ]
+                )
                 layers.append(torch.nn.Linear(self.hidden_size, self.output_size))
                 self.mlp_head = torch.nn.Sequential(*layers)
 
             else:
-                raise ValueError("Prompt encoder type not recognized. Please use one of MLP (recommended) or LSTM.")
+                raise ValueError(
+                    "Prompt encoder type not recognized. " " Please use one of MLP (recommended) or LSTM."
+                )
 
     def forward(self, indices):
         input_embeds = self.embedding(indices)
@@ -130,11 +132,15 @@ class PrefixEncoder(torch.nn.Module):
             self.trans = torch.nn.Sequential(
                 torch.nn.Linear(config["token_dim"], config["prompt_hidden_size"]),
                 torch.nn.Tanh(),
-                torch.nn.Linear(config["prompt_hidden_size"], config["num_layers"] * 2 * config["token_dim"]),
+                torch.nn.Linear(
+                    config["prompt_hidden_size"],
+                    config["num_layers"] * 2 * config["token_dim"],
+                ),
             )
         else:
             self.embedding = torch.nn.Embedding(
-                config["num_virtual_tokens"], config["num_layers"] * 2 * config["token_dim"]
+                config["num_virtual_tokens"],
+                config["num_layers"] * 2 * config["token_dim"],
             )
 
     def forward(self, prefix: torch.Tensor):
@@ -247,8 +253,8 @@ class PromptModel(torch.nn.Module):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """
-        Custom load state dict method that only loads prompt table and prompt encoder
-        parameters. Matching load method for this class' custom state dict method.
+        Custom load state dict method that only loads prompt table and prompt encoder parameters. Matching load method
+        for this class' custom state dict method.
         """
         self.prompt_encoder.embedding.load_state_dict({"weight": state_dict["prompt_embeddings"]}, strict)
 
@@ -389,8 +395,8 @@ class PromptModelForSequenceClassification(PromptModel):
 
     def load_state_dict(self, state_dict, strict: bool = True):
         """
-        Custom load state dict method that only loads prompt table and prompt encoder
-        parameters. Matching load method for this class' custom state dict method.
+        Custom load state dict method that only loads prompt table and prompt encoder parameters. Matching load method
+        for this class' custom state dict method.
         """
         super().load_state_dict(state_dict["prompt_encoder"], strict)
         self.classifier.load_state_dict(state_dict["classifier"], strict)
@@ -528,7 +534,7 @@ def main():
     batch_size = 16
     lr = 5e-3
     num_epochs = 100
-    device = "cuda"
+    # device = "cuda"
     seed = 11
     set_seed(seed)
 
@@ -544,7 +550,12 @@ def main():
 
     def tokenize_function(examples):
         # max_length=None => use the model max length (it's actually the default)
-        outputs = tokenizer(examples["sentence1"], examples["sentence2"], truncation=True, max_length=None)
+        outputs = tokenizer(
+            examples["sentence1"],
+            examples["sentence2"],
+            truncation=True,
+            max_length=None,
+        )
         return outputs
 
     # Apply the method we just defined to all the examples in all the splits of the dataset
@@ -564,10 +575,16 @@ def main():
 
     # Instantiate dataloaders.
     train_dataloader = DataLoader(
-        tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size
+        tokenized_datasets["train"],
+        shuffle=True,
+        collate_fn=collate_fn,
+        batch_size=batch_size,
     )
     eval_dataloader = DataLoader(
-        tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
+        tokenized_datasets["validation"],
+        shuffle=False,
+        collate_fn=collate_fn,
+        batch_size=batch_size,
     )
 
     # Instantiate optimizer
@@ -582,9 +599,13 @@ def main():
 
     accelerator.state.fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(model)
 
-    model, train_dataloader, eval_dataloader, optimizer, lr_scheduler = accelerator.prepare(
-        model, train_dataloader, eval_dataloader, optimizer, lr_scheduler
-    )
+    (
+        model,
+        train_dataloader,
+        eval_dataloader,
+        optimizer,
+        lr_scheduler,
+    ) = accelerator.prepare(model, train_dataloader, eval_dataloader, optimizer, lr_scheduler)
     accelerator.print(model)
 
     for epoch in range(num_epochs):
@@ -616,17 +637,14 @@ def main():
         accelerator.print(f"epoch {epoch}:", eval_metric)
         accelerator.print(f"epoch {epoch} train loss:", total_loss / len(train_dataloader))
 
+    from torch.distributed.fsdp.fully_sharded_data_parallel import FullStateDictConfig
     from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
-    from torch.distributed.fsdp.fully_sharded_data_parallel import (
-        BackwardPrefetch,
-        CPUOffload,
-        FullStateDictConfig,
-        ShardingStrategy,
-        StateDictType,
-    )
+    from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 
     FSDP.set_state_dict_type(
-        model, StateDictType.FULL_STATE_DICT, FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        model,
+        StateDictType.FULL_STATE_DICT,
+        FullStateDictConfig(offload_to_cpu=True, rank0_only=True),
     )
     state_dict = model.state_dict()
     state_dict = model.clean_state_dict(state_dict)

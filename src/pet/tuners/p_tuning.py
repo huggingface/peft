@@ -1,5 +1,6 @@
-import torch
 import enum
+
+import torch
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
@@ -11,8 +12,7 @@ class PromptEncoderReparameterizationType(str, enum.Enum):
 # with some refactor
 class PromptEncoder(torch.nn.Module):
     """
-    The prompt encoder network that is used to generate the virtual
-    token embeddings for p-tuning.
+    The prompt encoder network that is used to generate the virtual token embeddings for p-tuning.
     """
 
     def __init__(self, config):
@@ -54,8 +54,16 @@ class PromptEncoder(torch.nn.Module):
                 )
 
             elif self.encoder_type == PromptEncoderReparameterizationType.MLP:
-                layers = [torch.nn.Linear(self.input_size, self.hidden_size), torch.nn.ReLU()]
-                layers.extend([torch.nn.Linear(self.hidden_size, self.hidden_size), torch.nn.ReLU()])
+                layers = [
+                    torch.nn.Linear(self.input_size, self.hidden_size),
+                    torch.nn.ReLU(),
+                ]
+                layers.extend(
+                    [
+                        torch.nn.Linear(self.hidden_size, self.hidden_size),
+                        torch.nn.ReLU(),
+                    ]
+                )
                 layers.append(torch.nn.Linear(self.hidden_size, self.output_size))
                 self.mlp_head = torch.nn.Sequential(*layers)
 
