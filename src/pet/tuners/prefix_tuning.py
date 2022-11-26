@@ -7,9 +7,9 @@ class PrefixEncoder(torch.nn.Module):
     r"""
     The torch.nn model to encode the prefix
 
-    Input shape: (batch-size, prefix-length)
+    Input shape: (batch_size, num_virtual_tokens)
 
-    Output shape: (batch-size, prefix-length, 2*layers*hidden)
+    Output shape: (batch_size, num_virtual_tokens, 2*(num_transformer_submodules)*layers*hidden)
     """
 
     def __init__(self, config):
@@ -23,13 +23,13 @@ class PrefixEncoder(torch.nn.Module):
                 torch.nn.Tanh(),
                 torch.nn.Linear(
                     config["prompt_hidden_size"],
-                    config["num_layers"] * 2 * config["token_dim"],
+                    config["num_layers"] * 2 * config["num_transformer_submodules"] * config["token_dim"],
                 ),
             )
         else:
             self.embedding = torch.nn.Embedding(
                 config["num_virtual_tokens"],
-                config["num_layers"] * 2 * config["token_dim"],
+                config["num_layers"] * 2 * config["num_transformer_submodules"] * config["token_dim"],
             )
 
     def forward(self, prefix: torch.Tensor):

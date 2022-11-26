@@ -21,7 +21,7 @@ class PromptEncoder(torch.nn.Module):
         self.input_size = config["token_dim"]
         self.output_size = config["token_dim"]
         self.hidden_size = config["prompt_hidden_size"]
-        self.total_virtual_tokens = config["num_virtual_tokens"]
+        self.total_virtual_tokens = config["num_virtual_tokens"] * config["num_transformer_submodules"]
         self.encoder_type = config["prompt_encoder_config"]["prompt_reparam_type"]
 
         # embedding
