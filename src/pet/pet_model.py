@@ -1,17 +1,13 @@
 import enum
-import warnings
 import inspect
-from collections import OrderedDict
+import warnings
 
 import torch
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from accelerate.state import AcceleratorState
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput
 
-from .tuners import PromptEncoder
-from .tuners import PrefixEncoder
-from .tuners import PromptEmbedding
+from .tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
 
 
 class PromptEncoderType(str, enum.Enum):
@@ -257,6 +253,7 @@ class PETModelForCausalLM(PETModel):
         self,
         input_ids=None,
         attention_mask=None,
+        inputs_embeds=None,
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
@@ -271,13 +268,6 @@ class PETModelForCausalLM(PETModel):
                     self.model.device
                 )
                 attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-
-            # concat prompt labels
-            if labels is not None:
-                prefix_labels = torch.full((batch_size, self.prompt_learning_config["num_virtual_tokens"]), -100).to(
-                    self.device
-                )
-                labels = torch.cat((prefix_labels, labels), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -301,6 +291,12 @@ class PETModelForCausalLM(PETModel):
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
+            # concat prompt labels
+            if kwargs["labels"] is not None:
+                prefix_labels = torch.full((batch_size, self.prompt_learning_config["num_virtual_tokens"]), -100).to(
+                    self.model.device
+                )
+                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.model(inputs_embeds=inputs_embeds, **kwargs)
@@ -325,8 +321,10 @@ class PETModelForSeq2SeqLM(PETModel):
         self,
         input_ids=None,
         attention_mask=None,
+        inputs_embeds=None,
         decoder_input_ids=None,
         decoder_attention_mask=None,
+        decoder_inputs_embeds=None,
         labels=None,
         output_attentions=None,
         output_hidden_states=None,
@@ -348,7 +346,7 @@ class PETModelForSeq2SeqLM(PETModel):
             # concat prompt labels
             if labels is not None:
                 prefix_labels = torch.full((batch_size, self.prompt_learning_config["num_virtual_tokens"]), -100).to(
-                    self.device
+                    self.model.device
                 )
                 labels = torch.cat((prefix_labels, labels), dim=1)
 
