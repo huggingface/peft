@@ -5,8 +5,8 @@
 __version__ = "0.1.0.dev0"
 
 from .pet_model import (
-    ParameterEfficientTuningModel,
-    ParameterEfficientTuningModelForSequenceClassification,
+    PETModel,
+    PETModelForSequenceClassification,
     PromptEncoderType,
 )
 from .tuners import (

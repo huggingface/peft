@@ -11,14 +11,32 @@ Supported moethods:
 
 ### Sequence Classification
 |            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
-| --------- | ---- | ---- | ---- | ---- | 
-| RoBERTa        | ✅  | ✅  | ✅  |   | 
+| --------- | ---- | ---- | ---- | ---- |
 | BERT           | ✅  | ✅  | ✅  |   |  
+| RoBERTa        | ✅  | ✅  | ✅  |   |
+| GPT-2          | ✅  | ✅  | ✅  |   | 
+| Bloom          | ✅  | ✅  | ✅  |   |   
+| OPT            | ✅  | ✅  | ✅  |   |
+| GPT-Neo        | ✅  | ✅  | ✅  |   |
+| GPT-J          | ✅  | ✅  | ✅  |   |
+| Deberta        |   |   |   |   | 
 | Deberta-v2     |   |   |   |   |
-| BloomX         |   |   |   |   | 
-| Bloom          |   |   |   |   | 
-| mT-0           |   |   |   |   | 
-| T-0            |   |   |   |   | 
-| T5             |   |   |   |   | 
-| GPT-2          |   |   |   |   | 
-| BART           |   |   |   |   | 
+
+### Causal Language Modeling
+|            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
+| --------- | ---- | ---- | ---- | ---- |
+| GPT-2          |   |   |   |   |
+| Bloom          |   |   |   |   |
+| OPT            |   |   |   |   |
+| GPT-Neo        |   |   |   |   |
+| GPT-J          |   |   |   |   |
+| BART           |   |   |   |   |
+
+### Conditional Generation
+|            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
+| --------- | ---- | ---- | ---- | ---- |
+| T5        |   |   |   |   |
+| BART      |   |   |   |   |
+
+
+
