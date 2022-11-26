@@ -7,6 +7,8 @@ __version__ = "0.1.0.dev0"
 from .pet_model import (
     PETModel,
     PETModelForSequenceClassification,
+    PETModelForCausalLM,
+    PETModelForSeq2SeqLM,
     PromptEncoderType,
 )
 from .tuners import (
