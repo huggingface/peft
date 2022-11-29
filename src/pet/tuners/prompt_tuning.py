@@ -1,7 +1,11 @@
 import enum
 import math
+from dataclasses import dataclass, field
+from typing import Optional, Union
 
 import torch
+
+from ..utils import PromptLearningConfig
 
 
 class PromptTuningInit(str, enum.Enum):
@@ -9,17 +13,37 @@ class PromptTuningInit(str, enum.Enum):
     RANDOM = "RANDOM"
 
 
+@dataclass
+class PromptTuningConfig(PromptLearningConfig):
+    prompt_tuning_init: Union[PromptTuningInit, str] = field(
+        default=PromptTuningInit.RANDOM,
+        metadata={"help": "How to initialize the prompt tuning parameters"},
+    )
+    prompt_tuning_init_text: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "The text to use for prompt tuning initialization. Only used if prompt_tuning_init is `TEXT`"
+        },
+    )
+    tokenizer_name_or_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "The tokenizer to use for prompt tuning initialization. Only used if prompt_tuning_init is `TEXT`"
+        },
+    )
+
+
 class PromptEmbedding(torch.nn.Module):
     def __init__(self, config, word_embeddings):
         super().__init__()
 
-        total_virtual_tokens = config["num_virtual_tokens"] * config["num_transformer_submodules"]
+        total_virtual_tokens = config.num_virtual_tokens * config.num_transformer_submodules
         self.embedding = torch.nn.Embedding(total_virtual_tokens, config["token_dim"])
-        if config["prompt_encoder_config"]["prompt_tuning_init"] == PromptTuningInit.TEXT:
+        if config.prompt_tuning_init == PromptTuningInit.TEXT:
             from transformers import AutoTokenizer
 
-            self.tokenizer = AutoTokenizer.from_pretrained(config["prompt_encoder_config"]["tokenizer_name_or_path"])
-            self.init_text = config["prompt_encoder_config"]["prompt_tuning_text"]
+            self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name_or_path)
+            self.init_text = config.prompt_tuning_init_text
             init_token_ids = self.tokenizer(self.init_text)["input_ids"]
             # Trim or iterate until num_text_tokens matches total_virtual_tokens
             num_text_tokens = len(init_token_ids)

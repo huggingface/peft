@@ -1,4 +1,25 @@
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
 import torch
+
+from ..utils import PromptLearningConfig
+
+
+@dataclass
+class PrefixTuningConfig(PromptLearningConfig):
+    encoder_hidden_size: int = field(
+        default=256,
+        metadata={"help": "The hidden size of the encoder"},
+    )
+    prefix_projection: bool = field(
+        default=False,
+        metadata={"help": "Whether to project the prefix tokens"},
+    )
+    postprocess_past_key_value_function: Optional[Callable] = field(
+        default=None,
+        metadata={"help": "The function to postprocess the past key value"},
+    )
 
 
 # Based on https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
@@ -9,28 +30,26 @@ class PrefixEncoder(torch.nn.Module):
 
     Input shape: (batch_size, num_virtual_tokens)
 
-    Output shape: (batch_size, num_virtual_tokens, 2*(num_transformer_submodules)*layers*hidden)
+    Output shape: (batch_size, num_virtual_tokens, 2*layers*hidden)
     """
 
     def __init__(self, config):
         super().__init__()
-        self.prefix_projection = config["prompt_encoder_config"]["prefix_projection"]
-        if self.prefix_projection and not config.get("inference_mode", False):
+        self.prefix_projection = config.prefix_projection
+        token_dim = config.token_dim
+        num_layers = config.num_layers
+        encoder_hidden_size = config.encoder_hidden_size
+        num_virtual_tokens = config.num_virtual_tokens
+        if self.prefix_projection and not config.inference_mode:
             # Use a two-layer MLP to encode the prefix
-            self.embedding = torch.nn.Embedding(config["num_virtual_tokens"], config["token_dim"])
+            self.embedding = torch.nn.Embedding(num_virtual_tokens, token_dim)
             self.trans = torch.nn.Sequential(
-                torch.nn.Linear(config["token_dim"], config["prompt_hidden_size"]),
+                torch.nn.Linear(token_dim, encoder_hidden_size),
                 torch.nn.Tanh(),
-                torch.nn.Linear(
-                    config["prompt_hidden_size"],
-                    config["num_layers"] * 2 * config["num_transformer_submodules"] * config["token_dim"],
-                ),
+                torch.nn.Linear(encoder_hidden_size, num_layers * 2 * token_dim),
             )
         else:
-            self.embedding = torch.nn.Embedding(
-                config["num_virtual_tokens"],
-                config["num_layers"] * 2 * config["num_transformer_submodules"] * config["token_dim"],
-            )
+            self.embedding = torch.nn.Embedding(num_virtual_tokens, num_layers * 2 * token_dim)
 
     def forward(self, prefix: torch.Tensor):
         if self.prefix_projection:
