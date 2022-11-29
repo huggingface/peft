@@ -4,14 +4,7 @@
 
 __version__ = "0.1.0.dev0"
 
-from .pet_model import (
-    PETModel,
-    PETModelForCausalLM,
-    PETModelForSeq2SeqLM,
-    PETModelForSequenceClassification,
-    PETPluginBase,
-    PETType,
-)
+from .pet_model import PETModel, PETModelForCausalLM, PETModelForSeq2SeqLM, PETModelForSequenceClassification
 from .task_mapping import MODEL_TYPE_TO_PROMPT_MODEL_MAPPING
 from .tuners import (
     PrefixEncoder,
