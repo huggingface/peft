@@ -9,12 +9,18 @@ from .pet_model import (
     PETModelForCausalLM,
     PETModelForSeq2SeqLM,
     PETModelForSequenceClassification,
-    PromptEncoderType,
+    PETPluginBase,
+    PETType,
 )
+from .task_mapping import MODEL_TYPE_TO_PROMPT_MODEL_MAPPING
 from .tuners import (
     PrefixEncoder,
+    PrefixTuningConfig,
     PromptEmbedding,
     PromptEncoder,
+    PromptEncoderConfig,
     PromptEncoderReparameterizationType,
+    PromptTuningConfig,
     PromptTuningInit,
 )
+from .utils import PETConfig, PETType, PromptLearningConfig, TaskType

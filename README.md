@@ -1,11 +1,11 @@
 # 🤗 pets
 Parameter-Efficient Tuning at Scale with 🤗 Accelerate
 
-Supported moethods:
+Supported methods:
 1. Prefix Tuning
 2. P-Tuning
 3. Prompt Tuning
-4. LoRA [in progress]
+4. LoRA [in backlog]
 
 ## Models support matrix
 
@@ -25,18 +25,17 @@ Supported moethods:
 ### Causal Language Modeling
 |            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
 | --------- | ---- | ---- | ---- | ---- |
-| GPT-2          |   |   |   |   |
-| Bloom          |   |   |   |   |
-| OPT            |   |   |   |   |
-| GPT-Neo        |   |   |   |   |
-| GPT-J          |   |   |   |   |
-| BART           |   |   |   |   |
+| GPT-2          | ✅  | ✅  | ✅  |   |
+| Bloom          | ✅  | ✅  | ✅  |   |
+| OPT            | ✅  | ✅  | ✅  |   |
+| GPT-Neo        | ✅  | ✅  | ✅  |   |
+| GPT-J          | ✅  | ✅  | ✅  |   |
 
 ### Conditional Generation
 |            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
 | --------- | ---- | ---- | ---- | ---- |
-| T5        |   |   |   |   |
-| BART      |   |   |   |   |
+| T5        | ✅  | ✅  | ✅  |   |
+| BART      | ✅  | ✅  | ✅  |   |
 
 
 

@@ -1,11 +1,35 @@
 import enum
+from dataclasses import dataclass, field
+from typing import Union
 
 import torch
+
+from ..utils import PromptLearningConfig
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
     MLP = "MLP"
     LSTM = "LSTM"
+
+
+@dataclass
+class PromptEncoderConfig(PromptLearningConfig):
+    encoder_reparameterization_type: Union[str, PromptEncoderReparameterizationType] = field(
+        default=PromptEncoderReparameterizationType.MLP,
+        metadata={"help": "How to reparameterize the prompt encoder"},
+    )
+    encoder_hidden_size: int = field(
+        default=256,
+        metadata={"help": "The hidden size of the prompt encoder reparameterization"},
+    )
+    encoder_num_layers: int = field(
+        default=2,
+        metadata={"help": "The number of layers of the prompt encoder reparameterization"},
+    )
+    encoder_dropout: float = field(
+        default=0.0,
+        metadata={"help": "The dropout of the prompt encoder reparameterization"},
+    )
 
 
 # Based on https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/modules/common/prompt_encoder.py
@@ -17,26 +41,19 @@ class PromptEncoder(torch.nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.token_dim = config["token_dim"]
-        self.input_size = config["token_dim"]
-        self.output_size = config["token_dim"]
-        self.hidden_size = config["prompt_hidden_size"]
-        self.total_virtual_tokens = config["num_virtual_tokens"] * config["num_transformer_submodules"]
-        self.encoder_type = config["prompt_encoder_config"]["prompt_reparam_type"]
+        self.token_dim = config.token_dim
+        self.input_size = self.token_dim
+        self.output_size = self.token_dim
+        self.hidden_size = config.encoder_hidden_size
+        self.total_virtual_tokens = config.num_virtual_tokens * config.num_transformer_submodules
+        self.encoder_type = config.encoder_reparameterization_type
 
         # embedding
         self.embedding = torch.nn.Embedding(self.total_virtual_tokens, self.token_dim)
-        if not config.get("inference_mode", False):
+        if not config.inference_mode:
             if self.encoder_type == PromptEncoderReparameterizationType.LSTM:
-                if "dropout" not in config["prompt_encoder_config"]:
-                    lstm_dropout = 0.0
-                else:
-                    lstm_dropout = config["prompt_encoder_config"]["dropout"]
-
-                if "num_layers" not in config["prompt_encoder_config"]:
-                    num_layers = 2
-                else:
-                    num_layers = config["prompt_encoder_config"]["num_layers"]
+                lstm_dropout = config.encoder_dropout
+                num_layers = config.encoder_num_layers
                 # LSTM
                 self.lstm_head = torch.nn.LSTM(
                     input_size=self.input_size,
