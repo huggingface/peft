@@ -9,7 +9,7 @@ from ..utils import PromptLearningConfig
 @dataclass
 class PrefixTuningConfig(PromptLearningConfig):
     encoder_hidden_size: int = field(
-        default=256,
+        default=None,
         metadata={"help": "The hidden size of the encoder"},
     )
     prefix_projection: bool = field(

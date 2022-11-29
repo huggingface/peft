@@ -19,7 +19,7 @@ class PromptEncoderConfig(PromptLearningConfig):
         metadata={"help": "How to reparameterize the prompt encoder"},
     )
     encoder_hidden_size: int = field(
-        default=256,
+        default=None,
         metadata={"help": "The hidden size of the prompt encoder reparameterization"},
     )
     encoder_num_layers: int = field(
