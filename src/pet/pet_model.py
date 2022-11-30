@@ -53,6 +53,13 @@ class PETModel(torch.nn.Module):
             self.pet_config.num_virtual_tokens * self.pet_config.num_transformer_submodules
         ).long()
 
+    def get_prompt_embedding_to_save(self):
+        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(1, -1).to(self.base_model.device)
+        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+            prompt_tokens = prompt_tokens[:, : self.pet_config.num_virtual_tokens]
+        prompt_embeddings = self.prompt_encoder(prompt_tokens)
+        return prompt_embeddings[0].detach().cpu()
+
     def get_prompt(self, batch_size):
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.base_model.device)
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
