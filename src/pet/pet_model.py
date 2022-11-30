@@ -15,6 +15,7 @@ class PETModel(torch.nn.Module):
         super().__init__()
         self.pet_config = pet_config
         self.base_model = model
+        self.modules_to_save = None
         if pet_config.pet_type != PETType.LORA:
             self._setup_prompt_encoder()
         else:
@@ -99,6 +100,7 @@ class PETModelForSequenceClassification(PETModel):
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
         self.config = self.base_model.config
+        self.modules_to_save = ["classifier"]
 
         for name, module in self.base_model.named_children():
             if isinstance(module, torch.nn.Linear):
