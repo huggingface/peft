@@ -22,7 +22,7 @@ extras["dev"] = extras["quality"]
 setup(
     name="pets",
     version="0.1.0.dev0",
-    description="Parameter-Efficient Tuning at Scale (PETS)",
+    description="Parameter-Efficient Tuning (PET)",
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     keywords="deep learning",
