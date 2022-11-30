@@ -81,9 +81,9 @@ def _prepare_prompt_learning_config(pet_config, model_config):
 
 def _prepare_lora_config(pet_config, model_config):
     if pet_config.target_modules is None:
-        if model_config.model_type not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+        if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
             raise ValueError("Please specify `target_modules` in `pet_config`")
-        pet_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config.model_type]
+        pet_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
     if len(pet_config.target_modules) == 1:
         pet_config.fan_in_fan_out = True
         pet_config.enable_lora = [True, False, True]
