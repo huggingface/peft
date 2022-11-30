@@ -15,5 +15,7 @@ from .tuners import (
     PromptEncoderReparameterizationType,
     PromptTuningConfig,
     PromptTuningInit,
+    LoRAModel,
+    LoRAConfig,
 )
 from .utils import PETConfig, PETType, PromptLearningConfig, TaskType

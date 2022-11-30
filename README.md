@@ -1,7 +1,8 @@
-# 🤗 pets
-Parameter-Efficient Tuning at Scale with 🤗 Accelerate
+# 🤗 PET
+Parameter-Efficient Tuning. Intergrated with 🤗 Accelerate to scale seamlessly to large models using PyTorch FSDP. 
 
 Supported methods:
+
 1. Prefix Tuning
 2. P-Tuning
 3. Prompt Tuning
@@ -37,5 +38,8 @@ Supported methods:
 | T5        | ✅  | ✅  | ✅  |   |
 | BART      | ✅  | ✅  | ✅  |   |
 
+
+## Caveats:
+1. Doesn't work currently with DeeSpeed ZeRO Stage-3. Extending support with DeeSpeed ZeRO Stage-3 is in backlog.
 
 
