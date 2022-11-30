@@ -9,8 +9,7 @@ def get_pet_model_state_dict(model):
     else:
         to_return = {}
         state_dict = model.state_dict()
-        prompt_tokens = model.prompt_tokens.unsqueeze(0).expand(1, -1).to(model.base_model.device)
-        prompt_embeddings = model.prompt_encoder(prompt_tokens).detach().cpu()
+        prompt_embeddings = model.get_prompt_embedding_to_save()
         to_return["prompt_embeddings"] = prompt_embeddings
         if model.modules_to_save is not None:
             for key, value in state_dict.items():
