@@ -1,6 +1,5 @@
 from .pet_model import PETModelForCausalLM, PETModelForSeq2SeqLM, PETModelForSequenceClassification
-from .tuners import PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
-from .utils import PETConfig
+from .tuners import PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig, LoRAConfig
 
 
 MODEL_TYPE_TO_PET_MODEL_MAPPING = {
@@ -13,7 +12,7 @@ PET_TYPE_TO_CONFIG_MAPPING = {
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
     "P_TUNING": PromptEncoderConfig,
-    "LORA": PETConfig,
+    "LORA": LoRAConfig,
 }
 
 
