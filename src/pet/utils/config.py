@@ -19,7 +19,7 @@ class TaskType(str, enum.Enum):
 @dataclass
 class PETConfig:
     """
-    This is the configuration class to store the configuration of a :class:`~transform
+    This is the configuration class to store the configuration of a :class:`~pet.PETModel`.
     """
 
     pet_type: Union[str, PETType] = field(default=None, metadata={"help": "PET type"})

@@ -3,40 +3,40 @@ Parameter-Efficient Tuning. Intergrated with 🤗 Accelerate to scale seamlessly
 
 Supported methods:
 
-1. Prefix Tuning
-2. P-Tuning
-3. Prompt Tuning
-4. LoRA [in backlog]
+1. LoRA
+2. Prefix Tuning
+3. P-Tuning
+4. Prompt Tuning 
 
 ## Models support matrix
 
 ### Sequence Classification
-|            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
-| --------- | ---- | ---- | ---- | ---- |
-| BERT           | ✅  | ✅  | ✅  |   |  
-| RoBERTa        | ✅  | ✅  | ✅  |   |
-| GPT-2          | ✅  | ✅  | ✅  |   | 
-| Bloom          | ✅  | ✅  | ✅  |   |   
-| OPT            | ✅  | ✅  | ✅  |   |
-| GPT-Neo        | ✅  | ✅  | ✅  |   |
-| GPT-J          | ✅  | ✅  | ✅  |   |
-| Deberta        |   |   |   |   | 
-| Deberta-v2     |   |   |   |   |
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
+| --------- | ---- | ---- | ---- | ----  |
+| BERT           | ✅  | ✅  | ✅  | ✅  |  
+| RoBERTa        | ✅  | ✅  | ✅  | ✅  |
+| GPT-2          | ✅  | ✅  | ✅  | ✅  | 
+| Bloom          | ✅  | ✅  | ✅  | ✅  |   
+| OPT            | ✅  | ✅  | ✅  | ✅  |
+| GPT-Neo        | ✅  | ✅  | ✅  | ✅  |
+| GPT-J          | ✅  | ✅  | ✅  | ✅  |
+| Deberta        | ✅  |     |     |     | 
+| Deberta-v2     | ✅  |     |     |     |
 
 ### Causal Language Modeling
-|            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
-| --------- | ---- | ---- | ---- | ---- |
-| GPT-2          | ✅  | ✅  | ✅  |   |
-| Bloom          | ✅  | ✅  | ✅  |   |
-| OPT            | ✅  | ✅  | ✅  |   |
-| GPT-Neo        | ✅  | ✅  | ✅  |   |
-| GPT-J          | ✅  | ✅  | ✅  |   |
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  |
+| --------- | ---- | ---- | ---- | ----  |
+| GPT-2          | ✅  | ✅  | ✅  | ✅  |
+| Bloom          | ✅  | ✅  | ✅  | ✅  |
+| OPT            | ✅  | ✅  | ✅  | ✅  |
+| GPT-Neo        | ✅  | ✅  | ✅  | ✅  |
+| GPT-J          | ✅  | ✅  | ✅  | ✅  |
 
 ### Conditional Generation
-|            | Prefix Tuning | P-Tuning  | Prompt Tuning | LoRA  | 
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
 | --------- | ---- | ---- | ---- | ---- |
-| T5        | ✅  | ✅  | ✅  |   |
-| BART      | ✅  | ✅  | ✅  |   |
+| T5        | ✅   | ✅   | ✅   | ✅   |
+| BART      | ✅   | ✅   | ✅   | ✅   |
 
 
 ## Caveats:

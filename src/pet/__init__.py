@@ -18,4 +18,13 @@ from .tuners import (
     PromptTuningConfig,
     PromptTuningInit,
 )
-from .utils import PETConfig, PETType, PromptLearningConfig, TaskType
+from .utils import (
+    PETConfig,
+    PETType,
+    PromptLearningConfig,
+    TaskType,
+    bloom_model_postprocess_past_key_value,
+    get_pet_model_state_dict,
+    set_pet_model_state_dict,
+    shift_tokens_right,
+)

@@ -6,19 +6,24 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput
 
-from .tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
-from .utils import PETConfig, PETType, TaskType
+from .tuners import LoRAModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .utils import PETConfig, PETType, TaskType, shift_tokens_right
 
 
 class PETModel(torch.nn.Module):
     def __init__(self, model, pet_config: PETConfig):
         super().__init__()
-        self.model = model
         self.pet_config = pet_config
+        self.base_model = model
+        if pet_config.pet_type != PETType.LORA:
+            self._setup_prompt_encoder()
+        else:
+            self.base_model = LoRAModel(pet_config, model)
 
+    def _setup_prompt_encoder(self):
         num_transformer_submodules = 0
         transformer_backbone = None
-        for name, module in self.model.named_children():
+        for name, module in self.base_model.named_children():
             if isinstance(module, PreTrainedModel):
                 # Make sure to freeze Tranformers model
                 for param in module.parameters():
@@ -30,7 +35,7 @@ class PETModel(torch.nn.Module):
         self.pet_config.num_transformer_submodules = 2 if self.pet_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
         for named_param, value in list(transformer_backbone.named_parameters()):
-            if value.shape[0] == model.config.vocab_size:
+            if value.shape[0] == self.base_model.config.vocab_size:
                 self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                 break
 
@@ -48,7 +53,7 @@ class PETModel(torch.nn.Module):
         ).long()
 
     def get_prompt(self, batch_size):
-        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.model.device)
+        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.base_model.device)
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
             prompt_tokens = prompt_tokens[:, : self.pet_config.num_virtual_tokens]
             if self.pet_config.inference_mode:
@@ -93,9 +98,9 @@ class PETModel(torch.nn.Module):
 class PETModelForSequenceClassification(PETModel):
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
-        self.config = self.model.config
+        self.config = self.base_model.config
 
-        for name, module in self.model.named_children():
+        for name, module in self.base_model.named_children():
             if isinstance(module, torch.nn.Linear):
                 self.cls_layer_name = name
                 break
@@ -113,10 +118,24 @@ class PETModelForSequenceClassification(PETModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        if self.pet_config.pet_type == PETType.LORA:
+            return self.base_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                **kwargs,
+            )
+
         batch_size = input_ids.shape[0]
-        if attention_mask is not None and self.pet_config.pet_type != PETType.LORA:
+        if attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.model.device)
+            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
+                self.base_model.device
+            )
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -137,7 +156,7 @@ class PETModelForSequenceClassification(PETModel):
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
                     (
-                        torch.zeros(batch_size, self.pet_config.num_virtual_tokens).to(self.model.device),
+                        torch.zeros(batch_size, self.pet_config.num_virtual_tokens).to(self.base_model.device),
                         kwargs["token_type_ids"],
                     ),
                     dim=1,
@@ -146,7 +165,7 @@ class PETModelForSequenceClassification(PETModel):
                 inputs_embeds = self.word_embeddings(input_ids)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
-            return self.model(inputs_embeds=inputs_embeds, **kwargs)
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def prefix_tuning_forward(
         self,
@@ -161,7 +180,7 @@ class PETModelForSequenceClassification(PETModel):
     ):
         batch_size = input_ids.shape[0]
         past_key_values = self.get_prompt(batch_size)
-        fwd_params = list(inspect.signature(self.model.forward).parameters.keys())
+        fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
             {
                 "input_ids": input_ids,
@@ -174,37 +193,37 @@ class PETModelForSequenceClassification(PETModel):
             }
         )
         if "past_key_values" in fwd_params:
-            return self.model(labels=labels, **kwargs)
+            return self.base_model(labels=labels, **kwargs)
         else:
-            transformer_backbone_name = self.model.get_submodule(self.transformer_backbone_name)
+            transformer_backbone_name = self.base_model.get_submodule(self.transformer_backbone_name)
             fwd_params = list(inspect.signature(transformer_backbone_name.forward).parameters.keys())
             if "past_key_values" not in fwd_params:
                 raise ValueError("Model does not support past key values which are required for prefix tuning.")
             outputs = transformer_backbone_name(**kwargs)
             pooled_output = outputs[1] if len(outputs) > 1 else outputs[0]
-            if "dropout" in [name for name, _ in list(self.model.named_children())]:
-                pooled_output = self.model.dropout(pooled_output)
-            logits = self.model.get_submodule(self.cls_layer_name)(pooled_output)
+            if "dropout" in [name for name, _ in list(self.base_model.named_children())]:
+                pooled_output = self.base_model.dropout(pooled_output)
+            logits = self.base_model.get_submodule(self.cls_layer_name)(pooled_output)
 
             loss = None
             if labels is not None:
                 if self.config.problem_type is None:
-                    if self.model.num_labels == 1:
+                    if self.base_model.num_labels == 1:
                         self.config.problem_type = "regression"
-                    elif self.model.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    elif self.base_model.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
                         self.config.problem_type = "single_label_classification"
                     else:
                         self.config.problem_type = "multi_label_classification"
 
                 if self.config.problem_type == "regression":
                     loss_fct = MSELoss()
-                    if self.model.num_labels == 1:
+                    if self.base_model.num_labels == 1:
                         loss = loss_fct(logits.squeeze(), labels.squeeze())
                     else:
                         loss = loss_fct(logits, labels)
                 elif self.config.problem_type == "single_label_classification":
                     loss_fct = CrossEntropyLoss()
-                    loss = loss_fct(logits.view(-1, self.model.num_labels), labels.view(-1))
+                    loss = loss_fct(logits.view(-1, self.base_model.num_labels), labels.view(-1))
                 elif self.config.problem_type == "multi_label_classification":
                     loss_fct = BCEWithLogitsLoss()
                     loss = loss_fct(logits, labels)
@@ -223,7 +242,7 @@ class PETModelForSequenceClassification(PETModel):
 class PETModelForCausalLM(PETModel):
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
-        self.config = self.model.config
+        self.config = self.base_model.config
 
     def forward(
         self,
@@ -236,14 +255,25 @@ class PETModelForCausalLM(PETModel):
         return_dict=None,
         **kwargs,
     ):
+        if self.pet_config.pet_type == PETType.LORA:
+            return self.base_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                **kwargs,
+            )
+
         batch_size = input_ids.shape[0]
-        if self.pet_config.pet_type != PETType.LORA:
-            if attention_mask is not None:
-                # concat prompt attention mask
-                prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
-                    self.model.device
-                )
-                attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+        if attention_mask is not None:
+            # concat prompt attention mask
+            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
+                self.base_model.device
+            )
+            attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -263,26 +293,25 @@ class PETModelForCausalLM(PETModel):
 
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
-            return self.model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
+            return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
-            if self.pet_config.pet_type != PETType.LORA:
-                # concat prompt labels
-                if labels is not None:
-                    prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(
-                        self.model.device
-                    )
-                    kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+            # concat prompt labels
+            if labels is not None:
+                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(
+                    self.base_model.device
+                )
+                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
-            return self.model(inputs_embeds=inputs_embeds, **kwargs)
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
 
 class PETModelForSeq2SeqLM(PETModel):
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
-        self.config = self.model.config
+        self.config = self.base_model.config
 
     def forward(
         self,
@@ -298,15 +327,28 @@ class PETModelForSeq2SeqLM(PETModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        if self.pet_config.pet_type == PETType.LORA:
+            return self.base_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                decoder_input_ids=decoder_input_ids,
+                decoder_attention_mask=decoder_attention_mask,
+                decoder_inputs_embeds=decoder_inputs_embeds,
+                labels=labels,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                **kwargs,
+            )
 
-        if self.pet_config.pet_type != PETType.LORA:
-            if decoder_attention_mask is not None:
-                # concat prompt attention mask
-                prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
-                    self.model.device
-                )
-                decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
+        batch_size = input_ids.shape[0]
+        if decoder_attention_mask is not None:
+            # concat prompt attention mask
+            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
+                self.base_model.device
+            )
+            decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -327,36 +369,33 @@ class PETModelForSeq2SeqLM(PETModel):
 
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
-            return self.model(
+            return self.base_model(
                 input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
             )
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
             if decoder_inputs_embeds is None and decoder_input_ids is None:
-                from transformers.models.bart.modeling_bart import shift_tokens_right
-
                 decoder_input_ids = shift_tokens_right(
                     labels, self.config.pad_token_id, self.config.decoder_start_token_id
                 )
                 decoder_inputs_embeds = self.word_embeddings(decoder_input_ids)
 
-            if self.pet_config.pet_type != PETType.LORA:
-                if attention_mask is not None:
-                    # concat prompt attention mask
-                    prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
-                        self.model.device
-                    )
-                    kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
-                # concat prompt labels
-                if labels is not None:
-                    prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(
-                        self.model.device
-                    )
-                    kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+            if attention_mask is not None:
+                # concat prompt attention mask
+                prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(
+                    self.base_model.device
+                )
+                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+            # concat prompt labels
+            if labels is not None:
+                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(
+                    self.base_model.device
+                )
+                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts[:, : self.pet_config.num_virtual_tokens], inputs_embeds), dim=1)
             decoder_inputs_embeds = torch.cat(
                 (prompts[:, self.pet_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
             )
-            return self.model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
+            return self.base_model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
