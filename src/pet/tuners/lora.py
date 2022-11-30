@@ -1,11 +1,12 @@
 # todo
-from typing import Callable, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Optional
+
 import torch
 from transformers.pytorch_utils import Conv1D
-from dataclasses import dataclass, asdict, field
 
 import loralib as lora
-from loralib import mark_only_lora_as_trainable, lora_state_dict  # flake8: noqa
+from loralib import lora_state_dict, mark_only_lora_as_trainable  # noqa: F401
 
 from ..utils import PETConfig
 
