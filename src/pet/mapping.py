@@ -34,6 +34,13 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
 
 
 def get_pet_config(config_dict):
+    """
+    Returns a PET config object from a dictionary.
+
+    Args:
+        config_dict (:obj:`Dict[str, Any]`):
+    """
+
     return PET_TYPE_TO_CONFIG_MAPPING[config_dict["pet_type"]](**config_dict)
 
 
@@ -93,6 +100,14 @@ def _prepare_lora_config(pet_config, model_config):
 
 
 def get_pet_model(model, pet_config):
+    """
+    Returns a PET model object from a model and a config.
+
+    Args:
+        model (:obj:`transformers.PreTrainedModel`):
+        pet_config (:obj:`transformers.PETConfig`):
+    """
+
     model_config = model.config.to_dict()
     if pet_config.pet_type != PETType.LORA:
         pet_config = _prepare_prompt_learning_config(pet_config, model_config)

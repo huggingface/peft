@@ -8,6 +8,15 @@ from ..utils import PromptLearningConfig
 
 @dataclass
 class PrefixTuningConfig(PromptLearningConfig):
+    """
+    This is the configuration class to store the configuration of a :class:`~pet.PrefixEncoder`.
+
+    Args:
+        encoder_hidden_size (:obj: int): The hidden size of the prompt encoder.
+        prefix_projection (:obj: bool): Whether to project the prefix embeddings.
+        postprocess_past_key_value_function (:obj: Optional[Callable]): The function to postprocess the past key value.
+    """
+
     encoder_hidden_size: int = field(
         default=None,
         metadata={"help": "The hidden size of the encoder"},
@@ -27,6 +36,31 @@ class PrefixTuningConfig(PromptLearningConfig):
 class PrefixEncoder(torch.nn.Module):
     r"""
     The torch.nn model to encode the prefix
+
+    Args:
+        config (:class:`PrefixTuningConfig`): The configuration of the prefix encoder.
+
+    Example::
+
+        >>> from pet import PrefixEncoder, PrefixTuningConfig
+        >>> config = PrefixTuningConfig(
+                pet_type="PREFIX_TUNING",
+                task_type="SEQ_2_SEQ_LM",
+                num_virtual_tokens=20,
+                token_dim=768,
+                num_transformer_submodules=1,
+                num_attention_heads=12,
+                num_layers=12,
+                encoder_hidden_size=768
+            )
+        >>> prefix_encoder = PrefixEncoder(config)
+
+
+    Attributes:
+        embedding (:obj:`torch.nn.Embedding`): The embedding layer of the prefix encoder.
+        trans (:obj:`torch.nn.Sequential`): The two-layer MLP to transform the prefix embeddings
+            if :obj:`prefix_projection` is :obj:`True`.
+        prefix_projection (:obj:`bool`): Whether to project the prefix embeddings.
 
     Input shape: (batch_size, num_virtual_tokens)
 
