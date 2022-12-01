@@ -18,6 +18,7 @@ PET_TYPE_TO_CONFIG_MAPPING = {
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
+    "mt5": ["q", "v"],
     "bart": ["q_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "bloom": ["query_key_value"],
