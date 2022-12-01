@@ -28,6 +28,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gpt_neo": ["q_proj", "v_proj"],
     "bert": ["query", "value"],
     "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
     "electra": ["query", "value"],
     "deberta-v2": ["query_proj", "value_proj"],
     "deberta": ["in_proj"],
