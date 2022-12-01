@@ -28,6 +28,7 @@ pet_config = get_pet_config(config)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_pet_model(model, pet_config)
 model.print_trainable_parameters()
+# output: 
 ```
 
 ## Models support matrix
