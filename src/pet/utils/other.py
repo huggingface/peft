@@ -44,3 +44,15 @@ def _set_trainable(model):
                 param.requires_grad = True
             else:
                 param.requires_grad = False
+
+
+# def fsdp_auto_wrap_policy():
+#     from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, lambda_auto_wrap_policy, _or_policy
+
+#     def lambda_policy(module):
+#         if len(module.named_children()) != 0 and
+#             return True
+#         return False
+
+
+#     pass
