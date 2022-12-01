@@ -116,3 +116,10 @@ class LoRAModel(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.model, name)

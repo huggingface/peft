@@ -134,6 +134,13 @@ class PETModel(torch.nn.Module):
             f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
         )
 
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.base_model, name)
+
 
 class PETModelForSequenceClassification(PETModel):
     """
