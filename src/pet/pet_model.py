@@ -46,10 +46,10 @@ class PETModel(torch.nn.Module):
         num_transformer_submodules = 0
         transformer_backbone = None
         for name, module in self.base_model.named_children():
+            for param in module.parameters():
+                param.requires_grad = False
             if isinstance(module, PreTrainedModel):
                 # Make sure to freeze Tranformers model
-                for param in module.parameters():
-                    param.requires_grad = False
                 if transformer_backbone is None:
                     transformer_backbone = module
                     self.transformer_backbone_name = name
