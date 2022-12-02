@@ -1,3 +1,5 @@
+import os
+
 import torch
 from accelerate import Accelerator
 from torch.utils.data import DataLoader
@@ -11,13 +13,14 @@ from tqdm import tqdm
 
 def main():
     accelerator = Accelerator()
-    model_name_or_path = "bigscience/mt0-xxl"
-    batch_size = 16
+    model_name_or_path = "t5-base"
+    batch_size = 8
     text_column = "sentence"
-    label_column = "text_label"
+    label_column = "label"
     max_length = 64
     lr = 1e-3
     num_epochs = 1
+    base_path = "temp/data/FinancialPhraseBank-v1.0"
 
     config = {"pet_type": "LORA", "task_type": "SEQ_2_SEQ_LM", "r": 8, "lora_alpha": 32, "lora_dropout": 0.1}
     pet_config = get_pet_config(config)
@@ -26,16 +29,12 @@ def main():
     model = get_pet_model(model, pet_config)
     accelerator.print(model.print_trainable_parameters())
 
-    dataset = load_dataset("financial_phrasebank", "sentences_allagree")
-    dataset = dataset["train"].train_test_split(test_size=0.1)
-    dataset["validation"] = dataset["test"]
-    del dataset["test"]
-
-    classes = dataset["train"].features["label"].names
-    dataset = dataset.map(
-        lambda x: {"text_label": [classes[label] for label in x["label"]]},
-        batched=True,
-        num_proc=1,
+    dataset = load_dataset(
+        "json",
+        data_files={
+            "train": os.path.join(base_path, "financial_phrase_bank_train.jsonl"),
+            "validation": os.path.join(base_path, "financial_phrase_bank_val.jsonl"),
+        },
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
@@ -46,20 +45,21 @@ def main():
         model_inputs = tokenizer(
             inputs, max_length=max_length, padding="max_length", truncation=True, return_tensors="pt"
         )
-        labels = tokenizer(targets, max_length=3, padding="max_length", truncation=True, return_tensors="pt")
+        labels = tokenizer(targets, max_length=2, padding="max_length", truncation=True, return_tensors="pt")
         labels = labels["input_ids"]
         labels[labels == tokenizer.pad_token_id] = -100
         model_inputs["labels"] = labels
         return model_inputs
 
-    processed_datasets = dataset.map(
-        preprocess_function,
-        batched=True,
-        num_proc=1,
-        remove_columns=dataset["train"].column_names,
-        load_from_cache_file=False,
-        desc="Running tokenizer on dataset",
-    )
+    with accelerator.main_process_first():
+        processed_datasets = dataset.map(
+            preprocess_function,
+            batched=True,
+            num_proc=1,
+            remove_columns=dataset["train"].column_names,
+            load_from_cache_file=False,
+            desc="Running tokenizer on dataset",
+        )
 
     train_dataset = processed_datasets["train"]
     eval_dataset = processed_datasets["validation"]
@@ -106,13 +106,8 @@ def main():
                 outputs = model(**batch)
             loss = outputs.loss
             eval_loss += loss.detach().float()
-            eval_preds.extend(
-                tokenizer.batch_decode(
-                    accelerator.gather_for_metrics(torch.argmax(outputs.logits, -1)).detach().cpu().numpy(),
-                    skip_special_tokens=True,
-                )
-            )
-
+            preds = accelerator.gather_for_metrics(torch.argmax(outputs.logits, -1)).detach().cpu().numpy()
+            eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
         eval_epoch_loss = eval_loss / len(train_dataloader)
         eval_ppl = torch.exp(eval_epoch_loss)
         train_epoch_loss = total_loss / len(eval_dataloader)
@@ -128,6 +123,7 @@ def main():
         accuracy = correct / total * 100
         accelerator.print(f"{accuracy=}")
         accelerator.print(f"{eval_preds[:10]=}")
+        accelerator.print(f"{dataset['validation'][label_column][:10]=}")
         accelerator.wait_for_everyone()
         accelerator.save(get_pet_model_state_dict(model), checkpoint_name)
         accelerator.wait_for_everyone()
