@@ -57,7 +57,7 @@ def fsdp_auto_wrap_policy(model):
 
     def lambda_policy_fn(module):
         if (
-            len(module.named_children()) == 0
+            len(list(module.named_children())) == 0
             and getattr(module, "weight", None) is not None
             and module.weight.requires_grad
         ):
