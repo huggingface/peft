@@ -19,7 +19,8 @@ class PromptTuningConfig(PromptLearningConfig):
     This is the configuration class to store the configuration of a :class:`~pet.PromptEmbedding`.
 
     Args:
-        prompt_tuning_init (:obj:Union[:class:`PromptTuningInit`, :obj:`str`]): The initialization of the prompt embedding.
+        prompt_tuning_init (:
+            obj:Union[:class:`PromptTuningInit`, :obj:`str`]): The initialization of the prompt embedding.
         prompt_tuning_init_text (:obj: Optional[:obj:`str`]): The text to initialize the prompt embedding.
             Only used if `prompt_tuning_init` is `TEXT`
         tokenizer_name_or_path (:obj: Optional[:obj:`str`]): The name or path of the tokenizer.
@@ -57,21 +58,14 @@ class PromptEmbedding(torch.nn.Module):
 
     Example::
 
-        >>> from pet import PromptEmbedding, PromptTuningConfig
-        >>> config = PromptTuningConfig(
-                pet_type="PROMPT_TUNING",
-                task_type="SEQ_2_SEQ_LM",
-                num_virtual_tokens=20,
-                token_dim=768,
-                num_transformer_submodules=1,
-                num_attention_heads=12,
-                num_layers=12,
-                prompt_tuning_init="TEXT",
+        >>> from pet import PromptEmbedding, PromptTuningConfig >>> config = PromptTuningConfig(
+                pet_type="PROMPT_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
+                num_transformer_submodules=1, num_attention_heads=12, num_layers=12, prompt_tuning_init="TEXT",
                 prompt_tuning_init_text="Predict if sentiment of this review is positive, negative or neutral",
                 tokenizer_name_or_path="t5-base",
             )
-        >>> # t5_model.shared is the word embeddings of the base model
-        >>> prompt_embedding = PromptEmbedding(config, t5_model.shared)
+        >>> # t5_model.shared is the word embeddings of the base model >>> prompt_embedding = PromptEmbedding(config,
+        t5_model.shared)
 
 
     Input Shape: (batch_size, total_virtual_tokens)

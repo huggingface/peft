@@ -7,7 +7,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput
 
 from .tuners import LoRAModel, PrefixEncoder, PromptEmbedding, PromptEncoder
-from .utils import PETConfig, PETType, TaskType, shift_tokens_right, _set_trainable
+from .utils import PETConfig, PETType, TaskType, _set_trainable, shift_tokens_right
 
 
 class PETModel(torch.nn.Module):
@@ -20,12 +20,12 @@ class PETModel(torch.nn.Module):
 
 
     Attributes:
-        base_model (:obj:`PreTrainedModel`): The base transformer model used for PET.
-        pet_config (:obj:`PETConfig`): The configuration of the PET model.
-        modules_to_save (:obj:`list` of :obj:`str`): The list of sub-module names to save when saving the model.
-        prompt_encoder (:obj:`PromptEncoder`): The prompt encoder used for PET if `pet_config.pet_type != PETType.LORA`.
-        prompt_tokens (:obj:`torch.Tensor`): The virtual prompt tokens used for PET if `pet_config.pet_type != PETType.LORA`.
-        transformer_backbone_name (:obj:`str`): The name of the transformer backbone in the base model
+        base_model (:obj:`PreTrainedModel`): The base transformer model used for PET. pet_config (:obj:`PETConfig`):
+        The configuration of the PET model. modules_to_save (:obj:`list` of :obj:`str`): The list of sub-module names
+        to save when saving the model. prompt_encoder (:obj:`PromptEncoder`): The prompt encoder used for PET if
+        `pet_config.pet_type != PETType.LORA`. prompt_tokens (:obj:`torch.Tensor`): The virtual prompt tokens used for
+        PET if `pet_config.pet_type != PETType.LORA`. transformer_backbone_name (:obj:`str`): The name of the
+        transformer backbone in the base model
             if `pet_config.pet_type != PETType.LORA`.
         word_embeddings (:obj:`torch.nn.Embedding`): The word embeddings of the transformer backbone
             in the base model if `pet_config.pet_type != PETType.LORA`.
@@ -76,8 +76,8 @@ class PETModel(torch.nn.Module):
 
     def get_prompt_embedding_to_save(self):
         """
-        Returns the prompt embedding to save when saving the model.
-        Only applocable when `pet_config.pet_type != PETType.LORA`.
+        Returns the prompt embedding to save when saving the model. Only applocable when `pet_config.pet_type !=
+        PETType.LORA`.
         """
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(1, -1).to(self.base_model.device)
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
@@ -87,8 +87,7 @@ class PETModel(torch.nn.Module):
 
     def get_prompt(self, batch_size):
         """
-        Returns the virtual prompts to use for PET.
-        Only applocable when `pet_config.pet_type != PETType.LORA`.
+        Returns the virtual prompts to use for PET. Only applocable when `pet_config.pet_type != PETType.LORA`.
         """
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.base_model.device)
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
@@ -151,31 +150,21 @@ class PETModelForSequenceClassification(PETModel):
         pet_config (:obj:`PETConfig`): PET config.
 
     Attributes:
-        config (:obj:`PretrainedConfig`): The configuration object of the base model.
-        cls_layer_name (:obj:`str`): The name of the classification layer.
+        config (:obj:`PretrainedConfig`): The configuration object of the base model. cls_layer_name (:obj:`str`): The
+        name of the classification layer.
 
     Example::
 
-        >>> from transformers import AutoModelForSequenceClassification
-        >>> from pet import PETModelForSequenceClassification, get_pet_config
-        >>> config = {
-                'pet_type': 'PREFIX_TUNING',
-                'task_type': 'SEQ_CLS',
-                'inference_mode': False,
-                'num_virtual_tokens': 20,
-                'token_dim': 768,
-                'num_transformer_submodules': 1,
-                'num_attention_heads': 12,
-                'num_layers': 12,
-                'encoder_hidden_size': 768,
-                'prefix_projection': False,
-                'postprocess_past_key_value_function': None
+        >>> from transformers import AutoModelForSequenceClassification >>> from pet import
+        PETModelForSequenceClassification, get_pet_config >>> config = {
+                'pet_type': 'PREFIX_TUNING', 'task_type': 'SEQ_CLS', 'inference_mode': False, 'num_virtual_tokens': 20,
+                'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
+                'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> pet_config = get_pet_config(config)
-        >>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased")
-        >>> pet_model = PETModelForSequenceClassification(model, pet_config)
-        >>> pet_model.print_trainable_parameters()
-        trainable params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
+        >>> pet_config = get_pet_config(config) >>> model =
+        AutoModelForSequenceClassification.from_pretrained("bert-base-cased") >>> pet_model =
+        PETModelForSequenceClassification(model, pet_config) >>> pet_model.print_trainable_parameters() trainable
+        params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
     """
 
     def __init__(self, model, pet_config: PETConfig):
@@ -335,26 +324,15 @@ class PETModelForCausalLM(PETModel):
 
     Example::
 
-        >>> from transformers import AutoModelForCausalLM
-        >>> from pet import PETModelForCausalLM, get_pet_config
-        >>> config = {
-                'pet_type': 'PREFIX_TUNING',
-                'task_type': 'CAUSAL_LM',
-                'inference_mode': False,
-                'num_virtual_tokens': 20,
-                'token_dim': 1280,
-                'num_transformer_submodules': 1,
-                'num_attention_heads': 20,
-                'num_layers': 36,
-                'encoder_hidden_size': 1280,
-                'prefix_projection': False,
-                'postprocess_past_key_value_function': None
+        >>> from transformers import AutoModelForCausalLM >>> from pet import PETModelForCausalLM, get_pet_config >>>
+        config = {
+                'pet_type': 'PREFIX_TUNING', 'task_type': 'CAUSAL_LM', 'inference_mode': False, 'num_virtual_tokens':
+                20, 'token_dim': 1280, 'num_transformer_submodules': 1, 'num_attention_heads': 20, 'num_layers': 36,
+                'encoder_hidden_size': 1280, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> pet_config = get_pet_config(config)
-        >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large")
-        >>> pet_model = PETModelForCausalLM(model, pet_config)
-        >>> pet_model.print_trainable_parameters()
-        trainable params: 1843200 || all params: 775873280 || trainable%: 0.23756456724479544
+        >>> pet_config = get_pet_config(config) >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large") >>>
+        pet_model = PETModelForCausalLM(model, pet_config) >>> pet_model.print_trainable_parameters() trainable params:
+        1843200 || all params: 775873280 || trainable%: 0.23756456724479544
     """
 
     def __init__(self, model, pet_config: PETConfig):
@@ -435,26 +413,15 @@ class PETModelForSeq2SeqLM(PETModel):
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from pet import PETModelForSeq2SeqLM, get_pet_config
-        >>> config = {
-                'pet_type': 'LORA',
-                'task_type': 'SEQ_2_SEQ_LM',
-                'inference_mode': False,
-                'r': 8,
-                'target_modules': ['q', 'v'],
-                'lora_alpha': 32,
-                'lora_dropout': 0.1,
-                'merge_weights': False,
-                'fan_in_fan_out': False,
-                'enable_lora': None,
-                'bias': 'none'
+        >>> from transformers import AutoModelForSeq2SeqLM >>> from pet import PETModelForSeq2SeqLM, get_pet_config >>>
+        config = {
+                'pet_type': 'LORA', 'task_type': 'SEQ_2_SEQ_LM', 'inference_mode': False, 'r': 8, 'target_modules':
+                ['q', 'v'], 'lora_alpha': 32, 'lora_dropout': 0.1, 'merge_weights': False, 'fan_in_fan_out': False,
+                'enable_lora': None, 'bias': 'none'
             }
-        >>> pet_config = get_pet_config(config)
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> pet_model = PETModelForSeq2SeqLM(model, pet_config)
-        >>> pet_model.print_trainable_parameters()
-        trainable params: 884736 || all params: 223843584 || trainable%: 0.3952474242013566
+        >>> pet_config = get_pet_config(config) >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>>
+        pet_model = PETModelForSeq2SeqLM(model, pet_config) >>> pet_model.print_trainable_parameters() trainable
+        params: 884736 || all params: 223843584 || trainable%: 0.3952474242013566
     """
 
     def __init__(self, model, pet_config: PETConfig):
