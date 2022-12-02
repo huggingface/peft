@@ -41,6 +41,7 @@ class PETModel(torch.nn.Module):
             self._setup_prompt_encoder()
         else:
             self.base_model = LoRAModel(pet_config, model)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def _setup_prompt_encoder(self):
         num_transformer_submodules = 0
@@ -79,7 +80,7 @@ class PETModel(torch.nn.Module):
         Returns the prompt embedding to save when saving the model. Only applocable when `pet_config.pet_type !=
         PETType.LORA`.
         """
-        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(1, -1).to("cuda")
+        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(1, -1).to(self.device)
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
             prompt_tokens = prompt_tokens[:, : self.pet_config.num_virtual_tokens]
         prompt_embeddings = self.prompt_encoder(prompt_tokens)
@@ -89,7 +90,7 @@ class PETModel(torch.nn.Module):
         """
         Returns the virtual prompts to use for PET. Only applocable when `pet_config.pet_type != PETType.LORA`.
         """
-        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to("cuda")
+        prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.device)
         if self.pet_config.pet_type == PETType.PREFIX_TUNING:
             prompt_tokens = prompt_tokens[:, : self.pet_config.num_virtual_tokens]
             if self.pet_config.inference_mode:
@@ -207,7 +208,7 @@ class PETModelForSequenceClassification(PETModel):
         batch_size = input_ids.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to("cuda")
+            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -228,7 +229,7 @@ class PETModelForSequenceClassification(PETModel):
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
                     (
-                        torch.zeros(batch_size, self.pet_config.num_virtual_tokens).to("cuda"),
+                        torch.zeros(batch_size, self.pet_config.num_virtual_tokens).to(self.device),
                         kwargs["token_type_ids"],
                     ),
                     dim=1,
@@ -362,7 +363,7 @@ class PETModelForCausalLM(PETModel):
         batch_size = input_ids.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to("cuda")
+            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
@@ -389,7 +390,7 @@ class PETModelForCausalLM(PETModel):
                 inputs_embeds = self.word_embeddings(input_ids)
             # concat prompt labels
             if labels is not None:
-                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to("cuda")
+                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(self.device)
                 kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
@@ -453,7 +454,7 @@ class PETModelForSeq2SeqLM(PETModel):
         batch_size = input_ids.shape[0]
         if decoder_attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to("cuda")
+            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
             decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
@@ -489,11 +490,11 @@ class PETModelForSeq2SeqLM(PETModel):
 
             if attention_mask is not None:
                 # concat prompt attention mask
-                prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to("cuda")
+                prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
                 kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
             # concat prompt labels
             if labels is not None:
-                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to("cuda")
+                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(self.device)
                 kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts[:, : self.pet_config.num_virtual_tokens], inputs_embeds), dim=1)
