@@ -1,12 +1,18 @@
-# 🤗 PET
-Parameter-Efficient Tuning methods enable . Intergrated with 🤗 Accelerate to scale seamlessly to large models using PyTorch FSDP. 
+<h1 align="center"> <p>🤗 PET</p></h1>
+<h3 align="center">
+    <p>State-of-the-art Parameter-Efficient Tuning (PET) methods</p>
+</h3>
+
+Parameter-Efficient Tuning (PET) methods enable efficient adaptation of pre-trained language models (PLMs) to various downstream applications without fine-tuning all the model's parameters. Fine-tuning large-scale PLMs is often prohibitively costly. In this regard, PET methods only fine-tune a small number of (extra) model parameters, thereby greatly decreasing the computational and storage costs. Recent State-of-the-Art PET techniques achieve performance comparable to that of full fine-tuning. 
+
+Seamlessly integrated with 🤗 Accelerate for large scale models leveraging PyTorch FSDP. 
 
 Supported methods:
 
-1. LoRA
-2. Prefix Tuning
-3. P-Tuning
-4. Prompt Tuning 
+1. LoRA: [LORA: LOW-RANK ADAPTATION OF LARGE LANGUAGE MODELS](https://arxiv.org/pdf/2106.09685.pdf)
+2. Prefix Tuning: [P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks](https://arxiv.org/pdf/2110.07602.pdf)
+3. P-Tuning: [GPT Understands, Too](https://arxiv.org/pdf/2103.10385.pdf)
+4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/pdf/2104.08691.pdf) 
 
 ## Getting started
 
@@ -125,4 +131,15 @@ accelerate launch --config_file fsdp_config.yaml examples/pet_lora_seq2seq_accel
 2. When using `P_TUNING` or `PROMPT_TUNING` with `SEQ_2_SEQ` task, remember to remove the `num_virtual_token` virtual prompt predictions from the left side of the model outputs during evaluations. 
 
 
+## Citing 🤗 PET
 
+If you use 🤗 PET in your publication, please cite it by using the following BibTeX entry.
+
+```bibtex
+@Misc{pet,
+  title =        {PET: State-of-the-art Parameter-Efficient Tuning (PET) methods},
+  author =       {Sourab Mangrulkar},
+  howpublished = {\url{https://github.com/huggingface/pet}},
+  year =         {2022}
+}
+```
