@@ -121,7 +121,7 @@ class LoRAModel(torch.nn.Module):
             return getattr(self.model, name)
 
 
-# Below code is copied from https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
+# Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
 
 #  ------------------------------------------------------------------------------------------
