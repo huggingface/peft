@@ -18,6 +18,7 @@ PET_TYPE_TO_CONFIG_MAPPING = {
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
+    "mt5": ["q", "v"],
     "bart": ["q_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "bloom": ["query_key_value"],
@@ -27,6 +28,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "gpt_neo": ["q_proj", "v_proj"],
     "bert": ["query", "value"],
     "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
     "electra": ["query", "value"],
     "deberta-v2": ["query_proj", "value_proj"],
     "deberta": ["in_proj"],
@@ -34,6 +36,13 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
 
 
 def get_pet_config(config_dict):
+    """
+    Returns a PET config object from a dictionary.
+
+    Args:
+        config_dict (:obj:`Dict[str, Any]`):
+    """
+
     return PET_TYPE_TO_CONFIG_MAPPING[config_dict["pet_type"]](**config_dict)
 
 
@@ -73,8 +82,8 @@ def _prepare_prompt_learning_config(pet_config, model_config):
             raise ValueError("Please specify `num_attention_heads` in `pet_config`")
         pet_config.num_attention_heads = num_attention_heads
 
-    if pet_config.encoder_hidden_size is None:
-        pet_config.encoder_hidden_size = token_dim
+    if getattr(pet_config, "encoder_hidden_size", None) is None:
+        setattr(pet_config, "encoder_hidden_size", token_dim)
 
     return pet_config
 
@@ -93,6 +102,14 @@ def _prepare_lora_config(pet_config, model_config):
 
 
 def get_pet_model(model, pet_config):
+    """
+    Returns a PET model object from a model and a config.
+
+    Args:
+        model (:obj:`transformers.PreTrainedModel`):
+        pet_config (:obj:`transformers.PETConfig`):
+    """
+
     model_config = model.config.to_dict()
     if pet_config.pet_type != PETType.LORA:
         pet_config = _prepare_prompt_learning_config(pet_config, model_config)
