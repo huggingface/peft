@@ -82,8 +82,8 @@ def _prepare_prompt_learning_config(pet_config, model_config):
             raise ValueError("Please specify `num_attention_heads` in `pet_config`")
         pet_config.num_attention_heads = num_attention_heads
 
-    if pet_config.encoder_hidden_size is None:
-        pet_config.encoder_hidden_size = token_dim
+    if getattr(pet_config, "encoder_hidden_size", None) is None:
+        setattr(pet_config, "encoder_hidden_size", token_dim)
 
     return pet_config
 
