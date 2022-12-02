@@ -35,7 +35,8 @@ class PETConfig:
 @dataclass
 class PromptLearningConfig(PETConfig):
     """
-    This is the base configuration class to store the configuration of a :obj:Union[:class:`~pet.PrefixTuning`, :class:`~pet.PromptEncoder`, :class:`~pet.PromptTuning`].
+    This is the base configuration class to store the configuration of a :obj:Union[:class:`~pet.PrefixTuning`,
+    :class:`~pet.PromptEncoder`, :class:`~pet.PromptTuning`].
 
     Args:
         num_virtual_tokens (:obj:`int`): The number of virtual tokens to use.
