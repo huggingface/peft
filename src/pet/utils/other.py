@@ -19,6 +19,11 @@ def bloom_model_postprocess_past_key_value(past_key_values):
 def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
     """
     Shift input ids one token to the right.
+
+    Args:
+        input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`): input ids
+        pad_token_id (:obj:`int`): The id of the `padding` token.
+        decoder_start_token_id (:obj:`int`): The id of the `start` token.
     """
     shifted_input_ids = input_ids.new_zeros(input_ids.shape)
     shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()
@@ -30,3 +35,47 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
 
     return shifted_input_ids
+
+
+def _set_trainable(model):
+    if model.modules_to_save is not None:
+        for name, param in model.named_parameters():
+            if any(module_name in name for module_name in model.modules_to_save):
+                param.requires_grad = True
+            else:
+                param.requires_grad = False
+
+
+def fsdp_auto_wrap_policy(model):
+    import functools
+    import os
+
+    from accelerate import FullyShardedDataParallelPlugin
+    from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
+
+    from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
+
+    def lambda_policy_fn(module):
+        if (
+            len(list(module.named_children())) == 0
+            and getattr(module, "weight", None) is not None
+            and module.weight.requires_grad
+        ):
+            return True
+        return False
+
+    lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
+    transformer_wrap_policy = functools.partial(
+        transformer_auto_wrap_policy,
+        transformer_layer_cls=(
+            PrefixEncoder,
+            PromptEncoder,
+            PromptEmbedding,
+            FullyShardedDataParallelPlugin.get_module_class_from_name(
+                model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
+            ),
+        ),
+    )
+
+    auto_wrap_policy = functools.partial(_or_policy, policies=[lambda_policy, transformer_wrap_policy])
+    return auto_wrap_policy

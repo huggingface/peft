@@ -14,21 +14,33 @@ class PromptEncoderReparameterizationType(str, enum.Enum):
 
 @dataclass
 class PromptEncoderConfig(PromptLearningConfig):
+    """
+    This is the configuration class to store the configuration of a :class:`~pet.PromptEncoder`.
+
+    Args:
+        encoder_reparameterization_type
+            (:obj:Union[:class:`PromptEncoderReparameterizationType`, :obj:`str`]): The type of reparameterization to
+            use.
+        encoder_hidden_size (:obj:`int`): The hidden size of the prompt encoder.
+        encoder_num_layers (:obj:`int`): The number of layers of the prompt encoder.
+        encoder_dropout (:obj:`float`): The dropout probability of the prompt encoder.
+    """
+
     encoder_reparameterization_type: Union[str, PromptEncoderReparameterizationType] = field(
         default=PromptEncoderReparameterizationType.MLP,
         metadata={"help": "How to reparameterize the prompt encoder"},
     )
     encoder_hidden_size: int = field(
         default=None,
-        metadata={"help": "The hidden size of the prompt encoder reparameterization"},
+        metadata={"help": "The hidden size of the prompt encoder"},
     )
     encoder_num_layers: int = field(
         default=2,
-        metadata={"help": "The number of layers of the prompt encoder reparameterization"},
+        metadata={"help": "The number of layers of the prompt encoder"},
     )
     encoder_dropout: float = field(
         default=0.0,
-        metadata={"help": "The dropout of the prompt encoder reparameterization"},
+        metadata={"help": "The dropout of the prompt encoder"},
     )
 
 
@@ -37,6 +49,35 @@ class PromptEncoderConfig(PromptLearningConfig):
 class PromptEncoder(torch.nn.Module):
     """
     The prompt encoder network that is used to generate the virtual token embeddings for p-tuning.
+
+    Args:
+        config (:class:`PromptEncoderConfig`): The configuration of the prompt encoder.
+
+    Example::
+
+        >>> from pet import PromptEncoder, PromptEncoderConfig >>> config = PromptEncoderConfig(
+                pet_type="P_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
+                num_transformer_submodules=1, num_attention_heads=12, num_layers=12,
+                encoder_reparameterization_type="MLP", encoder_hidden_size=768
+            )
+        >>> prompt_encoder = PromptEncoder(config)
+
+    Attributes:
+        embedding (:class:`~torch.nn.Embedding`): The embedding layer of the prompt encoder. mlp_head
+        (:class:`~torch.nn.Sequential`): The MLP head of the prompt encoder if `inference_mode=False`. lstm_head
+        (:class:`~torch.nn.LSTM`):
+            The LSTM head of the prompt encoder if `inference_mode=False` and `encoder_reparameterization_type="LSTM"`.
+        token_dim (:obj:`int`): The hidden embedding dimension of the base transformer model. input_size (:obj:`int`):
+        The input size of the prompt encoder. output_size (:obj:`int`): The output size of the prompt encoder.
+        hidden_size (:obj:`int`): The hidden size of the prompt encoder. total_virtual_tokens (:obj:`int`): The total
+        number of virtual tokens of the prompt encoder. encoder_type
+        (:obj:Union[:class:`PromptEncoderReparameterizationType`, :obj:`str`]):
+            The encoder type of the prompt encoder.
+
+
+    Input shape: (batch_size, total_virtual_tokens)
+
+    Output shape: (batch_size, total_virtual_tokens, token_dim)
     """
 
     def __init__(self, config):

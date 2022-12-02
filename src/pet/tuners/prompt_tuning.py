@@ -15,6 +15,18 @@ class PromptTuningInit(str, enum.Enum):
 
 @dataclass
 class PromptTuningConfig(PromptLearningConfig):
+    """
+    This is the configuration class to store the configuration of a :class:`~pet.PromptEmbedding`.
+
+    Args:
+        prompt_tuning_init (:
+            obj:Union[:class:`PromptTuningInit`, :obj:`str`]): The initialization of the prompt embedding.
+        prompt_tuning_init_text (:obj: Optional[:obj:`str`]): The text to initialize the prompt embedding.
+            Only used if `prompt_tuning_init` is `TEXT`
+        tokenizer_name_or_path (:obj: Optional[:obj:`str`]): The name or path of the tokenizer.
+            Only used if `prompt_tuning_init` is `TEXT`
+    """
+
     prompt_tuning_init: Union[PromptTuningInit, str] = field(
         default=PromptTuningInit.RANDOM,
         metadata={"help": "How to initialize the prompt tuning parameters"},
@@ -34,17 +46,44 @@ class PromptTuningConfig(PromptLearningConfig):
 
 
 class PromptEmbedding(torch.nn.Module):
+    """
+    The model to encode virtual tokens into prompt embeddings.
+
+    Args:
+        config (:class:`PromptTuningConfig`): The configuration of the prompt embedding.
+        word_embeddings (:obj:`torch.nn.Module`): The word embeddings of the base transformer model.
+
+    Attributes:
+        embedding (:obj:`torch.nn.Embedding`): The embedding layer of the prompt embedding.
+
+    Example::
+
+        >>> from pet import PromptEmbedding, PromptTuningConfig >>> config = PromptTuningConfig(
+                pet_type="PROMPT_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
+                num_transformer_submodules=1, num_attention_heads=12, num_layers=12, prompt_tuning_init="TEXT",
+                prompt_tuning_init_text="Predict if sentiment of this review is positive, negative or neutral",
+                tokenizer_name_or_path="t5-base",
+            )
+        >>> # t5_model.shared is the word embeddings of the base model >>> prompt_embedding = PromptEmbedding(config,
+        t5_model.shared)
+
+
+    Input Shape: (batch_size, total_virtual_tokens)
+
+    Output Shape: (batch_size, total_virtual_tokens, token_dim)
+    """
+
     def __init__(self, config, word_embeddings):
         super().__init__()
 
         total_virtual_tokens = config.num_virtual_tokens * config.num_transformer_submodules
-        self.embedding = torch.nn.Embedding(total_virtual_tokens, config["token_dim"])
+        self.embedding = torch.nn.Embedding(total_virtual_tokens, config.token_dim)
         if config.prompt_tuning_init == PromptTuningInit.TEXT:
             from transformers import AutoTokenizer
 
-            self.tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name_or_path)
-            self.init_text = config.prompt_tuning_init_text
-            init_token_ids = self.tokenizer(self.init_text)["input_ids"]
+            tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name_or_path)
+            init_text = config.prompt_tuning_init_text
+            init_token_ids = tokenizer(init_text)["input_ids"]
             # Trim or iterate until num_text_tokens matches total_virtual_tokens
             num_text_tokens = len(init_token_ids)
             if num_text_tokens > total_virtual_tokens:

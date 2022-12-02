@@ -39,9 +39,10 @@ setup(
         "packaging>=20.0",
         "psutil",
         "pyyaml",
-        "torch>=1.4.0",
+        "torch>=1.13.0",
         "transformers",
         "accelerate",
+        "loralib",
     ],
     extras_require=extras,
     classifiers=[

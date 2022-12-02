@@ -4,6 +4,13 @@ from .config import PETType
 
 
 def get_pet_model_state_dict(model):
+    """
+    Get the state dict of the PET model.
+
+    Args:
+        model (:obj:`PETModel`): The PET model.
+    """
+
     if model.pet_config.pet_type == PETType.LORA:
         return lora_state_dict(model)
     else:
@@ -19,6 +26,14 @@ def get_pet_model_state_dict(model):
 
 
 def set_pet_model_state_dict(model, pet_model_state_dict):
+    """
+    Set the state dict of the PET model.
+
+    Args:
+        model (:obj:`PETModel`): The PET model.
+        pet_model_state_dict (:obj:`dict`): The state dict of the PET model.
+    """
+
     model.load_state_dict(pet_model_state_dict, strict=False)
     if model.pet_config.pet_type != PETType.LORA:
         model.prompt_encoder.embedding.load_state_dict(
