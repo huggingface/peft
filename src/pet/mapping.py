@@ -1,4 +1,9 @@
-from .pet_model import PETModelForCausalLM, PETModelForSeq2SeqLM, PETModelForSequenceClassification
+from .pet_model import (
+    PETModelForCausalLM,
+    PETModelForSeq2SeqLM,
+    PETModelForSequenceClassification,
+    PETModelForTokenClassification,
+)
 from .tuners import LoRAConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PETType
 
@@ -7,6 +12,7 @@ MODEL_TYPE_TO_PET_MODEL_MAPPING = {
     "SEQ_CLS": PETModelForSequenceClassification,
     "SEQ_2_SEQ_LM": PETModelForSeq2SeqLM,
     "CAUSAL_LM": PETModelForCausalLM,
+    "TOKEN_CLS": PETModelForTokenClassification,
 }
 
 PET_TYPE_TO_CONFIG_MAPPING = {
@@ -32,6 +38,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "electra": ["query", "value"],
     "deberta-v2": ["query_proj", "value_proj"],
     "deberta": ["in_proj"],
+    "layoutlm": ["query", "value"],
 }
 
 
