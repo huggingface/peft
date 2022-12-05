@@ -10,12 +10,11 @@ def get_pet_model_state_dict(model):
     Args:
         model (:obj:`PETModel`): The PET model.
     """
-
+    state_dict = model.state_dict()
     if model.pet_config.pet_type == PETType.LORA:
         to_return = lora_state_dict(model, bias=model.pet_config.bias)
     else:
         to_return = {}
-        state_dict = model.state_dict()
         prompt_embeddings = model.get_prompt_embedding_to_save()
         to_return["prompt_embeddings"] = prompt_embeddings
     if model.modules_to_save is not None:
