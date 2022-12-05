@@ -5,7 +5,13 @@
 __version__ = "0.1.0.dev0"
 
 from .mapping import MODEL_TYPE_TO_PET_MODEL_MAPPING, PET_TYPE_TO_CONFIG_MAPPING, get_pet_config, get_pet_model
-from .pet_model import PETModel, PETModelForCausalLM, PETModelForSeq2SeqLM, PETModelForSequenceClassification
+from .pet_model import (
+    PETModel,
+    PETModelForCausalLM,
+    PETModelForSeq2SeqLM,
+    PETModelForSequenceClassification,
+    PETModelForTokenClassification,
+)
 from .tuners import (
     LoRAConfig,
     LoRAModel,
