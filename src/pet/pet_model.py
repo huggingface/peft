@@ -178,7 +178,7 @@ class PETModelForSequenceClassification(PETModel):
                 break
 
         # to make sure classifier layer is trainable
-        _set_trainable(self.base_model)
+        _set_trainable(self)
 
     def forward(
         self,
@@ -540,7 +540,7 @@ class PETModelForTokenClassification(PETModel):
                 break
 
         # to make sure classifier layer is trainable
-        _set_trainable(self.base_model)
+        _set_trainable(self)
 
     def forward(
         self,

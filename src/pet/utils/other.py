@@ -42,8 +42,6 @@ def _set_trainable(model):
         for name, param in model.named_parameters():
             if any(module_name in name for module_name in model.modules_to_save):
                 param.requires_grad = True
-            else:
-                param.requires_grad = False
 
 
 def fsdp_auto_wrap_policy(model):
