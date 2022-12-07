@@ -170,10 +170,10 @@ class PETModelForSequenceClassification(PETModel):
 
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
-        self.modules_to_save = ["classifier"]
+        self.modules_to_save = ["classifier", "score"]
 
-        for name, module in self.base_model.named_children():
-            if isinstance(module, torch.nn.Linear):
+        for name, _ in self.base_model.named_children():
+            if any(module_name in name for module_name in self.modules_to_save):
                 self.cls_layer_name = name
                 break
 
@@ -237,7 +237,7 @@ class PETModelForSequenceClassification(PETModel):
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
             prompts = self.get_prompt(batch_size=batch_size)
-            inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
+            inputs_embeds = torch.cat((inputs_embeds[:, 0, :], prompts, inputs_embeds[:, 1:, :]), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def _prefix_tuning_forward(
@@ -532,10 +532,10 @@ class PETModelForTokenClassification(PETModel):
 
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
-        self.modules_to_save = ["classifier"]
+        self.modules_to_save = ["classifier", "score"]
 
-        for name, module in self.base_model.named_children():
-            if isinstance(module, torch.nn.Linear):
+        for name, _ in self.base_model.named_children():
+            if any(module_name in name for module_name in self.modules_to_save):
                 self.cls_layer_name = name
                 break
 
@@ -599,7 +599,7 @@ class PETModelForTokenClassification(PETModel):
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
             prompts = self.get_prompt(batch_size=batch_size)
-            inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
+            inputs_embeds = torch.cat((inputs_embeds[:, 0, :], prompts, inputs_embeds[:, 1:, :]), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def _prefix_tuning_forward(
