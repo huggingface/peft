@@ -321,6 +321,6 @@ class MergedLinear(nn.Linear, LoRALayer):
             result = F.linear(x, T(self.weight), bias=self.bias)
             if self.r > 0:
                 after_A = self.lora_A(self.lora_dropout(x))
-                after_B = self.lora_B(after_A.transpose(-2, -1))
+                after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)
                 result += self.zero_pad(after_B) * self.scaling
             return result
