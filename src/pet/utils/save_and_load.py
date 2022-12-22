@@ -3,14 +3,18 @@ from loralib import lora_state_dict
 from .config import PETType
 
 
-def get_pet_model_state_dict(model):
+def get_pet_model_state_dict(model, state_dict=None):
     """
     Get the state dict of the PET model.
 
     Args:
-        model (:obj:`PETModel`): The PET model.
+        model (:obj:`PETModel`): The PET model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
+        the model should be teh underlying model/unwrapped model (i.e. model.module).
+        state_dict (:obj:`dict`, `optional`): The state dict of the model. If not provided, the state dict of the model
+        will be used.
     """
-    state_dict = model.state_dict()
+    if state_dict is None:
+        state_dict = model.state_dict()
     if model.pet_config.pet_type == PETType.LORA:
         to_return = lora_state_dict(model, bias=model.pet_config.bias)
     else:
