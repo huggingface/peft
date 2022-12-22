@@ -2,6 +2,7 @@
 import math
 from dataclasses import dataclass, field
 from typing import List, Optional
+import warnings
 
 import torch
 import torch.nn as nn
@@ -90,11 +91,20 @@ class LoRAModel(torch.nn.Module):
             if any(key.endswith(target_key) for target_key in self.config.target_modules):
                 parent, target, target_name = self._get_submodules(key)
                 bias = target.bias is not None
-                if isinstance(target, torch.nn.Linear):
+                if isinstance(target, torch.nn.Linear) and self.config.enable_lora is None:
                     new_module = Linear(target.in_features, target.out_features, bias=bias, **kwargs)
-                elif isinstance(target, Conv1D):
+                elif self.config.enable_lora is not None:
                     kwargs.update({"enable_lora": self.config.enable_lora})
-                    in_features, out_features = target.weight.shape
+                    if isinstance(target, Conv1D):
+                        in_features, out_features = target.weight.shape
+                    else:
+                        in_features, out_features = target.in_features, target.out_features
+                        if kwargs["fan_in_fan_out"]:
+                            warnings.warn(
+                                "fan_in_fan_out is set to True but the target module is not a Conv1D. "
+                                "Setting fan_in_fan_out to False."
+                            )
+                            kwargs["fan_in_fan_out"] = False
                     new_module = MergedLinear(in_features, out_features, bias=bias, **kwargs)
                 self._replace_module(parent, target_name, new_module, target)
 
