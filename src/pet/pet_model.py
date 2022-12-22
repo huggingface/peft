@@ -396,6 +396,38 @@ class PETModelForCausalLM(PETModel):
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
+    def generate(self, **kwargs):
+        if self.pet_config.pet_type == PETType.LORA:
+            return self.base_model.generate(**kwargs)
+        else:
+            assert "input_ids" in kwargs, "input_ids must be provided for PET model generation"
+            if kwargs.get("attention_mask", None) is not None:
+                # concat prompt attention mask
+                prefix_attention_mask = torch.ones(
+                    kwargs["input_ids"].shape[0], self.pet_config.num_virtual_tokens
+                ).to(self.device)
+                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
+
+            if kwargs.get("position_ids", None) is not None:
+                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
+                kwargs["position_ids"] = None
+            if kwargs.get("token_type_ids", None) is not None:
+                warnings.warn(
+                    "Token type ids are not supported for parameter efficient tuning. Ignoring token type ids"
+                )
+                kwargs["token_type_ids"] = None
+
+            if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+                batch_size = kwargs["input_ids"].shape[0]
+                past_key_values = self.get_prompt(batch_size)
+                kwargs["past_key_values"] = past_key_values
+                return self.base_model.generate(**kwargs)
+            else:
+                prompts = self.get_prompt(batch_size=kwargs["input_ids"].shape[0])
+                kwargs["inputs_embeds"] = torch.cat((prompts, self.word_embeddings(kwargs["input_ids"])), dim=1)
+                kwargs["input_ids"] = None
+                return self.base_model.generate(**kwargs)
+
 
 class PETModelForSeq2SeqLM(PETModel):
     """
@@ -502,6 +534,43 @@ class PETModelForSeq2SeqLM(PETModel):
                 (prompts[:, self.pet_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
             )
             return self.base_model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
+
+    def generate(self, **kwargs):
+        if self.pet_config.pet_type == PETType.LORA:
+            return self.base_model.generate(**kwargs)
+        else:
+            assert "input_ids" in kwargs, "input_ids must be provided for PET model generation"
+
+            if kwargs.get("position_ids", None) is not None:
+                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
+                kwargs["position_ids"] = None
+            if kwargs.get("token_type_ids", None) is not None:
+                warnings.warn(
+                    "Token type ids are not supported for parameter efficient tuning. Ignoring token type ids"
+                )
+                kwargs["token_type_ids"] = None
+
+            if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+                batch_size = kwargs["input_ids"].shape[0]
+                past_key_values = self.get_prompt(batch_size)
+                kwargs["past_key_values"] = past_key_values
+                return self.base_model.generate(**kwargs)
+            else:
+                if kwargs.get("attention_mask", None) is not None:
+                    # concat prompt attention mask
+                    prefix_attention_mask = torch.ones(
+                        kwargs["input_ids"].shape[0], self.pet_config.num_virtual_tokens
+                    ).to(self.device)
+                    kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
+                prompts = self.get_prompt(batch_size=kwargs["input_ids"].shape[0])
+                inputs_embeds = torch.cat((prompts[:, : self.pet_config.num_virtual_tokens], inputs_embeds), dim=1)
+                decoder_inputs_embeds = torch.cat(
+                    (prompts[:, self.pet_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
+                )
+                kwargs["inputs_embeds"] = inputs_embeds
+                kwargs["decoder_inputs_embeds"] = decoder_inputs_embeds
+                kwargs["input_ids"] = None
+                return self.base_model.generate(**kwargs)
 
 
 class PETModelForTokenClassification(PETModel):
