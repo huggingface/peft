@@ -336,6 +336,8 @@ class PETModelForCausalLM(PETModel):
 
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
+        self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+        self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
 
     def forward(
         self,
@@ -405,7 +407,7 @@ class PETModelForCausalLM(PETModel):
                 # concat prompt attention mask
                 prefix_attention_mask = torch.ones(
                     kwargs["input_ids"].shape[0], self.pet_config.num_virtual_tokens
-                ).to(self.device)
+                ).to(kwargs["input_ids"].device)
                 kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
 
             if kwargs.get("position_ids", None) is not None:
@@ -423,10 +425,12 @@ class PETModelForCausalLM(PETModel):
                 kwargs["past_key_values"] = past_key_values
                 return self.base_model.generate(**kwargs)
             else:
-                prompts = self.get_prompt(batch_size=kwargs["input_ids"].shape[0])
-                kwargs["inputs_embeds"] = torch.cat((prompts, self.word_embeddings(kwargs["input_ids"])), dim=1)
-                kwargs["input_ids"] = None
-                return self.base_model.generate(**kwargs)
+                raise NotImplementedError
+
+    def prepare_inputs_for_generation(self, *args, **kwargs):
+        model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+        model_kwargs["past_key_values"] = kwargs.get("past", None) or kwargs.get("past_key_values", None)
+        return model_kwargs
 
 
 class PETModelForSeq2SeqLM(PETModel):
@@ -453,6 +457,14 @@ class PETModelForSeq2SeqLM(PETModel):
 
     def __init__(self, model, pet_config: PETConfig):
         super().__init__(model, pet_config)
+        self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+        self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
+        self.base_model_prepare_encoder_decoder_kwargs_for_generation = (
+            self.base_model._prepare_encoder_decoder_kwargs_for_generation
+        )
+        self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
+            self._prepare_encoder_decoder_kwargs_for_generation
+        )
 
     def forward(
         self,
@@ -556,21 +568,21 @@ class PETModelForSeq2SeqLM(PETModel):
                 kwargs["past_key_values"] = past_key_values
                 return self.base_model.generate(**kwargs)
             else:
-                if kwargs.get("attention_mask", None) is not None:
-                    # concat prompt attention mask
-                    prefix_attention_mask = torch.ones(
-                        kwargs["input_ids"].shape[0], self.pet_config.num_virtual_tokens
-                    ).to(self.device)
-                    kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
-                prompts = self.get_prompt(batch_size=kwargs["input_ids"].shape[0])
-                inputs_embeds = torch.cat((prompts[:, : self.pet_config.num_virtual_tokens], inputs_embeds), dim=1)
-                decoder_inputs_embeds = torch.cat(
-                    (prompts[:, self.pet_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
-                )
-                kwargs["inputs_embeds"] = inputs_embeds
-                kwargs["decoder_inputs_embeds"] = decoder_inputs_embeds
-                kwargs["input_ids"] = None
-                return self.base_model.generate(**kwargs)
+                raise NotImplementedError
+
+    def prepare_inputs_for_generation(self, *args, **kwargs):
+        model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+        model_kwargs["past_key_values"] = kwargs.get("past", None) or kwargs.get("past_key_values", None)
+        return model_kwargs
+
+    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor, model_kwargs, model_input_name=None):
+        past_key_values = model_kwargs.get("past_key_values", None)
+        model_kwargs["past_key_values"] = None
+        model_kwargs = self.base_model_prepare_encoder_decoder_kwargs_for_generation(
+            inputs_tensor, model_kwargs, model_input_name
+        )
+        model_kwargs["past_key_values"] = past_key_values
+        return model_kwargs
 
 
 class PETModelForTokenClassification(PETModel):

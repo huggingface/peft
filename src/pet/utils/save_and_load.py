@@ -10,7 +10,8 @@ def get_pet_model_state_dict(model, state_dict=None):
     Args:
         model (:obj:`PETModel`): The PET model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
         the model should be teh underlying model/unwrapped model (i.e. model.module).
-        state_dict (:obj:`dict`, `optional`): The state dict of the model. If not provided, the state dict of the model
+        state_dict (:
+            obj:`dict`, `optional`): The state dict of the model. If not provided, the state dict of the model
         will be used.
     """
     if state_dict is None:
