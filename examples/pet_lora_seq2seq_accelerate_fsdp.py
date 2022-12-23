@@ -78,7 +78,7 @@ def main():
         num_training_steps=(len(train_dataloader) * num_epochs),
     )
 
-    if accelerator.state.fsdp_plugin is not None:
+    if getattr(accelerator.state, "fsdp_plugin", None) is not None:
         accelerator.state.fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(model)
 
     model, train_dataloader, eval_dataloader, optimizer, lr_scheduler = accelerator.prepare(
