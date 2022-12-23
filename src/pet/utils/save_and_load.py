@@ -1,6 +1,7 @@
 from loralib import lora_state_dict
 
 from .config import PETType
+from ..mapping import get_pet_model
 
 
 def get_pet_model_state_dict(model, state_dict=None):
@@ -43,4 +44,33 @@ def set_pet_model_state_dict(model, pet_model_state_dict):
         model.prompt_encoder.embedding.load_state_dict(
             {"weight": pet_model_state_dict["prompt_embeddings"]}, strict=True
         )
+    return model
+
+
+def pet_model_load_and_dispatch(model, pet_model_state_dict, pet_config, max_memory=None):
+    """
+    Load the PET model state dict and dispatch the model to the correct device.
+
+    Args:
+        model (:obj:`PETModel`): The Pre-trained base model which has already been sharded and dispatched
+        using `accelerate` functionalities.
+        pet_model_state_dict (:obj:`dict`): The state dict of the PET model.
+        max_memory (`Dict`, *optional*):
+            A dictionary device identifier to maximum memory. Will default to the maximum memory available for each GPU
+            and the available CPU RAM if unset.
+    """
+    from accelerate import infer_auto_device_map, dispatch_model
+    from accelerate.hooks import remove_hook_from_submodules, AlignDevicesHook, add_hook_to_module
+
+    remove_hook_from_submodules(model)
+    model = get_pet_model(model, pet_config)
+    model.print_trainable_parameters()
+    set_pet_model_state_dict(model, pet_model_state_dict)
+    device_map = infer_auto_device_map(model, max_memory=max_memory, no_split_module_classes=model._no_split_modules)
+    model = dispatch_model(model, device_map=device_map)
+    hook = AlignDevicesHook(io_same_device=True)
+    if model.pet_config.pet_type == PETType.LORA:
+        add_hook_to_module(model.base_model.model, hook)
+    else:
+        add_hook_to_module(model.base_model, hook)
     return model
