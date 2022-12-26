@@ -1,7 +1,6 @@
 from loralib import lora_state_dict
 
 from .config import PETType
-from ..mapping import get_pet_model
 
 
 def get_pet_model_state_dict(model, state_dict=None):
@@ -61,6 +60,7 @@ def pet_model_load_and_dispatch(model, pet_model_state_dict, pet_config, max_mem
     """
     from accelerate import infer_auto_device_map, dispatch_model
     from accelerate.hooks import remove_hook_from_submodules, AlignDevicesHook, add_hook_to_module
+    from ..mapping import get_pet_model
 
     remove_hook_from_submodules(model)
     model = get_pet_model(model, pet_config)
