@@ -18,18 +18,13 @@ Supported methods:
 
 ```python
 from transformers import AutoModelForSeq2SeqLM
-from pet import get_pet_config, get_pet_model
+from pet import get_pet_config, get_pet_model, LoRAConfig, TaskType
 model_name_or_path = "bigscience/mt0-large"
 tokenizer_name_or_path = "bigscience/mt0-large"
 
-config = {
-    "pet_type":"LORA",
-    "task_type":"SEQ_2_SEQ_LM",
-    "r": 8,
-    "lora_alpha": 32,
-    "lora_dropout": 0.1
-}
-pet_config = get_pet_config(config)
+pet_config = LoRAConfig(
+    task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
+)
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_pet_model(model, pet_config)
@@ -73,9 +68,9 @@ Save storage by avoiding full finetuning of models on each of the downstream tas
 With PET methods, users only need to store tiny checkpoints in the order of `MBs` all the while retaining 
 performance comparable to full finetuning.
 
-An example of using LoRA for the task of adaping `LayoutLMForTokenClassification` on `FUNSD` dataset is given in `~examples/PET_LoRA_LayoutLMForTokenClassification_on_FUNSD.py`. We can observe that with only `0.62 %` of parameters being trainable, we achieve performance (F1 0.777) comparable to full finetuning (F1 0.786) (without any hyerparam tuning runs for extracting more performance), and the checkpoint of this is only `2.8MB`.
+An example of using LoRA for the task of adaping `LayoutLMForTokenClassification` on `FUNSD` dataset is given in `~examples/token_classification/PET_LoRA_LayoutLMForTokenClassification_on_FUNSD.py`. We can observe that with only `0.62 %` of parameters being trainable, we achieve performance (F1 0.777) comparable to full finetuning (F1 0.786) (without any hyerparam tuning runs for extracting more performance), and the checkpoint of this is only `2.8MB`. Now, if there are `N` such datasets, just have these PET models one for each dataset and save a lot of storage without having to worry about the problem of catastrophic forgetting or overfitting of backbone/base model.
 
-Now, if there are `N` such datasets, just have these PET models one for each dataset and save a lot of storage without having to worry about the problem of catastrophic forgetting or overfitting of backbone/base model.
+Another example is fine-tuning `roberta-large` on `MRPC` GLUE dataset suing differenct PET methods. The notebooks are given in `~examples/sequence_classification`. 
 
 
 ## PET + 🤗 Accelerate
@@ -83,9 +78,66 @@ Now, if there are `N` such datasets, just have these PET models one for each dat
 PET models work with 🤗 Accelerate out of the box. Use 🤗 Accelerate for Distributed training on various hardware such as GPUs, Apple Silicon devices etc during training.
 Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
 
-### Example of PET model distributed training using 🤗 Accelerate
+### Example of PET model training using 🤗 Accelerate's DeepSpeed integation
 
-### Example of PET model inference using 🤗 Accelerate
+ Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. Example is provided in `~examples/conditional_generation/pet_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
+  a. First run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionaire. 
+  Below are the contents of the config file.
+  ```
+  compute_environment: LOCAL_MACHINE
+  deepspeed_config:
+    gradient_accumulation_steps: 1
+    gradient_clipping: 1.0
+    offload_optimizer_device: cpu
+    offload_param_device: cpu
+    zero3_init_flag: true
+    zero3_save_16bit_model: true
+    zero_stage: 3
+  distributed_type: DEEPSPEED
+  downcast_bf16: 'no'
+  dynamo_backend: 'NO'
+  fsdp_config: {}
+  machine_rank: 0
+  main_training_function: main
+  megatron_lm_config: {}
+  mixed_precision: 'no'
+  num_machines: 1
+  num_processes: 1
+  rdzv_backend: static
+  same_network: true
+  use_cpu: false
+  ```
+  b. run the below command to launch example script
+  ```
+  accelerate launch --config_file ds_zero3_cpu.yaml examples/pet_lora_seq2seq_accelerate_ds_zero3_offload.py
+  ```
+
+  c. output logs:
+  ```bash
+  GPU Memory before entering the train : 1916
+  GPU Memory consumed at the end of the train (end-begin): 66
+  GPU Peak Memory consumed during the train (max-begin): 7488
+  GPU Total Peak Memory consumed during the train (max): 9404
+  CPU Memory before entering the train : 19411
+  CPU Memory consumed at the end of the train (end-begin): 0
+  CPU Peak Memory consumed during the train (max-begin): 0
+  CPU Total Peak Memory consumed during the train (max): 19411
+  epoch=4: train_ppl=tensor(1.0705, device='cuda:0') train_epoch_loss=tensor(0.0681, device='cuda:0')
+  100%|████████████████████████████████████████████████████████████████████████████████████████████| 7/7 [00:27<00:00,  3.92s/it]
+  GPU Memory before entering the eval : 1982
+  GPU Memory consumed at the end of the eval (end-begin): -66
+  GPU Peak Memory consumed during the eval (max-begin): 672
+  GPU Total Peak Memory consumed during the eval (max): 2654
+  CPU Memory before entering the eval : 19411
+  CPU Memory consumed at the end of the eval (end-begin): 0
+  CPU Peak Memory consumed during the eval (max-begin): 0
+  CPU Total Peak Memory consumed during the eval (max): 19411
+  accuracy=100.0
+  eval_preds[:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
+  dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
+  ```
+
+### Example of PET model inference using 🤗 Accelerate's Big Model Inferencing capabilities
 
 
 ## Models support matrix
@@ -134,39 +186,7 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
 
 ## Caveats:
 
-1. Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue on DeepSpeed repository. Example is provided in `~examples/pet_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
-  a. First run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionaire. 
-  Below are the contents of the config file.
-  ```
-  compute_environment: LOCAL_MACHINE
-  deepspeed_config:
-    gradient_accumulation_steps: 1
-    gradient_clipping: 1.0
-    offload_optimizer_device: cpu
-    offload_param_device: cpu
-    zero3_init_flag: true
-    zero3_save_16bit_model: true
-    zero_stage: 3
-  distributed_type: DEEPSPEED
-  downcast_bf16: 'no'
-  dynamo_backend: 'NO'
-  fsdp_config: {}
-  machine_rank: 0
-  main_training_function: main
-  megatron_lm_config: {}
-  mixed_precision: 'no'
-  num_machines: 1
-  num_processes: 1
-  rdzv_backend: static
-  same_network: true
-  use_cpu: false
-  ```
-  b. run the below command to launch example script
-  ```
-  accelerate launch --config_file ds_zero3_cpu.yaml examples/pet_lora_seq2seq_accelerate_ds_zero3_offload.py
-  ```
-
-2. Below is an example of using PyTorch FSDP for training. However, it doesn't lead to 
+1. Below is an example of using PyTorch FSDP for training. However, it doesn't lead to 
 any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consumes 1.65X more GPU memory when training models with most of the params frozen](https://github.com/pytorch/pytorch/issues/91165). 
 
   ```python
@@ -180,7 +200,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   model = accelerator.prepare(model)
   ```
 
-  Example of parameter efficient tuning with `mt0-xxl` base model using 🤗 Accelerate is provided in `~examples/pet_lora_seq2seq_accelerate_fsdp.py`. 
+  Example of parameter efficient tuning with `mt0-xxl` base model using 🤗 Accelerate is provided in `~examples/conditional_generation/pet_lora_seq2seq_accelerate_fsdp.py`. 
   a. First run `accelerate config --config_file fsdp_config.yaml` and answer the questionaire. 
   Below are the contents of the config file.
   ```
@@ -218,9 +238,9 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   accelerate launch --config_file fsdp_config.yaml examples/pet_lora_seq2seq_accelerate_fsdp.py
   ```
 
-3. When using `P_TUNING` or `PROMPT_TUNING` with `SEQ_2_SEQ` task, remember to remove the `num_virtual_token` virtual prompt predictions from the left side of the model outputs during evaluations. 
+2. When using `P_TUNING` or `PROMPT_TUNING` with `SEQ_2_SEQ` task, remember to remove the `num_virtual_token` virtual prompt predictions from the left side of the model outputs during evaluations. 
 
-4. `P_TUNING` or `PROMPT_TUNING` doesn't support `generate` functionality of transformers bcause `generate` strictly requires `input_ids`/`decoder_input_ids` but 
+3. `P_TUNING` or `PROMPT_TUNING` doesn't support `generate` functionality of transformers bcause `generate` strictly requires `input_ids`/`decoder_input_ids` but 
 `P_TUNING`/`PROMPT_TUNING` appends soft prompt embeddings to `input_embeds` to create
 new `input_embeds` to be given to the model. Therefore, `generate` doesn't support this yet.
 
