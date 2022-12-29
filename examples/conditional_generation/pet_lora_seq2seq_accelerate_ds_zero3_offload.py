@@ -104,14 +104,14 @@ def main():
     accelerator = Accelerator()
     model_name_or_path = "bigscience/T0_3B"
     dataset_name = "twitter_complaints"
-    pet_config = pet_config = LoRAConfig(
-        task_type=TaskType.TOKEN_CLS, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1, bias="all"
+    pet_config = LoRAConfig(
+        task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
     )
     checkpoint_name = f"{dataset_name}_{pet_config.pet_type}_{pet_config.task_type}_v1.pt".replace("/", "_")
     text_column = "Tweet text"
     label_column = "text_label"
     lr = 3e-3
-    num_epochs = 20
+    num_epochs = 5
     batch_size = 8
     seed = 42
     set_seed(seed)
@@ -178,10 +178,14 @@ def main():
         num_training_steps=(len(train_dataloader) * num_epochs),
     )
 
-    model, train_dataloader, eval_dataloader, optimizer, lr_scheduler = accelerator.prepare(
-        model, train_dataloader, eval_dataloader, optimizer, lr_scheduler
+    model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler = accelerator.prepare(
+        model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler
     )
     accelerator.print(model)
+
+    is_ds_zero_3 = False
+    if getattr(accelerator.state, "deepspeed_plugin", None):
+        is_ds_zero_3 = accelerator.state.deepspeed_plugin.zero_stage == 3
 
     for epoch in range(num_epochs):
         with TorchTracemalloc() as tracemalloc:
@@ -213,6 +217,9 @@ def main():
                 tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
             )
         )
+        train_epoch_loss = total_loss / len(eval_dataloader)
+        train_ppl = torch.exp(train_epoch_loss)
+        accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
 
         model.eval()
         eval_preds = []
@@ -220,12 +227,11 @@ def main():
             for _, batch in enumerate(tqdm(eval_dataloader)):
                 batch = {k: v for k, v in batch.items() if k != "labels"}
                 with torch.no_grad():
-                    outputs = model.generate(**batch, synced_gpus=True)  # synced_gpus=True for DS-stage 3
+                    outputs = accelerator.unwrap_model(model).generate(
+                        **batch, synced_gpus=is_ds_zero_3
+                    )  # synced_gpus=True for DS-stage 3
                 preds = outputs.detach().cpu().numpy()
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
-            train_epoch_loss = total_loss / len(eval_dataloader)
-            train_ppl = torch.exp(train_epoch_loss)
-            accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
         accelerator.print("GPU Memory before entering the eval : {}".format(b2mb(tracemalloc.begin)))
@@ -248,23 +254,23 @@ def main():
 
         correct = 0
         total = 0
-        for pred, true in zip(eval_preds, dataset["validation"][label_column]):
+        for pred, true in zip(eval_preds, dataset["train"][label_column]):
             if pred.strip() == true.strip():
                 correct += 1
             total += 1
         accuracy = correct / total * 100
         accelerator.print(f"{accuracy=}")
         accelerator.print(f"{eval_preds[:10]=}")
-        accelerator.print(f"{dataset['validation'][label_column][:10]=}")
-    accelerator.wait_for_everyone()
-    accelerator.save(get_pet_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name)
-    accelerator.wait_for_everyone()
+        accelerator.print(f"{dataset['train'][label_column][:10]=}")
 
     model.eval()
     test_preds = []
     for _, batch in enumerate(tqdm(test_dataloader)):
         batch = {k: v for k, v in batch.items() if k != "labels"}
-        outputs = model.generate(**batch, synced_gpus=True)  # synced_gpus=True for DS-stage 3
+        with torch.no_grad():
+            outputs = accelerator.unwrap_model(model).generate(
+                **batch, synced_gpus=is_ds_zero_3
+            )  # synced_gpus=True for DS-stage 3
         test_preds.extend(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True))
 
     test_preds_cleaned = []
@@ -272,15 +278,19 @@ def main():
         test_preds_cleaned.append(get_closest_label(pred, classes))
 
     test_df = dataset["test"].to_pandas()
-    test_df["text_labels"] = test_preds_cleaned
+    test_df[label_column] = test_preds_cleaned
     test_df["text_labels_orig"] = test_preds
-    accelerator.print(test_df.sample(20))
+    accelerator.print(test_df[[text_column, label_column]].sample(20))
 
-    pred_df = test_df[["ID", "text_labels"]]
+    pred_df = test_df[["ID", label_column]]
     pred_df.columns = ["ID", "Label"]
 
     os.makedirs(f"data/{dataset_name}", exist_ok=True)
     pred_df.to_csv(f"data/{dataset_name}/predictions.csv", index=False)
+
+    accelerator.wait_for_everyone()
+    accelerator.save(get_pet_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name)
+    accelerator.wait_for_everyone()
 
 
 if __name__ == "__main__":
