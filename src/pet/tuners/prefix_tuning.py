@@ -3,7 +3,7 @@ from typing import Callable, Optional
 
 import torch
 
-from ..utils import PromptLearningConfig
+from ..utils import PETType, PromptLearningConfig
 
 
 @dataclass
@@ -30,6 +30,9 @@ class PrefixTuningConfig(PromptLearningConfig):
         default=None,
         metadata={"help": "The function to postprocess the past key value"},
     )
+
+    def __post_init__(self):
+        self.pet_type = PETType.PREFIX_TUNING
 
 
 # Based on https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
