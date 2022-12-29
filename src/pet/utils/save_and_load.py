@@ -1,5 +1,3 @@
-from loralib import lora_state_dict
-
 from .config import PETType
 
 
@@ -17,7 +15,24 @@ def get_pet_model_state_dict(model, state_dict=None):
     if state_dict is None:
         state_dict = model.state_dict()
     if model.pet_config.pet_type == PETType.LORA:
-        to_return = lora_state_dict(model, bias=model.pet_config.bias)
+        # to_return = lora_state_dict(model, bias=model.pet_config.bias)
+        # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
+        # to directly with the state dict which is necessary when using DeepSpeed or FSDP
+        bias = model.pet_config.bias
+        if bias == "none":
+            to_return = {k: state_dict[k] for k in state_dict if "lora_" in k}
+        elif bias == "all":
+            to_return = {k: state_dict[k] for k in state_dict if "lora_" in k or "bias" in k}
+        elif bias == "lora_only":
+            to_return = {}
+            for k in state_dict:
+                if "lora_" in k:
+                    to_return[k] = state_dict[k]
+                    bias_name = k.split("lora_")[0] + "bias"
+                    if bias_name in state_dict:
+                        to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
     else:
         to_return = {}
         prompt_embeddings = model.get_prompt_embedding_to_save()
@@ -58,8 +73,9 @@ def pet_model_load_and_dispatch(model, pet_model_state_dict, pet_config, max_mem
             A dictionary device identifier to maximum memory. Will default to the maximum memory available for each GPU
             and the available CPU RAM if unset.
     """
-    from accelerate import infer_auto_device_map, dispatch_model
-    from accelerate.hooks import remove_hook_from_submodules, AlignDevicesHook, add_hook_to_module
+    from accelerate import dispatch_model, infer_auto_device_map
+    from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
+
     from ..mapping import get_pet_model
 
     remove_hook_from_submodules(model)

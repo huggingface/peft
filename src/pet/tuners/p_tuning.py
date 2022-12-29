@@ -4,7 +4,7 @@ from typing import Union
 
 import torch
 
-from ..utils import PromptLearningConfig
+from ..utils import PETType, PromptLearningConfig
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
@@ -42,6 +42,9 @@ class PromptEncoderConfig(PromptLearningConfig):
         default=0.0,
         metadata={"help": "The dropout of the prompt encoder"},
     )
+
+    def __post_init__(self):
+        self.pet_type = PETType.P_TUNING
 
 
 # Based on https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/modules/common/prompt_encoder.py

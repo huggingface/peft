@@ -12,7 +12,7 @@ from transformers.pytorch_utils import Conv1D
 import loralib as lora  # noqa: F401
 from loralib import mark_only_lora_as_trainable
 
-from ..utils import PETConfig
+from ..utils import PETConfig, PETType
 
 
 @dataclass
@@ -45,6 +45,9 @@ class LoRAConfig(PETConfig):
     )
     enable_lora: Optional[list[bool]] = field(default=None, metadata={"help": "Used with `lora.MergedLinear`."})
     bias: str = field(default="none", metadata={"help": "Bias type for LoRA. Can be 'none', 'all' or 'lora_only'"})
+
+    def __post_init__(self):
+        self.pet_type = PETType.LORA
 
 
 class LoRAModel(torch.nn.Module):

@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 import torch
 
-from ..utils import PromptLearningConfig
+from ..utils import PETType, PromptLearningConfig
 
 
 class PromptTuningInit(str, enum.Enum):
@@ -43,6 +43,9 @@ class PromptTuningConfig(PromptLearningConfig):
             "help": "The tokenizer to use for prompt tuning initialization. Only used if prompt_tuning_init is `TEXT`"
         },
     )
+
+    def __post_init__(self):
+        self.pet_type = PETType.PROMPT_TUNING
 
 
 class PromptEmbedding(torch.nn.Module):
