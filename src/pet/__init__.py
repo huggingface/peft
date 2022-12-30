@@ -33,4 +33,5 @@ from .utils import (
     get_pet_model_state_dict,
     set_pet_model_state_dict,
     shift_tokens_right,
+    pet_model_load_and_dispatch,
 )
