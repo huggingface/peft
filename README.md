@@ -45,6 +45,7 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 | --------- | ---- | ---- | ---- |
 | bigscience/T0_3B (3B params) | 47.14GB GPU / 2.96GB CPU  | 14.4GB GPU / 2.96GB CPU | 9.8GB GPU / 17.8GB CPU |
 | bigscience/mt0-xxl (12B params) | OOM GPU | 56GB GPU / 3GB CPU | 22GB GPU / 52GB CPU |
+| bigscience/bloomz-7b1 (7B params) | OOM GPU | 32GB GPU / 3.8GB CPU | 18.1GB GPU / 35GB CPU |
 
 Performance of PET-LoRA tuned `bigscience/T0_3B` on `ought/raft/twitter_complaints` leaderboard. 
 A point to note is that we didn't try to sequeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B mt0-xxl model.
