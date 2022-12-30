@@ -88,5 +88,6 @@ def pet_model_load_and_dispatch(model, pet_model_state_dict, pet_config, max_mem
     if model.pet_config.pet_type == PETType.LORA:
         add_hook_to_module(model.base_model.model, hook)
     else:
+        remove_hook_from_submodules(model.prompt_encoder)
         add_hook_to_module(model.base_model, hook)
     return model
