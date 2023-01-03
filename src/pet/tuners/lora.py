@@ -1,7 +1,7 @@
-# todo
+from enum import Enum
 import math
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import List, Optional
 
 import torch
@@ -76,28 +76,28 @@ class LoRAModel(torch.nn.Module):
 
     def __init__(self, config, model):
         super().__init__()
-        self.config = config
+        self.pet_config = config
         self.model = model
         self._find_and_replace()
-        mark_only_lora_as_trainable(self.model, self.config.bias)
+        mark_only_lora_as_trainable(self.model, self.pet_config.bias)
 
     def _find_and_replace(self):
         kwargs = {
-            "r": self.config.r,
-            "lora_alpha": self.config.lora_alpha,
-            "lora_dropout": self.config.lora_dropout,
-            "fan_in_fan_out": self.config.fan_in_fan_out,
-            "merge_weights": self.config.merge_weights,
+            "r": self.pet_config.r,
+            "lora_alpha": self.pet_config.lora_alpha,
+            "lora_dropout": self.pet_config.lora_dropout,
+            "fan_in_fan_out": self.pet_config.fan_in_fan_out,
+            "merge_weights": self.pet_config.merge_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
-            if any(key.endswith(target_key) for target_key in self.config.target_modules):
+            if any(key.endswith(target_key) for target_key in self.pet_config.target_modules):
                 parent, target, target_name = self._get_submodules(key)
                 bias = target.bias is not None
-                if isinstance(target, torch.nn.Linear) and self.config.enable_lora is None:
+                if isinstance(target, torch.nn.Linear) and self.pet_config.enable_lora is None:
                     new_module = Linear(target.in_features, target.out_features, bias=bias, **kwargs)
-                elif self.config.enable_lora is not None:
-                    kwargs.update({"enable_lora": self.config.enable_lora})
+                elif self.pet_config.enable_lora is not None:
+                    kwargs.update({"enable_lora": self.pet_config.enable_lora})
                     if isinstance(target, Conv1D):
                         in_features, out_features = target.weight.shape
                     else:
@@ -132,6 +132,16 @@ class LoRAModel(torch.nn.Module):
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.model, name)
+
+    @property
+    def modules_to_save(self):
+        return None
+
+    def get_pet_config_as_dict(self, inference: bool = False):
+        config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(self.pet_config).items()}
+        if inference:
+            config["inference_mode"] = True
+        return config
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py

@@ -60,6 +60,35 @@ So, we are already seeing comparable performance to SoTA with parameter effcient
 **Therefore, we can see that performance comparable to SoTA is achievable by PET methods with consumer hardware such as 16GB and 24GB GPUs.**
 
 ### Parameter Efficient Tuning of Diffusion Models [ToDo]
+```bash
+export MODEL_NAME="stabilityai/stable-diffusion-2-1" #"CompVis/stable-diffusion-v1-4"
+export INSTANCE_DIR="path-to-instance-images"
+export CLASS_DIR="path-to-class-images"
+export OUTPUT_DIR="path-to-save-model"
+
+accelerate launch train_dreambooth.py \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --instance_data_dir=$INSTANCE_DIR \
+  --class_data_dir=$CLASS_DIR \
+  --output_dir=$OUTPUT_DIR \
+  --train_text_encoder \
+  --with_prior_preservation --prior_loss_weight=1.0 \
+  --instance_prompt="a photo of sks dog" \
+  --class_prompt="a photo of dog" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --lr_scheduler="constant" \
+  --lr_warmup_steps=0 \
+  --num_class_images=200 \
+  --use_lora \
+  --lora_r 16 \
+  --lora_alpha 27 \
+  --lora_text_encoder_r 16 \
+  --lora_text_encoder_alpha 17 \
+  --learning_rate=1e-4 \
+  --gradient_accumulation_steps=1 \
+  --max_train_steps=800
+```
 
 ### Parameter Efficient Tuning of LLMs for RLHF components such as Ranker and Policy [ToDo]
 
