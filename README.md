@@ -66,7 +66,7 @@ GPU memory and training times required by different settings during training are
 Hardware: Single A100 80GB GPU with CPU RAM above 64G
 
 |   Model         | Full Finetuning | PET-LoRA  |
-| --------- | ---- | ---- | ---- |
+| --------- | ---- | ---- |
 | CompVis/stable-diffusion-v1-4 | 66.4GB GPU / 3.97GB CPU / 22 minutes  | 15.5GB GPU / 3.84GB CPU / 5.5 minutes | 
 
 
@@ -181,6 +181,8 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
   ```
 
 ### Example of PET model inference using 🤗 Accelerate's Big Model Inferencing capabilities
+
+Example is provided in `~examples/causal_language_modeling/pet_lora_clm_accelerate_big_model_inference.ipynb`. 
 
 
 ## Models support matrix
