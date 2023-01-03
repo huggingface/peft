@@ -10,32 +10,30 @@ import threading
 import warnings
 from pathlib import Path
 from typing import Optional
-import psutil
 
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from torch.utils.data import Dataset
-from dataclasses import asdict
-
-import datasets
-import diffusers
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
+from torch.utils.data import Dataset
+from transformers import AutoTokenizer, PretrainedConfig
+
+import datasets
+import diffusers
+import psutil
 from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel
-from diffusers import DDPMScheduler, PNDMScheduler, StableDiffusionPipeline
-from diffusers.pipelines.stable_diffusion import StableDiffusionSafetyChecker
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from huggingface_hub import HfFolder, Repository, whoami
+from pet import LoRAConfig, LoRAModel, get_pet_model_state_dict
 from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import AutoTokenizer, PretrainedConfig, CLIPFeatureExtractor
-from pet import LoRAModel, LoRAConfig, get_pet_model_state_dict
+
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.10.0.dev0")
@@ -632,7 +630,7 @@ def main(args):
                 repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
             else:
                 repo_name = args.hub_model_id
-            repo = Repository(args.output_dir, clone_from=repo_name)
+            repo = Repository(args.output_dir, clone_from=repo_name)  # noqa: F841
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -670,7 +668,6 @@ def main(args):
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
-    feature_extractor = CLIPFeatureExtractor.from_pretrained("openai/clip-vit-base-patch32")
 
     if args.use_lora:
         config = LoRAConfig(
