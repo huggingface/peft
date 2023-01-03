@@ -59,7 +59,20 @@ So, we are already seeing comparable performance to SoTA with parameter effcient
 
 **Therefore, we can see that performance comparable to SoTA is achievable by PET methods with consumer hardware such as 16GB and 24GB GPUs.**
 
-### Parameter Efficient Tuning of Diffusion Models [ToDo]
+### Parameter Efficient Tuning of Diffusion Models
+
+GPU memory and training times required by different settings during training are given below. The final checkpoint size being `8.8 MB`.
+
+Hardware: Single A100 80GB GPU with CPU RAM above 64G
+
+|   Model         | Full Finetuning | PET-LoRA  |
+| --------- | ---- | ---- | ---- |
+| CompVis/stable-diffusion-v1-4 | 66.4GB GPU / 3.97GB CPU / 22 minutes  | 15.5GB GPU / 3.84GB CPU / 5.5 minutes | 
+
+
+**Training**
+An example of using LoRA for parameter efficient dreambooth training is given in `~examples/lora_dreambooth/train_dreambooth.py`
+
 ```bash
 export MODEL_NAME="stabilityai/stable-diffusion-2-1" #"CompVis/stable-diffusion-v1-4"
 export INSTANCE_DIR="path-to-instance-images"
