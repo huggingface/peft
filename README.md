@@ -61,13 +61,13 @@ So, we are already seeing comparable performance to SoTA with parameter effcient
 
 ### Parameter Efficient Tuning of Diffusion Models
 
-GPU memory and training times required by different settings during training are given below. The final checkpoint size being `8.8 MB`.
+GPU memory required by different settings during training are given below. The final checkpoint size being `8.8 MB`.
 
 Hardware: Single A100 80GB GPU with CPU RAM above 64G
 
 |   Model         | Full Finetuning | PET-LoRA  |
 | --------- | ---- | ---- |
-| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU / 22 minutes  | 15.5GB GPU / 3.84GB CPU / 5.5 minutes | 
+| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU | 15.5GB GPU / 3.84GB CPU | 
 
 
 **Training**
