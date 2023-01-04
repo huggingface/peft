@@ -156,6 +156,12 @@ def parse_args(input_args=None):
     parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha, only used if use_lora is True")
     parser.add_argument("--lora_dropout", type=float, default=0.0, help="LoRA dropout, only used if use_lora is True")
     parser.add_argument(
+        "--lora_bias",
+        type=str,
+        default="none",
+        help="Bias type for LoRA. Can be 'none', 'all' or 'lora_only', only used if use_lora is True",
+    )
+    parser.add_argument(
         "--lora_text_encoder_r",
         type=int,
         default=8,
@@ -172,6 +178,12 @@ def parse_args(input_args=None):
         type=float,
         default=0.0,
         help="LoRA dropout for text encoder, only used if `use_lora` and `train_text_encoder` are True",
+    )
+    parser.add_argument(
+        "--lora_text_encoder_bias",
+        type=str,
+        default="none",
+        help="Bias type for LoRA. Can be 'none', 'all' or 'lora_only', only used if use_lora and `train_text_encoder` are True",
     )
 
     parser.add_argument(
@@ -675,6 +687,7 @@ def main(args):
             lora_alpha=args.lora_alpha,
             target_modules=UNET_TARGET_MODULES,
             lora_dropout=args.lora_dropout,
+            bias=args.lora_bias,
         )
         unet = LoRAModel(config, unet)
         print_trainable_parameters(unet)
@@ -689,6 +702,7 @@ def main(args):
             lora_alpha=args.lora_text_encoder_alpha,
             target_modules=TEXT_ENCODER_TARGET_MODULES,
             lora_dropout=args.lora_text_encoder_dropout,
+            bias=args.lora_text_encoder_bias,
         )
         text_encoder = LoRAModel(config, text_encoder)
         print_trainable_parameters(text_encoder)
