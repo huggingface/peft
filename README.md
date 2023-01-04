@@ -67,14 +67,14 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64G
 
 |   Model         | Full Finetuning | PET-LoRA  |
 | --------- | ---- | ---- |
-| CompVis/stable-diffusion-v1-4 | 66.4GB GPU / 3.97GB CPU / 22 minutes  | 15.5GB GPU / 3.84GB CPU / 5.5 minutes | 
+| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU / 22 minutes  | 15.5GB GPU / 3.84GB CPU / 5.5 minutes | 
 
 
 **Training**
 An example of using LoRA for parameter efficient dreambooth training is given in `~examples/lora_dreambooth/train_dreambooth.py`
 
 ```bash
-export MODEL_NAME="stabilityai/stable-diffusion-2-1" #"CompVis/stable-diffusion-v1-4"
+export MODEL_NAME= "CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"
 export INSTANCE_DIR="path-to-instance-images"
 export CLASS_DIR="path-to-class-images"
 export OUTPUT_DIR="path-to-save-model"
