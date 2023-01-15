@@ -1,9 +1,9 @@
-<h1 align="center"> <p>🤗 PET</p></h1>
+<h1 align="center"> <p>🤗 PEFT</p></h1>
 <h3 align="center">
-    <p>State-of-the-art Parameter-Efficient Tuning (PET) methods</p>
+    <p>State-of-the-art Parameter-Efficient Fine-Tuning (PEFT) methods</p>
 </h3>
 
-Parameter-Efficient Tuning (PET) methods enable efficient adaptation of pre-trained language models (PLMs) to various downstream applications without fine-tuning all the model's parameters. Fine-tuning large-scale PLMs is often prohibitively costly. In this regard, PET methods only fine-tune a small number of (extra) model parameters, thereby greatly decreasing the computational and storage costs. Recent State-of-the-Art PET techniques achieve performance comparable to that of full fine-tuning. 
+Parameter-Efficient Fine-Tuning (PEFT) methods enable efficient adaptation of pre-trained language models (PLMs) to various downstream applications without fine-tuning all the model's parameters. Fine-tuning large-scale PLMs is often prohibitively costly. In this regard, PEFT methods only fine-tune a small number of (extra) model parameters, thereby greatly decreasing the computational and storage costs. Recent State-of-the-Art PEFT techniques achieve performance comparable to that of full fine-tuning. 
 
 Seamlessly integrated with 🤗 Accelerate for large scale models leveraging PyTorch FSDP. 
 
@@ -18,16 +18,16 @@ Supported methods:
 
 ```python
 from transformers import AutoModelForSeq2SeqLM
-from pet import get_pet_config, get_pet_model, LoRAConfig, TaskType
+from peft import get_peft_config, get_peft_model, LoRAConfig, TaskType
 model_name_or_path = "bigscience/mt0-large"
 tokenizer_name_or_path = "bigscience/mt0-large"
 
-pet_config = LoRAConfig(
+peft_config = LoRAConfig(
     task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
 )
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
-model = get_pet_model(model, pet_config)
+model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 # output: trainable params: 2359296 || all params: 1231940608 || trainable%: 0.19151053100118282
 ```
@@ -37,17 +37,17 @@ model.print_trainable_parameters()
 ### Get comparable performance to full finetuning by adapting LLMs to downstream tasks using consumer hardware
 
 GPU memory required for adapting LLMs on the few-shot dataset `ought/raft/twitter_complaints`. Here, settings considered
-are full finetuning, PET-LoRA using plain PyTorch and  PET-LoRA using DeepSpeed with CPU Offloading. 
+are full finetuning, PEFT-LoRA using plain PyTorch and  PEFT-LoRA using DeepSpeed with CPU Offloading. 
 
 Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 
-|   Model         | Full Finetuning | PET-LoRA PyTorch  | PET-LoRA DeepSpeed with CPU Offloading |
+|   Model         | Full Finetuning | PEFT-LoRA PyTorch  | PEFT-LoRA DeepSpeed with CPU Offloading |
 | --------- | ---- | ---- | ---- |
 | bigscience/T0_3B (3B params) | 47.14GB GPU / 2.96GB CPU  | 14.4GB GPU / 2.96GB CPU | 9.8GB GPU / 17.8GB CPU |
 | bigscience/mt0-xxl (12B params) | OOM GPU | 56GB GPU / 3GB CPU | 22GB GPU / 52GB CPU |
 | bigscience/bloomz-7b1 (7B params) | OOM GPU | 32GB GPU / 3.8GB CPU | 18.1GB GPU / 35GB CPU |
 
-Performance of PET-LoRA tuned `bigscience/T0_3B` on `ought/raft/twitter_complaints` leaderboard. 
+Performance of PEFT-LoRA tuned `bigscience/T0_3B` on `ought/raft/twitter_complaints` leaderboard. 
 A point to note is that we didn't try to sequeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B mt0-xxl model.
 So, we are already seeing comparable performance to SoTA with parameter effcient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone `bigscience/T0_3B` model.
 
@@ -57,7 +57,7 @@ So, we are already seeing comparable performance to SoTA with parameter effcient
 | Flan-T5 | 0.892 |
 | lora-t0-3b | 0.863 |
 
-**Therefore, we can see that performance comparable to SoTA is achievable by PET methods with consumer hardware such as 16GB and 24GB GPUs.**
+**Therefore, we can see that performance comparable to SoTA is achievable by PEFT methods with consumer hardware such as 16GB and 24GB GPUs.**
 
 ### Parameter Efficient Tuning of Diffusion Models
 
@@ -65,9 +65,9 @@ GPU memory required by different settings during training are given below. The f
 
 Hardware: Single A100 80GB GPU with CPU RAM above 64G
 
-|   Model         | Full Finetuning | PET-LoRA  |
+|   Model         | Full Finetuning | PEFT-LoRA  | PEFT-LoRA with Gradient Checkpoitning  |
 | --------- | ---- | ---- |
-| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU | 15.5GB GPU / 3.84GB CPU | 
+| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU | 15.5GB GPU / 3.84GB CPU | 8.12GB GPU / 3.77GB CPU | 
 
 
 **Training**
@@ -100,6 +100,7 @@ accelerate launch train_dreambooth.py \
   --lora_text_encoder_alpha 17 \
   --learning_rate=1e-4 \
   --gradient_accumulation_steps=1 \
+  --gradient_checkpointing \
   --max_train_steps=800
 ```
 
@@ -108,22 +109,22 @@ accelerate launch train_dreambooth.py \
 ### Save compute and storage even for medium and small models
 
 Save storage by avoiding full finetuning of models on each of the downstream tasks/datasets,
-With PET methods, users only need to store tiny checkpoints in the order of `MBs` all the while retaining 
+With PEFT methods, users only need to store tiny checkpoints in the order of `MBs` all the while retaining 
 performance comparable to full finetuning.
 
-An example of using LoRA for the task of adaping `LayoutLMForTokenClassification` on `FUNSD` dataset is given in `~examples/token_classification/PET_LoRA_LayoutLMForTokenClassification_on_FUNSD.py`. We can observe that with only `0.62 %` of parameters being trainable, we achieve performance (F1 0.777) comparable to full finetuning (F1 0.786) (without any hyerparam tuning runs for extracting more performance), and the checkpoint of this is only `2.8MB`. Now, if there are `N` such datasets, just have these PET models one for each dataset and save a lot of storage without having to worry about the problem of catastrophic forgetting or overfitting of backbone/base model.
+An example of using LoRA for the task of adaping `LayoutLMForTokenClassification` on `FUNSD` dataset is given in `~examples/token_classification/PEFT_LoRA_LayoutLMForTokenClassification_on_FUNSD.py`. We can observe that with only `0.62 %` of parameters being trainable, we achieve performance (F1 0.777) comparable to full finetuning (F1 0.786) (without any hyerparam tuning runs for extracting more performance), and the checkpoint of this is only `2.8MB`. Now, if there are `N` such datasets, just have these PEFT models one for each dataset and save a lot of storage without having to worry about the problem of catastrophic forgetting or overfitting of backbone/base model.
 
-Another example is fine-tuning `roberta-large` on `MRPC` GLUE dataset suing differenct PET methods. The notebooks are given in `~examples/sequence_classification`. 
+Another example is fine-tuning `roberta-large` on `MRPC` GLUE dataset suing differenct PEFT methods. The notebooks are given in `~examples/sequence_classification`. 
 
 
-## PET + 🤗 Accelerate
+## PEFT + 🤗 Accelerate
 
-PET models work with 🤗 Accelerate out of the box. Use 🤗 Accelerate for Distributed training on various hardware such as GPUs, Apple Silicon devices etc during training.
+PEFT models work with 🤗 Accelerate out of the box. Use 🤗 Accelerate for Distributed training on various hardware such as GPUs, Apple Silicon devices etc during training.
 Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
 
-### Example of PET model training using 🤗 Accelerate's DeepSpeed integation
+### Example of PEFT model training using 🤗 Accelerate's DeepSpeed integation
 
- Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. Example is provided in `~examples/conditional_generation/pet_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
+ Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. Example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
   a. First run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionaire. 
   Below are the contents of the config file.
   ```
@@ -152,7 +153,7 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
   ```
   b. run the below command to launch example script
   ```
-  accelerate launch --config_file ds_zero3_cpu.yaml examples/pet_lora_seq2seq_accelerate_ds_zero3_offload.py
+  accelerate launch --config_file ds_zero3_cpu.yaml examples/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
   ```
 
   c. output logs:
@@ -180,9 +181,9 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
   dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
   ```
 
-### Example of PET model inference using 🤗 Accelerate's Big Model Inferencing capabilities
+### Example of PEFT model inference using 🤗 Accelerate's Big Model Inferencing capabilities
 
-Example is provided in `~examples/causal_language_modeling/pet_lora_clm_accelerate_big_model_inference.ipynb`. 
+Example is provided in `~examples/causal_language_modeling/peft_lora_clm_accelerate_big_model_inference.ipynb`. 
 
 
 ## Models support matrix
@@ -235,7 +236,7 @@ Example is provided in `~examples/causal_language_modeling/pet_lora_clm_accelera
 any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consumes 1.65X more GPU memory when training models with most of the params frozen](https://github.com/pytorch/pytorch/issues/91165). 
 
   ```python
-  from pet.utils.other import fsdp_auto_wrap_policy
+  from peft.utils.other import fsdp_auto_wrap_policy
 
   ...
 
@@ -245,7 +246,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   model = accelerator.prepare(model)
   ```
 
-  Example of parameter efficient tuning with `mt0-xxl` base model using 🤗 Accelerate is provided in `~examples/conditional_generation/pet_lora_seq2seq_accelerate_fsdp.py`. 
+  Example of parameter efficient tuning with `mt0-xxl` base model using 🤗 Accelerate is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_fsdp.py`. 
   a. First run `accelerate config --config_file fsdp_config.yaml` and answer the questionaire. 
   Below are the contents of the config file.
   ```
@@ -280,7 +281,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   ```
   b. run the below command to launch example script
   ```
-  accelerate launch --config_file fsdp_config.yaml examples/pet_lora_seq2seq_accelerate_fsdp.py
+  accelerate launch --config_file fsdp_config.yaml examples/peft_lora_seq2seq_accelerate_fsdp.py
   ```
 
 2. When using `P_TUNING` or `PROMPT_TUNING` with `SEQ_2_SEQ` task, remember to remove the `num_virtual_token` virtual prompt predictions from the left side of the model outputs during evaluations. 
@@ -294,15 +295,15 @@ new `input_embeds` to be given to the model. Therefore, `generate` doesn't suppo
 2. Add tests
 3. Add more use cases and examples
 
-## Citing 🤗 PET
+## Citing 🤗 PEFT
 
-If you use 🤗 PET in your publication, please cite it by using the following BibTeX entry.
+If you use 🤗 PEFT in your publication, please cite it by using the following BibTeX entry.
 
 ```bibtex
-@Misc{pet,
-  title =        {PET: State-of-the-art Parameter-Efficient Tuning (PET) methods},
-  author =       {Sourab Mangrulkar},
-  howpublished = {\url{https://github.com/huggingface/pet}},
+@Misc{peft,
+  title =        {PEFT: State-of-the-art Parameter-Efficient Fine-Tuning methods},
+  author =       {Sourab Mangrulkar, Sylvain Gugger},
+  howpublished = {\url{https://github.com/huggingface/peft}},
   year =         {2022}
 }
 ```

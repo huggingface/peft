@@ -6,8 +6,8 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, default_data_collator, get_linear_schedule_with_warmup
 
 from datasets import load_dataset
-from pet import LoRAConfig, TaskType, get_pet_model, get_pet_model_state_dict
-from pet.utils.other import fsdp_auto_wrap_policy
+from peft import LoraConfig, TaskType, get_peft_model, get_peft_model_state_dict
+from peft.utils.other import fsdp_auto_wrap_policy
 from tqdm import tqdm
 
 
@@ -22,12 +22,12 @@ def main():
     num_epochs = 1
     base_path = "temp/data/FinancialPhraseBank-v1.0"
 
-    pet_config = LoRAConfig(
+    peft_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
     )
     checkpoint_name = "financial_sentiment_analysis_lora_fsdp_v1.pt"
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
-    model = get_pet_model(model, pet_config)
+    model = get_peft_model(model, peft_config)
     accelerator.print(model.print_trainable_parameters())
 
     dataset = load_dataset(
@@ -127,7 +127,7 @@ def main():
         accelerator.print(f"{dataset['validation'][label_column][:10]=}")
         accelerator.wait_for_everyone()
         accelerator.save(
-            get_pet_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name
+            get_peft_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name
         )
         accelerator.wait_for_everyone()
 
