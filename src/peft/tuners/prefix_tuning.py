@@ -3,17 +3,17 @@ from typing import Callable, Optional
 
 import torch
 
-from ..utils import PETType, PromptLearningConfig
+from ..utils import PeftType, PromptLearningConfig
 
 
 @dataclass
 class PrefixTuningConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~pet.PrefixEncoder`.
+    This is the configuration class to store the configuration of a :class:`~peft.PrefixEncoder`.
 
     Args:
-        encoder_hidden_size (:obj: int): The hidden size of the prompt encoder.
-        prefix_projection (:obj: bool): Whether to project the prefix embeddings.
+        encoder_hidden_size ( int): The hidden size of the prompt encoder.
+        prefix_projection ( bool): Whether to project the prefix embeddings.
         postprocess_past_key_value_function (:
             obj: Optional[Callable]): The function to postprocess the past key value.
     """
@@ -32,7 +32,7 @@ class PrefixTuningConfig(PromptLearningConfig):
     )
 
     def __post_init__(self):
-        self.pet_type = PETType.PREFIX_TUNING
+        self.peft_type = PeftType.PREFIX_TUNING
 
 
 # Based on https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
@@ -46,18 +46,18 @@ class PrefixEncoder(torch.nn.Module):
 
     Example::
 
-        >>> from pet import PrefixEncoder, PrefixTuningConfig >>> config = PrefixTuningConfig(
-                pet_type="PREFIX_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
+        >>> from peft import PrefixEncoder, PrefixTuningConfig >>> config = PrefixTuningConfig(
+                peft_type="PREFIX_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
                 num_transformer_submodules=1, num_attention_heads=12, num_layers=12, encoder_hidden_size=768
             )
         >>> prefix_encoder = PrefixEncoder(config)
 
 
     Attributes:
-        embedding (:obj:`torch.nn.Embedding`): The embedding layer of the prefix encoder. trans
-        (:obj:`torch.nn.Sequential`): The two-layer MLP to transform the prefix embeddings
-            if :obj:`prefix_projection` is :obj:`True`.
-        prefix_projection (:obj:`bool`): Whether to project the prefix embeddings.
+        embedding (`torch.nn.Embedding`): The embedding layer of the prefix encoder. trans
+        (`torch.nn.Sequential`): The two-layer MLP to transform the prefix embeddings
+            if `prefix_projection` is `True`.
+        prefix_projection (`bool`): Whether to project the prefix embeddings.
 
     Input shape: (batch_size, num_virtual_tokens)
 

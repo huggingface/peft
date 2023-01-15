@@ -12,92 +12,92 @@ from transformers.pytorch_utils import Conv1D
 import loralib as lora  # noqa: F401
 from loralib import mark_only_lora_as_trainable
 
-from ..utils import PETConfig, PETType
+from ..utils import PeftConfig, PeftType, transpose
 
 
 @dataclass
-class LoRAConfig(PETConfig):
+class LoraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~pet.LoRA`.
+    This is the configuration class to store the configuration of a :class:`~peft.Lora`.
 
     Args:
-        r: (:obj:`init`): LoRA attention dimension
-        target_modules (:obj: list of :obj: str): The names of the modules to apply LoRA to.
-        lora_alpha (:obj: float): The alpha parameter for LoRA scaling.
-        lora_dropout (:obj: float): The dropout probability for LoRA layers.
-        merge_weights (:obj: bool):
-            Whether to merge the weights of the LoRA layers with the base transformer model in `eval` mode.
-        fan_in_fan_out (:obj: bool): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        enable_lora (:obj: list of :obj: bool): Used with `lora.MergedLinear`.
-        bias (:obj: str): Bias type for LoRA. Can be 'none', 'all' or 'lora_only'
+        r: (int): Lora attention dimension
+        target_modules ( list of  str): The names of the modules to apply Lora to.
+        lora_alpha ( float): The alpha parameter for Lora scaling.
+        lora_dropout ( float): The dropout probability for Lora layers.
+        merge_weights ( bool):
+            Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
+        fan_in_fan_out ( bool): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        enable_lora ( list of  bool): Used with `lora.MergedLinear`.
+        bias ( str): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
     """
 
-    r: int = field(default=8, metadata={"help": "LoRA attention dimension"})
-    target_modules: Optional[list] = field(default=None, metadata={"help": "List of modules to replace with LoRA"})
-    lora_alpha: int = field(default=None, metadata={"help": "LoRA alpha"})
-    lora_dropout: float = field(default=None, metadata={"help": "LoRA dropout"})
+    r: int = field(default=8, metadata={"help": "Lora attention dimension"})
+    target_modules: Optional[list] = field(default=None, metadata={"help": "List of modules to replace with Lora"})
+    lora_alpha: int = field(default=None, metadata={"help": "Lora alpha"})
+    lora_dropout: float = field(default=None, metadata={"help": "Lora dropout"})
     merge_weights: bool = field(
-        default=False, metadata={"help": "Merge weights of the original model and the LoRA model"}
+        default=False, metadata={"help": "Merge weights of the original model and the Lora model"}
     )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     enable_lora: Optional[list[bool]] = field(default=None, metadata={"help": "Used with `lora.MergedLinear`."})
-    bias: str = field(default="none", metadata={"help": "Bias type for LoRA. Can be 'none', 'all' or 'lora_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for Lora. Can be 'none', 'all' or 'lora_only'"})
 
     def __post_init__(self):
-        self.pet_type = PETType.LORA
+        self.peft_type = PeftType.LORA
 
 
-class LoRAModel(torch.nn.Module):
+class LoraModel(torch.nn.Module):
     """
-    Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
+    Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
     Args:
-        model (:obj:`transformers.PreTrainedModel`): The model to be adapted.
-        config (:obj:`LoRAConfig`): The configuration of the LoRA model.
+        model (`transformers.PreTrainedModel`): The model to be adapted.
+        config (`LoraConfig`): The configuration of the Lora model.
 
     Returns:
-        :obj:`torch.nn.Module`: The LoRA model.
+        `torch.nn.Module`: The Lora model.
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoRAConfig >>> from pet import LoRAModel, LoRAConfig >>>
-        config = LoRAConfig(
-            pet_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import LoraModel, LoraConfig >>>
+        config = LoraConfig(
+            peft_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
             lora_dropout=0.01, )
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoRAModel(config, model)
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoraModel(config, model)
 
     Attributes:
-        model (:obj:`transformers.PreTrainedModel`): The model to be adapted. config (:obj:`LoRAConfig`): The
-        configuration of the LoRA model.
+        model (`transformers.PreTrainedModel`): The model to be adapted. config (`LoraConfig`): The
+        configuration of the Lora model.
     """
 
     def __init__(self, config, model):
         super().__init__()
-        self.pet_config = config
+        self.peft_config = config
         self.model = model
         self._find_and_replace()
-        mark_only_lora_as_trainable(self.model, self.pet_config.bias)
+        mark_only_lora_as_trainable(self.model, self.peft_config.bias)
 
     def _find_and_replace(self):
         kwargs = {
-            "r": self.pet_config.r,
-            "lora_alpha": self.pet_config.lora_alpha,
-            "lora_dropout": self.pet_config.lora_dropout,
-            "fan_in_fan_out": self.pet_config.fan_in_fan_out,
-            "merge_weights": self.pet_config.merge_weights,
+            "r": self.peft_config.r,
+            "lora_alpha": self.peft_config.lora_alpha,
+            "lora_dropout": self.peft_config.lora_dropout,
+            "fan_in_fan_out": self.peft_config.fan_in_fan_out,
+            "merge_weights": self.peft_config.merge_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
-            if any(key.endswith(target_key) for target_key in self.pet_config.target_modules):
+            if any(key.endswith(target_key) for target_key in self.peft_config.target_modules):
                 parent, target, target_name = self._get_submodules(key)
                 bias = target.bias is not None
-                if isinstance(target, torch.nn.Linear) and self.pet_config.enable_lora is None:
+                if isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
                     new_module = Linear(target.in_features, target.out_features, bias=bias, **kwargs)
-                elif self.pet_config.enable_lora is not None:
-                    kwargs.update({"enable_lora": self.pet_config.enable_lora})
+                elif self.peft_config.enable_lora is not None:
+                    kwargs.update({"enable_lora": self.peft_config.enable_lora})
                     if isinstance(target, Conv1D):
                         in_features, out_features = target.weight.shape
                     else:
@@ -137,8 +137,8 @@ class LoRAModel(torch.nn.Module):
     def modules_to_save(self):
         return None
 
-    def get_pet_config_as_dict(self, inference: bool = False):
-        config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(self.pet_config).items()}
+    def get_peft_config_as_dict(self, inference: bool = False):
+        config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(self.peft_config).items()}
         if inference:
             config["inference_mode"] = True
         return config
@@ -151,7 +151,7 @@ class LoRAModel(torch.nn.Module):
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
-class LoRALayer:
+class LoraLayer:
     def __init__(
         self,
         r: int,
@@ -171,8 +171,8 @@ class LoRALayer:
         self.merge_weights = merge_weights
 
 
-class Linear(nn.Linear, LoRALayer):
-    # LoRA implemented in a dense layer
+class Linear(nn.Linear, LoraLayer):
+    # Lora implemented in a dense layer
     def __init__(
         self,
         in_features: int,
@@ -185,7 +185,7 @@ class Linear(nn.Linear, LoRALayer):
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        LoRALayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
+        LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
 
         self.fan_in_fan_out = fan_in_fan_out
         # Actual trainable parameters
@@ -207,37 +207,32 @@ class Linear(nn.Linear, LoRALayer):
             nn.init.zeros_(self.lora_B.weight)
 
     def train(self, mode: bool = True):
-        def T(w):
-            return w.T if self.fan_in_fan_out else w
-
         nn.Linear.train(self, mode)
         self.lora_A.train(mode)
         self.lora_B.train(mode)
         if self.merge_weights and self.merged:
             # Make sure that the weights are not merged
             if self.r > 0:
-                self.weight.data -= T(self.lora_B.weight @ self.lora_A.weight) * self.scaling
+                self.weight.data -= (
+                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
+                )
             self.merged = False
 
     def eval(self):
-        def T(w):
-            return w.T if self.fan_in_fan_out else w
-
         nn.Linear.eval(self)
         self.lora_A.eval()
         self.lora_B.eval()
         if self.merge_weights and not self.merged:
             # Merge the weights and mark it
             if self.r > 0:
-                self.weight.data += T(self.lora_B.weight @ self.lora_A.weight) * self.scaling
+                self.weight.data += (
+                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
+                )
             self.merged = True
 
     def forward(self, x: torch.Tensor):
-        def T(w):
-            return w.T if self.fan_in_fan_out else w
-
         if self.r > 0 and not self.merged:
-            result = F.linear(x, T(self.weight), bias=self.bias)
+            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
             return result
@@ -245,8 +240,8 @@ class Linear(nn.Linear, LoRALayer):
             return F.linear(x, T(self.weight), bias=self.bias)
 
 
-class MergedLinear(nn.Linear, LoRALayer):
-    # LoRA implemented in a dense layer
+class MergedLinear(nn.Linear, LoraLayer):
+    # Lora implemented in a dense layer
     def __init__(
         self,
         in_features: int,
@@ -260,8 +255,9 @@ class MergedLinear(nn.Linear, LoRALayer):
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        LoRALayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
-        assert out_features % len(enable_lora) == 0, "The length of enable_lora must divide out_features"
+        LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
+        if out_features % len(enable_lora) != 0:
+            raise ValueError("The length of enable_lora must divide out_features")
         self.enable_lora = enable_lora
         self.fan_in_fan_out = fan_in_fan_out
         # Actual trainable parameters
@@ -299,9 +295,6 @@ class MergedLinear(nn.Linear, LoRALayer):
         return result.view((*x.shape[:-1], self.out_features))
 
     def train(self, mode: bool = True):
-        def T(w):
-            return w.T if self.fan_in_fan_out else w
-
         nn.Linear.train(self, mode)
         self.lora_A.train(mode)
         self.lora_B.train(mode)
@@ -313,13 +306,10 @@ class MergedLinear(nn.Linear, LoRALayer):
                     self.lora_B.weight.data.unsqueeze(-1),
                     groups=sum(self.enable_lora),
                 ).squeeze(0)
-                self.weight.data -= self.zero_pad(T(delta_w * self.scaling))
+                self.weight.data -= self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
             self.merged = False
 
     def eval(self):
-        def T(w):
-            return w.T if self.fan_in_fan_out else w
-
         nn.Linear.eval(self)
         self.lora_A.eval()
         self.lora_B.eval()
@@ -331,17 +321,14 @@ class MergedLinear(nn.Linear, LoRALayer):
                     self.lora_B.weight.data.unsqueeze(-1),
                     groups=sum(self.enable_lora),
                 ).squeeze(0)
-                self.weight.data += self.zero_pad(T(delta_w * self.scaling))
+                self.weight.data += self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
             self.merged = True
 
     def forward(self, x: torch.Tensor):
-        def T(w):
-            return w.T if self.fan_in_fan_out else w
-
         if self.merged:
-            return F.linear(x, T(self.weight), bias=self.bias)
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         else:
-            result = F.linear(x, T(self.weight), bias=self.bias)
+            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 after_A = self.lora_A(self.lora_dropout(x))
                 after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)

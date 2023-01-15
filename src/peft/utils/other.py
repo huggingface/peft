@@ -21,9 +21,9 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start
     Shift input ids one token to the right.
 
     Args:
-        input_ids (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`): input ids
-        pad_token_id (:obj:`int`): The id of the `padding` token.
-        decoder_start_token_id (:obj:`int`): The id of the `start` token.
+        input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`): input ids
+        pad_token_id (`int`): The id of the `padding` token.
+        decoder_start_token_id (`int`): The id of the `start` token.
     """
     shifted_input_ids = input_ids.new_zeros(input_ids.shape)
     shifted_input_ids[:, 1:] = input_ids[:, :-1].clone()
@@ -77,3 +77,7 @@ def fsdp_auto_wrap_policy(model):
 
     auto_wrap_policy = functools.partial(_or_policy, policies=[lambda_policy, transformer_wrap_policy])
     return auto_wrap_policy
+
+
+def transpose(weight, fan_in_fan_out):
+    return weight.T if fan_in_fan_out else weight
