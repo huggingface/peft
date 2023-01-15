@@ -65,9 +65,9 @@ GPU memory required by different settings during training are given below. The f
 
 Hardware: Single A100 80GB GPU with CPU RAM above 64G
 
-|   Model         | Full Finetuning | PEFT-LoRA  |
+|   Model         | Full Finetuning | PEFT-LoRA  | PEFT-LoRA with Gradient Checkpoitning  |
 | --------- | ---- | ---- |
-| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU | 15.5GB GPU / 3.84GB CPU | 
+| CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU | 15.5GB GPU / 3.84GB CPU | 8.12GB GPU / 3.77GB CPU | 
 
 
 **Training**
@@ -100,6 +100,7 @@ accelerate launch train_dreambooth.py \
   --lora_text_encoder_alpha 17 \
   --learning_rate=1e-4 \
   --gradient_accumulation_steps=1 \
+  --gradient_checkpointing \
   --max_train_steps=800
 ```
 
