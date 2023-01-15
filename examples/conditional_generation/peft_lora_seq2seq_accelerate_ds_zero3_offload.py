@@ -7,17 +7,11 @@ import numpy as np
 import torch
 from accelerate import Accelerator
 from torch.utils.data import DataLoader
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    default_data_collator,
-    get_linear_schedule_with_warmup,
-    set_seed,
-)
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
 
 import psutil
 from datasets import load_dataset
-from pet import LoRAConfig, TaskType, get_pet_model, get_pet_model_state_dict
+from peft import LoraConfig, TaskType, get_peft_model, get_peft_model_state_dict
 from tqdm import tqdm
 
 
@@ -108,19 +102,20 @@ class TorchTracemalloc:
 
 def main():
     accelerator = Accelerator()
-    model_name_or_path = "bigscience/bloomz-7b1"
+    model_name_or_path = "bigscience/T0_3B"
     dataset_name = "twitter_complaints"
-    pet_config = LoRAConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+    peft_config = LoraConfig(
+        task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
+    )
     checkpoint_name = (
-        f"{dataset_name}_{model_name_or_path}_{pet_config.pet_type}_{pet_config.task_type}_v1.pt".replace("/", "_")
+        f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}_v1.pt".replace("/", "_")
     )
     text_column = "Tweet text"
     label_column = "text_label"
     lr = 3e-3
-    num_epochs = 20
+    num_epochs = 5
     batch_size = 8
     seed = 42
-    max_length = 64
     set_seed(seed)
 
     dataset = load_dataset("ought/raft", dataset_name)
@@ -132,50 +127,18 @@ def main():
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in classes])
 
     def preprocess_function(examples):
-        batch_size = len(examples[text_column])
-        inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
-        targets = [str(x) for x in examples[label_column]]
-        model_inputs = tokenizer(inputs)
-        labels = tokenizer(targets)
-        for i in range(batch_size):
-            sample_input_ids = model_inputs["input_ids"][i]
-            label_input_ids = labels["input_ids"][i] + [tokenizer.pad_token_id]
-            model_inputs["input_ids"][i] = sample_input_ids + label_input_ids
-            labels["input_ids"][i] = [-100] * len(sample_input_ids) + label_input_ids
-            model_inputs["attention_mask"][i] = [1] * len(model_inputs["input_ids"][i])
-        for i in range(batch_size):
-            sample_input_ids = model_inputs["input_ids"][i]
-            label_input_ids = labels["input_ids"][i]
-            model_inputs["input_ids"][i] = [tokenizer.pad_token_id] * (
-                max_length - len(sample_input_ids)
-            ) + sample_input_ids
-            model_inputs["attention_mask"][i] = [0] * (max_length - len(sample_input_ids)) + model_inputs[
-                "attention_mask"
-            ][i]
-            labels["input_ids"][i] = [-100] * (max_length - len(sample_input_ids)) + label_input_ids
-            model_inputs["input_ids"][i] = torch.tensor(model_inputs["input_ids"][i][:max_length])
-            model_inputs["attention_mask"][i] = torch.tensor(model_inputs["attention_mask"][i][:max_length])
-            labels["input_ids"][i] = torch.tensor(labels["input_ids"][i][:max_length])
-        model_inputs["labels"] = labels["input_ids"]
-        return model_inputs
-
-    def test_preprocess_function(examples):
-        batch_size = len(examples[text_column])
-        inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
-        model_inputs = tokenizer(inputs)
-        # print(model_inputs)
-        for i in range(batch_size):
-            sample_input_ids = model_inputs["input_ids"][i]
-            model_inputs["input_ids"][i] = [tokenizer.pad_token_id] * (
-                max_length - len(sample_input_ids)
-            ) + sample_input_ids
-            model_inputs["attention_mask"][i] = [0] * (max_length - len(sample_input_ids)) + model_inputs[
-                "attention_mask"
-            ][i]
-            model_inputs["input_ids"][i] = torch.tensor(model_inputs["input_ids"][i][:max_length])
-            model_inputs["attention_mask"][i] = torch.tensor(model_inputs["attention_mask"][i][:max_length])
+        inputs = examples[text_column]
+        targets = examples[label_column]
+        model_inputs = tokenizer(inputs, truncation=True)
+        labels = tokenizer(
+            targets, max_length=target_max_length, padding="max_length", truncation=True, return_tensors="pt"
+        )
+        labels = labels["input_ids"]
+        labels[labels == tokenizer.pad_token_id] = -100
+        model_inputs["labels"] = labels
         return model_inputs
 
     with accelerator.main_process_first():
@@ -190,34 +153,21 @@ def main():
     accelerator.wait_for_everyone()
 
     train_dataset = processed_datasets["train"]
-
-    with accelerator.main_process_first():
-        processed_datasets = dataset.map(
-            test_preprocess_function,
-            batched=True,
-            num_proc=1,
-            remove_columns=dataset["train"].column_names,
-            load_from_cache_file=False,
-            desc="Running tokenizer on dataset",
-        )
     eval_dataset = processed_datasets["train"]
     test_dataset = processed_datasets["test"]
 
-    train_dataloader = DataLoader(
-        train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True
-    )
-    eval_dataloader = DataLoader(
-        eval_dataset, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True
-    )
-    test_dataloader = DataLoader(
-        test_dataset, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True
-    )
+    def collate_fn(examples):
+        return tokenizer.pad(examples, padding="longest", return_tensors="pt")
 
-    print(next(iter(train_dataloader)))
+    train_dataloader = DataLoader(
+        train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=batch_size, pin_memory=True
+    )
+    eval_dataloader = DataLoader(eval_dataset, collate_fn=collate_fn, batch_size=batch_size, pin_memory=True)
+    test_dataloader = DataLoader(test_dataset, collate_fn=collate_fn, batch_size=batch_size, pin_memory=True)
 
     # creating model
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
-    model = get_pet_model(model, pet_config)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+    model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
     # optimizer
@@ -280,9 +230,9 @@ def main():
                 batch = {k: v for k, v in batch.items() if k != "labels"}
                 with torch.no_grad():
                     outputs = accelerator.unwrap_model(model).generate(
-                        **batch, synced_gpus=is_ds_zero_3, max_new_tokens=10
+                        **batch, synced_gpus=is_ds_zero_3
                     )  # synced_gpus=True for DS-stage 3
-                preds = outputs[:, max_length:].detach().cpu().numpy()
+                preds = outputs.detach().cpu().numpy()
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
@@ -321,11 +271,9 @@ def main():
         batch = {k: v for k, v in batch.items() if k != "labels"}
         with torch.no_grad():
             outputs = accelerator.unwrap_model(model).generate(
-                **batch, synced_gpus=is_ds_zero_3, max_new_tokens=10
+                **batch, synced_gpus=is_ds_zero_3
             )  # synced_gpus=True for DS-stage 3
-        test_preds.extend(
-            tokenizer.batch_decode(outputs[:, max_length:].detach().cpu().numpy(), skip_special_tokens=True)
-        )
+        test_preds.extend(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True))
 
     test_preds_cleaned = []
     for _, pred in enumerate(test_preds):
@@ -343,7 +291,7 @@ def main():
     pred_df.to_csv(f"data/{dataset_name}/predictions.csv", index=False)
 
     accelerator.wait_for_everyone()
-    accelerator.save(get_pet_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name)
+    accelerator.save(get_peft_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name)
     accelerator.wait_for_everyone()
 
 

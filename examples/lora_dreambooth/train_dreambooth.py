@@ -29,7 +29,7 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from huggingface_hub import HfFolder, Repository, whoami
-from pet import LoRAConfig, LoRAModel, get_pet_model_state_dict
+from peft import LoraConfig, LoraModel, get_peft_model_state_dict
 from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -151,39 +151,39 @@ def parse_args(input_args=None):
     parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
 
     # lora args
-    parser.add_argument("--use_lora", action="store_true", help="Whether to use LoRA for parameter efficient tuning")
-    parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank, only used if use_lora is True")
-    parser.add_argument("--lora_alpha", type=int, default=32, help="LoRA alpha, only used if use_lora is True")
-    parser.add_argument("--lora_dropout", type=float, default=0.0, help="LoRA dropout, only used if use_lora is True")
+    parser.add_argument("--use_lora", action="store_true", help="Whether to use Lora for parameter efficient tuning")
+    parser.add_argument("--lora_r", type=int, default=8, help="Lora rank, only used if use_lora is True")
+    parser.add_argument("--lora_alpha", type=int, default=32, help="Lora alpha, only used if use_lora is True")
+    parser.add_argument("--lora_dropout", type=float, default=0.0, help="Lora dropout, only used if use_lora is True")
     parser.add_argument(
         "--lora_bias",
         type=str,
         default="none",
-        help="Bias type for LoRA. Can be 'none', 'all' or 'lora_only', only used if use_lora is True",
+        help="Bias type for Lora. Can be 'none', 'all' or 'lora_only', only used if use_lora is True",
     )
     parser.add_argument(
         "--lora_text_encoder_r",
         type=int,
         default=8,
-        help="LoRA rank for text encoder, only used if `use_lora` and `train_text_encoder` are True",
+        help="Lora rank for text encoder, only used if `use_lora` and `train_text_encoder` are True",
     )
     parser.add_argument(
         "--lora_text_encoder_alpha",
         type=int,
         default=32,
-        help="LoRA alpha for text encoder, only used if `use_lora` and `train_text_encoder` are True",
+        help="Lora alpha for text encoder, only used if `use_lora` and `train_text_encoder` are True",
     )
     parser.add_argument(
         "--lora_text_encoder_dropout",
         type=float,
         default=0.0,
-        help="LoRA dropout for text encoder, only used if `use_lora` and `train_text_encoder` are True",
+        help="Lora dropout for text encoder, only used if `use_lora` and `train_text_encoder` are True",
     )
     parser.add_argument(
         "--lora_text_encoder_bias",
         type=str,
         default="none",
-        help="Bias type for LoRA. Can be 'none', 'all' or 'lora_only', only used if use_lora and `train_text_encoder` are True",
+        help="Bias type for Lora. Can be 'none', 'all' or 'lora_only', only used if use_lora and `train_text_encoder` are True",
     )
 
     parser.add_argument(
@@ -682,14 +682,14 @@ def main(args):
     )
 
     if args.use_lora:
-        config = LoRAConfig(
+        config = LoraConfig(
             r=args.lora_r,
             lora_alpha=args.lora_alpha,
             target_modules=UNET_TARGET_MODULES,
             lora_dropout=args.lora_dropout,
             bias=args.lora_bias,
         )
-        unet = LoRAModel(config, unet)
+        unet = LoraModel(config, unet)
         print_trainable_parameters(unet)
         print(unet)
 
@@ -697,14 +697,14 @@ def main(args):
     if not args.train_text_encoder:
         text_encoder.requires_grad_(False)
     elif args.train_text_encoder and args.use_lora:
-        config = LoRAConfig(
+        config = LoraConfig(
             r=args.lora_text_encoder_r,
             lora_alpha=args.lora_text_encoder_alpha,
             target_modules=TEXT_ENCODER_TARGET_MODULES,
             lora_dropout=args.lora_text_encoder_dropout,
             bias=args.lora_text_encoder_bias,
         )
-        text_encoder = LoRAModel(config, text_encoder)
+        text_encoder = LoraModel(config, text_encoder)
         print_trainable_parameters(text_encoder)
         print(text_encoder)
 
@@ -717,8 +717,8 @@ def main(args):
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
         # below fails when using lora so commenting it out
-        # if args.train_text_encoder:
-        #     text_encoder.gradient_checkpointing_enable()
+        if args.train_text_encoder and not args.use_lora:
+            text_encoder.gradient_checkpointing_enable()
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
@@ -974,15 +974,15 @@ def main(args):
     if accelerator.is_main_process:
         if args.use_lora:
             lora_config = {}
-            state_dict = get_pet_model_state_dict(unet, state_dict=accelerator.get_state_dict(unet))
-            lora_config["pet_config"] = unet.get_pet_config_as_dict(inference=True)
+            state_dict = get_peft_model_state_dict(unet, state_dict=accelerator.get_state_dict(unet))
+            lora_config["peft_config"] = unet.get_peft_config_as_dict(inference=True)
             if args.train_text_encoder:
-                text_encoder_state_dict = get_pet_model_state_dict(
+                text_encoder_state_dict = get_peft_model_state_dict(
                     text_encoder, state_dict=accelerator.get_state_dict(text_encoder)
                 )
                 text_encoder_state_dict = {f"text_encoder_{k}": v for k, v in text_encoder_state_dict.items()}
                 state_dict.update(text_encoder_state_dict)
-                lora_config["text_encoder_pet_config"] = text_encoder.get_pet_config_as_dict(inference=True)
+                lora_config["text_encoder_peft_config"] = text_encoder.get_peft_config_as_dict(inference=True)
 
             accelerator.print(state_dict)
             accelerator.save(state_dict, os.path.join(args.output_dir, f"{args.instance_prompt}_lora.pt"))
