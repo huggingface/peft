@@ -4,7 +4,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .tuners import LoRAConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from .tuners import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PeftType
 
 
@@ -19,7 +19,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
     "P_TUNING": PromptEncoderConfig,
-    "LORA": LoRAConfig,
+    "LORA": LoraConfig,
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
