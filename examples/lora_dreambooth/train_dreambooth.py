@@ -717,8 +717,8 @@ def main(args):
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
         # below fails when using lora so commenting it out
-        # if args.train_text_encoder:
-        #     text_encoder.gradient_checkpointing_enable()
+        if args.train_text_encoder and not args.use_lora:
+            text_encoder.gradient_checkpointing_enable()
 
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
