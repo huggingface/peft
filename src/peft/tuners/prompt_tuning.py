@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 import torch
 
-from ..utils import PETType, PromptLearningConfig
+from ..utils import PeftType, PromptLearningConfig
 
 
 class PromptTuningInit(str, enum.Enum):
@@ -16,14 +16,13 @@ class PromptTuningInit(str, enum.Enum):
 @dataclass
 class PromptTuningConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~pet.PromptEmbedding`.
+    This is the configuration class to store the configuration of a :class:`~peft.PromptEmbedding`.
 
     Args:
-        prompt_tuning_init (:
-            obj:Union[:class:`PromptTuningInit`, :obj:`str`]): The initialization of the prompt embedding.
-        prompt_tuning_init_text (:obj: Optional[:obj:`str`]): The text to initialize the prompt embedding.
+        prompt_tuning_init (Union[:class:`PromptTuningInit`, `str`]): The initialization of the prompt embedding.
+        prompt_tuning_init_text ( Optional[`str`]): The text to initialize the prompt embedding.
             Only used if `prompt_tuning_init` is `TEXT`
-        tokenizer_name_or_path (:obj: Optional[:obj:`str`]): The name or path of the tokenizer.
+        tokenizer_name_or_path ( Optional[`str`]): The name or path of the tokenizer.
             Only used if `prompt_tuning_init` is `TEXT`
     """
 
@@ -45,7 +44,7 @@ class PromptTuningConfig(PromptLearningConfig):
     )
 
     def __post_init__(self):
-        self.pet_type = PETType.PROMPT_TUNING
+        self.peft_type = PeftType.PROMPT_TUNING
 
 
 class PromptEmbedding(torch.nn.Module):
@@ -54,15 +53,15 @@ class PromptEmbedding(torch.nn.Module):
 
     Args:
         config (:class:`PromptTuningConfig`): The configuration of the prompt embedding.
-        word_embeddings (:obj:`torch.nn.Module`): The word embeddings of the base transformer model.
+        word_embeddings (`torch.nn.Module`): The word embeddings of the base transformer model.
 
     Attributes:
-        embedding (:obj:`torch.nn.Embedding`): The embedding layer of the prompt embedding.
+        embedding (`torch.nn.Embedding`): The embedding layer of the prompt embedding.
 
     Example::
 
-        >>> from pet import PromptEmbedding, PromptTuningConfig >>> config = PromptTuningConfig(
-                pet_type="PROMPT_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
+        >>> from peft import PromptEmbedding, PromptTuningConfig >>> config = PromptTuningConfig(
+                peft_type="PROMPT_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
                 num_transformer_submodules=1, num_attention_heads=12, num_layers=12, prompt_tuning_init="TEXT",
                 prompt_tuning_init_text="Predict if sentiment of this review is positive, negative or neutral",
                 tokenizer_name_or_path="t5-base",

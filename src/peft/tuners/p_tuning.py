@@ -4,7 +4,7 @@ from typing import Union
 
 import torch
 
-from ..utils import PETType, PromptLearningConfig
+from ..utils import PeftType, PromptLearningConfig
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
@@ -15,15 +15,15 @@ class PromptEncoderReparameterizationType(str, enum.Enum):
 @dataclass
 class PromptEncoderConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~pet.PromptEncoder`.
+    This is the configuration class to store the configuration of a :class:`~peft.PromptEncoder`.
 
     Args:
         encoder_reparameterization_type
-            (:obj:Union[:class:`PromptEncoderReparameterizationType`, :obj:`str`]): The type of reparameterization to
+            (Union[:class:`PromptEncoderReparameterizationType`, `str`]): The type of reparameterization to
             use.
-        encoder_hidden_size (:obj:`int`): The hidden size of the prompt encoder.
-        encoder_num_layers (:obj:`int`): The number of layers of the prompt encoder.
-        encoder_dropout (:obj:`float`): The dropout probability of the prompt encoder.
+        encoder_hidden_size (`int`): The hidden size of the prompt encoder.
+        encoder_num_layers (`int`): The number of layers of the prompt encoder.
+        encoder_dropout (`float`): The dropout probability of the prompt encoder.
     """
 
     encoder_reparameterization_type: Union[str, PromptEncoderReparameterizationType] = field(
@@ -44,7 +44,7 @@ class PromptEncoderConfig(PromptLearningConfig):
     )
 
     def __post_init__(self):
-        self.pet_type = PETType.P_TUNING
+        self.peft_type = PeftType.P_TUNING
 
 
 # Based on https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/modules/common/prompt_encoder.py
@@ -58,8 +58,8 @@ class PromptEncoder(torch.nn.Module):
 
     Example::
 
-        >>> from pet import PromptEncoder, PromptEncoderConfig >>> config = PromptEncoderConfig(
-                pet_type="P_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
+        >>> from peft import PromptEncoder, PromptEncoderConfig >>> config = PromptEncoderConfig(
+                peft_type="P_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
                 num_transformer_submodules=1, num_attention_heads=12, num_layers=12,
                 encoder_reparameterization_type="MLP", encoder_hidden_size=768
             )
@@ -70,11 +70,11 @@ class PromptEncoder(torch.nn.Module):
         (:class:`~torch.nn.Sequential`): The MLP head of the prompt encoder if `inference_mode=False`. lstm_head
         (:class:`~torch.nn.LSTM`):
             The LSTM head of the prompt encoder if `inference_mode=False` and `encoder_reparameterization_type="LSTM"`.
-        token_dim (:obj:`int`): The hidden embedding dimension of the base transformer model. input_size (:obj:`int`):
-        The input size of the prompt encoder. output_size (:obj:`int`): The output size of the prompt encoder.
-        hidden_size (:obj:`int`): The hidden size of the prompt encoder. total_virtual_tokens (:obj:`int`): The total
+        token_dim (`int`): The hidden embedding dimension of the base transformer model. input_size (`int`):
+        The input size of the prompt encoder. output_size (`int`): The output size of the prompt encoder.
+        hidden_size (`int`): The hidden size of the prompt encoder. total_virtual_tokens (`int`): The total
         number of virtual tokens of the prompt encoder. encoder_type
-        (:obj:Union[:class:`PromptEncoderReparameterizationType`, :obj:`str`]):
+        (Union[:class:`PromptEncoderReparameterizationType`, `str`]):
             The encoder type of the prompt encoder.
 
 

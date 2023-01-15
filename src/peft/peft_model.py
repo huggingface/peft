@@ -6,41 +6,41 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 
-from .tuners import LoRAModel, PrefixEncoder, PromptEmbedding, PromptEncoder
-from .utils import PETConfig, PETType, TaskType, _set_trainable, shift_tokens_right
+from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .utils import PeftConfig, PeftType, TaskType, _set_trainable, shift_tokens_right
 
 
-class PETModel(torch.nn.Module):
+class PeftModel(torch.nn.Module):
     """
-    Parameter Efficient Tuning Model. Base model encompassing various PET methods.
+    Parameter-Efficient Fine-Tuning Model. Base model encompassing various Peft methods.
 
     Args:
-        model (:obj:`PreTrainedModel`): The base transformer model used for PET.
-        pet_config (:obj:`PETConfig`): The configuration of the PET model.
+        model (`PreTrainedModel`): The base transformer model used for Peft.
+        peft_config (`PeftConfig`): The configuration of the Peft model.
 
 
     Attributes:
-        base_model (:obj:`PreTrainedModel`): The base transformer model used for PET. pet_config (:obj:`PETConfig`):
-        The configuration of the PET model. modules_to_save (:obj:`list` of :obj:`str`): The list of sub-module names
-        to save when saving the model. prompt_encoder (:obj:`PromptEncoder`): The prompt encoder used for PET if
-        `pet_config.pet_type != PETType.LORA`. prompt_tokens (:obj:`torch.Tensor`): The virtual prompt tokens used for
-        PET if `pet_config.pet_type != PETType.LORA`. transformer_backbone_name (:obj:`str`): The name of the
+        base_model (`PreTrainedModel`): The base transformer model used for Peft. peft_config (`PeftConfig`):
+        The configuration of the Peft model. modules_to_save (`list` of `str`): The list of sub-module names
+        to save when saving the model. prompt_encoder (`PromptEncoder`): The prompt encoder used for Peft if
+        `peft_config.peft_type != PeftType.LORA`. prompt_tokens (`torch.Tensor`): The virtual prompt tokens used for
+        Peft if `peft_config.peft_type != PeftType.LORA`. transformer_backbone_name (`str`): The name of the
         transformer backbone in the base model
-            if `pet_config.pet_type != PETType.LORA`.
-        word_embeddings (:obj:`torch.nn.Embedding`): The word embeddings of the transformer backbone
-            in the base model if `pet_config.pet_type != PETType.LORA`.
+            if `peft_config.peft_type != PeftType.LORA`.
+        word_embeddings (`torch.nn.Embedding`): The word embeddings of the transformer backbone
+            in the base model if `peft_config.peft_type != PeftType.LORA`.
     """
 
-    def __init__(self, model, pet_config: PETConfig):
+    def __init__(self, model, peft_config: PeftConfig):
         super().__init__()
-        self.pet_config = pet_config
+        self.peft_config = peft_config
         self.base_model = model
         self.config = self.base_model.config
         self.modules_to_save = None
-        if pet_config.pet_type != PETType.LORA:
+        if peft_config.peft_type != PeftType.LORA:
             self._setup_prompt_encoder()
         else:
-            self.base_model = LoRAModel(pet_config, model)
+            self.base_model = LoraModel(peft_config, model)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def _setup_prompt_encoder(self):
@@ -55,66 +55,66 @@ class PETModel(torch.nn.Module):
                     transformer_backbone = module
                     self.transformer_backbone_name = name
                 num_transformer_submodules += 1
-        self.pet_config.num_transformer_submodules = 2 if self.pet_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
+        self.peft_config.num_transformer_submodules = 2 if self.peft_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
         for named_param, value in list(transformer_backbone.named_parameters()):
             if value.shape[0] == self.base_model.config.vocab_size:
                 self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                 break
 
-        if self.pet_config.pet_type == PETType.PROMPT_TUNING:
-            prompt_encoder = PromptEmbedding(self.pet_config, self.word_embeddings)
-        elif self.pet_config.pet_type == PETType.P_TUNING:
-            prompt_encoder = PromptEncoder(self.pet_config)
-        elif self.pet_config.pet_type == PETType.PREFIX_TUNING:
-            prompt_encoder = PrefixEncoder(self.pet_config)
+        if self.peft_config.peft_type == PeftType.PROMPT_TUNING:
+            prompt_encoder = PromptEmbedding(self.peft_config, self.word_embeddings)
+        elif self.peft_config.peft_type == PeftType.P_TUNING:
+            prompt_encoder = PromptEncoder(self.peft_config)
+        elif self.peft_config.peft_type == PeftType.PREFIX_TUNING:
+            prompt_encoder = PrefixEncoder(self.peft_config)
         else:
             raise ValueError("Not supported")
         self.prompt_encoder = prompt_encoder
         self.prompt_tokens = torch.arange(
-            self.pet_config.num_virtual_tokens * self.pet_config.num_transformer_submodules
+            self.peft_config.num_virtual_tokens * self.peft_config.num_transformer_submodules
         ).long()
 
     def get_prompt_embedding_to_save(self):
         """
-        Returns the prompt embedding to save when saving the model. Only applocable when `pet_config.pet_type !=
-        PETType.LORA`.
+        Returns the prompt embedding to save when saving the model. Only applocable when `peft_config.peft_type !=
+        PeftType.LORA`.
         """
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(1, -1).to(self.device)
-        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
-            prompt_tokens = prompt_tokens[:, : self.pet_config.num_virtual_tokens]
+        if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
+            prompt_tokens = prompt_tokens[:, : self.peft_config.num_virtual_tokens]
         prompt_embeddings = self.prompt_encoder(prompt_tokens)
         return prompt_embeddings[0].detach().cpu()
 
     def get_prompt(self, batch_size):
         """
-        Returns the virtual prompts to use for PET. Only applocable when `pet_config.pet_type != PETType.LORA`.
+        Returns the virtual prompts to use for Peft. Only applocable when `peft_config.peft_type != PeftType.LORA`.
         """
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.device)
-        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
-            prompt_tokens = prompt_tokens[:, : self.pet_config.num_virtual_tokens]
-            if self.pet_config.inference_mode:
+        if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
+            prompt_tokens = prompt_tokens[:, : self.peft_config.num_virtual_tokens]
+            if self.peft_config.inference_mode:
                 past_key_values = self.prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
             else:
                 past_key_values = self.prompt_encoder(prompt_tokens)
             past_key_values = past_key_values.view(
                 batch_size,
-                self.pet_config.num_virtual_tokens,
-                self.pet_config.num_layers * 2,
-                self.pet_config.num_attention_heads,
-                self.pet_config.token_dim // self.pet_config.num_attention_heads,
+                self.peft_config.num_virtual_tokens,
+                self.peft_config.num_layers * 2,
+                self.peft_config.num_attention_heads,
+                self.peft_config.token_dim // self.peft_config.num_attention_heads,
             )
-            if self.pet_config.num_transformer_submodules == 2:
+            if self.peft_config.num_transformer_submodules == 2:
                 past_key_values = torch.cat([past_key_values, past_key_values], dim=2)
             past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
-                self.pet_config.num_transformer_submodules * 2
+                self.peft_config.num_transformer_submodules * 2
             )
-            if self.pet_config.postprocess_past_key_value_function is not None:
-                post_process_fn = self.pet_config.postprocess_past_key_value_function
+            if self.peft_config.postprocess_past_key_value_function is not None:
+                post_process_fn = self.peft_config.postprocess_past_key_value_function
                 past_key_values = post_process_fn(past_key_values)
             return past_key_values
         else:
-            if self.pet_config.inference_mode:
+            if self.peft_config.inference_mode:
                 prompts = self.prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
             else:
                 prompts = self.prompt_encoder(prompt_tokens)
@@ -142,34 +142,34 @@ class PETModel(torch.nn.Module):
             return getattr(self.base_model, name)
 
 
-class PETModelForSequenceClassification(PETModel):
+class PeftModelForSequenceClassification(PeftModel):
     """
-    PET model for sequence classification tasks.
+    Peft model for sequence classification tasks.
 
     Args:
-        model (:obj:`PreTrainedModel`): Base transformer model
-        pet_config (:obj:`PETConfig`): PET config.
+        model (`PreTrainedModel`): Base transformer model
+        peft_config (`PeftConfig`): Peft config.
 
     Attributes:
-        config (:obj:`PretrainedConfig`): The configuration object of the base model. cls_layer_name (:obj:`str`): The
+        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The
         name of the classification layer.
 
     Example::
 
-        >>> from transformers import AutoModelForSequenceClassification >>> from pet import
-        PETModelForSequenceClassification, get_pet_config >>> config = {
-                'pet_type': 'PREFIX_TUNING', 'task_type': 'SEQ_CLS', 'inference_mode': False, 'num_virtual_tokens': 20,
+        >>> from transformers import AutoModelForSequenceClassification >>> from peft import
+        PeftModelForSequenceClassification, get_peft_config >>> config = {
+                'peft_type': 'PREFIX_TUNING', 'task_type': 'SEQ_CLS', 'inference_mode': False, 'num_virtual_tokens': 20,
                 'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
                 'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> pet_config = get_pet_config(config) >>> model =
-        AutoModelForSequenceClassification.from_pretrained("bert-base-cased") >>> pet_model =
-        PETModelForSequenceClassification(model, pet_config) >>> pet_model.print_trainable_parameters() trainable
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased")
+        >>> peft_model = PeftModelForSequenceClassification(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
         params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
     """
 
-    def __init__(self, model, pet_config: PETConfig):
-        super().__init__(model, pet_config)
+    def __init__(self, model, peft_config: PeftConfig):
+        super().__init__(model, peft_config)
         self.modules_to_save = ["classifier", "score"]
 
         for name, _ in self.base_model.named_children():
@@ -193,7 +193,7 @@ class PETModelForSequenceClassification(PETModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if self.pet_config.pet_type == PETType.LORA:
+        if self.peft_config.peft_type == PeftType.LORA:
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -208,7 +208,7 @@ class PETModelForSequenceClassification(PETModel):
         batch_size = input_ids.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
+            prefix_attention_mask = torch.ones(batch_size, self.peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -223,13 +223,13 @@ class PETModelForSequenceClassification(PETModel):
             }
         )
 
-        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+        if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
                     (
-                        torch.zeros(batch_size, self.pet_config.num_virtual_tokens).to(self.device),
+                        torch.zeros(batch_size, self.peft_config.num_virtual_tokens).to(self.device),
                         kwargs["token_type_ids"],
                     ),
                     dim=1,
@@ -312,30 +312,32 @@ class PETModelForSequenceClassification(PETModel):
             )
 
 
-class PETModelForCausalLM(PETModel):
+class PeftModelForCausalLM(PeftModel):
     """
-    PET model for Causal LM
+    Peft model for Causal LM
 
     Args:
-        model (:obj:`PreTrainedModel`): Base transformer model
-        pet_config (:obj:`PETConfig`): PET config.
+        model (`PreTrainedModel`): Base transformer model
+        peft_config (`PeftConfig`): Peft config.
 
 
     Example::
 
-        >>> from transformers import AutoModelForCausalLM >>> from pet import PETModelForCausalLM, get_pet_config >>>
+        >>> from transformers import AutoModelForCausalLM >>> from peft import PeftModelForCausalLM, get_peft_config >>>
         config = {
-                'pet_type': 'PREFIX_TUNING', 'task_type': 'CAUSAL_LM', 'inference_mode': False, 'num_virtual_tokens':
+                'peft_type': 'PREFIX_TUNING', 'task_type': 'CAUSAL_LM', 'inference_mode': False, 'num_virtual_tokens':
                 20, 'token_dim': 1280, 'num_transformer_submodules': 1, 'num_attention_heads': 20, 'num_layers': 36,
                 'encoder_hidden_size': 1280, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> pet_config = get_pet_config(config) >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large") >>>
-        pet_model = PETModelForCausalLM(model, pet_config) >>> pet_model.print_trainable_parameters() trainable params:
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large")
+        >>> peft_model = PeftModelForCausalLM(model, peft_config)
+        >>> peft_model.print_trainable_parameters() trainable params:
         1843200 || all params: 775873280 || trainable%: 0.23756456724479544
     """
 
-    def __init__(self, model, pet_config: PETConfig):
-        super().__init__(model, pet_config)
+    def __init__(self, model, peft_config: PeftConfig):
+        super().__init__(model, peft_config)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
 
@@ -350,7 +352,7 @@ class PETModelForCausalLM(PETModel):
         return_dict=None,
         **kwargs,
     ):
-        if self.pet_config.pet_type == PETType.LORA:
+        if self.peft_config.peft_type == PeftType.LORA:
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -365,7 +367,7 @@ class PETModelForCausalLM(PETModel):
         batch_size = input_ids.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
+            prefix_attention_mask = torch.ones(batch_size, self.peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
@@ -384,7 +386,7 @@ class PETModelForCausalLM(PETModel):
             }
         )
 
-        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+        if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
             return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
         else:
@@ -392,21 +394,22 @@ class PETModelForCausalLM(PETModel):
                 inputs_embeds = self.word_embeddings(input_ids)
             # concat prompt labels
             if labels is not None:
-                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(self.device)
+                prefix_labels = torch.full((batch_size, self.peft_config.num_virtual_tokens), -100).to(self.device)
                 kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def generate(self, **kwargs):
-        if self.pet_config.pet_type == PETType.LORA:
+        if self.peft_config.peft_type == PeftType.LORA:
             return self.base_model.generate(**kwargs)
         else:
-            assert "input_ids" in kwargs, "input_ids must be provided for PET model generation"
+            if "input_ids" not in kwargs:
+                raise ValueError("input_ids must be provided for Peft model generation")
             if kwargs.get("attention_mask", None) is not None:
                 # concat prompt attention mask
                 prefix_attention_mask = torch.ones(
-                    kwargs["input_ids"].shape[0], self.pet_config.num_virtual_tokens
+                    kwargs["input_ids"].shape[0], self.peft_config.num_virtual_tokens
                 ).to(kwargs["input_ids"].device)
                 kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
 
@@ -419,7 +422,7 @@ class PETModelForCausalLM(PETModel):
                 )
                 kwargs["token_type_ids"] = None
 
-            if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+            if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
                 batch_size = kwargs["input_ids"].shape[0]
                 past_key_values = self.get_prompt(batch_size)
                 kwargs["past_key_values"] = past_key_values
@@ -433,30 +436,32 @@ class PETModelForCausalLM(PETModel):
         return model_kwargs
 
 
-class PETModelForSeq2SeqLM(PETModel):
+class PeftModelForSeq2SeqLM(PeftModel):
     """
-    PET model for Seq2Seq LM
+    Peft model for Seq2Seq LM
 
     Args:
-        model (:obj:`PreTrainedModel`): Base transformer model
-        pet_config (:obj:`PETConfig`): PET config.
+        model (`PreTrainedModel`): Base transformer model
+        peft_config (`PeftConfig`): Peft config.
 
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM >>> from pet import PETModelForSeq2SeqLM, get_pet_config >>>
+        >>> from transformers import AutoModelForSeq2SeqLM >>> from peft import PeftModelForSeq2SeqLM, get_peft_config >>>
         config = {
-                'pet_type': 'LORA', 'task_type': 'SEQ_2_SEQ_LM', 'inference_mode': False, 'r': 8, 'target_modules':
+                'peft_type': 'LORA', 'task_type': 'SEQ_2_SEQ_LM', 'inference_mode': False, 'r': 8, 'target_modules':
                 ['q', 'v'], 'lora_alpha': 32, 'lora_dropout': 0.1, 'merge_weights': False, 'fan_in_fan_out': False,
                 'enable_lora': None, 'bias': 'none'
             }
-        >>> pet_config = get_pet_config(config) >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>>
-        pet_model = PETModelForSeq2SeqLM(model, pet_config) >>> pet_model.print_trainable_parameters() trainable
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        >>> peft_model = PeftModelForSeq2SeqLM(model, peft_config)
+        >>> peft_model.print_trainable_parameters() trainable
         params: 884736 || all params: 223843584 || trainable%: 0.3952474242013566
     """
 
-    def __init__(self, model, pet_config: PETConfig):
-        super().__init__(model, pet_config)
+    def __init__(self, model, peft_config: PeftConfig):
+        super().__init__(model, peft_config)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
         self.base_model_prepare_encoder_decoder_kwargs_for_generation = (
@@ -480,7 +485,7 @@ class PETModelForSeq2SeqLM(PETModel):
         return_dict=None,
         **kwargs,
     ):
-        if self.pet_config.pet_type == PETType.LORA:
+        if self.peft_config.peft_type == PeftType.LORA:
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -498,7 +503,7 @@ class PETModelForSeq2SeqLM(PETModel):
         batch_size = input_ids.shape[0]
         if decoder_attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
+            prefix_attention_mask = torch.ones(batch_size, self.peft_config.num_virtual_tokens).to(self.device)
             decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
@@ -518,7 +523,7 @@ class PETModelForSeq2SeqLM(PETModel):
             }
         )
 
-        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+        if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
             return self.base_model(
                 input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
@@ -534,25 +539,25 @@ class PETModelForSeq2SeqLM(PETModel):
 
             if attention_mask is not None:
                 # concat prompt attention mask
-                prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
+                prefix_attention_mask = torch.ones(batch_size, self.peft_config.num_virtual_tokens).to(self.device)
                 kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
             # concat prompt labels
             if labels is not None:
-                prefix_labels = torch.full((batch_size, self.pet_config.num_virtual_tokens), -100).to(self.device)
+                prefix_labels = torch.full((batch_size, self.peft_config.num_virtual_tokens), -100).to(self.device)
                 kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
-            inputs_embeds = torch.cat((prompts[:, : self.pet_config.num_virtual_tokens], inputs_embeds), dim=1)
+            inputs_embeds = torch.cat((prompts[:, : self.peft_config.num_virtual_tokens], inputs_embeds), dim=1)
             decoder_inputs_embeds = torch.cat(
-                (prompts[:, self.pet_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
+                (prompts[:, self.peft_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
             )
             return self.base_model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
 
     def generate(self, **kwargs):
-        if self.pet_config.pet_type == PETType.LORA:
+        if self.peft_config.peft_type == PeftType.LORA:
             return self.base_model.generate(**kwargs)
         else:
-            assert "input_ids" in kwargs, "input_ids must be provided for PET model generation"
-
+            if "input_ids" not in kwargs:
+                raise ValueError("input_ids must be provided for Peft model generation")
             if kwargs.get("position_ids", None) is not None:
                 warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
                 kwargs["position_ids"] = None
@@ -562,7 +567,7 @@ class PETModelForSeq2SeqLM(PETModel):
                 )
                 kwargs["token_type_ids"] = None
 
-            if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+            if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
                 batch_size = kwargs["input_ids"].shape[0]
                 past_key_values = self.get_prompt(batch_size)
                 kwargs["past_key_values"] = past_key_values
@@ -585,34 +590,35 @@ class PETModelForSeq2SeqLM(PETModel):
         return model_kwargs
 
 
-class PETModelForTokenClassification(PETModel):
+class PeftModelForTokenClassification(PeftModel):
     """
-    PET model for sequence classification tasks.
+    Peft model for sequence classification tasks.
 
     Args:
-        model (:obj:`PreTrainedModel`): Base transformer model
-        pet_config (:obj:`PETConfig`): PET config.
+        model (`PreTrainedModel`): Base transformer model
+        peft_config (`PeftConfig`): Peft config.
 
     Attributes:
-        config (:obj:`PretrainedConfig`): The configuration object of the base model. cls_layer_name (:obj:`str`): The
+        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The
         name of the classification layer.
 
     Example::
 
-        >>> from transformers import AutoModelForSequenceClassification >>> from pet import
-        PETModelForTokenClassification, get_pet_config >>> config = {
-                'pet_type': 'PREFIX_TUNING', 'task_type': 'TOKEN_CLS', 'inference_mode': False, 'num_virtual_tokens':
+        >>> from transformers import AutoModelForSequenceClassification >>> from peft import
+        PeftModelForTokenClassification, get_peft_config >>> config = {
+                'peft_type': 'PREFIX_TUNING', 'task_type': 'TOKEN_CLS', 'inference_mode': False, 'num_virtual_tokens':
                 20, 'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
                 'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> pet_config = get_pet_config(config) >>> model =
-        AutoModelForSequenceClassification.from_pretrained("bert-base-cased") >>> pet_model =
-        PETModelForSequenceClassification(model, pet_config) >>> pet_model.print_trainable_parameters() trainable
+        >>> peft_config = get_peft_config(config) >>> model =
+        AutoModelForTokenClassification.from_pretrained("bert-base-cased")
+        >>> peft_model = PeftModelForTokenClassification(model, peft_config)
+        >>> peft_model.print_trainable_parameters() trainable
         params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
     """
 
-    def __init__(self, model, pet_config: PETConfig):
-        super().__init__(model, pet_config)
+    def __init__(self, model, peft_config: PeftConfig):
+        super().__init__(model, peft_config)
         self.modules_to_save = ["classifier", "score"]
 
         for name, _ in self.base_model.named_children():
@@ -636,7 +642,7 @@ class PETModelForTokenClassification(PETModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if self.pet_config.pet_type == PETType.LORA:
+        if self.peft_config.peft_type == PeftType.LORA:
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -651,7 +657,7 @@ class PETModelForTokenClassification(PETModel):
         batch_size = input_ids.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, self.pet_config.num_virtual_tokens).to(self.device)
+            prefix_attention_mask = torch.ones(batch_size, self.peft_config.num_virtual_tokens).to(self.device)
             attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -666,13 +672,13 @@ class PETModelForTokenClassification(PETModel):
             }
         )
 
-        if self.pet_config.pet_type == PETType.PREFIX_TUNING:
+        if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
             return self._prefix_tuning_forward(input_ids=input_ids, **kwargs)
         else:
             if kwargs.get("token_type_ids", None) is not None:
                 kwargs["token_type_ids"] = torch.cat(
                     (
-                        torch.zeros(batch_size, self.pet_config.num_virtual_tokens).to(self.device),
+                        torch.zeros(batch_size, self.peft_config.num_virtual_tokens).to(self.device),
                         kwargs["token_type_ids"],
                     ),
                     dim=1,
