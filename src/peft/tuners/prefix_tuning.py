@@ -25,13 +25,12 @@ from ..utils import PeftType, PromptLearningConfig
 @dataclass
 class PrefixTuningConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~peft.PrefixEncoder`.
+    This is the configuration class to store the configuration of a [`~peft.PrefixEncoder`].
 
     Args:
-        encoder_hidden_size ( int): The hidden size of the prompt encoder.
-        prefix_projection ( bool): Whether to project the prefix embeddings.
-        postprocess_past_key_value_function (:
-            obj: Optional[Callable]): The function to postprocess the past key value.
+        encoder_hidden_size (`int`): The hidden size of the prompt encoder.
+        prefix_projection (`bool`): Whether to project the prefix embeddings.
+        postprocess_past_key_value_function (`Callable`, *optional*): The function to postprocess the past key value.
     """
 
     encoder_hidden_size: int = field(
@@ -58,7 +57,7 @@ class PrefixEncoder(torch.nn.Module):
     The torch.nn model to encode the prefix
 
     Args:
-        config (:class:`PrefixTuningConfig`): The configuration of the prefix encoder.
+        config ([`PrefixTuningConfig`]): The configuration of the prefix encoder.
 
     Example::
 
@@ -69,12 +68,12 @@ class PrefixEncoder(torch.nn.Module):
         >>> prefix_encoder = PrefixEncoder(config)
 
 
-    Attributes:
-        embedding (`torch.nn.Embedding`):
-            The embedding layer of the prefix encoder. trans (`torch.nn.Sequential`): The
-        two-layer MLP to transform the prefix embeddings
-            if `prefix_projection` is `True`.
-        prefix_projection (`bool`): Whether to project the prefix embeddings.
+    **Attributes**:
+        - **embedding** (`torch.nn.Embedding`) --
+            The embedding layer of the prefix encoder.
+        - **transform** (`torch.nn.Sequential`) -- The
+        two-layer MLP to transform the prefix embeddings if `prefix_projection` is `True`.
+        - **prefix_projection** (`bool`) -- Whether to project the prefix embeddings.
 
     Input shape: (batch_size, num_virtual_tokens)
 
@@ -91,7 +90,7 @@ class PrefixEncoder(torch.nn.Module):
         if self.prefix_projection and not config.inference_mode:
             # Use a two-layer MLP to encode the prefix
             self.embedding = torch.nn.Embedding(num_virtual_tokens, token_dim)
-            self.trans = torch.nn.Sequential(
+            self.transform = torch.nn.Sequential(
                 torch.nn.Linear(token_dim, encoder_hidden_size),
                 torch.nn.Tanh(),
                 torch.nn.Linear(encoder_hidden_size, num_layers * 2 * token_dim),
@@ -102,7 +101,7 @@ class PrefixEncoder(torch.nn.Module):
     def forward(self, prefix: torch.Tensor):
         if self.prefix_projection:
             prefix_tokens = self.embedding(prefix)
-            past_key_values = self.trans(prefix_tokens)
+            past_key_values = self.transform(prefix_tokens)
         else:
             past_key_values = self.embedding(prefix)
         return past_key_values

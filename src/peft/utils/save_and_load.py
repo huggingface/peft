@@ -21,10 +21,10 @@ def get_peft_model_state_dict(model, state_dict=None):
     Get the state dict of the Peft model.
 
     Args:
-        model (`PeftModel`): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
-        the model should be teh underlying model/unwrapped model (i.e. model.module).
-        state_dict (:
-            obj:`dict`, `optional`): The state dict of the model. If not provided, the state dict of the model
+        model ([`PeftModel`]): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
+        the model should be the underlying model/unwrapped model (i.e. model.module).
+        state_dict (`dict`, *optional*, defaults to `None`):
+            The state dict of the model. If not provided, the state dict of the model
         will be used.
     """
     if state_dict is None:
@@ -64,7 +64,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
     Set the state dict of the Peft model.
 
     Args:
-        model (`PeftModel`): The Peft model.
+        model ([`PeftModel`]): The Peft model.
         peft_model_state_dict (`dict`): The state dict of the Peft model.
     """
 
@@ -81,7 +81,7 @@ def peft_model_load_and_dispatch(model, peft_model_state_dict, peft_config, max_
     Load the Peft model state dict and dispatch the model to the correct device.
 
     Args:
-        model (`PeftModel`): The Pre-trained base model which has already been sharded and dispatched
+        model ([`PeftModel`]): The Pre-trained base model which has already been sharded and dispatched
         using `accelerate` functionalities.
         peft_model_state_dict (`dict`): The state dict of the Peft model.
         max_memory (`Dict`, *optional*):

@@ -31,10 +31,10 @@ class PromptTuningInit(str, enum.Enum):
 @dataclass
 class PromptTuningConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~peft.PromptEmbedding`.
+    This is the configuration class to store the configuration of a [`~peft.PromptEmbedding`].
 
     Args:
-        prompt_tuning_init (Union[:class:`PromptTuningInit`, `str`]): The initialization of the prompt embedding.
+        prompt_tuning_init (Union[[`PromptTuningInit`], `str`]): The initialization of the prompt embedding.
         prompt_tuning_init_text ( Optional[`str`]): The text to initialize the prompt embedding.
             Only used if `prompt_tuning_init` is `TEXT`
         tokenizer_name_or_path ( Optional[`str`]): The name or path of the tokenizer.
@@ -67,11 +67,11 @@ class PromptEmbedding(torch.nn.Module):
     The model to encode virtual tokens into prompt embeddings.
 
     Args:
-        config (:class:`PromptTuningConfig`): The configuration of the prompt embedding.
+        config ([`PromptTuningConfig`]): The configuration of the prompt embedding.
         word_embeddings (`torch.nn.Module`): The word embeddings of the base transformer model.
 
-    Attributes:
-        embedding (`torch.nn.Embedding`): The embedding layer of the prompt embedding.
+    **Attributes**:
+        **embedding** (`torch.nn.Embedding`) -- The embedding layer of the prompt embedding.
 
     Example::
 

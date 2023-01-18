@@ -62,7 +62,7 @@ def get_peft_config(config_dict):
     Returns a Peft config object from a dictionary.
 
     Args:
-        config_dict (`Dict[str, Any]`):
+        config_dict (`Dict[str, Any]`): Dictionary containing the configuration parameters.
     """
 
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
@@ -128,8 +128,8 @@ def get_peft_model(model, peft_config):
     Returns a Peft model object from a model and a config.
 
     Args:
-        model (`transformers.PreTrainedModel`):
-        peft_config (`transformers.PeftConfig`):
+        model ([`transformers.PreTrainedModel`]): Model to be wrapped.
+        peft_config ([`PeftConfig`]): Configuration object containing the parameters of the Peft model.
     """
 
     model_config = model.config.to_dict()

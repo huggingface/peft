@@ -30,20 +30,23 @@ class PeftModel(torch.nn.Module):
     Parameter-Efficient Fine-Tuning Model. Base model encompassing various Peft methods.
 
     Args:
-        model (`PreTrainedModel`): The base transformer model used for Peft.
-        peft_config (`PeftConfig`): The configuration of the Peft model.
+        model ([`PreTrainedModel`]): The base transformer model used for Peft.
+        peft_config ([`PeftConfig`]): The configuration of the Peft model.
 
 
-    Attributes:
-        base_model (`PreTrainedModel`): The base transformer model used for Peft. peft_config (`PeftConfig`): The
-        configuration of the Peft model. modules_to_save (`list` of `str`): The list of sub-module names to save when
-        saving the model. prompt_encoder (`PromptEncoder`): The prompt encoder used for Peft if `peft_config.peft_type
-        != PeftType.LORA`. prompt_tokens (`torch.Tensor`): The virtual prompt tokens used for Peft if
-        `peft_config.peft_type != PeftType.LORA`. transformer_backbone_name (`str`): The name of the transformer
-        backbone in the base model
-            if `peft_config.peft_type != PeftType.LORA`.
-        word_embeddings (`torch.nn.Embedding`): The word embeddings of the transformer backbone
-            in the base model if `peft_config.peft_type != PeftType.LORA`.
+    **Attributes**:
+        - **base_model** ([`PreTrainedModel`]) -- The base transformer model used for Peft.
+        - **peft_config** ([`PeftConfig`]) -- The configuration of the Peft model.
+        - **modules_to_save** (`list` of `str`) -- The list of sub-module names to save when
+        saving the model.
+        - **prompt_encoder** ([`PromptEncoder`]) -- The prompt encoder used for Peft if `peft_config.peft_type
+        != PeftType.LORA`.
+        - **prompt_tokens** (`torch.Tensor`) -- The virtual prompt tokens used for Peft if
+        `peft_config.peft_type != PeftType.LORA`.
+        - **transformer_backbone_name** (`str`) -- The name of the transformer
+        backbone in the base model if `peft_config.peft_type != PeftType.LORA`.
+        - **word_embeddings** (`torch.nn.Embedding`) -- The word embeddings of the transformer backbone
+        in the base model if `peft_config.peft_type != PeftType.LORA`.
     """
 
     def __init__(self, model, peft_config: PeftConfig):
@@ -92,7 +95,7 @@ class PeftModel(torch.nn.Module):
 
     def get_prompt_embedding_to_save(self):
         """
-        Returns the prompt embedding to save when saving the model. Only applocable when `peft_config.peft_type !=
+        Returns the prompt embedding to save when saving the model. Only applicable when `peft_config.peft_type !=
         PeftType.LORA`.
         """
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(1, -1).to(self.device)
@@ -103,7 +106,7 @@ class PeftModel(torch.nn.Module):
 
     def get_prompt(self, batch_size):
         """
-        Returns the virtual prompts to use for Peft. Only applocable when `peft_config.peft_type != PeftType.LORA`.
+        Returns the virtual prompts to use for Peft. Only applicable when `peft_config.peft_type != PeftType.LORA`.
         """
         prompt_tokens = self.prompt_tokens.unsqueeze(0).expand(batch_size, -1).to(self.device)
         if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
@@ -162,12 +165,12 @@ class PeftModelForSequenceClassification(PeftModel):
     Peft model for sequence classification tasks.
 
     Args:
-        model (`PreTrainedModel`): Base transformer model
-        peft_config (`PeftConfig`): Peft config.
+        model ([`PreTrainedModel`]): Base transformer model
+        peft_config ([`PeftConfig`]): Peft config.
 
-    Attributes:
-        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The name of
-        the classification layer.
+    **Attributes**:
+        - **config** ([`PretrainedConfig`]) -- The configuration object of the base model.
+        - **cls_layer_name** (`str`) -- The name of the classification layer.
 
     Example::
 
@@ -332,8 +335,8 @@ class PeftModelForCausalLM(PeftModel):
     Peft model for Causal LM
 
     Args:
-        model (`PreTrainedModel`): Base transformer model
-        peft_config (`PeftConfig`): Peft config.
+        model ([`PreTrainedModel`]): Base transformer model
+        peft_config ([`PeftConfig`]): Peft config.
 
 
     Example::
@@ -454,8 +457,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
     Peft model for Seq2Seq LM
 
     Args:
-        model (`PreTrainedModel`): Base transformer model
-        peft_config (`PeftConfig`): Peft config.
+        model ([`PreTrainedModel`]): Base transformer model
+        peft_config ([`PeftConfig`]): Peft config.
 
 
     Example::
@@ -606,12 +609,12 @@ class PeftModelForTokenClassification(PeftModel):
     Peft model for sequence classification tasks.
 
     Args:
-        model (`PreTrainedModel`): Base transformer model
-        peft_config (`PeftConfig`): Peft config.
+        model ([`PreTrainedModel`]): Base transformer model
+        peft_config ([`PeftConfig`]): Peft config.
 
-    Attributes:
-        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The name of
-        the classification layer.
+    **Attributes**:
+        - **config** ([`PretrainedConfig`]) -- The configuration object of the base model.
+        - **cls_layer_name** (`str`) -- The name of the classification layer.
 
     Example::
 
