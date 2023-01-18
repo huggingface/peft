@@ -123,6 +123,8 @@ accelerate launch train_dreambooth.py \
 Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 [smangrul/peft-lora-sd-dreambooth](https://huggingface.co/spaces/smangrul/peft-lora-sd-dreambooth).
 
+![peft lora dreambooth gradio space](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_lora_dreambooth_gradio_space.png)
+
 ### Parameter Efficient Tuning of LLMs for RLHF components such as Ranker and Policy [ToDo]
 
 ### Save compute and storage even for medium and small models
