@@ -1,3 +1,18 @@
+# coding=utf-8
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import inspect
 import warnings
 
@@ -20,12 +35,12 @@ class PeftModel(torch.nn.Module):
 
 
     Attributes:
-        base_model (`PreTrainedModel`): The base transformer model used for Peft. peft_config (`PeftConfig`):
-        The configuration of the Peft model. modules_to_save (`list` of `str`): The list of sub-module names
-        to save when saving the model. prompt_encoder (`PromptEncoder`): The prompt encoder used for Peft if
-        `peft_config.peft_type != PeftType.LORA`. prompt_tokens (`torch.Tensor`): The virtual prompt tokens used for
-        Peft if `peft_config.peft_type != PeftType.LORA`. transformer_backbone_name (`str`): The name of the
-        transformer backbone in the base model
+        base_model (`PreTrainedModel`): The base transformer model used for Peft. peft_config (`PeftConfig`): The
+        configuration of the Peft model. modules_to_save (`list` of `str`): The list of sub-module names to save when
+        saving the model. prompt_encoder (`PromptEncoder`): The prompt encoder used for Peft if `peft_config.peft_type
+        != PeftType.LORA`. prompt_tokens (`torch.Tensor`): The virtual prompt tokens used for Peft if
+        `peft_config.peft_type != PeftType.LORA`. transformer_backbone_name (`str`): The name of the transformer
+        backbone in the base model
             if `peft_config.peft_type != PeftType.LORA`.
         word_embeddings (`torch.nn.Embedding`): The word embeddings of the transformer backbone
             in the base model if `peft_config.peft_type != PeftType.LORA`.
@@ -151,20 +166,20 @@ class PeftModelForSequenceClassification(PeftModel):
         peft_config (`PeftConfig`): Peft config.
 
     Attributes:
-        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The
-        name of the classification layer.
+        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The name of
+        the classification layer.
 
     Example::
 
         >>> from transformers import AutoModelForSequenceClassification >>> from peft import
         PeftModelForSequenceClassification, get_peft_config >>> config = {
-                'peft_type': 'PREFIX_TUNING', 'task_type': 'SEQ_CLS', 'inference_mode': False, 'num_virtual_tokens': 20,
-                'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
+                'peft_type': 'PREFIX_TUNING', 'task_type': 'SEQ_CLS', 'inference_mode': False, 'num_virtual_tokens':
+                20, 'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
                 'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> peft_config = get_peft_config(config)
-        >>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased")
-        >>> peft_model = PeftModelForSequenceClassification(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
+        >>> peft_config = get_peft_config(config) >>> model =
+        AutoModelForSequenceClassification.from_pretrained("bert-base-cased") >>> peft_model =
+        PeftModelForSequenceClassification(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
         params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
     """
 
@@ -323,17 +338,15 @@ class PeftModelForCausalLM(PeftModel):
 
     Example::
 
-        >>> from transformers import AutoModelForCausalLM >>> from peft import PeftModelForCausalLM, get_peft_config >>>
-        config = {
+        >>> from transformers import AutoModelForCausalLM >>> from peft import PeftModelForCausalLM, get_peft_config
+        >>> config = {
                 'peft_type': 'PREFIX_TUNING', 'task_type': 'CAUSAL_LM', 'inference_mode': False, 'num_virtual_tokens':
                 20, 'token_dim': 1280, 'num_transformer_submodules': 1, 'num_attention_heads': 20, 'num_layers': 36,
                 'encoder_hidden_size': 1280, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
-        >>> peft_config = get_peft_config(config)
-        >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large")
-        >>> peft_model = PeftModelForCausalLM(model, peft_config)
-        >>> peft_model.print_trainable_parameters() trainable params:
-        1843200 || all params: 775873280 || trainable%: 0.23756456724479544
+        >>> peft_config = get_peft_config(config) >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large") >>>
+        peft_model = PeftModelForCausalLM(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
+        params: 1843200 || all params: 775873280 || trainable%: 0.23756456724479544
     """
 
     def __init__(self, model, peft_config: PeftConfig):
@@ -447,16 +460,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM >>> from peft import PeftModelForSeq2SeqLM, get_peft_config >>>
-        config = {
+        >>> from transformers import AutoModelForSeq2SeqLM >>> from peft import PeftModelForSeq2SeqLM, get_peft_config
+        >>> config = {
                 'peft_type': 'LORA', 'task_type': 'SEQ_2_SEQ_LM', 'inference_mode': False, 'r': 8, 'target_modules':
                 ['q', 'v'], 'lora_alpha': 32, 'lora_dropout': 0.1, 'merge_weights': False, 'fan_in_fan_out': False,
                 'enable_lora': None, 'bias': 'none'
             }
-        >>> peft_config = get_peft_config(config)
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> peft_model = PeftModelForSeq2SeqLM(model, peft_config)
-        >>> peft_model.print_trainable_parameters() trainable
+        >>> peft_config = get_peft_config(config) >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>>
+        peft_model = PeftModelForSeq2SeqLM(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
         params: 884736 || all params: 223843584 || trainable%: 0.3952474242013566
     """
 
@@ -599,8 +610,8 @@ class PeftModelForTokenClassification(PeftModel):
         peft_config (`PeftConfig`): Peft config.
 
     Attributes:
-        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The
-        name of the classification layer.
+        config (`PretrainedConfig`): The configuration object of the base model. cls_layer_name (`str`): The name of
+        the classification layer.
 
     Example::
 
@@ -611,9 +622,8 @@ class PeftModelForTokenClassification(PeftModel):
                 'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
             }
         >>> peft_config = get_peft_config(config) >>> model =
-        AutoModelForTokenClassification.from_pretrained("bert-base-cased")
-        >>> peft_model = PeftModelForTokenClassification(model, peft_config)
-        >>> peft_model.print_trainable_parameters() trainable
+        AutoModelForTokenClassification.from_pretrained("bert-base-cased") >>> peft_model =
+        PeftModelForTokenClassification(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
         params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
     """
 
