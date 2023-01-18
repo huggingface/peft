@@ -1,0 +1,11 @@
+transformers
+accelerate
+loralib
+evaluate
+deepspeed
+tqdm
+datasets
+diffusers
+Pillow
+torchvision
+huggingface_hub
