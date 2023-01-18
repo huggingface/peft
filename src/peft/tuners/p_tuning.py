@@ -30,11 +30,11 @@ class PromptEncoderReparameterizationType(str, enum.Enum):
 @dataclass
 class PromptEncoderConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~peft.PromptEncoder`.
+    This is the configuration class to store the configuration of a [`~peft.PromptEncoder`].
 
     Args:
         encoder_reparameterization_type
-            (Union[:class:`PromptEncoderReparameterizationType`, `str`]): The type of reparameterization to use.
+            (Union[[`PromptEncoderReparameterizationType`], `str`]): The type of reparameterization to use.
         encoder_hidden_size (`int`): The hidden size of the prompt encoder.
         encoder_num_layers (`int`): The number of layers of the prompt encoder.
         encoder_dropout (`float`): The dropout probability of the prompt encoder.
@@ -68,7 +68,7 @@ class PromptEncoder(torch.nn.Module):
     The prompt encoder network that is used to generate the virtual token embeddings for p-tuning.
 
     Args:
-        config (:class:`PromptEncoderConfig`): The configuration of the prompt encoder.
+        config ([`PromptEncoderConfig`]): The configuration of the prompt encoder.
 
     Example::
 
@@ -79,15 +79,18 @@ class PromptEncoder(torch.nn.Module):
             )
         >>> prompt_encoder = PromptEncoder(config)
 
-    Attributes:
-        embedding (:class:`~torch.nn.Embedding`): The embedding layer of the prompt encoder. mlp_head
-        (:class:`~torch.nn.Sequential`): The MLP head of the prompt encoder if `inference_mode=False`. lstm_head
-        (:class:`~torch.nn.LSTM`):
-            The LSTM head of the prompt encoder if `inference_mode=False` and `encoder_reparameterization_type="LSTM"`.
-        token_dim (`int`): The hidden embedding dimension of the base transformer model. input_size (`int`): The input
-        size of the prompt encoder. output_size (`int`): The output size of the prompt encoder. hidden_size (`int`):
-        The hidden size of the prompt encoder. total_virtual_tokens (`int`): The total number of virtual tokens of the
-        prompt encoder. encoder_type (Union[:class:`PromptEncoderReparameterizationType`, `str`]):
+    **Attributes**:
+        - **embedding** ([`~torch.nn.Embedding`]) -- The embedding layer of the prompt encoder.
+        - **mlp_head** ([`~torch.nn.Sequential`]) -- The MLP head of the prompt encoder if `inference_mode=False`.
+        - **lstm_head** ([`~torch.nn.LSTM`]) -- The LSTM head of the prompt encoder if `inference_mode=False` and
+        `encoder_reparameterization_type="LSTM"`.
+        - **token_dim** (`int`) -- The hidden embedding dimension of the base transformer model.
+        - **input_size** (`int`) -- The input size of the prompt encoder.
+        - **output_size** (`int`) -- The output size of the prompt encoder.
+        - **hidden_size** (`int`) -- The hidden size of the prompt encoder.
+        - **total_virtual_tokens** (`int`): The total number of virtual tokens of the
+        prompt encoder.
+        - **encoder_type** (Union[[`PromptEncoderReparameterizationType`], `str`]):
             The encoder type of the prompt encoder.
 
 
