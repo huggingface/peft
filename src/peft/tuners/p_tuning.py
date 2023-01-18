@@ -1,3 +1,18 @@
+# coding=utf-8
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import enum
 from dataclasses import dataclass, field
 from typing import Union
@@ -19,8 +34,7 @@ class PromptEncoderConfig(PromptLearningConfig):
 
     Args:
         encoder_reparameterization_type
-            (Union[:class:`PromptEncoderReparameterizationType`, `str`]): The type of reparameterization to
-            use.
+            (Union[:class:`PromptEncoderReparameterizationType`, `str`]): The type of reparameterization to use.
         encoder_hidden_size (`int`): The hidden size of the prompt encoder.
         encoder_num_layers (`int`): The number of layers of the prompt encoder.
         encoder_dropout (`float`): The dropout probability of the prompt encoder.
@@ -70,11 +84,10 @@ class PromptEncoder(torch.nn.Module):
         (:class:`~torch.nn.Sequential`): The MLP head of the prompt encoder if `inference_mode=False`. lstm_head
         (:class:`~torch.nn.LSTM`):
             The LSTM head of the prompt encoder if `inference_mode=False` and `encoder_reparameterization_type="LSTM"`.
-        token_dim (`int`): The hidden embedding dimension of the base transformer model. input_size (`int`):
-        The input size of the prompt encoder. output_size (`int`): The output size of the prompt encoder.
-        hidden_size (`int`): The hidden size of the prompt encoder. total_virtual_tokens (`int`): The total
-        number of virtual tokens of the prompt encoder. encoder_type
-        (Union[:class:`PromptEncoderReparameterizationType`, `str`]):
+        token_dim (`int`): The hidden embedding dimension of the base transformer model. input_size (`int`): The input
+        size of the prompt encoder. output_size (`int`): The output size of the prompt encoder. hidden_size (`int`):
+        The hidden size of the prompt encoder. total_virtual_tokens (`int`): The total number of virtual tokens of the
+        prompt encoder. encoder_type (Union[:class:`PromptEncoderReparameterizationType`, `str`]):
             The encoder type of the prompt encoder.
 
 
