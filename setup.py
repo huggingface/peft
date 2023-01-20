@@ -22,7 +22,7 @@ extras["dev"] = extras["quality"] + extras["docs_specific"]
 
 setup(
     name="peft",
-    version="0.1.0.dev",
+    version="0.1.0.dev0",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
@@ -30,7 +30,7 @@ setup(
     license="Apache",
     author="The HuggingFace team",
     author_email="sourab@huggingface.co",
-    url="https://github.com/huggingface/pets",
+    url="https://github.com/huggingface/peft",
     package_dir={"": "src"},
     packages=find_packages("src"),
     entry_points={},
