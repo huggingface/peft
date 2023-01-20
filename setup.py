@@ -22,7 +22,7 @@ extras["dev"] = extras["quality"] + extras["docs_specific"]
 
 setup(
     name="peft",
-    version="0.0.2",
+    version="0.1.0.dev",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
@@ -71,9 +71,7 @@ setup(
 #      twine upload dist/* -r pypitest
 #      twine upload dist/* -r pypitest --repository-url=https://test.pypi.org/legacy/
 # 6. Check that you can install it in a virtualenv by running:
-#      pip install -i https://testpypi.python.org/pypi accelerate
-#      accelerate env
-#      accelerate test
+#      pip install -i https://testpypi.python.org/pypi peft
 # 7. Upload the final version to actual pypi:
 #      twine upload dist/* -r pypi
 # 8. Add release notes to the tag in github once everything is looking hunky-dory.
