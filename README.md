@@ -323,7 +323,7 @@ If you use 🤗 PEFT in your publication, please cite it by using the following 
 ```bibtex
 @Misc{peft,
   title =        {PEFT: State-of-the-art Parameter-Efficient Fine-Tuning methods},
-  author =       {Sourab Mangrulkar, Sylvain Gugger},
+  author =       {Sourab Mangrulkar, Sylvain Gugger, Lysandre Debut},
   howpublished = {\url{https://github.com/huggingface/peft}},
   year =         {2022}
 }

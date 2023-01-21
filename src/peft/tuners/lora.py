@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 import math
 import warnings
 from dataclasses import asdict, dataclass, field
@@ -24,10 +25,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
-import loralib as lora  # noqa: F401
-from loralib import mark_only_lora_as_trainable
-
 from ..utils import PeftConfig, PeftType, transpose
+
+
+def is_loralib_available():
+    return importlib.util.find_spec("loralib") is not None
+
+
+if is_loralib_available():
+    import loralib as lora  # noqa: F401
+    from loralib import mark_only_lora_as_trainable
 
 
 @dataclass
@@ -90,6 +97,8 @@ class LoraModel(torch.nn.Module):
     """
 
     def __init__(self, config, model):
+        if not is_loralib_available():
+            raise ImportError("LoRA requires `loralib` to be installed. Please run `pip install loralib`.")
         super().__init__()
         self.peft_config = config
         self.model = model
