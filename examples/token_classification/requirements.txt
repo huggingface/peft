@@ -2,7 +2,6 @@ transformers
 accelerate
 loralib
 evaluate
-deepspeed
 tqdm
 datasets
 Pillow
