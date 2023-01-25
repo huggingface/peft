@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import os
 import importlib
 import math
 import warnings
@@ -25,7 +25,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
-from ..utils import PeftConfig, PeftType, transpose
+from huggingface_hub import hf_hub_download
+
+from ..utils import PeftConfig, PeftType, transpose, WEIGHTS_NAME, CONFIG_NAME, get_peft_model_state_dict
 
 
 def is_loralib_available():
@@ -85,8 +87,9 @@ class LoraModel(torch.nn.Module):
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import LoraModel, LoraConfig >>>
-        config = LoraConfig(
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig 
+        >>> from peft import LoraModel, LoraConfig 
+        >>> config = LoraConfig(
             peft_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
             lora_dropout=0.01, )
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoraModel(config, model)
@@ -166,6 +169,57 @@ class LoraModel(torch.nn.Module):
         if inference:
             config["inference_mode"] = True
         return config
+
+    def save_pretrained(self, save_directory):
+        if os.path.isfile(save_directory):
+            raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
+        os.makedirs(save_directory, exist_ok=True)
+        
+        # save the config
+        self.peft_config.save_pretrained(save_directory)
+
+        for param in self.parameters():
+            param.requires_grad = False  # freeze the model 
+
+        # save only the trainable weights
+        output_state_dict = get_peft_model_state_dict(self)
+        torch.save(output_state_dict, os.path.join(save_directory, WEIGHTS_NAME))
+    
+    @classmethod
+    def from_pretrained(cls, model, lora_id, **kwargs):
+        r"""
+        
+        Args:
+            model (`transformers.PreTrainedModel`): 
+                The model to be adapted.
+            lora_id (`str`):
+                The name of the Lora configuration to use.
+        """
+        # load the config
+        config = LoraConfig.from_pretrained(lora_id)
+        
+        model = cls(config, model)
+
+        # load weights if any
+        if os.path.exists(os.path.join(lora_id, WEIGHTS_NAME)):
+            filename = os.path.join(lora_id, WEIGHTS_NAME)
+        else:
+            try:
+                filename = hf_hub_download(lora_id, WEIGHTS_NAME)
+            except: # noqa
+                raise ValueError(
+                    f"Can't find weights for {lora_id} in {lora_id} or in the Hugging Face Hub. "
+                    f"Please check that the file {WEIGHTS_NAME} is present at {lora_id}."
+                )
+
+
+        adapters_weights = torch.load(filename)
+        # load the weights into the model
+        model.load_state_dict(adapters_weights, strict=False)
+
+        return model
+
+
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
