@@ -106,6 +106,7 @@ class LoraModel(torch.nn.Module):
         self.model = model
         self._find_and_replace()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
+        self.forward = self.model.forward
 
     def _find_and_replace(self):
         kwargs = {
@@ -121,7 +122,15 @@ class LoraModel(torch.nn.Module):
                 parent, target, target_name = self._get_submodules(key)
                 bias = target.bias is not None
                 if isinstance(target, bnb.nn.Linear8bitLt) and self.peft_config.enable_lora is None:
-                    new_module = Linear8bitLt(target.in_features, target.out_features, **kwargs)
+                    kwargs.update(
+                        {
+                            "has_fp16_weights": target.state.has_fp16_weights,
+                            "memory_efficient_backward": target.state.memory_efficient_backward,
+                            "threshold": target.state.threshold,
+                            "index": target.index,
+                        }
+                    )
+                    new_module = Linear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
                 elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
                     new_module = Linear(target.in_features, target.out_features, bias=bias, **kwargs)
                 elif self.peft_config.enable_lora is not None:
@@ -150,9 +159,9 @@ class LoraModel(torch.nn.Module):
         new_module.weight = old_module.weight
         if old_module.bias is not None:
             new_module.bias = old_module.bias
-
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
+        if getattr(old_module, "state", None) is not None:
+            new_module.state = old_module.state
+            new_module.to(old_module.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -375,7 +384,16 @@ class Linear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
         lora_dropout: float = 0.0,
         **kwargs,
     ):
-        bnb.nn.Linear8bitLt.__init__(self, in_features, out_features, kwargs.get("bias", None))
+        bnb.nn.Linear8bitLt.__init__(
+            self,
+            in_features,
+            out_features,
+            bias=kwargs.get("bias", True),
+            has_fp16_weights=kwargs.get("has_fp16_weights", True),
+            memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
+            threshold=kwargs.get("threshold", 0.0),
+            index=kwargs.get("index", None),
+        )
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=False)
         # Actual trainable parameters
         if r > 0:
