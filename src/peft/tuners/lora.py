@@ -27,6 +27,7 @@ from transformers.pytorch_utils import Conv1D
 
 from huggingface_hub import hf_hub_download
 
+from transformers.utils import PushToHubMixin
 from ..utils import PeftConfig, PeftType, transpose, WEIGHTS_NAME, CONFIG_NAME, get_peft_model_state_dict
 
 
@@ -37,6 +38,17 @@ def is_loralib_available():
 if is_loralib_available():
     import loralib as lora  # noqa: F401
     from loralib import mark_only_lora_as_trainable
+
+MODEL_CARD_TEMPLATE = """---
+license: apache-2.0
+base_model: {base_model}
+tags:
+- peft
+- lora
+---
+# Lora adapters for {model_name}
+
+"""
 
 
 @dataclass
@@ -74,7 +86,7 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
 
 
-class LoraModel(torch.nn.Module):
+class LoraModel(PushToHubMixin, torch.nn.Module):
     """
     Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
@@ -150,27 +162,19 @@ class LoraModel(torch.nn.Module):
         if old_module.bias is not None:
             new_module.bias = old_module.bias
 
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
+    def save_pretrained(self, save_directory, **kwargs):
+        r"""
+        This function saves the adapter model and the adapter configuration files to a directory, so that it
+        can be re-loaded using the `LoraModel.from_pretrained` class method, and also used by the
+        `LoraModel.push_to_hub` method.
 
-    def __getattr__(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            return getattr(self.model, name)
-
-    @property
-    def modules_to_save(self):
-        return None
-
-    def get_peft_config_as_dict(self, inference: bool = False):
-        config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(self.peft_config).items()}
-        if inference:
-            config["inference_mode"] = True
-        return config
-
-    def save_pretrained(self, save_directory):
+        Args:   
+            save_directory (`str`):
+                Directory where the adapter model and configuration files will be saved (will be created if it does not
+                exist).
+            **kwargs:
+                Additional keyword arguments passed along to the `push_to_hub` method.
+        """
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
         os.makedirs(save_directory, exist_ok=True)
@@ -184,16 +188,31 @@ class LoraModel(torch.nn.Module):
         # save only the trainable weights
         output_state_dict = get_peft_model_state_dict(self)
         torch.save(output_state_dict, os.path.join(save_directory, WEIGHTS_NAME))
+
+        # save model card
+        if 'name_or_path' in self.model.__dict__:
+            model_name = self.model.__dict__['name_or_path']
+        else:
+            model_name = None
+        model_card_content = MODEL_CARD_TEMPLATE.format(model_name=model_name, base_model=model_name)
+        with open(os.path.join(save_directory, "README.md"), "w", encoding="utf-8") as f:
+            f.write(model_card_content)
     
     @classmethod
     def from_pretrained(cls, model, lora_id, **kwargs):
         r"""
+        Instantiate a `LoraModel` from a pretrained Lora configuration and weights.
         
         Args:
             model (`transformers.PreTrainedModel`): 
-                The model to be adapted.
+                The model to be adapted. The model should be initialized with the `from_pretrained` method.
+                from `transformers` library.
             lora_id (`str`):
-                The name of the Lora configuration to use.
+                The name of the Lora configuration to use. Can be either:
+                    - A string, the `model id` of a Lora configuration hosted inside a model repo on
+                        huggingface Hub
+                    - A path to a directory containing a Lora configuration file saved using the
+                        `save_pretrained` method, e.g., ``./my_lora_config_directory/``.
         """
         # load the config
         config = LoraConfig.from_pretrained(lora_id)
@@ -218,6 +237,27 @@ class LoraModel(torch.nn.Module):
         model.load_state_dict(adapters_weights, strict=False)
 
         return model
+
+
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.model, name)
+
+    @property
+    def modules_to_save(self):
+        return None
+
+    def get_peft_config_as_dict(self, inference: bool = False):
+        config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(self.peft_config).items()}
+        if inference:
+            config["inference_mode"] = True
+        return config
 
 
 
