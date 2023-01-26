@@ -38,9 +38,14 @@ class TaskType(str, enum.Enum):
 
 @dataclass
 class PeftConfigMixin(object):
+    peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
+
     @property
     def __dict__(self):
         return asdict(self)
+
+    def to_dict(self):
+        return self.__dict__
 
     def save_pretrained(self, save_directory):
         if os.path.isfile(save_directory):
