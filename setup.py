@@ -43,6 +43,7 @@ setup(
         "torch>=1.13.0",
         "transformers",
         "accelerate",
+        "bitsandbytes",
     ],
     extras_require=extras,
     classifiers=[
