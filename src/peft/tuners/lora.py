@@ -12,9 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import os
 import importlib
 import math
+import os
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -24,13 +24,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
-
+from transformers.utils import PushToHubMixin
 
 import bitsandbytes as bnb
 from huggingface_hub import hf_hub_download
 
-from transformers.utils import PushToHubMixin
-from ..utils import PeftConfig, PeftType, transpose, WEIGHTS_NAME, CONFIG_NAME, get_peft_model_state_dict
+from ..utils import WEIGHTS_NAME, PeftConfig, PeftType, get_peft_model_state_dict, transpose
 
 
 def is_loralib_available():
@@ -40,17 +39,6 @@ def is_loralib_available():
 if is_loralib_available():
     import loralib as lora  # noqa: F401
     from loralib import mark_only_lora_as_trainable
-
-MODEL_CARD_TEMPLATE = """---
-license: apache-2.0
-base_model: {base_model}
-tags:
-- peft
-- lora
----
-# Lora adapters for {model_name}
-
-"""
 
 
 @dataclass
@@ -101,9 +89,8 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig 
-        >>> from peft import LoraModel, LoraConfig 
-        >>> config = LoraConfig(
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import LoraModel, LoraConfig >>>
+        config = LoraConfig(
             peft_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
             lora_dropout=0.01, )
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoraModel(config, model)
@@ -180,11 +167,11 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
-        This function saves the adapter model and the adapter configuration files to a directory, so that it
-        can be re-loaded using the `LoraModel.from_pretrained` class method, and also used by the
-        `LoraModel.push_to_hub` method.
+        This function saves the adapter model and the adapter configuration files to a directory, so that it can be
+        re-loaded using the `LoraModel.from_pretrained` class method, and also used by the `LoraModel.push_to_hub`
+        method.
 
-        Args:   
+        Args:
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
                 exist).
@@ -194,35 +181,26 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
         os.makedirs(save_directory, exist_ok=True)
-        
+
         # save the config
         self.peft_config.save_pretrained(save_directory)
 
         for param in self.parameters():
-            param.requires_grad = False  # freeze the model 
+            param.requires_grad = False  # freeze the model
 
         # save only the trainable weights
         output_state_dict = get_peft_model_state_dict(self)
         torch.save(output_state_dict, os.path.join(save_directory, WEIGHTS_NAME))
 
-        # save model card
-        if 'name_or_path' in self.model.__dict__:
-            model_name = self.model.__dict__['name_or_path']
-        else:
-            model_name = None
-        model_card_content = MODEL_CARD_TEMPLATE.format(model_name=model_name, base_model=model_name)
-        with open(os.path.join(save_directory, "README.md"), "w", encoding="utf-8") as f:
-            f.write(model_card_content)
-    
     @classmethod
     def from_pretrained(cls, model, lora_id, **kwargs):
         r"""
         Instantiate a `LoraModel` from a pretrained Lora configuration and weights.
-        
+
         Args:
-            model (`transformers.PreTrainedModel`): 
-                The model to be adapted. The model should be initialized with the `from_pretrained` method.
-                from `transformers` library.
+            model (`transformers.PreTrainedModel`):
+                The model to be adapted. The model should be initialized with the `from_pretrained` method. from
+                `transformers` library.
             lora_id (`str`):
                 The name of the Lora configuration to use. Can be either:
                     - A string, the `model id` of a Lora configuration hosted inside a model repo on
@@ -232,7 +210,7 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
         """
         # load the config
         config = LoraConfig.from_pretrained(lora_id)
-        
+
         model = cls(config, model)
 
         # load weights if any
@@ -241,19 +219,17 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
         else:
             try:
                 filename = hf_hub_download(lora_id, WEIGHTS_NAME)
-            except: # noqa
+            except:  # noqa
                 raise ValueError(
                     f"Can't find weights for {lora_id} in {lora_id} or in the Hugging Face Hub. "
                     f"Please check that the file {WEIGHTS_NAME} is present at {lora_id}."
                 )
-
 
         adapters_weights = torch.load(filename)
         # load the weights into the model
         model.load_state_dict(adapters_weights, strict=False)
 
         return model
-
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -271,8 +247,6 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
         if inference:
             config["inference_mode"] = True
         return config
-
-
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py

@@ -43,6 +43,11 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
             self.assertTrue(hasattr(config, "save_pretrained"))
             self.assertTrue(hasattr(config, "from_pretrained"))
             self.assertTrue(hasattr(config, "from_json_file"))
+    
+    def test_task_type(self):
+        for config_class in self.all_config_classes:
+            # assert this will not fail
+            _ = config_class(task_type="test")
 
 
     def test_save_pretrained(self):

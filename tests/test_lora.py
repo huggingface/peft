@@ -88,13 +88,6 @@ class LoraTester(unittest.TestCase, LoraTestMixin):
                 for key in state_dict.keys():
                     self.assertTrue(torch.allclose(state_dict[key], state_dict_from_pretrained[key]))
 
-                # check if `README.md` is present
-                self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "README.md")))
-                # check if `base_model` attribute is in `README.md`
-                with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
-                    readme = f.read()
-                    self.assertTrue("base_model" in readme)
-
                 # check if `adapter_model.bin` is present
                 self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
 
