@@ -192,6 +192,7 @@ class PeftModel(torch.nn.Module, PushToHubMixin):
         # save the config
         if self.peft_config.base_model_name_or_path is None:
             self.peft_config.base_model_name_or_path = self.base_model.__dict__.get("name_or_path", None)
+        self.peft_config.inference_mode = True
         self.peft_config.save_pretrained(save_directory)
 
         for param in self.parameters():
@@ -217,10 +218,12 @@ class PeftModel(torch.nn.Module, PushToHubMixin):
                     - A path to a directory containing a Lora configuration file saved using the
                         `save_pretrained` method, e.g., ``./my_lora_config_directory/``.
         """
-        # load the config
-        config = PeftConfig.from_pretrained(model_id)
+        from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
 
-        model = cls(config, model)
+        # load the config
+        config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig.from_pretrained(model_id).peft_type].from_pretrained(model_id)
+
+        model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config)
 
         # load weights if any
         if os.path.exists(os.path.join(model_id, WEIGHTS_NAME)):

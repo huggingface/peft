@@ -126,6 +126,7 @@ class PeftConfigMixin(PushToHubMixin):
         return json_object
 
 
+@dataclass
 class PeftConfig(PeftConfigMixin):
     """
     This is the base configuration class to store the configuration of a :class:`~peft.PeftModel`.
@@ -142,6 +143,7 @@ class PeftConfig(PeftConfigMixin):
     base_model_name_or_path: str = field(default=None, metadata={"help": "The name of the base model to use."})
 
 
+@dataclass
 class PromptLearningConfig(PeftConfig):
     """
     This is the base configuration class to store the configuration of a Union[[`~peft.PrefixTuning`],
