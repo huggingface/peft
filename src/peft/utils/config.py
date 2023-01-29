@@ -124,6 +124,7 @@ class PeftConfigMixin(PushToHubMixin):
         return json_object
 
 
+@dataclass
 class PeftConfig(PeftConfigMixin):
     """
     This is the base configuration class to store the configuration of a :class:`~peft.PeftModel`.

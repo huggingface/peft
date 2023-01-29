@@ -255,9 +255,6 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
         return model
 
 
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
