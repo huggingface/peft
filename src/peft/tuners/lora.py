@@ -14,7 +14,6 @@
 # limitations under the License.
 import importlib
 import math
-import os
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -24,12 +23,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
-from transformers.utils import PushToHubMixin
 
 import bitsandbytes as bnb
-from huggingface_hub import hf_hub_download
 
-from ..utils import WEIGHTS_NAME, PeftConfig, PeftType, get_peft_model_state_dict, transpose
+from ..utils import PeftConfig, PeftType, transpose
 
 
 def is_loralib_available():
@@ -76,7 +73,7 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
 
 
-class LoraModel(PushToHubMixin, torch.nn.Module):
+class LoraModel(torch.nn.Module):
     """
     Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
@@ -164,72 +161,6 @@ class LoraModel(PushToHubMixin, torch.nn.Module):
         if getattr(old_module, "state", None) is not None:
             new_module.state = old_module.state
             new_module.to(old_module.weight.device)
-
-    def save_pretrained(self, save_directory, **kwargs):
-        r"""
-        This function saves the adapter model and the adapter configuration files to a directory, so that it can be
-        re-loaded using the `LoraModel.from_pretrained` class method, and also used by the `LoraModel.push_to_hub`
-        method.
-
-        Args:
-            save_directory (`str`):
-                Directory where the adapter model and configuration files will be saved (will be created if it does not
-                exist).
-            **kwargs:
-                Additional keyword arguments passed along to the `push_to_hub` method.
-        """
-        if os.path.isfile(save_directory):
-            raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
-        os.makedirs(save_directory, exist_ok=True)
-
-        # save the config
-        self.peft_config.save_pretrained(save_directory)
-
-        for param in self.parameters():
-            param.requires_grad = False  # freeze the model
-
-        # save only the trainable weights
-        output_state_dict = get_peft_model_state_dict(self)
-        torch.save(output_state_dict, os.path.join(save_directory, WEIGHTS_NAME))
-
-    @classmethod
-    def from_pretrained(cls, model, lora_id, **kwargs):
-        r"""
-        Instantiate a `LoraModel` from a pretrained Lora configuration and weights.
-
-        Args:
-            model (`transformers.PreTrainedModel`):
-                The model to be adapted. The model should be initialized with the `from_pretrained` method. from
-                `transformers` library.
-            lora_id (`str`):
-                The name of the Lora configuration to use. Can be either:
-                    - A string, the `model id` of a Lora configuration hosted inside a model repo on
-                        huggingface Hub
-                    - A path to a directory containing a Lora configuration file saved using the
-                        `save_pretrained` method, e.g., ``./my_lora_config_directory/``.
-        """
-        # load the config
-        config = LoraConfig.from_pretrained(lora_id)
-
-        model = cls(config, model)
-
-        # load weights if any
-        if os.path.exists(os.path.join(lora_id, WEIGHTS_NAME)):
-            filename = os.path.join(lora_id, WEIGHTS_NAME)
-        else:
-            try:
-                filename = hf_hub_download(lora_id, WEIGHTS_NAME)
-            except:  # noqa
-                raise ValueError(
-                    f"Can't find weights for {lora_id} in {lora_id} or in the Hugging Face Hub. "
-                    f"Please check that the file {WEIGHTS_NAME} is present at {lora_id}."
-                )
-
-        adapters_weights = torch.load(filename)
-        # load the weights into the model
-        model.load_state_dict(adapters_weights, strict=False)
-
-        return model
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

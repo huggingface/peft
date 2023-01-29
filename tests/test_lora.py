@@ -17,36 +17,62 @@ import torch
 import tempfile
 import unittest
 
-from peft import LoraModel, LoraConfig, get_peft_model_state_dict
+from peft import PeftConfig, PeftModel, LoraConfig, get_peft_model_state_dict, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 
 from transformers import AutoModelForCausalLM
 
 class LoraTestMixin:
     checkpoints_to_test = [
-        "trl-internal-testing/tiny-random-OPTForCausalLM",
+        "hf-internal-testing/tiny-random-OPTForCausalLM",
     ]
+    config_classes = (
+        LoraConfig,
+        # PrefixTuningConfig,
+        # PromptEncoderConfig,
+        # PromptTuningConfig,
+    )
+    config_kwargs = (
+        dict(
+            r = 8,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        ),
+        # dict(
+        #     encoder_hidden_size=32,
+        #     task_type="CAUSAL_LM",
+        # ),
+        # dict(
+        #     encoder_hidden_size=32,
+        #     task_type="CAUSAL_LM",
+        # ),
+        # dict(
+        #     task_type="CAUSAL_LM",
+        # )
 
-class LoraTester(unittest.TestCase, LoraTestMixin):
+    )
+
+class PeftModelTester(unittest.TestCase, LoraTestMixin):
     r"""
-    Test if the LoraModel behaves as expected. This includes:
+    Test if the PeftModel behaves as expected. This includes:
     - test if the model has the expected methods
     """
     def test_attributes_lora_model(self):
         for model_id in self.checkpoints_to_test:
             model = AutoModelForCausalLM.from_pretrained(model_id)
             
-            config = LoraConfig(
-                r = 8,
-                lora_alpha=32,
-                target_modules=["q_proj", "v_proj"],
-                lora_dropout=0.05,
-                bias="none",
-            )
-            model = LoraModel(config, model)
+            for i, config_cls in enumerate(self.config_classes):
+                config = config_cls(
+                    base_model_name_or_path=model_id,
+                    **self.config_kwargs[i],
+                )
+                model = PeftModel(model, config)
 
-            self.assertTrue(hasattr(model, 'save_pretrained'))
-            self.assertTrue(hasattr(model, 'from_pretrained'))
-            self.assertTrue(hasattr(model, 'push_to_hub'))
+                self.assertTrue(hasattr(model, 'save_pretrained'))
+                self.assertTrue(hasattr(model, 'from_pretrained'))
+                self.assertTrue(hasattr(model, 'push_to_hub'))
     
     def test_save_pretrained(self):
         r"""
@@ -62,42 +88,38 @@ class LoraTester(unittest.TestCase, LoraTestMixin):
         for model_id in self.checkpoints_to_test:
             model = AutoModelForCausalLM.from_pretrained(model_id)
             
-            config = LoraConfig(
-                r = 8,
-                lora_alpha=32,
-                target_modules=["q_proj", "v_proj"],
-                lora_dropout=0.05,
-                bias="none",
-            )
-            model = LoraModel(config, model)
+            for i, config_cls in enumerate(self.config_classes):
+                config = config_cls(
+                    base_model_name_or_path=model_id,
+                    **self.config_kwargs[i],
+                )
+                model = PeftModel(model, config)
 
-            with tempfile.TemporaryDirectory() as tmp_dirname:
-                model.save_pretrained(tmp_dirname)
+                with tempfile.TemporaryDirectory() as tmp_dirname:
+                    model.save_pretrained(tmp_dirname)
 
-                model_from_pretrained = AutoModelForCausalLM.from_pretrained(model_id)
-                model_from_pretrained = LoraModel.from_pretrained(model_from_pretrained, tmp_dirname)
-                
-                # check if the state dicts are equal
-                state_dict = get_peft_model_state_dict(model)
-                state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+                    model_from_pretrained = AutoModelForCausalLM.from_pretrained(model_id)
+                    model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+                    
+                    # check if the state dicts are equal
+                    state_dict = get_peft_model_state_dict(model)
+                    state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
-                # check if same keys
-                self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+                    # check if same keys
+                    self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
 
-                # check if tensors equal
-                for key in state_dict.keys():
-                    self.assertTrue(torch.allclose(state_dict[key], state_dict_from_pretrained[key]))
+                    # check if tensors equal
+                    for key in state_dict.keys():
+                        self.assertTrue(torch.allclose(state_dict[key], state_dict_from_pretrained[key]))
 
-                # check if `adapter_model.bin` is present
-                self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+                    # check if `adapter_model.bin` is present
+                    self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
 
-                # check if `adapter_config.json` is present
-                self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+                    # check if `adapter_config.json` is present
+                    self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
 
-                # check if `pytorch_model.bin` is not present
-                self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+                    # check if `pytorch_model.bin` is not present
+                    self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
 
-                # check if `config.json` is not present
-                self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
-
-
+                    # check if `config.json` is not present
+                    self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
