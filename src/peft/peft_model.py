@@ -14,18 +14,31 @@
 # limitations under the License.
 
 import inspect
+import os
 import warnings
 
 import torch
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
+from transformers.utils import PushToHubMixin
+
+from huggingface_hub import hf_hub_download
 
 from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
-from .utils import PeftConfig, PeftType, TaskType, _set_trainable, shift_tokens_right
+from .utils import (
+    WEIGHTS_NAME,
+    PeftConfig,
+    PeftType,
+    TaskType,
+    _set_trainable,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
+    shift_tokens_right,
+)
 
 
-class PeftModel(torch.nn.Module):
+class PeftModel(torch.nn.Module, PushToHubMixin):
     """
     Parameter-Efficient Fine-Tuning Model. Base model encompassing various Peft methods.
 
@@ -158,6 +171,72 @@ class PeftModel(torch.nn.Module):
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.base_model, name)
+
+    def save_pretrained(self, save_directory, **kwargs):
+        r"""
+        This function saves the adapter model and the adapter configuration files to a directory, so that it can be
+        re-loaded using the `LoraModel.from_pretrained` class method, and also used by the `LoraModel.push_to_hub`
+        method.
+
+        Args:
+            save_directory (`str`):
+                Directory where the adapter model and configuration files will be saved (will be created if it does not
+                exist).
+            **kwargs:
+                Additional keyword arguments passed along to the `push_to_hub` method.
+        """
+        if os.path.isfile(save_directory):
+            raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
+        os.makedirs(save_directory, exist_ok=True)
+
+        # save the config
+        if self.peft_config.base_model_name_or_path is None:
+            self.peft_config.base_model_name_or_path = self.base_model.__dict__.get("name_or_path", None)
+        self.peft_config.save_pretrained(save_directory)
+
+        for param in self.parameters():
+            param.requires_grad = False  # freeze the model
+
+        # save only the trainable weights
+        output_state_dict = get_peft_model_state_dict(self, kwargs.get("state_dict", None))
+        torch.save(output_state_dict, os.path.join(save_directory, WEIGHTS_NAME))
+
+    @classmethod
+    def from_pretrained(cls, model, model_id, **kwargs):
+        r"""
+        Instantiate a `LoraModel` from a pretrained Lora configuration and weights.
+
+        Args:
+            model (`transformers.PreTrainedModel`):
+                The model to be adapted. The model should be initialized with the `from_pretrained` method. from
+                `transformers` library.
+            model_id (`str`):
+                The name of the Lora configuration to use. Can be either:
+                    - A string, the `model id` of a Lora configuration hosted inside a model repo on
+                        huggingface Hub
+                    - A path to a directory containing a Lora configuration file saved using the
+                        `save_pretrained` method, e.g., ``./my_lora_config_directory/``.
+        """
+        # load the config
+        config = PeftConfig.from_pretrained(model_id)
+
+        model = cls(config, model)
+
+        # load weights if any
+        if os.path.exists(os.path.join(model_id, WEIGHTS_NAME)):
+            filename = os.path.join(model_id, WEIGHTS_NAME)
+        else:
+            try:
+                filename = hf_hub_download(model_id, WEIGHTS_NAME)
+            except:  # noqa
+                raise ValueError(
+                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
+                    f"Please check that the file {WEIGHTS_NAME} is present at {model_id}."
+                )
+
+        adapters_weights = torch.load(filename)
+        # load the weights into the model
+        return set_peft_model_state_dict(model, adapters_weights)
 
 
 class PeftModelForSequenceClassification(PeftModel):
