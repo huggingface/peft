@@ -138,4 +138,6 @@ def get_peft_model(model, peft_config):
     else:
         peft_config = _prepare_lora_config(peft_config, model_config)
 
+    peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config)
