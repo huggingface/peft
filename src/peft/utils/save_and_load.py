@@ -50,7 +50,10 @@ def get_peft_model_state_dict(model, state_dict=None):
             raise NotImplementedError
     else:
         to_return = {}
-        prompt_embeddings = model.get_prompt_embedding_to_save()
+        if model.peft_config.inference_mode:
+            prompt_embeddings = model.prompt_encoder.embedding.weight
+        else:
+            prompt_embeddings = model.get_prompt_embedding_to_save()
         to_return["prompt_embeddings"] = prompt_embeddings
     if model.modules_to_save is not None:
         for key, value in state_dict.items():

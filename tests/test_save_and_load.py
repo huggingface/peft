@@ -13,22 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-import torch
 import tempfile
 import unittest
 
+import torch
+from transformers import AutoModelForCausalLM
+
 from peft import (
-    PeftConfig,
-    PeftModel,
     LoraConfig,
-    get_peft_model_state_dict,
+    PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
     get_peft_model,
+    get_peft_model_state_dict,
 )
-
-from transformers import AutoModelForCausalLM
 
 
 class PeftTestMixin:
@@ -72,11 +71,10 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     - test if the model has the expected methods
     """
 
-    def test_attributes_lora_model(self):
+    def test_attributes_model(self):
         for model_id in self.checkpoints_to_test:
-            model = AutoModelForCausalLM.from_pretrained(model_id)
-
             for i, config_cls in enumerate(self.config_classes):
+                model = AutoModelForCausalLM.from_pretrained(model_id)
                 config = config_cls(
                     base_model_name_or_path=model_id,
                     **self.config_kwargs[i],
@@ -89,9 +87,8 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
     def test_save_pretrained(self):
         r"""
-        A test to check if `save_pretrained` behaves as expected. This function
-        should only save the state dict of the adapter model and not the state
-        dict of the base model. Hence inside each saved directory you should have:
+        A test to check if `save_pretrained` behaves as expected. This function should only save the state dict of the
+        adapter model and not the state dict of the base model. Hence inside each saved directory you should have:
 
         - README.md (that contains an entry `base_model`)
         - adapter_config.json
@@ -99,20 +96,21 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
         """
         for model_id in self.checkpoints_to_test:
-            model = AutoModelForCausalLM.from_pretrained(model_id)
-
             for i, config_cls in enumerate(self.config_classes):
+                model = AutoModelForCausalLM.from_pretrained(model_id)
                 config = config_cls(
                     base_model_name_or_path=model_id,
                     **self.config_kwargs[i],
                 )
                 model = get_peft_model(model, config)
+                model.to(model.device)
 
                 with tempfile.TemporaryDirectory() as tmp_dirname:
                     model.save_pretrained(tmp_dirname)
 
                     model_from_pretrained = AutoModelForCausalLM.from_pretrained(model_id)
                     model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+                    model_from_pretrained.to(model.device)
 
                     # check if the state dicts are equal
                     state_dict = get_peft_model_state_dict(model)
