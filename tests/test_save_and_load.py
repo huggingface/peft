@@ -17,63 +17,76 @@ import torch
 import tempfile
 import unittest
 
-from peft import PeftConfig, PeftModel, LoraConfig, get_peft_model_state_dict, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from peft import (
+    PeftConfig,
+    PeftModel,
+    LoraConfig,
+    get_peft_model_state_dict,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
+    PromptTuningConfig,
+    get_peft_model,
+)
 
 from transformers import AutoModelForCausalLM
 
-class LoraTestMixin:
+
+class PeftTestMixin:
     checkpoints_to_test = [
         "hf-internal-testing/tiny-random-OPTForCausalLM",
     ]
     config_classes = (
         LoraConfig,
-        # PrefixTuningConfig,
-        # PromptEncoderConfig,
-        # PromptTuningConfig,
+        PrefixTuningConfig,
+        PromptEncoderConfig,
+        PromptTuningConfig,
     )
     config_kwargs = (
         dict(
-            r = 8,
+            r=8,
             lora_alpha=32,
             target_modules=["q_proj", "v_proj"],
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM",
         ),
-        # dict(
-        #     encoder_hidden_size=32,
-        #     task_type="CAUSAL_LM",
-        # ),
-        # dict(
-        #     encoder_hidden_size=32,
-        #     task_type="CAUSAL_LM",
-        # ),
-        # dict(
-        #     task_type="CAUSAL_LM",
-        # )
-
+        dict(
+            num_virtual_tokens=10,
+            task_type="CAUSAL_LM",
+        ),
+        dict(
+            num_virtual_tokens=10,
+            encoder_hidden_size=32,
+            task_type="CAUSAL_LM",
+        ),
+        dict(
+            num_virtual_tokens=10,
+            task_type="CAUSAL_LM",
+        ),
     )
 
-class PeftModelTester(unittest.TestCase, LoraTestMixin):
+
+class PeftModelTester(unittest.TestCase, PeftTestMixin):
     r"""
     Test if the PeftModel behaves as expected. This includes:
     - test if the model has the expected methods
     """
+
     def test_attributes_lora_model(self):
         for model_id in self.checkpoints_to_test:
             model = AutoModelForCausalLM.from_pretrained(model_id)
-            
+
             for i, config_cls in enumerate(self.config_classes):
                 config = config_cls(
                     base_model_name_or_path=model_id,
                     **self.config_kwargs[i],
                 )
-                model = PeftModel(model, config)
+                model = get_peft_model(model, config)
 
-                self.assertTrue(hasattr(model, 'save_pretrained'))
-                self.assertTrue(hasattr(model, 'from_pretrained'))
-                self.assertTrue(hasattr(model, 'push_to_hub'))
-    
+                self.assertTrue(hasattr(model, "save_pretrained"))
+                self.assertTrue(hasattr(model, "from_pretrained"))
+                self.assertTrue(hasattr(model, "push_to_hub"))
+
     def test_save_pretrained(self):
         r"""
         A test to check if `save_pretrained` behaves as expected. This function
@@ -83,24 +96,24 @@ class PeftModelTester(unittest.TestCase, LoraTestMixin):
         - README.md (that contains an entry `base_model`)
         - adapter_config.json
         - adapter_model.bin
-        
+
         """
         for model_id in self.checkpoints_to_test:
             model = AutoModelForCausalLM.from_pretrained(model_id)
-            
+
             for i, config_cls in enumerate(self.config_classes):
                 config = config_cls(
                     base_model_name_or_path=model_id,
                     **self.config_kwargs[i],
                 )
-                model = PeftModel(model, config)
+                model = get_peft_model(model, config)
 
                 with tempfile.TemporaryDirectory() as tmp_dirname:
                     model.save_pretrained(tmp_dirname)
 
                     model_from_pretrained = AutoModelForCausalLM.from_pretrained(model_id)
                     model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
-                    
+
                     # check if the state dicts are equal
                     state_dict = get_peft_model_state_dict(model)
                     state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
