@@ -978,7 +978,7 @@ def main(args):
 
                 if (
                     args.validation_prompt is not None
-                    and step + num_update_steps_per_epoch * epoch % args.validation_steps == 0
+                    and (step + num_update_steps_per_epoch * epoch) % args.validation_steps == 0
                 ):
                     logger.info(
                         f"Running validation... \n Generating {args.num_validation_images} images with prompt:"
