@@ -245,12 +245,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
-        if name == "forward":
-            return getattr(self.base_model, name)
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.base_model, name)
+
+    def forward(self, *args, **kwargs):
+        """
+        Forward pass of the model.
+        """
+        if isinstance(self.peft_config, PromptLearningConfig):
+            return self.base_model(*args, **kwargs)
+        else:
+            return self.base_model.model(*args, **kwargs)
 
 
 class PeftModelForSequenceClassification(PeftModel):

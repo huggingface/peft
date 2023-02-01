@@ -21,7 +21,7 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .tuners import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
-from .utils import PeftType, PromptLearningConfig
+from .utils import PromptLearningConfig
 
 
 MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
