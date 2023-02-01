@@ -21,7 +21,7 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .tuners import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
-from .utils import PromptLearningConfig
+from .utils import PeftType, PromptLearningConfig
 
 
 MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
@@ -135,8 +135,11 @@ def get_peft_model(model, peft_config):
 
     model_config = model.config.to_dict()
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
-    if not isinstance(peft_config, PromptLearningConfig):
+    if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
         peft_config = _prepare_lora_config(peft_config, model_config)
         return PeftModel(model, peft_config)
-    peft_config = _prepare_prompt_learning_config(peft_config, model_config)
+    if not isinstance(peft_config, PromptLearningConfig):
+        peft_config = _prepare_lora_config(peft_config, model_config)
+    else:
+        peft_config = _prepare_prompt_learning_config(peft_config, model_config)
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config)
