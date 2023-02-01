@@ -96,7 +96,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # save the config
         if self.peft_config.base_model_name_or_path is None:
-            self.peft_config.base_model_name_or_path = self.base_model.__dict__.get("name_or_path", None)
+            self.peft_config.base_model_name_or_path = (
+                self.base_model.__dict__.get("name_or_path", None)
+                if isinstance(self.peft_config, PromptLearningConfig)
+                else self.base_model.model.__dict__.get("name_or_path", None)
+            )
         self.peft_config.inference_mode = True
         self.peft_config.save_pretrained(save_directory)
 
