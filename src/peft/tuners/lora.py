@@ -53,6 +53,8 @@ class LoraConfig(PeftConfig):
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         enable_lora ( `List[bool]`): Used with `lora.MergedLinear`.
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
+        modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
+            and saved in the final checkpoint.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -68,6 +70,14 @@ class LoraConfig(PeftConfig):
     )
     enable_lora: Optional[List[bool]] = field(default=None, metadata={"help": "Used with `lora.MergedLinear`."})
     bias: str = field(default="none", metadata={"help": "Bias type for Lora. Can be 'none', 'all' or 'lora_only'"})
+    modules_to_save: Optional[List[str]] = field(
+        default=None,
+        metadata={
+            "help": "List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. "
+            "For example, in Sequence Classification or Token Classification tasks, "
+            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
