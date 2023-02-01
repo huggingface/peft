@@ -76,7 +76,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(self.peft_config, "modules_to_save", None) is not None:
             self.modules_to_save = self.peft_config.modules_to_save
             _set_trainable(self)
-        self.forward = self.base_model.forward
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def save_pretrained(self, save_directory, **kwargs):
@@ -246,6 +245,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
+        if name == "forward":
+            return getattr(self.base_model, name)
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:

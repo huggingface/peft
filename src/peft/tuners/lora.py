@@ -115,7 +115,6 @@ class LoraModel(torch.nn.Module):
         self.model = model
         self._find_and_replace()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
-        self.forward = self.model.forward
 
     def _find_and_replace(self):
         kwargs = {
@@ -174,6 +173,8 @@ class LoraModel(torch.nn.Module):
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
+        if name == "forward":
+            return getattr(self.model, name)
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
