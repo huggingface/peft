@@ -75,7 +75,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model = LoraModel(peft_config, model)
         if getattr(self.peft_config, "modules_to_save", None) is not None:
             self.modules_to_save = self.peft_config.modules_to_save
-            _set_trainable(self.base_model)
+            _set_trainable(self)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def save_pretrained(self, save_directory, **kwargs):
