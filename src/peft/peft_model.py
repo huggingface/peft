@@ -131,7 +131,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load the config
         config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig.from_pretrained(model_id).peft_type].from_pretrained(model_id)
 
-        if not isinstance(config, PromptLearningConfig):
+        if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
             model = cls(model, config)
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config)
