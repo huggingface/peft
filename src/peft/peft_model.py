@@ -30,6 +30,7 @@ from .utils import (
     WEIGHTS_NAME,
     PeftConfig,
     PeftType,
+    PromptLearningConfig,
     TaskType,
     _set_trainable,
     get_peft_model_state_dict,
@@ -52,14 +53,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         - **peft_config** ([`PeftConfig`]) -- The configuration of the Peft model.
         - **modules_to_save** (`list` of `str`) -- The list of sub-module names to save when
         saving the model.
-        - **prompt_encoder** ([`PromptEncoder`]) -- The prompt encoder used for Peft if `peft_config.peft_type
-        != PeftType.LORA`.
+        - **prompt_encoder** ([`PromptEncoder`]) -- The prompt encoder used for Peft if
+        `isinstance(self.peft_config, PromptLearningConfig)`.
         - **prompt_tokens** (`torch.Tensor`) -- The virtual prompt tokens used for Peft if
-        `peft_config.peft_type != PeftType.LORA`.
+        `isinstance(self.peft_config, PromptLearningConfig)`.
         - **transformer_backbone_name** (`str`) -- The name of the transformer
-        backbone in the base model if `peft_config.peft_type != PeftType.LORA`.
+        backbone in the base model if `isinstance(self.peft_config, PromptLearningConfig)`.
         - **word_embeddings** (`torch.nn.Embedding`) -- The word embeddings of the transformer backbone
-        in the base model if `peft_config.peft_type != PeftType.LORA`.
+        in the base model if `isinstance(self.peft_config, PromptLearningConfig)`.
     """
 
     def __init__(self, model, peft_config: PeftConfig):
@@ -68,10 +69,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.base_model = model
         self.config = self.base_model.config
         self.modules_to_save = None
-        if peft_config.peft_type != PeftType.LORA:
+        if isinstance(self.peft_config, PromptLearningConfig):
             self._setup_prompt_encoder()
         else:
             self.base_model = LoraModel(peft_config, model)
+        if getattr(self.peft_config, "modules_to_save", None) is not None:
+            self.modules_to_save = self.peft_config.modules_to_save
+            _set_trainable(self)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def save_pretrained(self, save_directory, **kwargs):
@@ -92,7 +96,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # save the config
         if self.peft_config.base_model_name_or_path is None:
-            self.peft_config.base_model_name_or_path = self.base_model.__dict__.get("name_or_path", None)
+            self.peft_config.base_model_name_or_path = (
+                self.base_model.__dict__.get("name_or_path", None)
+                if isinstance(self.peft_config, PromptLearningConfig)
+                else self.base_model.model.__dict__.get("name_or_path", None)
+            )
         self.peft_config.inference_mode = True
         self.peft_config.save_pretrained(save_directory)
 
@@ -123,7 +131,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load the config
         config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig.from_pretrained(model_id).peft_type].from_pretrained(model_id)
 
-        model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config)
+        if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
+            model = cls(model, config)
+        else:
+            model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config)
 
         # load weights if any
         if os.path.exists(os.path.join(model_id, WEIGHTS_NAME)):
@@ -239,6 +250,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         except AttributeError:
             return getattr(self.base_model, name)
 
+    def forward(self, *args, **kwargs):
+        """
+        Forward pass of the model.
+        """
+        if isinstance(self.peft_config, PromptLearningConfig):
+            return self.base_model(*args, **kwargs)
+        else:
+            return self.base_model.model(*args, **kwargs)
+
 
 class PeftModelForSequenceClassification(PeftModel):
     """
@@ -291,7 +311,7 @@ class PeftModelForSequenceClassification(PeftModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if self.peft_config.peft_type == PeftType.LORA:
+        if not isinstance(self.peft_config, PromptLearningConfig):
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -448,7 +468,7 @@ class PeftModelForCausalLM(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        if self.peft_config.peft_type == PeftType.LORA:
+        if not isinstance(self.peft_config, PromptLearningConfig):
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -497,7 +517,7 @@ class PeftModelForCausalLM(PeftModel):
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def generate(self, **kwargs):
-        if self.peft_config.peft_type == PeftType.LORA:
+        if not isinstance(self.peft_config, PromptLearningConfig):
             return self.base_model.generate(**kwargs)
         else:
             if "input_ids" not in kwargs:
@@ -579,7 +599,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        if self.peft_config.peft_type == PeftType.LORA:
+        if not isinstance(self.peft_config, PromptLearningConfig):
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -647,7 +667,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             return self.base_model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
 
     def generate(self, **kwargs):
-        if self.peft_config.peft_type == PeftType.LORA:
+        if not isinstance(self.peft_config, PromptLearningConfig):
             return self.base_model.generate(**kwargs)
         else:
             if "input_ids" not in kwargs:
@@ -735,7 +755,7 @@ class PeftModelForTokenClassification(PeftModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if self.peft_config.peft_type == PeftType.LORA:
+        if not isinstance(self.peft_config, PromptLearningConfig):
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
