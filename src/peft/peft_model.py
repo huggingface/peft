@@ -538,17 +538,22 @@ class PeftModelForCausalLM(PeftModel):
                 )
                 kwargs["token_type_ids"] = None
 
-            if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
-                return self.base_model.generate(**kwargs)
-            else:
-                raise NotImplementedError
+            return self.base_model.generate(**kwargs)
 
     def prepare_inputs_for_generation(self, *args, **kwargs):
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
-        if model_kwargs["past_key_values"] is None and self.peft_config.peft_type == PeftType.PREFIX_TUNING:
-            batch_size = model_kwargs["input_ids"].shape[0]
-            past_key_values = self.get_prompt(batch_size)
-            model_kwargs["past_key_values"] = past_key_values
+        if isinstance(self.peft_config, PromptLearningConfig):
+            if model_kwargs["past_key_values"] is None and self.peft_config.peft_type == PeftType.PREFIX_TUNING:
+                past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+                model_kwargs["past_key_values"] = past_key_values
+            else:
+                if model_kwargs["past_key_values"] is None:
+                    prompts = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+                    model_kwargs["inputs_embeds"] = torch.cat(
+                        (prompts, self.word_embeddings(model_kwargs["input_ids"])), dim=1
+                    )
+                    model_kwargs["input_ids"] = None
+
         return model_kwargs
 
 
