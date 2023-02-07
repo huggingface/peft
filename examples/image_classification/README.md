@@ -1,6 +1,6 @@
 # Fine-tuning for image classification using LoRA and 🤗 PEFT
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sayakpaul/peft/blob/example/img-cls/examples/image_classification/image_classification_peft_lora.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sayakpaul/peft/blob/example/img-cls/examples/image_classification/image_classification_peft_lora.ipynb) <!-- Update the Colab Link -->
 
 We provide a notebook (`image_classification_peft_lora.ipynb`) where we learn how to use [LoRA](https://arxiv.org/abs/2106.09685) from 🤗 PEFT to fine-tune an image classification modelby ONLY using **0.6%** of the original trainable parameters of the model. 
 
