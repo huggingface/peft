@@ -19,8 +19,8 @@ import warnings
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
-from accelerate.utils import get_balanced_memory
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
+from accelerate.utils import get_balanced_memory
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
