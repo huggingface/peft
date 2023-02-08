@@ -15,7 +15,6 @@
 
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
 import torch
 
@@ -30,7 +29,6 @@ class PrefixTuningConfig(PromptLearningConfig):
     Args:
         encoder_hidden_size (`int`): The hidden size of the prompt encoder.
         prefix_projection (`bool`): Whether to project the prefix embeddings.
-        postprocess_past_key_value_function (`Callable`, *optional*): The function to postprocess the past key value.
     """
 
     encoder_hidden_size: int = field(
@@ -40,10 +38,6 @@ class PrefixTuningConfig(PromptLearningConfig):
     prefix_projection: bool = field(
         default=False,
         metadata={"help": "Whether to project the prefix tokens"},
-    )
-    postprocess_past_key_value_function: Optional[Callable] = field(
-        default=None,
-        metadata={"help": "The function to postprocess the past key value"},
     )
 
     def __post_init__(self):

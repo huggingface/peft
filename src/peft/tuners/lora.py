@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib
 import math
 import warnings
 from dataclasses import asdict, dataclass, field
@@ -27,15 +26,6 @@ from transformers.pytorch_utils import Conv1D
 import bitsandbytes as bnb
 
 from ..utils import PeftConfig, PeftType, transpose
-
-
-def is_loralib_available():
-    return importlib.util.find_spec("loralib") is not None
-
-
-if is_loralib_available():
-    import loralib as lora  # noqa: F401
-    from loralib import mark_only_lora_as_trainable
 
 
 @dataclass
@@ -108,8 +98,6 @@ class LoraModel(torch.nn.Module):
     """
 
     def __init__(self, config, model):
-        if not is_loralib_available():
-            raise ImportError("LoRA requires `loralib` to be installed. Please run `pip install loralib`.")
         super().__init__()
         self.peft_config = config
         self.model = model
@@ -432,3 +420,22 @@ class Linear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
         if self.r > 0:
             result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
         return result
+
+
+# had to adapt it for `lora_only` to work
+def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
+    for n, p in model.named_parameters():
+        if "lora_" not in n:
+            p.requires_grad = False
+    if bias == "none":
+        return
+    elif bias == "all":
+        for n, p in model.named_parameters():
+            if "bias" in n:
+                p.requires_grad = True
+    elif bias == "lora_only":
+        for m in model.modules():
+            if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                m.bias.requires_grad = True
+    else:
+        raise NotImplementedError

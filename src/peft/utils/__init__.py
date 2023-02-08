@@ -19,5 +19,11 @@
 
 from .adapters_utils import CONFIG_NAME, WEIGHTS_NAME
 from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
-from .other import _set_trainable, bloom_model_postprocess_past_key_value, shift_tokens_right, transpose
-from .save_and_load import get_peft_model_state_dict, peft_model_load_and_dispatch, set_peft_model_state_dict
+from .other import (
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    _set_trainable,
+    bloom_model_postprocess_past_key_value,
+    shift_tokens_right,
+    transpose,
+)
+from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
