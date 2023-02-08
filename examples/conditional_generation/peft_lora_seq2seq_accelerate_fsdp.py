@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, default_data_collator, get_linear_schedule_with_warmup
 
 from datasets import load_dataset
-from peft import LoraConfig, TaskType, get_peft_model, get_peft_model_state_dict
+from peft import LoraConfig, TaskType, get_peft_model
 from peft.utils.other import fsdp_auto_wrap_policy
 from tqdm import tqdm
 
@@ -25,7 +25,6 @@ def main():
     peft_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
     )
-    checkpoint_name = "financial_sentiment_analysis_lora_fsdp_v1.pt"
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
     model = get_peft_model(model, peft_config)
     accelerator.print(model.print_trainable_parameters())
@@ -126,8 +125,10 @@ def main():
         accelerator.print(f"{eval_preds[:10]=}")
         accelerator.print(f"{dataset['validation'][label_column][:10]=}")
         accelerator.wait_for_everyone()
-        accelerator.save(
-            get_peft_model_state_dict(model, state_dict=accelerator.get_state_dict(model)), checkpoint_name
+        model.push_to_hub(
+            "smangrul/" + f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
+            state_dict=accelerator.get_state_dict(model),
+            use_auth_token=True,
         )
         accelerator.wait_for_everyone()
 
