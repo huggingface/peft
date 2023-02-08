@@ -27,6 +27,7 @@ from huggingface_hub import hf_hub_download
 
 from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
     PeftConfig,
     PeftType,
@@ -218,8 +219,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(
                 self.peft_config.num_transformer_submodules * 2
             )
-            if self.peft_config.postprocess_past_key_value_function is not None:
-                post_process_fn = self.peft_config.postprocess_past_key_value_function
+            if TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING.get(self.config.model_type, None) is not None:
+                post_process_fn = TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING[self.config.model_type]
                 past_key_values = post_process_fn(past_key_values)
             return past_key_values
         else:

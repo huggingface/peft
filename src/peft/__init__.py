@@ -40,6 +40,7 @@ from .tuners import (
     PromptTuningInit,
 )
 from .utils import (
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     PeftConfig,
     PeftType,
     PromptLearningConfig,
