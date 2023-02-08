@@ -77,35 +77,3 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
     return model
-
-
-def peft_model_load_and_dispatch(model, peft_model_state_dict, peft_config, max_memory=None):
-    """
-    Load the Peft model state dict and dispatch the model to the correct device.
-
-    Args:
-        model ([`PeftModel`]): The Pre-trained base model which has already been sharded and dispatched
-        using `accelerate` functionalities.
-        peft_model_state_dict (`dict`): The state dict of the Peft model.
-        max_memory (`Dict`, *optional*):
-            A dictionary device identifier to maximum memory. Will default to the maximum memory available for each GPU
-            and the available CPU RAM if unset.
-    """
-    from accelerate import dispatch_model, infer_auto_device_map
-    from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
-
-    from ..mapping import get_peft_model
-
-    remove_hook_from_submodules(model)
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
-    set_peft_model_state_dict(model, peft_model_state_dict)
-    device_map = infer_auto_device_map(model, max_memory=max_memory, no_split_module_classes=model._no_split_modules)
-    model = dispatch_model(model, device_map=device_map)
-    hook = AlignDevicesHook(io_same_device=True)
-    if model.peft_config.peft_type == PeftType.LORA:
-        add_hook_to_module(model.base_model.model, hook)
-    else:
-        remove_hook_from_submodules(model.prompt_encoder)
-        add_hook_to_module(model.base_model, hook)
-    return model

@@ -30,6 +30,11 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
+TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
+    "bloom": bloom_model_postprocess_past_key_value,
+}
+
+
 # copied from transformers.models.bart.modeling_bart
 def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
     """
