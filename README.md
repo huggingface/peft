@@ -127,6 +127,12 @@ Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 
 ### Parameter Efficient Tuning of LLMs for RLHF components such as Ranker and Policy [ToDo]
 
+### INT8 training of large models in Colab using PEFT LoRA and bits_and_bytes
+
+Here is now a demo on how to fine tune OPT-6.7b (14GB in fp16) in a Google colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1jCkpikz0J2o20FBQmYmAGdiKmJGOMo-o?usp=sharing)
+
+Here is now a demo on how to fine tune wishper-large (1.5B params) (14GB in fp16) in a Google colab: [ToDo]
+
 ### Save compute and storage even for medium and small models
 
 Save storage by avoiding full finetuning of models on each of the downstream tasks/datasets,
@@ -307,12 +313,12 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 
 2. When using `P_TUNING` or `PROMPT_TUNING` with `SEQ_2_SEQ` task, remember to remove the `num_virtual_token` virtual prompt predictions from the left side of the model outputs during evaluations. 
 
-3. `P_TUNING` or `PROMPT_TUNING` doesn't support `generate` functionality of transformers bcause `generate` strictly requires `input_ids`/`decoder_input_ids` but 
+3. For encoder-decoder models, `P_TUNING` or `PROMPT_TUNING` doesn't support `generate` functionality of transformers because `generate` strictly requires `decoder_input_ids` but 
 `P_TUNING`/`PROMPT_TUNING` appends soft prompt embeddings to `input_embeds` to create
 new `input_embeds` to be given to the model. Therefore, `generate` doesn't support this yet.
 
 ## Backlog:
-1. Explore and possibly integrate `(IA)^3` and `UniPELT`
+1. Explore and possibly integrate `(IA)^3`
 2. Add tests
 3. Add more use cases and examples
 
