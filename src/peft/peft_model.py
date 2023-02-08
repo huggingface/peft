@@ -19,6 +19,7 @@ import warnings
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
+from accelerate.utils import get_balanced_memory
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
@@ -158,9 +159,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load the weights into the model
         model = set_peft_model_state_dict(model, adapters_weights)
         if getattr(model, "hf_device_map", None) is not None:
-            device_map = infer_auto_device_map(
-                model, max_memory=kwargs.get("max_memory", None), no_split_module_classes=model._no_split_modules
-            )
+            device_map = kwargs.get("device_map", "auto")
+            max_memory = kwargs.get("max_memory", None)
+            no_split_module_classes = model._no_split_modules
+            if device_map != "sequential":
+                max_memory = get_balanced_memory(
+                    model,
+                    max_memory=max_memory,
+                    no_split_module_classes=no_split_module_classes,
+                    low_zero=(device_map == "balanced_low_0"),
+                )
+            if isinstance(device_map, str):
+                device_map = infer_auto_device_map(
+                    model, max_memory=max_memory, no_split_module_classes=no_split_module_classes
+                )
             model = dispatch_model(model, device_map=device_map)
             hook = AlignDevicesHook(io_same_device=True)
             if model.peft_config.peft_type == PeftType.LORA:
