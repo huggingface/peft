@@ -79,7 +79,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
     return model
 
 
-def peft_model_load_and_dispatch(model, peft_model_state_dict, peft_config, max_memory=None):
+def peft_model_load_and_dispatch(model, peft_model_id, max_memory=None):
     """
     Load the Peft model state dict and dispatch the model to the correct device.
 
@@ -94,12 +94,11 @@ def peft_model_load_and_dispatch(model, peft_model_state_dict, peft_config, max_
     from accelerate import dispatch_model, infer_auto_device_map
     from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 
-    from ..mapping import get_peft_model
+    from ..peft_model import PeftModel
 
     remove_hook_from_submodules(model)
-    model = get_peft_model(model, peft_config)
+    model = PeftModel.from_pretrained(peft_model_id, peft_model_id)
     model.print_trainable_parameters()
-    set_peft_model_state_dict(model, peft_model_state_dict)
     device_map = infer_auto_device_map(model, max_memory=max_memory, no_split_module_classes=model._no_split_modules)
     model = dispatch_model(model, device_map=device_map)
     hook = AlignDevicesHook(io_same_device=True)
