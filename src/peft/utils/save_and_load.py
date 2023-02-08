@@ -97,7 +97,7 @@ def peft_model_load_and_dispatch(model, peft_model_id, max_memory=None):
     from ..peft_model import PeftModel
 
     remove_hook_from_submodules(model)
-    model = PeftModel.from_pretrained(peft_model_id, peft_model_id)
+    model = PeftModel.from_pretrained(model, peft_model_id)
     model.print_trainable_parameters()
     device_map = infer_auto_device_map(model, max_memory=max_memory, no_split_module_classes=model._no_split_modules)
     model = dispatch_model(model, device_map=device_map)
