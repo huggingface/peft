@@ -18,6 +18,8 @@ import os
 import warnings
 
 import torch
+from accelerate import dispatch_model, infer_auto_device_map
+from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
@@ -132,6 +134,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load the config
         config = PEFT_TYPE_TO_CONFIG_MAPPING[PeftConfig.from_pretrained(model_id).peft_type].from_pretrained(model_id)
 
+        if getattr(model, "hf_device_map", None) is not None:
+            remove_hook_from_submodules(model)
+
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
             model = cls(model, config)
         else:
@@ -151,7 +156,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         adapters_weights = torch.load(filename)
         # load the weights into the model
-        return set_peft_model_state_dict(model, adapters_weights)
+        model = set_peft_model_state_dict(model, adapters_weights)
+        if getattr(model, "hf_device_map", None) is not None:
+            device_map = infer_auto_device_map(
+                model, max_memory=kwargs.get("max_memory", None), no_split_module_classes=model._no_split_modules
+            )
+            model = dispatch_model(model, device_map=device_map)
+            hook = AlignDevicesHook(io_same_device=True)
+            if model.peft_config.peft_type == PeftType.LORA:
+                add_hook_to_module(model.base_model.model, hook)
+            else:
+                remove_hook_from_submodules(model.prompt_encoder)
+                add_hook_to_module(model.base_model, hook)
+        return model
 
     def _setup_prompt_encoder(self):
         num_transformer_submodules = 0
