@@ -65,7 +65,7 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 
 Performance of PEFT-LoRA tuned `bigscience/T0_3B` on `ought/raft/twitter_complaints` leaderboard. 
 A point to note is that we didn't try to sequeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B mt0-xxl model.
-So, we are already seeing comparable performance to SoTA with parameter effcient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone `bigscience/T0_3B` model.
+So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone `bigscience/T0_3B` model.
 
 |   Submission Name        | Accuracy |
 | --------- | ---- |
@@ -77,7 +77,7 @@ So, we are already seeing comparable performance to SoTA with parameter effcient
 
 ### Parameter Efficient Tuning of Diffusion Models
 
-GPU memory required by different settings during training are given below. The final checkpoint size being `8.8 MB`.
+GPU memory required by different settings during training is given below. The final checkpoint size is `8.8 MB``.
 
 Hardware: Single A100 80GB GPU with CPU RAM above 64G
 
@@ -149,10 +149,10 @@ Another example is fine-tuning `roberta-large` on `MRPC` GLUE dataset suing diff
 PEFT models work with 🤗 Accelerate out of the box. Use 🤗 Accelerate for Distributed training on various hardware such as GPUs, Apple Silicon devices etc during training.
 Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
 
-### Example of PEFT model training using 🤗 Accelerate's DeepSpeed integation
+### Example of PEFT model training using 🤗 Accelerate's DeepSpeed integration
 
- Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. Example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
-  a. First run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionaire. 
+ Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. An example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
+  a. First, run `accelerate` config --config_file ds_zero3_cpu.yaml` and answer the questionnaire. 
   Below are the contents of the config file.
   ```
   compute_environment: LOCAL_MACHINE
@@ -178,7 +178,7 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
   same_network: true
   use_cpu: false
   ```
-  b. run the below command to launch example script
+  b. run the below command to launch the example script
   ```
   accelerate launch --config_file ds_zero3_cpu.yaml examples/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
   ```
@@ -209,8 +209,7 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
   ```
 
 ### Example of PEFT model inference using 🤗 Accelerate's Big Model Inferencing capabilities
-
-Example is provided in `~examples/causal_language_modeling/peft_lora_clm_accelerate_big_model_inference.ipynb`. 
+An example is provided in `~examples/causal_language_modeling/peft_lora_clm_accelerate_big_model_inference.ipynb`. 
 
 
 ## Models support matrix
@@ -273,7 +272,7 @@ Example is provided in `~examples/causal_language_modeling/peft_lora_clm_acceler
 ___Note that we have tested LoRA for https://huggingface.co/docs/transformers/model_doc/vit and [https://huggingface.co/docs/transformers/model_doc/swin] for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
 examples to learn more. If you run into problems, please open an issue.___
 
-Same principle applies to our [segmentation models](https://huggingface.co/models?pipeline_tag=image-segmentation&sort=downloads) as well. 
+The same principle applies to our [segmentation models](https://huggingface.co/models?pipeline_tag=image-segmentation&sort=downloads) as well. 
 
 ### Semantic Segmentation
 
@@ -297,7 +296,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   ```
 
   Example of parameter efficient tuning with `mt0-xxl` base model using 🤗 Accelerate is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_fsdp.py`. 
-  a. First run `accelerate config --config_file fsdp_config.yaml` and answer the questionaire. 
+  a. First, run `accelerate config --config_file fsdp_config.yaml` and answer the questionnaire. 
   Below are the contents of the config file.
   ```
   command_file: null
@@ -329,7 +328,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   tpu_zone: null
   use_cpu: false
   ```
-  b. run the below command to launch example script
+  b. run the below command to launch the example script
   ```
   accelerate launch --config_file fsdp_config.yaml examples/peft_lora_seq2seq_accelerate_fsdp.py
   ```
