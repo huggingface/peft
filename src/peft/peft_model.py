@@ -98,9 +98,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
         os.makedirs(save_directory, exist_ok=True)
 
-        for param in self.parameters():
-            param.requires_grad = False  # freeze the model
-
         # save only the trainable weights
         output_state_dict = get_peft_model_state_dict(self, kwargs.get("state_dict", None))
         torch.save(output_state_dict, os.path.join(save_directory, WEIGHTS_NAME))
@@ -112,8 +109,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if isinstance(self.peft_config, PromptLearningConfig)
                 else self.base_model.model.__dict__.get("name_or_path", None)
             )
+        inference_mode = self.peft_config.inference_mode
         self.peft_config.inference_mode = True
         self.peft_config.save_pretrained(save_directory)
+        self.peft_config.inference_mode = inference_mode
 
     @classmethod
     def from_pretrained(cls, model, model_id, **kwargs):
