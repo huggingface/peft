@@ -256,7 +256,30 @@ Example is provided in `~examples/causal_language_modeling/peft_lora_clm_acceler
 | Deberta        | ✅  |     |   |   | 
 | Deberta-v2     | ✅  |     |   |   |
 
+### Text-to-Image Generation
 
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
+| --------- | ---- | ---- | ---- | ----  |
+| Stable Diffusion           | ✅  |   |   |   |  
+
+
+### Image Classification
+
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
+| --------- | ---- | ---- | ---- | ----  |
+| ViT           | ✅  |   |   |   | 
+| Swin           | ✅  |   |   |   | 
+
+___Note that we have tested LoRA for https://huggingface.co/docs/transformers/model_doc/vit and [https://huggingface.co/docs/transformers/model_doc/swin] for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
+examples to learn more. If you run into problems, please open an issue.___
+
+Same principle applies to our [segmentation models](https://huggingface.co/models?pipeline_tag=image-segmentation&sort=downloads) as well. 
+
+### Semantic Segmentation
+
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
+| --------- | ---- | ---- | ---- | ----  |
+| SegFormer           | ✅  |   |   |   | 
 ## Caveats:
 
 1. Below is an example of using PyTorch FSDP for training. However, it doesn't lead to 
