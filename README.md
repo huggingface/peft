@@ -269,7 +269,7 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 | ViT           | ✅  |   |   |   | 
 | Swin           | ✅  |   |   |   | 
 
-___Note that we have tested LoRA for https://huggingface.co/docs/transformers/model_doc/vit and [https://huggingface.co/docs/transformers/model_doc/swin] for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
+___Note that we have tested LoRA for [ViT](https://huggingface.co/docs/transformers/model_doc/vit) and [Swin](https://huggingface.co/docs/transformers/model_doc/swin) for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
 examples to learn more. If you run into problems, please open an issue.___
 
 The same principle applies to our [segmentation models](https://huggingface.co/models?pipeline_tag=image-segmentation&sort=downloads) as well. 
