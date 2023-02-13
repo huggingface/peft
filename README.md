@@ -52,7 +52,7 @@ model.print_trainable_parameters()
 
 ### Get comparable performance to full finetuning by adapting LLMs to downstream tasks using consumer hardware
 
-GPU memory required for adapting LLMs on the few-shot dataset `ought/raft/twitter_complaints`. Here, settings considered
+GPU memory required for adapting LLMs on the few-shot dataset [`ought/raft/twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints). Here, settings considered
 are full finetuning, PEFT-LoRA using plain PyTorch and  PEFT-LoRA using DeepSpeed with CPU Offloading. 
 
 Hardware: Single A100 80GB GPU with CPU RAM above 64GB
@@ -63,9 +63,9 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 | bigscience/mt0-xxl (12B params) | OOM GPU | 56GB GPU / 3GB CPU | 22GB GPU / 52GB CPU |
 | bigscience/bloomz-7b1 (7B params) | OOM GPU | 32GB GPU / 3.8GB CPU | 18.1GB GPU / 35GB CPU |
 
-Performance of PEFT-LoRA tuned `bigscience/T0_3B` on `ought/raft/twitter_complaints` leaderboard. 
-A point to note is that we didn't try to sequeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B mt0-xxl model.
-So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone `bigscience/T0_3B` model.
+Performance of PEFT-LoRA tuned [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) on [`ought/raft/twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints) leaderboard. 
+A point to note is that we didn't try to sequeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B [mt0-xxl](https://huggingface.co/bigscience/mt0-xxl) model.
+So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) model.
 
 |   Submission Name        | Accuracy |
 | --------- | ---- |
@@ -77,9 +77,9 @@ So, we are already seeing comparable performance to SoTA with parameter efficien
 
 ### Parameter Efficient Tuning of Diffusion Models
 
-GPU memory required by different settings during training is given below. The final checkpoint size is `8.8 MB``.
+GPU memory required by different settings during training is given below. The final checkpoint size is `8.8 MB`.
 
-Hardware: Single A100 80GB GPU with CPU RAM above 64G
+Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 
 |   Model         | Full Finetuning | PEFT-LoRA  | PEFT-LoRA with Gradient Checkpoitning  |
 | --------- | ---- | ---- | ---- |
@@ -129,9 +129,9 @@ Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 
 ### INT8 training of large models in Colab using PEFT LoRA and bits_and_bytes
 
-Here is now a demo on how to fine tune OPT-6.7b (14GB in fp16) in a Google colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1jCkpikz0J2o20FBQmYmAGdiKmJGOMo-o?usp=sharing)
+Here is now a demo on how to fine tune [OPT-6.7b](https://huggingface.co/facebook/opt-6.7b) (14GB in fp16) in a Google colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1jCkpikz0J2o20FBQmYmAGdiKmJGOMo-o?usp=sharing)
 
-Here is now a demo on how to fine tune wishper-large (1.5B params) (14GB in fp16) in a Google colab: [ToDo]
+Here is now a demo on how to fine tune [whishper-large](openai/whisper-large-v2) (1.5B params) (14GB in fp16) in a Google colab: [ToDo]
 
 ### Save compute and storage even for medium and small models
 
@@ -141,7 +141,7 @@ performance comparable to full finetuning.
 
 An example of using LoRA for the task of adaping `LayoutLMForTokenClassification` on `FUNSD` dataset is given in `~examples/token_classification/PEFT_LoRA_LayoutLMForTokenClassification_on_FUNSD.py`. We can observe that with only `0.62 %` of parameters being trainable, we achieve performance (F1 0.777) comparable to full finetuning (F1 0.786) (without any hyerparam tuning runs for extracting more performance), and the checkpoint of this is only `2.8MB`. Now, if there are `N` such datasets, just have these PEFT models one for each dataset and save a lot of storage without having to worry about the problem of catastrophic forgetting or overfitting of backbone/base model.
 
-Another example is fine-tuning `roberta-large` on `MRPC` GLUE dataset suing differenct PEFT methods. The notebooks are given in `~examples/sequence_classification`. 
+Another example is fine-tuning [`roberta-large`](https://huggingface.co/roberta-large) on [`MRPC` GLUE](https://huggingface.co/datasets/glue/viewer/mrpc) dataset suing differenct PEFT methods. The notebooks are given in `~examples/sequence_classification`. 
 
 
 ## PEFT + 🤗 Accelerate
@@ -151,10 +151,10 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
 
 ### Example of PEFT model training using 🤗 Accelerate's DeepSpeed integration
 
- Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. An example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
-  a. First, run `accelerate` config --config_file ds_zero3_cpu.yaml` and answer the questionnaire. 
+Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. An example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
+  a. First, run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionnaire. 
   Below are the contents of the config file.
-  ```
+  ```yaml
   compute_environment: LOCAL_MACHINE
   deepspeed_config:
     gradient_accumulation_steps: 1
@@ -179,7 +179,7 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
   use_cpu: false
   ```
   b. run the below command to launch the example script
-  ```
+  ```bash
   accelerate launch --config_file ds_zero3_cpu.yaml examples/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
   ```
 
@@ -295,10 +295,10 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   model = accelerator.prepare(model)
   ```
 
-  Example of parameter efficient tuning with `mt0-xxl` base model using 🤗 Accelerate is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_fsdp.py`. 
+  Example of parameter efficient tuning with [`mt0-xxl`](https://huggingface.co/bigscience/mt0-xxl) base model using 🤗 Accelerate is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_fsdp.py`. 
   a. First, run `accelerate config --config_file fsdp_config.yaml` and answer the questionnaire. 
   Below are the contents of the config file.
-  ```
+  ```yaml
   command_file: null
   commands: null
   compute_environment: LOCAL_MACHINE
@@ -329,7 +329,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
   use_cpu: false
   ```
   b. run the below command to launch the example script
-  ```
+  ```bash
   accelerate launch --config_file fsdp_config.yaml examples/peft_lora_seq2seq_accelerate_fsdp.py
   ```
 
