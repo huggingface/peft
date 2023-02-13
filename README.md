@@ -151,7 +151,7 @@ Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
 
 ### Example of PEFT model training using 🤗 Accelerate's DeepSpeed integration
 
-Currently DeepSpeed requires PR [ZeRO3 handling frozen weights](https://github.com/microsoft/DeepSpeed/pull/2653) to fix [[REQUEST] efficiently deal with frozen weights during training](https://github.com/microsoft/DeepSpeed/issues/2615) issue. An example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
+DeepSpeed version required `v0.8.0`. An example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
   a. First, run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionnaire. 
   Below are the contents of the config file.
   ```yaml
