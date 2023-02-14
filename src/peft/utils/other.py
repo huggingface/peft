@@ -30,6 +30,59 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
+def prepare_model_for_training(model):
+    r"""
+    This method wrapps the entire protocol for preparing a model before running a training. This includes:
+        1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
+        head to fp32
+
+    Args:
+        model, (`transformers.PreTrainedModel`):
+            The loaded model from `transformers`
+    """
+    loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
+
+    for param in model.parameters():
+        # freeze base model's layers
+        param.requires_grad = False
+
+        if loaded_in_8bit:
+            # cast layer norm in fp32 for stability for 8bit models
+            if param.ndim == 1:
+                param.data = param.data.to(torch.float32)
+
+    # For backward compatibility
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+    else:
+
+        def make_inputs_require_grad(module, input, output):
+            output.requires_grad_(True)
+
+        model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+    if loaded_in_8bit:
+        # enable gradient checkpointing for memory efficiency
+        model.gradient_checkpointing_enable()
+
+    if hasattr(model, "lm_head"):
+        input_dtype = model.lm_head.weight.dtype
+
+        class CastOutputToFloat(torch.nn.Sequential):
+            r"""
+            Manually cast to the expected dtype of the lm_head as sometimes there is a final layer norm that is casted
+            in fp32
+
+            """
+
+            def forward(self, x):
+                return super().forward(x.to(input_dtype)).to(torch.float32)
+
+        model.lm_head = CastOutputToFloat(model.lm_head)
+
+    return model
+
+
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
     "bloom": bloom_model_postprocess_past_key_value,
 }

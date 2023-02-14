@@ -288,36 +288,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             return self.base_model.model(*args, **kwargs)
 
-    def prepare_model_for_training(self):
-        r"""
-        This method wrapps the entire protocol for preparing a model before running a training. This includes:
-            1- Cast the layernorm in fp32 2- making output embedding layer require grads
-        """
-        loaded_in_8bit = getattr(self.base_model, "is_loaded_in_8bit", False)
-
-        for param in self.base_model.parameters():
-            # freeze base model's layers
-            param.requires_grad = False
-
-            if loaded_in_8bit:
-                # cast layer norm in fp32 for stability for 8bit models
-                if param.ndim == 1:
-                    param.data = param.data.to(torch.float32)
-
-        # For backward compatibility
-        if hasattr(self.base_model, "enable_input_require_grads"):
-            self.base_model.enable_input_require_grads()
-        else:
-
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
-
-            self.base_model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-
-        if loaded_in_8bit:
-            # enable gradient checkpointing for memory efficiency
-            self.base_model.model.gradient_checkpointing_enable()
-
 
 class PeftModelForSequenceClassification(PeftModel):
     """

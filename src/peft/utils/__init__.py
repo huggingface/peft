@@ -23,6 +23,7 @@ from .other import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     _set_trainable,
     bloom_model_postprocess_past_key_value,
+    prepare_model_for_training,
     shift_tokens_right,
     transpose,
 )
