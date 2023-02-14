@@ -27,6 +27,7 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    prepare_model_for_training,
 )
 
 
@@ -103,10 +104,18 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
                 self.assertTrue(not dummy_output.requires_grad)
 
-                model.prepare_model_for_training()
+                # load with `prepare_model_for_training`
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+                model = prepare_model_for_training(model)
 
-                for param in model.base_model.parameters():
+                for param in model.parameters():
                     self.assertTrue(not param.requires_grad)
+
+                config = config_cls(
+                    base_model_name_or_path=model_id,
+                    **self.config_kwargs[i],
+                )
+                model = get_peft_model(model, config)
 
                 dummy_input = torch.LongTensor([[1, 1, 1]])
                 dummy_output = model.get_input_embeddings()(dummy_input)
