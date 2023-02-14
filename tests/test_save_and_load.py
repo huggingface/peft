@@ -85,6 +85,34 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
                 self.assertTrue(hasattr(model, "from_pretrained"))
                 self.assertTrue(hasattr(model, "push_to_hub"))
 
+    def test_prepare_for_training(self):
+        r"""
+        A test that checks if `prepare_for_training` behaves as expected
+        """
+        for model_id in self.checkpoints_to_test:
+            for i, config_cls in enumerate(self.config_classes):
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+                config = config_cls(
+                    base_model_name_or_path=model_id,
+                    **self.config_kwargs[i],
+                )
+                model = get_peft_model(model, config)
+
+                dummy_input = torch.LongTensor([[1, 1, 1]])
+                dummy_output = model.get_input_embeddings()(dummy_input)
+
+                self.assertTrue(not dummy_output.requires_grad)
+
+                model.prepare_model_for_training()
+
+                for param in model.base_model.parameters():
+                    self.assertTrue(not param.requires_grad)
+
+                dummy_input = torch.LongTensor([[1, 1, 1]])
+                dummy_output = model.get_input_embeddings()(dummy_input)
+
+                self.assertTrue(dummy_output.requires_grad)
+
     def test_save_pretrained(self):
         r"""
         A test to check if `save_pretrained` behaves as expected. This function should only save the state dict of the
