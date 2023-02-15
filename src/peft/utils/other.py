@@ -42,7 +42,7 @@ def prepare_model_for_training(model, output_embedding_layer_name="lm_head"):
     """
     loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
 
-    for name,param in model.named_parameters():
+    for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
 
