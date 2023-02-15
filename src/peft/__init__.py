@@ -47,6 +47,7 @@ from .utils import (
     TaskType,
     bloom_model_postprocess_past_key_value,
     get_peft_model_state_dict,
+    prepare_model_for_training,
     set_peft_model_state_dict,
     shift_tokens_right,
 )

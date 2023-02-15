@@ -27,6 +27,7 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    prepare_model_for_training,
 )
 
 
@@ -84,6 +85,42 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
                 self.assertTrue(hasattr(model, "save_pretrained"))
                 self.assertTrue(hasattr(model, "from_pretrained"))
                 self.assertTrue(hasattr(model, "push_to_hub"))
+
+    def test_prepare_for_training(self):
+        r"""
+        A test that checks if `prepare_for_training` behaves as expected
+        """
+        for model_id in self.checkpoints_to_test:
+            for i, config_cls in enumerate(self.config_classes):
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+                config = config_cls(
+                    base_model_name_or_path=model_id,
+                    **self.config_kwargs[i],
+                )
+                model = get_peft_model(model, config)
+
+                dummy_input = torch.LongTensor([[1, 1, 1]])
+                dummy_output = model.get_input_embeddings()(dummy_input)
+
+                self.assertTrue(not dummy_output.requires_grad)
+
+                # load with `prepare_model_for_training`
+                model = AutoModelForCausalLM.from_pretrained(model_id)
+                model = prepare_model_for_training(model)
+
+                for param in model.parameters():
+                    self.assertTrue(not param.requires_grad)
+
+                config = config_cls(
+                    base_model_name_or_path=model_id,
+                    **self.config_kwargs[i],
+                )
+                model = get_peft_model(model, config)
+
+                dummy_input = torch.LongTensor([[1, 1, 1]])
+                dummy_output = model.get_input_embeddings()(dummy_input)
+
+                self.assertTrue(dummy_output.requires_grad)
 
     def test_save_pretrained(self):
         r"""
