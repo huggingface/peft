@@ -81,6 +81,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = self.peft_config.modules_to_save
             _set_trainable(self)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.forward.__func__.__signature__ = inspect.signature(self.base_model.forward)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
