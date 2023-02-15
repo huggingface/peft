@@ -42,13 +42,13 @@ def prepare_model_for_training(model, output_embedding_layer_name="lm_head"):
     """
     loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
 
-    for param in model.parameters():
+    for name,param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
 
         if loaded_in_8bit:
             # cast layer norm in fp32 for stability for 8bit models
-            if param.ndim == 1:
+            if param.ndim == 1 and "layer_norm" in name:
                 param.data = param.data.to(torch.float32)
 
     # For backward compatibility
