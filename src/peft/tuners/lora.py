@@ -134,7 +134,7 @@ class LoraModel(torch.nn.Module):
                     is_target_modules_in_base_model = True
                 parent, target, target_name = self._get_submodules(key)
                 bias = target.bias is not None
-                if isinstance(target, bnb.nn.Linear8bitLt) and self.peft_config.enable_lora is None:
+                if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt) and self.peft_config.enable_lora is None:
                     kwargs.update(
                         {
                             "has_fp16_weights": target.state.has_fp16_weights,
