@@ -207,6 +207,27 @@ class LoraModel(torch.nn.Module):
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
+
+
+# had to adapt it for `lora_only` to work
+def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
+    for n, p in model.named_parameters():
+        if "lora_" not in n:
+            p.requires_grad = False
+    if bias == "none":
+        return
+    elif bias == "all":
+        for n, p in model.named_parameters():
+            if "bias" in n:
+                p.requires_grad = True
+    elif bias == "lora_only":
+        for m in model.modules():
+            if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                m.bias.requires_grad = True
+    else:
+        raise NotImplementedError
+
+
 class LoraLayer:
     def __init__(
         self,
@@ -436,21 +457,3 @@ if is_bnb_available():
             if self.r > 0:
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
             return result
-
-    # had to adapt it for `lora_only` to work
-    def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
-        for n, p in model.named_parameters():
-            if "lora_" not in n:
-                p.requires_grad = False
-        if bias == "none":
-            return
-        elif bias == "all":
-            for n, p in model.named_parameters():
-                if "bias" in n:
-                    p.requires_grad = True
-        elif bias == "lora_only":
-            for m in model.modules():
-                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
-                    m.bias.requires_grad = True
-        else:
-            raise NotImplementedError
