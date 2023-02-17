@@ -494,6 +494,8 @@ if is_bnb_available():
 
         def forward(self, x: torch.Tensor):
             result = super().forward(x)
-            if self.r > 0:
+            if self.disable_adapters:
+                return result
+            elif self.r > 0:
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
             return result
