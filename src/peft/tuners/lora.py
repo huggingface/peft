@@ -14,10 +14,11 @@
 # limitations under the License.
 import importlib
 import math
+import re
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -42,7 +43,7 @@ class LoraConfig(PeftConfig):
 
     Args:
         r (`int`): Lora attention dimension
-        target_modules (`List[str]`): The names of the modules to apply Lora to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
         lora_alpha (`float`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
         merge_weights (`bool`):
@@ -55,7 +56,13 @@ class LoraConfig(PeftConfig):
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
-    target_modules: Optional[list] = field(default=None, metadata={"help": "List of modules to replace with Lora"})
+    target_modules: Optional[Union[List[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or regex expression of the module names to replace with Lora."
+            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+        },
+    )
     lora_alpha: int = field(default=None, metadata={"help": "Lora alpha"})
     lora_dropout: float = field(default=None, metadata={"help": "Lora dropout"})
     merge_weights: bool = field(
@@ -129,7 +136,11 @@ class LoraModel(torch.nn.Module):
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
-            if any(key.endswith(target_key) for target_key in self.peft_config.target_modules):
+            if isinstance(self.peft_config.target_modules, str):
+                target_module_found = re.fullmatch(self.peft_config.target_modules, key)
+            else:
+                target_module_found = any(key.endswith(target_key) for target_key in self.peft_config.target_modules)
+            if target_module_found:
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
                 parent, target, target_name = self._get_submodules(key)
