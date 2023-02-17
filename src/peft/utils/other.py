@@ -30,7 +30,7 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_training(model, output_embedding_layer_name="lm_head"):
+def prepare_model_for_int8_training(model, output_embedding_layer_name="lm_head"):
     r"""
     This method wrapps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
