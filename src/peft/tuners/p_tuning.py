@@ -111,9 +111,9 @@ class PromptEncoder(torch.nn.Module):
         # embedding
         self.embedding = torch.nn.Embedding(self.total_virtual_tokens, self.token_dim)
         if not config.inference_mode:
+            num_layers = config.encoder_num_layers
             if self.encoder_type == PromptEncoderReparameterizationType.LSTM:
                 lstm_dropout = config.encoder_dropout
-                num_layers = config.encoder_num_layers
                 # LSTM
                 self.lstm_head = torch.nn.LSTM(
                     input_size=self.input_size,
@@ -131,16 +131,22 @@ class PromptEncoder(torch.nn.Module):
                 )
 
             elif self.encoder_type == PromptEncoderReparameterizationType.MLP:
+                if num_layers <= 1:
+                    raise ValueError(
+                        "The MLP prompt encoder must have at least 2 layers, and exactly 2 layers is recommended."
+                    )
+
                 layers = [
                     torch.nn.Linear(self.input_size, self.hidden_size),
                     torch.nn.ReLU(),
                 ]
-                layers.extend(
-                    [
-                        torch.nn.Linear(self.hidden_size, self.hidden_size),
-                        torch.nn.ReLU(),
-                    ]
-                )
+                for _ in range(num_layers - 2):
+                    layers.extend(
+                        [
+                            torch.nn.Linear(self.hidden_size, self.hidden_size),
+                            torch.nn.ReLU(),
+                        ]
+                    )
                 layers.append(torch.nn.Linear(self.hidden_size, self.output_size))
                 self.mlp_head = torch.nn.Sequential(*layers)
 
