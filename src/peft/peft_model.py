@@ -16,6 +16,7 @@
 import inspect
 import os
 import warnings
+from contextlib import contextmanager
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -287,6 +288,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             return self.base_model(*args, **kwargs)
         else:
             return self.base_model.model(*args, **kwargs)
+
+    @contextmanager
+    def disable_adapter(self):
+        """
+        Disables the adapter module.
+        """
+        if isinstance(self.peft_config, PromptLearningConfig):
+            old_forward = self.forward
+            self.forward = self.base_model.forward
+        else:
+            self.base_model.disable_adapter_layers()
+        yield
+        if isinstance(self.peft_config, PromptLearningConfig):
+            self.forward = old_forward
+        else:
+            self.base_model.enable_adapter_layers()
 
 
 class PeftModelForSequenceClassification(PeftModel):
