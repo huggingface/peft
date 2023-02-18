@@ -222,6 +222,7 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 | OPT            | ✅  | ✅  | ✅  | ✅  |
 | GPT-Neo        | ✅  | ✅  | ✅  | ✅  |
 | GPT-J          | ✅  | ✅  | ✅  | ✅  |
+| GPT-NeoX-20B   | ✅  | ✅  | ✅  | ✅  |
 
 ### Conditional Generation
 |   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
@@ -279,6 +280,8 @@ The same principle applies to our [segmentation models](https://huggingface.co/m
 |   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
 | --------- | ---- | ---- | ---- | ----  |
 | SegFormer           | ✅  |   |   |   | 
+
+
 ## Caveats:
 
 1. Below is an example of using PyTorch FSDP for training. However, it doesn't lead to 
