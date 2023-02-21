@@ -284,10 +284,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Forward pass of the model.
         """
-        if isinstance(self.peft_config, PromptLearningConfig):
-            return self.base_model(*args, **kwargs)
-        else:
-            return self.base_model.model(*args, **kwargs)
+        return self.get_base_model()(*args, **kwargs)
 
     @contextmanager
     def disable_adapter(self):
@@ -304,6 +301,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.forward = old_forward
         else:
             self.base_model.enable_adapter_layers()
+
+    def get_base_model(self):
+        """
+        Returns the base model.
+        """
+        return self.base_model if isinstance(self.peft_config, PromptLearningConfig) else self.base_model.model
 
 
 class PeftModelForSequenceClassification(PeftModel):
