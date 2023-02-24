@@ -17,4 +17,4 @@ jobs:
           pip install pytest
           
       - name: Run test
-        run: pytest tests\test_config.py
+        run: pytest tests/test_config.py
