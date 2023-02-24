@@ -30,7 +30,9 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_int8_training(model, output_embedding_layer_name="lm_head", use_gradient_checkpointing=True):
+def prepare_model_for_int8_training(
+    model, output_embedding_layer_name="lm_head", use_gradient_checkpointing=True, layer_norm_names=["layer_norm"]
+):
     r"""
     This method wrapps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -48,7 +50,7 @@ def prepare_model_for_int8_training(model, output_embedding_layer_name="lm_head"
 
         if loaded_in_8bit:
             # cast layer norm in fp32 for stability for 8bit models
-            if param.ndim == 1 and "layer_norm" in name:
+            if param.ndim == 1 and any(layer_norm_name in name for layer_norm_name in layer_norm_names):
                 param.data = param.data.to(torch.float32)
 
     if loaded_in_8bit and use_gradient_checkpointing:
