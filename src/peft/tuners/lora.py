@@ -56,6 +56,7 @@ class LoraConfig(PeftConfig):
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
+    n_adapters: int = field(default=1, metadata={"help": "the total number of adapters attached to the base model"})
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
@@ -129,6 +130,7 @@ class LoraModel(torch.nn.Module):
         is_target_modules_in_base_model = False
         kwargs = {
             "r": self.peft_config.r,
+            "n_adapters" : self.peft_config.n_adapters,
             "lora_alpha": self.peft_config.lora_alpha,
             "lora_dropout": self.peft_config.lora_dropout,
             "fan_in_fan_out": self.peft_config.fan_in_fan_out,
@@ -227,6 +229,21 @@ class LoraModel(torch.nn.Module):
         self._set_adapter_layers(enabled=False)
 
 
+
+    def enable_adapter_layers_index(self, adapter_index):
+        self._set_adapter_layers_index(adapter_index, enabled=True)
+
+    def disable_adapter_layers_index(self, adapter_index):
+        self._set_adapter_layers_index(adapter_index, enabled=False)
+
+
+    def _set_adapter_layers_index(self, adapter_index, enabled=True):
+        for module in self.model.modules():
+            if isinstance(module, LoraLayer):
+                module.disable_adapters = not enabled     
+                module.cur_adapter = adapter_index if enabled else 10000    # a large number will through an exception incase we enable but don't set the index
+
+
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
 
@@ -275,6 +292,7 @@ class LoraLayer:
         self.merged = False
         self.merge_weights = merge_weights
         self.disable_adapters = False
+        self.cur_adapter = 0
 
 
 class Linear(nn.Linear, LoraLayer):
@@ -470,6 +488,7 @@ if is_bnb_available():
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
+            n_adapters=1,
             **kwargs,
         ):
             bnb.nn.Linear8bitLt.__init__(
@@ -485,18 +504,22 @@ if is_bnb_available():
             LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=False)
             # Actual trainable parameters
             if r > 0:
-                self.lora_A = nn.Linear(in_features, r, bias=False)
-                self.lora_B = nn.Linear(r, out_features, bias=False)
+                print(f"there are {n_adapters} adapters")
+                self.lora_As = nn.ModuleList([nn.Linear(in_features, r, bias=False) for _ in range(n_adapters)])
+                self.lora_Bs = nn.ModuleList([nn.Linear(r, out_features, bias=False) for _ in range(n_adapters)])
                 self.scaling = self.lora_alpha / self.r
                 # Freezing the pre-trained weight matrix
                 self.weight.requires_grad = False
+            
             self.reset_parameters()
+            
 
         def reset_parameters(self):
-            if hasattr(self, "lora_A"):
+            if hasattr(self, "lora_As"):
+                for adapter_index in range(len(self.lora_As)):
                 # initialize A the same way as the default for nn.Linear and B to zero
-                nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-                nn.init.zeros_(self.lora_B.weight)
+                    nn.init.kaiming_uniform_(self.lora_As[adapter_index].weight, a=math.sqrt(5))
+                    nn.init.zeros_(self.lora_Bs[adapter_index].weight)
 
         def forward(self, x: torch.Tensor):
             result = super().forward(x)
@@ -509,10 +532,10 @@ if is_bnb_available():
 
                     if x.dtype != torch.float32:
                         x = x.float()
-                    output = self.lora_B(self.lora_A(self.lora_dropout(x))).to(expected_dtype) * self.scaling
+                    output = self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout(x))).to(expected_dtype) * self.scaling
                     result += output
                 else:
-                    output = self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
+                    output = self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout(x))) * self.scaling
                     result += output
             return result
 
