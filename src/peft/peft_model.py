@@ -155,7 +155,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"Please check that the file {WEIGHTS_NAME} is present at {model_id}."
                 )
 
-        adapters_weights = torch.load(filename)
+        adapters_weights = torch.load(
+            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         # load the weights into the model
         model = set_peft_model_state_dict(model, adapters_weights)
         if getattr(model, "hf_device_map", None) is not None:
@@ -266,7 +267,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         trainable_params = 0
         all_param = 0
         for _, param in self.named_parameters():
-            all_param += param.numel()
+            num_params = param.numel()
+            # if using DS Zero 3 and the weights are initialized empty
+            if num_params == 0 and hasattr(param, "ds_numel"):
+                num_params = param.ds_numel
+                
+            all_param += num_params
             if param.requires_grad:
                 trainable_params += param.numel()
         print(
