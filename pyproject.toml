@@ -9,7 +9,7 @@ line-length = 119
 
 [tool.ruff.isort]
 default_section = "FIRSTPARTY"
-known_first_party = "pet"
+known_first_party = "peft"
 known_third_party = [
     "numpy",
     "torch",
