@@ -27,10 +27,10 @@ def print_trainable_parameters(model):
 
 
 lora_config = LoraConfig(
-    r=(16,16),
-    lora_alpha=(32,32),
+    r=[16,8],
+    lora_alpha=32,
     target_modules=None,  #handled automatically by peft
-    lora_dropout=(0.05,0.01),
+    lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
     n_adapters=2

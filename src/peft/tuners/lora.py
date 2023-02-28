@@ -44,10 +44,10 @@ class LoraConfig(PeftConfig):
 
     Args:
         n_adapters (`int`): The total number of adapters attached to the base model
-        r (`Tuple[int]`): Lora attention dimension for each Adapter
+        r (`Union[int,List[int]]`): Lora attention dimension for each Adapter
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
-        lora_alpha (`Tuple[float]`): The alpha parameters for Lora scaling.
-        lora_dropout (`Tuple[float]`): The dropout probabilities for Lora layers.
+        lora_alpha (`Union[int,List[int]]`): The alpha parameters for Lora scaling.
+        lora_dropout (`Union[int,List[float]]`): The dropout probabilities for Lora layers.
         merge_weights (`bool`):
             Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
@@ -58,7 +58,7 @@ class LoraConfig(PeftConfig):
     """
 
     n_adapters: int = field(default=1, metadata={"help": "The total number of adapters attached to the base model"})
-    r: Tuple[int] = field(default=(8,), metadata={"help": "Lora attention dimension for each adaptor"})
+    r: Union[int, List[int]] = field(default=8, metadata={"help": "Lora attention dimension for each adaptor"})
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
@@ -66,8 +66,8 @@ class LoraConfig(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
-    lora_alpha: Tuple[int] = field(default=None, metadata={"help": "Lora alphas"})
-    lora_dropout: Tuple[float] = field(default=None, metadata={"help": "Lora dropouts"})
+    lora_alpha: Union[int, List[int]] = field(default=None, metadata={"help": "Lora alpha"})
+    lora_dropout: Union[int, List[float]] = field(default=None, metadata={"help": "Lora dropout"})
     merge_weights: bool = field(
         default=False, metadata={"help": "Merge weights of the original model and the Lora model"}
     )
@@ -88,6 +88,21 @@ class LoraConfig(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
+
+        if self.n_adapters == 1:
+            assert isinstance(self.r, int)
+            self.r = [self.r]
+            assert isinstance(self.lora_alpha, int)
+            self.lora_alpha = [self.lora_alpha]
+            assert isinstance(self.lora_dropout, float)
+            self.lora_dropout = [self.lora_dropout]
+        else:
+            if isinstance(self.r, int):
+                self.r = [self.r] * self.n_adapters
+            if isinstance(self.lora_alpha, int):
+                self.lora_alpha = [self.lora_alpha] * self.n_adapters
+            if isinstance(self.lora_dropout, float):
+                self.lora_dropout = [self.lora_dropout] * self.n_adapters
 
         assert len(self.r) == len(self.lora_alpha) == len(self.lora_dropout) == self.n_adapters
 
