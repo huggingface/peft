@@ -314,10 +314,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.base_model.enable_adapter_layers_index(index)
 
     def disable_adapter_index(self, index=0):
-        self.base_model.enable_adapter_layers_index(index)
-
-
-    
+        self.base_model.disable_adapter_layers_index(index)
 
     def get_base_model(self):
         """

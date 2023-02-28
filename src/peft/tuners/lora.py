@@ -13,12 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
+
 import math
 import re
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -42,10 +43,11 @@ class LoraConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`~peft.Lora`].
 
     Args:
-        r (`int`): Lora attention dimension
+        n_adapters (`int`): The total number of adapters attached to the base model
+        r (`Tuple[int]`): Lora attention dimension for each Adapter
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
-        lora_alpha (`float`): The alpha parameter for Lora scaling.
-        lora_dropout (`float`): The dropout probability for Lora layers.
+        lora_alpha (`Tuple[float]`): The alpha parameters for Lora scaling.
+        lora_dropout (`Tuple[float]`): The dropout probabilities for Lora layers.
         merge_weights (`bool`):
             Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
@@ -55,8 +57,8 @@ class LoraConfig(PeftConfig):
             and saved in the final checkpoint.
     """
 
-    r: int = field(default=8, metadata={"help": "Lora attention dimension"})
-    n_adapters: int = field(default=1, metadata={"help": "the total number of adapters attached to the base model"})
+    n_adapters: int = field(default=1, metadata={"help": "The total number of adapters attached to the base model"})
+    r: Tuple[int] = field(default=(8,), metadata={"help": "Lora attention dimension for each adaptor"})
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
@@ -64,8 +66,8 @@ class LoraConfig(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
-    lora_alpha: int = field(default=None, metadata={"help": "Lora alpha"})
-    lora_dropout: float = field(default=None, metadata={"help": "Lora dropout"})
+    lora_alpha: Tuple[int] = field(default=None, metadata={"help": "Lora alphas"})
+    lora_dropout: Tuple[float] = field(default=None, metadata={"help": "Lora dropouts"})
     merge_weights: bool = field(
         default=False, metadata={"help": "Merge weights of the original model and the Lora model"}
     )
@@ -86,6 +88,8 @@ class LoraConfig(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
+
+        assert len(self.r) == len(self.lora_alpha) == len(self.lora_dropout) == self.n_adapters
 
 
 class LoraModel(torch.nn.Module):
@@ -228,14 +232,11 @@ class LoraModel(torch.nn.Module):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-
-
     def enable_adapter_layers_index(self, adapter_index):
         self._set_adapter_layers_index(adapter_index, enabled=True)
 
     def disable_adapter_layers_index(self, adapter_index):
         self._set_adapter_layers_index(adapter_index, enabled=False)
-
 
     def _set_adapter_layers_index(self, adapter_index, enabled=True):
         for module in self.model.modules():
@@ -284,10 +285,13 @@ class LoraLayer:
         self.r = r
         self.lora_alpha = lora_alpha
         # Optional dropout
-        if lora_dropout > 0.0:
-            self.lora_dropout = nn.Dropout(p=lora_dropout)
-        else:
-            self.lora_dropout = lambda x: x
+        lora_dropouts = []
+        for dropout in lora_dropout:
+            if dropout > 0.0:
+                lora_dropouts.append(nn.Dropout(p=dropout))
+            else:
+                lora_dropouts.append(lambda x: x)
+        self.lora_dropout = nn.ModuleList(lora_dropouts)
         # Mark the weight as unmerged
         self.merged = False
         self.merge_weights = merge_weights
@@ -485,9 +489,9 @@ if is_bnb_available():
             self,
             in_features,
             out_features,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
+            r: Tuple[int] = (0,),
+            lora_alpha: Tuple[int] = (1,),
+            lora_dropout: Tuple[float] = (0.0,),
             n_adapters=1,
             **kwargs,
         ):
@@ -503,11 +507,11 @@ if is_bnb_available():
             )
             LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=False)
             # Actual trainable parameters
-            if r > 0:
+            if any([rr > 0 for rr in r]):
                 print(f"there are {n_adapters} adapters")
-                self.lora_As = nn.ModuleList([nn.Linear(in_features, r, bias=False) for _ in range(n_adapters)])
-                self.lora_Bs = nn.ModuleList([nn.Linear(r, out_features, bias=False) for _ in range(n_adapters)])
-                self.scaling = self.lora_alpha / self.r
+                self.lora_As = nn.ModuleList([nn.Linear(in_features, r[i], bias=False) for i in range(n_adapters)])
+                self.lora_Bs = nn.ModuleList([nn.Linear(r[i], out_features, bias=False) for i in range(n_adapters)])
+                self.scalings = [self.lora_alpha[i] / self.r[i] for i in range(n_adapters) ]
                 # Freezing the pre-trained weight matrix
                 self.weight.requires_grad = False
             
@@ -526,16 +530,16 @@ if is_bnb_available():
 
             if self.disable_adapters:
                 return result
-            elif self.r > 0:
+            elif self.r[self.cur_adapter] > 0:
                 if not torch.is_autocast_enabled():
                     expected_dtype = result.dtype
 
                     if x.dtype != torch.float32:
                         x = x.float()
-                    output = self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout(x))).to(expected_dtype) * self.scaling
+                    output = self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout[self.cur_adapter](x))).to(expected_dtype) * self.scalings[self.cur_adapter]
                     result += output
                 else:
-                    output = self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout(x))) * self.scaling
+                    output = self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout[self.cur_adapter](x))) * self.scalings[self.cur_adapter]
                     result += output
             return result
 
