@@ -167,7 +167,7 @@ class AdaLoraModel(LoraModel):
 
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs) 
-        
+
         # Calculate the orthogonal regularization 
         orth_reg_weight = self.peft_config.orth_reg_weight
         assert orth_reg_weight > 0 
@@ -188,6 +188,10 @@ class AdaLoraModel(LoraModel):
 
             outputs.loss += orth_reg_weight * regu_loss 
         return outputs 
+
+    def update_and_allocate(self, global_step):
+        self.rankallocator.update_and_allocate(self, global_step)
+
 
 
 
@@ -483,7 +487,7 @@ class RankAllocator(object):
                     p.data.masked_fill_(triplet_ipt[n]<=mask_threshold, 0.0)
         return mask_threshold
 
-    def update_and_mask(self, model, global_step):
+    def update_and_allocate(self, model, global_step):
         if global_step < self.peft_config.total_step - self.tfinal:
             self.update_ipt(model)
         budget, mask_ind = self.budget_schedule(global_step)
