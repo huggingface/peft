@@ -1,5 +1,5 @@
 from transformers import AutoModelForSeq2SeqLM
-from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, LoraConfig, TaskType
+from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, LoraConfig, AdaLoraConfig, AdaLoraModel, TaskType
 import torch
 from datasets import load_dataset
 import os
@@ -12,20 +12,24 @@ from tqdm import tqdm
 from datasets import load_dataset
 
 device = "cuda"
-model_name_or_path = "bigscience/mt0-large"
-tokenizer_name_or_path = "bigscience/mt0-large"
+model_name_or_path = "facebook/bart-base"
+tokenizer_name_or_path = "facebook/bart-base"
 
 checkpoint_name = "financial_sentiment_analysis_lora_v1.pt"
 text_column = "sentence"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
-num_epochs = 3
+num_epochs = 1
 batch_size = 8
 
 
 # creating model
-peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+peft_config = AdaLoraConfig(
+    r=8, lora_alpha=32, lora_dropout=0.1
+    task_type=TaskType.SEQ_2_SEQ_LM, 
+    inference_mode=False
+)
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
@@ -89,6 +93,7 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_warmup_steps=0,
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
+model.base_model.peft_config.total_step = len(train_dataloader) * num_epochs
 
 
 # training and evaluation
