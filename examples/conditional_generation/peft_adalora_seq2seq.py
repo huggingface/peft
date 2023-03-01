@@ -26,7 +26,7 @@ batch_size = 8
 
 # creating model
 peft_config = AdaLoraConfig(
-    r=8, lora_alpha=32, lora_dropout=0.1
+    r=8, lora_alpha=32, lora_dropout=0.1,
     task_type=TaskType.SEQ_2_SEQ_LM, 
     inference_mode=False
 )
@@ -151,7 +151,7 @@ model.save_pretrained(peft_model_id)
 
 
 ckpt = f"{peft_model_id}/adapter_model.bin"
-get_ipython().system('du -h $ckpt')
+# get_ipython().system('du -h $ckpt')
 
 
 from peft import PeftModel, PeftConfig
