@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from ..utils import PeftConfig, PeftType, transpose
-from .lora import LoraConfig, LoraModel, LoRALayer, mark_only_lora_as_trainable
+from .lora import LoraConfig, LoraModel, LoraLayer, mark_only_lora_as_trainable
 
 
 def is_bnb_available():
@@ -69,26 +69,26 @@ class AdaLoraModel(LoraModel):
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`LoraConfig`]): The configuration of the Lora model.
+        config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
 
     Returns:
-        `torch.nn.Module`: The Lora model.
+        `torch.nn.Module`: The AdaLora model.
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import LoraModel, LoraConfig >>>
-        config = LoraConfig(
-            peft_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
-            lora_dropout=0.01, )
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoraModel(config, model)
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import AdaLoraModel, AdaLoraConfig 
+        >>> config = AdaLoraConfig(
+                peft_type="ADALORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
+                lora_dropout=0.01,
+            )
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> adalora_model = AdaLoraModel(config, model)
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
+        - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
 
     def __init__(self, config, model):
-        # super().__init__()
         nn.Module.__init__(self)
         self.peft_config = config
         self.model = model
@@ -194,9 +194,7 @@ class AdaLoraModel(LoraModel):
 
 
 
-
-
-class SVDLinear(nn.Linear, LoRALayer):
+class SVDLinear(nn.Linear, LoraLayer):
     # SVD-based adaptation for a dense layer
     def __init__(
         self, 
@@ -210,7 +208,7 @@ class SVDLinear(nn.Linear, LoRALayer):
         **kwargs
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        LoRALayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout,
+        LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout,
                            merge_weights=merge_weights)
 
         self.fan_in_fan_out = fan_in_fan_out

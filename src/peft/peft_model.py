@@ -29,7 +29,7 @@ from transformers.utils import PushToHubMixin
 
 from huggingface_hub import hf_hub_download
 
-from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .tuners import LoraModel, AdaLoraConfig, AdaLoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -76,6 +76,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.modules_to_save = None
         if isinstance(self.peft_config, PromptLearningConfig):
             self._setup_prompt_encoder()
+        elif isinstance(self.peft_config, AdaLoraConfig):
+            self.base_model = AdaLoraModel(peft_config, model)
         else:
             self.base_model = LoraModel(peft_config, model)
         if getattr(self.peft_config, "modules_to_save", None) is not None:
