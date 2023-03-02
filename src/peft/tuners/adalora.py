@@ -63,7 +63,8 @@ class AdaLoraConfig(LoraConfig):
 
 class AdaLoraModel(LoraModel):
     """
-    Creates Adaptive LoRA (AdaLora) model from a pretrained transformers model.
+    Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model.
+    Paper: https://openreview.net/pdf?id=lq62uWRJjiY 
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
