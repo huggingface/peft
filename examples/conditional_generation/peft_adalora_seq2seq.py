@@ -1,5 +1,5 @@
 from transformers import AutoModelForSeq2SeqLM
-from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, LoraConfig, AdaLoraConfig, AdaLoraModel, TaskType
+from peft import get_peft_model, AdaLoraConfig, AdaLoraModel, TaskType
 import torch
 from datasets import load_dataset
 import os
@@ -20,15 +20,15 @@ text_column = "sentence"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
-num_epochs = 1
+num_epochs = 8
 batch_size = 8
 
 
 # creating model
 peft_config = AdaLoraConfig(
-    init_r=12, target_r=1, 
+    init_r=12, target_r=8, 
     beta1=0.85, beta2=0.85, 
-    tinit=0, tfinal=230, deltaT=1,
+    tinit=200, tfinal=1000, deltaT=10,
     lora_alpha=32, lora_dropout=0.1,
     task_type=TaskType.SEQ_2_SEQ_LM, 
     inference_mode=False
@@ -107,17 +107,17 @@ for epoch in range(num_epochs):
     total_loss = 0
     for step, batch in enumerate(tqdm(train_dataloader)):
         batch = {k: v.to(device) for k, v in batch.items()}
-        with torch.autograd.set_detect_anomaly(True):
-            outputs = model(**batch)
-            loss = outputs.loss
-            total_loss += loss.detach().float()
-            loss.backward()
-            optimizer.step()
-            lr_scheduler.step()
-
-            model.base_model.update_and_allocate(global_step)
-            optimizer.zero_grad()
-            global_step += 1
+        outputs = model(**batch)
+        loss = outputs.loss
+        total_loss += loss.detach().float()
+        loss.backward()
+        optimizer.step()
+        lr_scheduler.step()
+        # Update the importance of low-rank matrices 
+        # and allocate the budget accordingly. 
+        model.base_model.update_and_allocate(global_step)
+        optimizer.zero_grad()
+        global_step += 1
 
     model.eval()
     eval_loss = 0
