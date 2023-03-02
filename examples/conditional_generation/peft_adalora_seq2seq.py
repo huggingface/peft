@@ -26,7 +26,10 @@ batch_size = 8
 
 # creating model
 peft_config = AdaLoraConfig(
-    r=8, lora_alpha=32, lora_dropout=0.1,
+    init_r=12, target_r=1, 
+    beta1=0.85, beta2=0.85, 
+    tinit=0, tfinal=230, deltaT=1,
+    lora_alpha=32, lora_dropout=0.1,
     task_type=TaskType.SEQ_2_SEQ_LM, 
     inference_mode=False
 )
@@ -98,19 +101,23 @@ model.base_model.peft_config.total_step = len(train_dataloader) * num_epochs
 
 # training and evaluation
 model = model.to(device)
-
+global_step = 0 
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
     for step, batch in enumerate(tqdm(train_dataloader)):
         batch = {k: v.to(device) for k, v in batch.items()}
-        outputs = model(**batch)
-        loss = outputs.loss
-        total_loss += loss.detach().float()
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
+        with torch.autograd.set_detect_anomaly(True):
+            outputs = model(**batch)
+            loss = outputs.loss
+            total_loss += loss.detach().float()
+            loss.backward()
+            optimizer.step()
+            lr_scheduler.step()
+
+            model.base_model.update_and_allocate(global_step)
+            optimizer.zero_grad()
+            global_step += 1
 
     model.eval()
     eval_loss = 0

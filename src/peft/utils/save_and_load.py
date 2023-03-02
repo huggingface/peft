@@ -29,7 +29,7 @@ def get_peft_model_state_dict(model, state_dict=None):
     """
     if state_dict is None:
         state_dict = model.state_dict()
-    if model.peft_config.peft_type == PeftType.LORA:
+    if model.peft_config.peft_type in (PeftType.LORA, PeftType.ADALORA):
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
         # to directly with the state dict which is necessary when using DeepSpeed or FSDP
@@ -72,7 +72,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
     """
 
     model.load_state_dict(peft_model_state_dict, strict=False)
-    if model.peft_config.peft_type != PeftType.LORA:
+    if model.peft_config.peft_type not in (PeftType.LORA, PeftType.ADALORA):
         model.prompt_encoder.embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
