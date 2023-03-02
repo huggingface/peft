@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from copy import deepcopy
 import importlib
 import math
 import re
@@ -192,6 +193,11 @@ class LoraModel(torch.nn.Module):
             new_module.state = old_module.state
             new_module.to(old_module.weight.device)
 
+        # dispatch to correct device
+        for name, module in new_module.named_modules():
+            if "lora_" in name:
+                module.to(old_module.weight.device)
+
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -331,20 +337,27 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_B.eval()
 
     def forward(self, x: torch.Tensor):
+        previous_device = x.device
+
+        if previous_device != self.weight.device:
+            x = x.to(self.weight.device)
+
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 self.weight.data -= (
                     transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
                 )
                 self.merged = False
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias).to(previous_device)
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
+            result = result.to(previous_device)
             return result
         else:
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias).to(previous_device)
 
 
 class MergedLinear(nn.Linear, LoraLayer):
