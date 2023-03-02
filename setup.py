@@ -12,11 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from setuptools import setup
-from setuptools import find_packages
+from setuptools import find_packages, setup
 
 extras = {}
-extras["quality"] = ["black ~= 22.0", "isort >= 5.5.4", "flake8 >= 3.8.3"]
+extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
 
@@ -24,6 +23,7 @@ setup(
     name="peft",
     version="0.2.0.dev0",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
+    license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     keywords="deep learning",
