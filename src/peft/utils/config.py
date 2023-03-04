@@ -161,6 +161,6 @@ class PromptLearningConfig(PeftConfig):
     token_dim: int = field(
         default=None, metadata={"help": "The hidden embedding dimension of the base transformer model"}
     )
-    num_transformer_submodules: Optional[int] = field(default=1, metadata={"help": "Number of transformer submodules"})
+    num_transformer_submodules: Optional[int] = field(default=None, metadata={"help": "Number of transformer submodules"})
     num_attention_heads: Optional[int] = field(default=None, metadata={"help": "Number of attention heads"})
     num_layers: Optional[int] = field(default=None, metadata={"help": "Number of transformer layers"})
