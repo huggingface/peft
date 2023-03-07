@@ -8,6 +8,10 @@ select = ["C", "E", "F", "I", "W"]
 line-length = 119
 
 [tool.ruff.isort]
+lines-after-imports = 2
+known-first-party = ["peft"]
+
+[isort]
 default_section = "FIRSTPARTY"
 known_first_party = "peft"
 known_third_party = [
