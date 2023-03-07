@@ -164,7 +164,9 @@ class LoraModel(torch.nn.Module):
                 elif self.peft_config.enable_lora is not None:
                     kwargs.update({"enable_lora": self.peft_config.enable_lora})
                     if isinstance(target, Conv1D):
-                        in_features, out_features = target.weight.shape
+                        in_features, out_features = (
+                            target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
+                        )
                     else:
                         in_features, out_features = target.in_features, target.out_features
                         if kwargs["fan_in_fan_out"]:
