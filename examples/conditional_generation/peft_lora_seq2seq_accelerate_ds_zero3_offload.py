@@ -4,15 +4,15 @@ import sys
 import threading
 
 import numpy as np
+import psutil
 import torch
 from accelerate import Accelerator
+from datasets import load_dataset
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
 
-import psutil
-from datasets import load_dataset
 from peft import LoraConfig, TaskType, get_peft_model
-from tqdm import tqdm
 
 
 def levenshtein_distance(str1, str2):
@@ -217,7 +217,7 @@ def main():
                 tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
             )
         )
-        train_epoch_loss = total_loss / len(eval_dataloader)
+        train_epoch_loss = total_loss / len(train_dataloader)
         train_ppl = torch.exp(train_epoch_loss)
         accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
 
@@ -230,7 +230,8 @@ def main():
                     outputs = accelerator.unwrap_model(model).generate(
                         **batch, synced_gpus=is_ds_zero_3
                     )  # synced_gpus=True for DS-stage 3
-                preds = outputs.detach().cpu().numpy()
+                outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
+                preds = accelerator.gather(outputs).detach().cpu().numpy()
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
@@ -254,6 +255,9 @@ def main():
 
         correct = 0
         total = 0
+        assert len(eval_preds) == len(
+            dataset["train"][label_column]
+        ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
         for pred, true in zip(eval_preds, dataset["train"][label_column]):
             if pred.strip() == true.strip():
                 correct += 1
@@ -272,13 +276,16 @@ def main():
                 outputs = accelerator.unwrap_model(model).generate(
                     **batch, synced_gpus=is_ds_zero_3
                 )  # synced_gpus=True for DS-stage 3
-            test_preds.extend(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True))
+            outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
+            preds = accelerator.gather(outputs).detach().cpu().numpy()
+            test_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
         test_preds_cleaned = []
         for _, pred in enumerate(test_preds):
             test_preds_cleaned.append(get_closest_label(pred, classes))
 
         test_df = dataset["test"].to_pandas()
+        assert len(test_preds_cleaned) == len(test_df), f"{len(test_preds_cleaned)} != {len(test_df)}"
         test_df[label_column] = test_preds_cleaned
         test_df["text_labels_orig"] = test_preds
         accelerator.print(test_df[[text_column, label_column]].sample(20))

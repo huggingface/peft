@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import enum
+import warnings
 from dataclasses import dataclass, field
 from typing import Union
 
@@ -131,17 +132,16 @@ class PromptEncoder(torch.nn.Module):
                 )
 
             elif self.encoder_type == PromptEncoderReparameterizationType.MLP:
+                warnings.warn(
+                    f"for {self.encoder_type}, the `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
+                )
                 layers = [
                     torch.nn.Linear(self.input_size, self.hidden_size),
                     torch.nn.ReLU(),
+                    torch.nn.Linear(self.hidden_size, self.hidden_size),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(self.hidden_size, self.output_size),
                 ]
-                layers.extend(
-                    [
-                        torch.nn.Linear(self.hidden_size, self.hidden_size),
-                        torch.nn.ReLU(),
-                    ]
-                )
-                layers.append(torch.nn.Linear(self.hidden_size, self.output_size))
                 self.mlp_head = torch.nn.Sequential(*layers)
 
             else:
