@@ -42,27 +42,27 @@ class PeftTestMixin:
         PromptTuningConfig,
     )
     config_kwargs = (
-        dict(
-            r=8,
-            lora_alpha=32,
-            target_modules=["q_proj", "v_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM",
-        ),
-        dict(
-            num_virtual_tokens=10,
-            task_type="CAUSAL_LM",
-        ),
-        dict(
-            num_virtual_tokens=10,
-            encoder_hidden_size=32,
-            task_type="CAUSAL_LM",
-        ),
-        dict(
-            num_virtual_tokens=10,
-            task_type="CAUSAL_LM",
-        ),
+        {
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": ["q_proj", "v_proj"],
+            "lora_dropout": 0.05,
+            "bias": "none",
+            "task_type": "CAUSAL_LM",
+        },
+        {
+            "num_virtual_tokens": 10,
+            "task_type": "CAUSAL_LM",
+        },
+        {
+            "num_virtual_tokens": 10,
+            "encoder_hidden_size": 32,
+            "task_type": "CAUSAL_LM",
+        },
+        {
+            "num_virtual_tokens": 10,
+            "task_type": "CAUSAL_LM",
+        },
     )
 
 
