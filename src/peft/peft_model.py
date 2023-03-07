@@ -22,12 +22,11 @@ import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
+from huggingface_hub import hf_hub_download
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
-
-from huggingface_hub import hf_hub_download
 
 from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
@@ -156,7 +155,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
 
         adapters_weights = torch.load(
-            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
         # load the weights into the model
         model = set_peft_model_state_dict(model, adapters_weights)
         if getattr(model, "hf_device_map", None) is not None:
@@ -271,7 +271,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # if using DS Zero 3 and the weights are initialized empty
             if num_params == 0 and hasattr(param, "ds_numel"):
                 num_params = param.ds_numel
-                
+
             all_param += num_params
             if param.requires_grad:
                 trainable_params += param.numel()
