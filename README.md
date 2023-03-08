@@ -215,14 +215,15 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 ## Models support matrix
 
 ### Causal Language Modeling
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  |
-| --------- | ---- | ---- | ---- | ----  |
-| GPT-2          | ✅  | ✅  | ✅  | ✅  |
-| Bloom          | ✅  | ✅  | ✅  | ✅  |
-| OPT            | ✅  | ✅  | ✅  | ✅  |
-| GPT-Neo        | ✅  | ✅  | ✅  | ✅  |
-| GPT-J          | ✅  | ✅  | ✅  | ✅  |
-| GPT-NeoX-20B   | ✅  | ✅  | ✅  | ✅  |
+| Model        | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  |
+|--------------| ---- | ---- | ---- | ----  |
+| GPT-2        | ✅  | ✅  | ✅  | ✅  |
+| Bloom        | ✅  | ✅  | ✅  | ✅  |
+| OPT          | ✅  | ✅  | ✅  | ✅  |
+| GPT-Neo      | ✅  | ✅  | ✅  | ✅  |
+| GPT-J        | ✅  | ✅  | ✅  | ✅  |
+| GPT-NeoX-20B | ✅  | ✅  | ✅  | ✅  |
+| LLaMA        | ✅  | ✅  | ✅  | ✅  |
 
 ### Conditional Generation
 |   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
