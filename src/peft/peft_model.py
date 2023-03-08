@@ -195,7 +195,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     self.transformer_backbone_name = name
 
         if self.peft_config.num_transformer_submodules is None:
-            self.peft_config.num_transformer_submodules = 2 if self.peft_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
+            self.peft_config.num_transformer_submodules = (
+                2 if self.peft_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
+            )
 
         for named_param, value in list(transformer_backbone.named_parameters()):
             if value.shape[0] == self.base_model.config.vocab_size:
@@ -733,8 +735,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 decoder_inputs_embeds = torch.cat(
                     (prompts[:, self.peft_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
                 )
-                return self.base_model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
-
+                return self.base_model(
+                    inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs
+                )
 
     def generate(self, **kwargs):
         if not isinstance(self.peft_config, PromptLearningConfig):
