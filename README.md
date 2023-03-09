@@ -344,7 +344,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 `P_TUNING`/`PROMPT_TUNING` appends soft prompt embeddings to `input_embeds` to create
 new `input_embeds` to be given to the model. Therefore, `generate` doesn't support this yet.
 
-4. For causal_language_modeling with LoRA, like GPT2 models, we might need to set zero3_init_flag=false in accelerate config.yaml. The related issue is [[BUG] memory leak under zero.Init](https://github.com/microsoft/DeepSpeed/issues/2637)
+4. When using ZeRO3 with zero3_init_flag=True, if you find the gpu memory increase with training steps. we might need to set zero3_init_flag=false in accelerate config.yaml. The related issue is [[BUG] memory leak under zero.Init](https://github.com/microsoft/DeepSpeed/issues/2637)
 ## Backlog:
 1. Explore and possibly integrate `(IA)^3`
 2. Add tests
