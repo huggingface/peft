@@ -21,7 +21,7 @@ extras["dev"] = extras["quality"] + extras["docs_specific"]
 
 setup(
     name="peft",
-    version="0.2.0.dev0",
+    version="0.2.0",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),
