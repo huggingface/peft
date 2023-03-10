@@ -22,12 +22,11 @@ import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
+from huggingface_hub import hf_hub_download
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
-
-from huggingface_hub import hf_hub_download
 
 from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
@@ -156,7 +155,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
 
         adapters_weights = torch.load(
-            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
         # load the weights into the model
         model = set_peft_model_state_dict(model, adapters_weights)
         if getattr(model, "hf_device_map", None) is not None:
@@ -184,7 +184,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         return model
 
     def _setup_prompt_encoder(self):
-        num_transformer_submodules = 0
         transformer_backbone = None
         for name, module in self.base_model.named_children():
             for param in module.parameters():
@@ -194,8 +193,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if transformer_backbone is None:
                     transformer_backbone = module
                     self.transformer_backbone_name = name
-                num_transformer_submodules += 1
-        self.peft_config.num_transformer_submodules = 2 if self.peft_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
+
+        if self.peft_config.num_transformer_submodules is None:
+            self.peft_config.num_transformer_submodules = (
+                2 if self.peft_config.task_type == TaskType.SEQ_2_SEQ_LM else 1
+            )
 
         for named_param, value in list(transformer_backbone.named_parameters()):
             if value.shape[0] == self.base_model.config.vocab_size:
@@ -271,10 +273,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # if using DS Zero 3 and the weights are initialized empty
             if num_params == 0 and hasattr(param, "ds_numel"):
                 num_params = param.ds_numel
-                
+
             all_param += num_params
             if param.requires_grad:
-                trainable_params += param.numel()
+                trainable_params += num_params
         print(
             f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
         )
@@ -719,15 +721,23 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
             # concat prompt labels
             if labels is not None:
-                prefix_labels = torch.full((batch_size, self.peft_config.num_virtual_tokens), -100).to(self.device)
-                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+                if self.peft_config.num_transformer_submodules == 1:
+                    kwargs["labels"] = labels
+                elif self.peft_config.num_transformer_submodules == 2:
+                    prefix_labels = torch.full((batch_size, self.peft_config.num_virtual_tokens), -100).to(self.device)
+                    kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
             prompts = self.get_prompt(batch_size=batch_size)
             prompts = prompts.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prompts[:, : self.peft_config.num_virtual_tokens], inputs_embeds), dim=1)
-            decoder_inputs_embeds = torch.cat(
-                (prompts[:, self.peft_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
-            )
-            return self.base_model(inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs)
+            if self.peft_config.num_transformer_submodules == 1:
+                return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+            elif self.peft_config.num_transformer_submodules == 2:
+                decoder_inputs_embeds = torch.cat(
+                    (prompts[:, self.peft_config.num_virtual_tokens :], decoder_inputs_embeds), dim=1
+                )
+                return self.base_model(
+                    inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs
+                )
 
     def generate(self, **kwargs):
         if not isinstance(self.peft_config, PromptLearningConfig):

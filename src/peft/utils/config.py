@@ -18,9 +18,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Optional, Union
 
-from transformers.utils import PushToHubMixin
-
 from huggingface_hub import hf_hub_download
+from transformers.utils import PushToHubMixin
 
 from .adapters_utils import CONFIG_NAME
 
@@ -98,7 +97,7 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             try:
                 config_file = hf_hub_download(pretrained_model_name_or_path, CONFIG_NAME)
-            except:
+            except Exception:
                 raise ValueError(f"Can't find config.json at '{pretrained_model_name_or_path}'")
 
         loaded_attributes = cls.from_json_file(config_file)
@@ -161,6 +160,8 @@ class PromptLearningConfig(PeftConfig):
     token_dim: int = field(
         default=None, metadata={"help": "The hidden embedding dimension of the base transformer model"}
     )
-    num_transformer_submodules: Optional[int] = field(default=1, metadata={"help": "Number of transformer submodules"})
+    num_transformer_submodules: Optional[int] = field(
+        default=None, metadata={"help": "Number of transformer submodules"}
+    )
     num_attention_heads: Optional[int] = field(default=None, metadata={"help": "Number of attention heads"})
     num_layers: Optional[int] = field(default=None, metadata={"help": "Number of transformer layers"})
