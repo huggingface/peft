@@ -320,22 +320,23 @@ class Linear(nn.Linear, LoraLayer):
         self,
         in_features: int,
         out_features: int,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
+        r: Tuple[int] = (0,),
+        lora_alpha: Tuple[int] = (1,),
+        lora_dropout: Tuple[float] = (0.0,),
+        n_adapters=1,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         merge_weights: bool = True,
         **kwargs,
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
-
+        self.n_adapters = n_adapters
         self.fan_in_fan_out = fan_in_fan_out
         # Actual trainable parameters
-        if r > 0:
-            self.lora_A = nn.Linear(in_features, r, bias=False)
-            self.lora_B = nn.Linear(r, out_features, bias=False)
-            self.scaling = self.lora_alpha / self.r
+        if any([rr > 0 for rr in r]):
+            self.lora_As = nn.ModuleList([nn.Linear(in_features, r[i], bias=False) for i in range(n_adapters)])
+            self.lora_Bs = nn.ModuleList([nn.Linear(r[i], out_features, bias=False) for i in range(n_adapters)])
+            self.scalings = [self.lora_alpha[i] / self.r[i] for i in range(n_adapters)]
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
         self.reset_parameters()
@@ -344,47 +345,48 @@ class Linear(nn.Linear, LoraLayer):
 
     def reset_parameters(self):
         nn.Linear.reset_parameters(self)
-        if hasattr(self, "lora_A"):
+        if hasattr(self, "lora_As"):
             # initialize A the same way as the default for nn.Linear and B to zero
-            nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_B.weight)
+            for i in range(self.n_adapters):
+                nn.init.kaiming_uniform_(self.lora_As[i].weight, a=math.sqrt(5))
+                nn.init.zeros_(self.lora_Bs[i].weight)
 
     def train(self, mode: bool = True):
         nn.Linear.train(self, mode)
-        self.lora_A.train(mode)
-        self.lora_B.train(mode)
+        self.lora_As[self.cur_adapter].train(mode)
+        self.lora_Bs[self.cur_adapter].train(mode)
         if not mode and self.merge_weights and not self.merged:
             # Merge the weights and mark it
             if self.r > 0:
                 self.weight.data += (
-                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
+                    transpose(self.lora_Bs[self.cur_adapter].weight @ self.lora_As[self.cur_adapter].weight, self.fan_in_fan_out) * self.scalings[self.cur_adapter]
                 )
             self.merged = True
         elif self.merge_weights and self.merged:
             # Make sure that the weights are not merged
             if self.r > 0:
                 self.weight.data -= (
-                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
+                    transpose(self.lora_Bs[self.cur_adapter].weight @ self.lora_As[self.cur_adapter].weight, self.fan_in_fan_out) * self.scalings[self.cur_adapter]
                 )
             self.merged = False
 
     def eval(self):
         nn.Linear.eval(self)
-        self.lora_A.eval()
-        self.lora_B.eval()
+        self.lora_As[self.cur_adapter].eval()
+        self.lora_Bs[self.cur_adapter].eval()
 
     def forward(self, x: torch.Tensor):
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 self.weight.data -= (
-                    transpose(self.lora_B.weight @ self.lora_A.weight, self.fan_in_fan_out) * self.scaling
+                    transpose(self.lora_Bs[self.cur_adapter].weight @ self.lora_As[self.cur_adapter].weight, self.fan_in_fan_out) * self.scalings[self.cur_adapter]
                 )
                 self.merged = False
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-        elif self.r > 0 and not self.merged:
+        elif self.r[self.cur_adapter] > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-            if self.r > 0:
-                result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
+            if self.r[self.cur_adapter] > 0:
+                result += self.lora_Bs[self.cur_adapter](self.lora_As[self.cur_adapter](self.lora_dropout[self.cur_adapter](x))) * self.scalings[self.cur_adapter]
             return result
         else:
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
@@ -396,9 +398,10 @@ class MergedLinear(nn.Linear, LoraLayer):
         self,
         in_features: int,
         out_features: int,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
+        r: Tuple[int] = (0,),
+        lora_alpha: Tuple[int] = (1,),
+        lora_dropout: Tuple[float] = (0.0,),
+        n_adapters=1,
         enable_lora: List[bool] = [False],
         fan_in_fan_out: bool = False,
         merge_weights: bool = True,
@@ -408,19 +411,20 @@ class MergedLinear(nn.Linear, LoraLayer):
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
         if out_features % len(enable_lora) != 0:
             raise ValueError("The length of enable_lora must divide out_features")
+        self.n_adapters = n_adapters
         self.enable_lora = enable_lora
         self.fan_in_fan_out = fan_in_fan_out
         # Actual trainable parameters
-        if r > 0 and any(enable_lora):
-            self.lora_A = nn.Linear(in_features, r * sum(enable_lora), bias=False)
-            self.lora_B = nn.Conv1d(
-                r * sum(enable_lora),
+        if any([rr > 0 for rr in r]) and any(enable_lora):
+            self.lora_As = nn.ModuleList([nn.Linear(in_features, r[i]* sum(enable_lora), bias=False) for i in range(n_adapters)])
+            self.lora_Bs = nn.ModuleList([nn.Conv1d(
+                r[i] * sum(enable_lora),
                 out_features // len(enable_lora) * sum(enable_lora),
                 kernel_size=1,
                 groups=2,
                 bias=False,
-            )
-            self.scaling = self.lora_alpha / self.r
+            ) for i in range(n_adapters)])
+            self.scalings = [self.lora_alpha[i] / self.r[i] for i in range(n_adapters) ]
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
             # Compute the indices
@@ -433,10 +437,11 @@ class MergedLinear(nn.Linear, LoraLayer):
 
     def reset_parameters(self):
         nn.Linear.reset_parameters(self)
-        if hasattr(self, "lora_A"):
+        if hasattr(self, "lora_As"):
             # initialize A the same way as the default for nn.Linear and B to zero
-            nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_B.weight)
+            for i in range(self.n_adapters):
+                nn.init.kaiming_uniform_(self.lora_As[i].weight, a=math.sqrt(5))
+                nn.init.zeros_(self.lora_Bs[i].weight)
 
     def zero_pad(self, x):
         result = x.new_zeros((*x.shape[:-1], self.out_features))
@@ -446,43 +451,43 @@ class MergedLinear(nn.Linear, LoraLayer):
 
     def train(self, mode: bool = True):
         nn.Linear.train(self, mode)
-        self.lora_A.train(mode)
-        self.lora_B.train(mode)
+        self.lora_As[self.cur_adapter].train(mode)
+        self.lora_Bs[self.cur_adapter].train(mode)
         if not mode and self.merge_weights and not self.merged:
             # Merge the weights and mark it
-            if self.r > 0 and any(self.enable_lora):
+            if self.r[self.cur_adapter] > 0 and any(self.enable_lora):
                 delta_w = F.conv1d(
-                    self.lora_A.weight.data.unsqueeze(0),
-                    self.lora_B.weight.data.unsqueeze(-1),
+                    self.lora_As[self.cur_adapter].weight.data.unsqueeze(0),
+                    self.lora_Bs[self.cur_adapter].weight.data.unsqueeze(-1),
                     groups=sum(self.enable_lora),
                 ).squeeze(0)
-                self.weight.data += self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
+                self.weight.data += self.zero_pad(transpose(delta_w * self.scalings[self.cur_adapter], self.fan_in_fan_out))
             self.merged = True
         elif self.merge_weights and self.merged:
             # Make sure that the weights are not merged
-            if self.r > 0 and any(self.enable_lora):
+            if self.r[self.cur_adapter] > 0 and any(self.enable_lora):
                 delta_w = F.conv1d(
-                    self.lora_A.weight.data.unsqueeze(0),
-                    self.lora_B.weight.data.unsqueeze(-1),
+                    self.lora_As[self.cur_adapter].weight.data.unsqueeze(0),
+                    self.lora_Bs[self.cur_adapter].weight.data.unsqueeze(-1),
                     groups=sum(self.enable_lora),
                 ).squeeze(0)
-                self.weight.data -= self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
+                self.weight.data -= self.zero_pad(transpose(delta_w * self.scalings[self.cur_adapter], self.fan_in_fan_out))
             self.merged = False
 
     def eval(self):
         nn.Linear.eval(self)
-        self.lora_A.eval()
-        self.lora_B.eval()
+        self.lora_As[self.cur_adapter].eval()
+        self.lora_Bs[self.cur_adapter].eval()
 
     def forward(self, x: torch.Tensor):
         if self.disable_adapters:
-            if self.r > 0 and self.merged and any(self.enable_lora):
+            if self.r[self.cur_adapter] > 0 and self.merged and any(self.enable_lora):
                 delta_w = F.conv1d(
-                    self.lora_A.weight.data.unsqueeze(0),
-                    self.lora_B.weight.data.unsqueeze(-1),
+                    self.lora_As[self.cur_adapter].weight.data.unsqueeze(0),
+                    self.lora_Bs[self.cur_adapter].weight.data.unsqueeze(-1),
                     groups=sum(self.enable_lora),
                 ).squeeze(0)
-                self.weight.data -= self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
+                self.weight.data -= self.zero_pad(transpose(delta_w * self.scalings, self.fan_in_fan_out))
                 self.merged = False
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.merged:
@@ -490,9 +495,9 @@ class MergedLinear(nn.Linear, LoraLayer):
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
-                after_A = self.lora_A(self.lora_dropout(x))
-                after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)
-                result += self.zero_pad(after_B) * self.scaling
+                after_A = self.lora_As[self.cur_adapter](self.lora_dropout[self.cur_adapter](x))
+                after_B = self.lora_Bs[self.cur_adapter](after_A.transpose(-2, -1)).transpose(-2, -1)
+                result += self.zero_pad(after_B) * self.scalings[self.cur_adapter]
             return result
 
 
@@ -521,9 +526,9 @@ if is_bnb_available():
                 index=kwargs.get("index", None),
             )
             LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=False)
+            self.n_adapters = n_adapters
             # Actual trainable parameters
             if any([rr > 0 for rr in r]):
-                print(f"there are {n_adapters} adapters")
                 self.lora_As = nn.ModuleList([nn.Linear(in_features, r[i], bias=False) for i in range(n_adapters)])
                 self.lora_Bs = nn.ModuleList([nn.Linear(r[i], out_features, bias=False) for i in range(n_adapters)])
                 self.scalings = [self.lora_alpha[i] / self.r[i] for i in range(n_adapters) ]
@@ -535,10 +540,10 @@ if is_bnb_available():
 
         def reset_parameters(self):
             if hasattr(self, "lora_As"):
-                for adapter_index in range(len(self.lora_As)):
                 # initialize A the same way as the default for nn.Linear and B to zero
-                    nn.init.kaiming_uniform_(self.lora_As[adapter_index].weight, a=math.sqrt(5))
-                    nn.init.zeros_(self.lora_Bs[adapter_index].weight)
+                for i in range(self.n_adapters):
+                    nn.init.kaiming_uniform_(self.lora_As[i].weight, a=math.sqrt(5))
+                    nn.init.zeros_(self.lora_Bs[i].weight)
 
         def forward(self, x: torch.Tensor):
             result = super().forward(x)
@@ -564,10 +569,11 @@ if is_bnb_available():
             self,
             in_features: int,
             out_features: int,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            enable_lora: List[bool] = [False],
+            r: Tuple[int] = (0,),
+            lora_alpha: Tuple[int] = (1,),
+            lora_dropout: Tuple[float] = (0.0,),
+            n_adapters=1,
+            enable_lora: List[bool] = [False], # do we want to be able to modify this per adapter?
             **kwargs,
         ):
             bnb.nn.Linear8bitLt.__init__(
@@ -581,20 +587,22 @@ if is_bnb_available():
                 index=kwargs.get("index", None),
             )
             LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=False)
+            self.n_adapters = n_adapters
             if out_features % len(enable_lora) != 0:
                 raise ValueError("The length of enable_lora must divide out_features")
             self.enable_lora = enable_lora
             # Actual trainable parameters
-            if r > 0 and any(enable_lora):
-                self.lora_A = nn.Linear(in_features, r * sum(enable_lora), bias=False)
-                self.lora_B = nn.Conv1d(
-                    r * sum(enable_lora),
+            if any([rr > 0 for rr in r]) and any(enable_lora):
+                self.lora_As = nn.ModuleList([nn.Linear(in_features, r[i]* sum(enable_lora), bias=False) for i in range(n_adapters)])
+                self.lora_Bs = nn.ModuleList([ nn.Conv1d(
+                    r[i] * sum(enable_lora),
                     out_features // len(enable_lora) * sum(enable_lora),
                     kernel_size=1,
                     groups=2,
                     bias=False,
-                )
-                self.scaling = self.lora_alpha / self.r
+                ) for i in range(n_adapters)])
+  
+                self.scalings = [self.lora_alpha[i] / self.r[i] for i in range(n_adapters) ]
                 # Freezing the pre-trained weight matrix
                 self.weight.requires_grad = False
                 # Compute the indices
@@ -604,10 +612,11 @@ if is_bnb_available():
             self.reset_parameters()
 
         def reset_parameters(self):
-            if hasattr(self, "lora_A"):
+            if hasattr(self, "lora_As"):
                 # initialize A the same way as the default for nn.Linear and B to zero
-                nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-                nn.init.zeros_(self.lora_B.weight)
+                for i in range(self.n_adapters):
+                    nn.init.kaiming_uniform_(self.lora_As[i].weight, a=math.sqrt(5))
+                    nn.init.zeros_(self.lora_Bs[i].weight)
 
         def zero_pad(self, x):
             result = x.new_zeros((*x.shape[:-1], self.out_features))
@@ -626,13 +635,13 @@ if is_bnb_available():
                     expected_dtype = result.dtype
                     if x.dtype != torch.float32:
                         x = x.float()
-                    after_A = self.lora_A(self.lora_dropout(x))
-                    after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)
-                    output = self.zero_pad(after_B).to(expected_dtype) * self.scaling
+                    after_A = self.lora_As[self.cur_adapter](self.lora_dropout[self.cur_adapter](x))
+                    after_B = self.lora_Bs[self.cur_adapter](after_A.transpose(-2, -1)).transpose(-2, -1)
+                    output = self.zero_pad(after_B).to(expected_dtype) * self.scalings[self.cur_adapter]
                     result += output
                 else:
-                    after_A = self.lora_A(self.lora_dropout(x))
-                    after_B = self.lora_B(after_A.transpose(-2, -1)).transpose(-2, -1)
-                    output = self.zero_pad(after_B) * self.scaling
+                    after_A = self.lora_As[self.cur_adapter](self.lora_dropout[self.cur_adapter](x))
+                    after_B = self.lora_Bs[self.cur_adapter](after_A.transpose(-2, -1)).transpose(-2, -1)
+                    output = self.zero_pad(after_B) * self.scalings[self.cur_adapter]
                     result += output
             return result
