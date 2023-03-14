@@ -127,12 +127,14 @@ class LoraModel(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
         is_target_modules_in_base_model = False
+        is_hf_device_map_available = hasattr(self.model, "hf_device_map")
         kwargs = {
             "r": self.peft_config.r,
             "lora_alpha": self.peft_config.lora_alpha,
             "lora_dropout": self.peft_config.lora_dropout,
             "fan_in_fan_out": self.peft_config.fan_in_fan_out,
-            "merge_weights": self.peft_config.merge_weights or self.peft_config.inference_mode,
+            "merge_weights": (self.peft_config.merge_weights or self.peft_config.inference_mode)
+            and not is_hf_device_map_available,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
@@ -174,7 +176,7 @@ class LoraModel(torch.nn.Module):
                                 "fan_in_fan_out is set to True but the target module is not a Conv1D. "
                                 "Setting fan_in_fan_out to False."
                             )
-                            kwargs["fan_in_fan_out"] = False
+                            kwargs["fan_in_fan_out"] = self.peft_config.fan_in_fan_out = False
                     new_module = MergedLinear(in_features, out_features, bias=bias, **kwargs)
                 self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
@@ -426,22 +428,30 @@ class MergedLinear(nn.Linear, LoraLayer):
         if not mode and self.merge_weights and not self.merged:
             # Merge the weights and mark it
             if self.r > 0 and any(self.enable_lora):
-                delta_w = F.conv1d(
-                    self.lora_A.weight.data.unsqueeze(0),
-                    self.lora_B.weight.data.unsqueeze(-1),
-                    groups=sum(self.enable_lora),
-                ).squeeze(0)
-                self.weight.data += self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
+                delta_w = (
+                    F.conv1d(
+                        self.lora_A.weight.data.unsqueeze(0),
+                        self.lora_B.weight.data,
+                        groups=sum(self.enable_lora),
+                    )
+                    .squeeze(0)
+                    .transpose(-2, -1)
+                )
+                self.weight.data += transpose(self.zero_pad(delta_w * self.scaling), not self.fan_in_fan_out)
             self.merged = True
         elif self.merge_weights and self.merged:
             # Make sure that the weights are not merged
             if self.r > 0 and any(self.enable_lora):
-                delta_w = F.conv1d(
-                    self.lora_A.weight.data.unsqueeze(0),
-                    self.lora_B.weight.data.unsqueeze(-1),
-                    groups=sum(self.enable_lora),
-                ).squeeze(0)
-                self.weight.data -= self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
+                delta_w = (
+                    F.conv1d(
+                        self.lora_A.weight.data.unsqueeze(0),
+                        self.lora_B.weight.data,
+                        groups=sum(self.enable_lora),
+                    )
+                    .squeeze(0)
+                    .transpose(-2, -1)
+                )
+                self.weight.data -= transpose(self.zero_pad(delta_w * self.scaling), not self.fan_in_fan_out)
             self.merged = False
 
     def eval(self):
@@ -452,12 +462,16 @@ class MergedLinear(nn.Linear, LoraLayer):
     def forward(self, x: torch.Tensor):
         if self.disable_adapters:
             if self.r > 0 and self.merged and any(self.enable_lora):
-                delta_w = F.conv1d(
-                    self.lora_A.weight.data.unsqueeze(0),
-                    self.lora_B.weight.data.unsqueeze(-1),
-                    groups=sum(self.enable_lora),
-                ).squeeze(0)
-                self.weight.data -= self.zero_pad(transpose(delta_w * self.scaling, self.fan_in_fan_out))
+                delta_w = (
+                    F.conv1d(
+                        self.lora_A.weight.data.unsqueeze(0),
+                        self.lora_B.weight.data,
+                        groups=sum(self.enable_lora),
+                    )
+                    .squeeze(0)
+                    .transpose(-2, -1)
+                )
+                self.weight.data -= transpose(self.zero_pad(delta_w * self.scaling), not self.fan_in_fan_out)
                 self.merged = False
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.merged:
