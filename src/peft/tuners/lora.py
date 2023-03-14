@@ -342,10 +342,10 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_B.eval()
 
     def forward(self, x: torch.Tensor):
-        previous_device = x.device
+        # previous_device = x.device
 
-        if previous_device != self.weight.device:
-            x = x.to(self.weight.device)
+        # if previous_device != self.weight.device:
+        #     x = x.to(self.weight.device)
 
         if self.disable_adapters:
             if self.r > 0 and self.merged:
@@ -354,15 +354,15 @@ class Linear(nn.Linear, LoraLayer):
                 )
                 self.merged = False
 
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias).to(previous_device)
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias) # .to(previous_device)
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
-            result = result.to(previous_device)
+            result = result # .to(previous_device)
             return result
         else:
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias).to(previous_device)
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias) # .to(previous_device)
 
 
 class MergedLinear(nn.Linear, LoraLayer):
