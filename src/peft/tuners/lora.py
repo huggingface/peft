@@ -344,7 +344,6 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_B.eval()
 
     def forward(self, x: torch.Tensor):
-
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 self.weight.data -= (
@@ -357,7 +356,6 @@ class Linear(nn.Linear, LoraLayer):
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
-            result = result
             return result
         else:
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
