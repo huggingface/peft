@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import List, Optional, Union
 
+import hiq
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -27,14 +28,8 @@ from transformers.pytorch_utils import Conv1D
 
 from ..utils import PeftConfig, PeftType, transpose
 
-
-def is_bnb_available():
-    return importlib.util.find_spec("bitsandbytes") is not None
-
-
-if is_bnb_available():
-    import bitsandbytes as bnb
-
+with hiq.SilencePrint():
+    bnb = hiq.mod('bitsandbytes',False)
 
 @dataclass
 class LoraConfig(PeftConfig):
@@ -121,7 +116,7 @@ class LoraModel(torch.nn.Module):
 
     def _find_and_replace(self):
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if loaded_in_8bit and not is_bnb_available():
+        if loaded_in_8bit and bnb:
             raise ImportError(
                 "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
@@ -479,7 +474,7 @@ class MergedLinear(nn.Linear, LoraLayer):
             return result
 
 
-if is_bnb_available():
+if bnb is not None:
 
     class Linear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
         # Lora implemented in a dense layer

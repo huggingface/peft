@@ -43,6 +43,7 @@ setup(
         "torch>=1.13.0",
         "transformers",
         "accelerate",
+        "hiq-python>=1.1.9",
     ],
     extras_require=extras,
     classifiers=[
