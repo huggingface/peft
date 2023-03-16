@@ -226,6 +226,7 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 | GPT-J        | ✅  | ✅  | ✅  | ✅  |
 | GPT-NeoX-20B | ✅  | ✅  | ✅  | ✅  |
 | LLaMA        | ✅  | ✅  | ✅  | ✅  |
+| ChatGLM      | ✅  | ✅  | ✅  | ✅  |
 
 ### Conditional Generation
 |   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
