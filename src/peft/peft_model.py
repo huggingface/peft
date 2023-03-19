@@ -162,6 +162,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "hf_device_map", None) is not None:
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
+            offload_folder = kwargs.pop("offload_folder", None)
             no_split_module_classes = model._no_split_modules
             if device_map != "sequential":
                 max_memory = get_balanced_memory(
@@ -174,7 +175,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 device_map = infer_auto_device_map(
                     model, max_memory=max_memory, no_split_module_classes=no_split_module_classes
                 )
-            model = dispatch_model(model, device_map=device_map)
+            model = dispatch_model(model, device_map=device_map, offload_dir=offload_folder)
             hook = AlignDevicesHook(io_same_device=True)
             if model.peft_config.peft_type == PeftType.LORA:
                 add_hook_to_module(model.base_model.model, hook)
