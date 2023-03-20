@@ -72,6 +72,7 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
+    lora_match: bool = field(default=False, metadata={"help": "Match Lora tensor device/dtype"})
     enable_lora: Optional[List[bool]] = field(default=None, metadata={"help": "Used with `lora.MergedLinear`."})
     bias: str = field(default="none", metadata={"help": "Bias type for Lora. Can be 'none', 'all' or 'lora_only'"})
     modules_to_save: Optional[List[str]] = field(
@@ -162,9 +163,13 @@ class LoraModel(torch.nn.Module):
                         kwargs.update({"enable_lora": self.peft_config.enable_lora})
                         new_module = MergedLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
                 elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
+                    if self.peft_config.lora_match:
+                        kwargs.update({"dtype": target.weight.dtype, "device": target.weight.device})
                     new_module = Linear(target.in_features, target.out_features, bias=bias, **kwargs)
                 elif self.peft_config.enable_lora is not None:
                     kwargs.update({"enable_lora": self.peft_config.enable_lora})
+                    if self.peft_config.lora_match:
+                        kwargs.update({"dtype": target.weight.dtype, "device": target.weight.device})
                     if isinstance(target, Conv1D):
                         in_features, out_features = (
                             target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
@@ -301,10 +306,12 @@ class Linear(nn.Linear, LoraLayer):
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
 
         self.fan_in_fan_out = fan_in_fan_out
+        dtype = kwargs.get('dtype', None)
+        device = kwargs.get('device', None)
         # Actual trainable parameters
         if r > 0:
-            self.lora_A = nn.Linear(in_features, r, bias=False)
-            self.lora_B = nn.Linear(r, out_features, bias=False)
+            self.lora_A = nn.Linear(in_features, r, bias=False, dtype=dtype, device=device)
+            self.lora_B = nn.Linear(r, out_features, bias=False, dtype=dtype, device=device)
             self.scaling = self.lora_alpha / self.r
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
@@ -381,15 +388,19 @@ class MergedLinear(nn.Linear, LoraLayer):
             raise ValueError("The length of enable_lora must divide out_features")
         self.enable_lora = enable_lora
         self.fan_in_fan_out = fan_in_fan_out
+        dtype = kwargs.get('dtype', None)
+        device = kwargs.get('device', None)
         # Actual trainable parameters
         if r > 0 and any(enable_lora):
-            self.lora_A = nn.Linear(in_features, r * sum(enable_lora), bias=False)
+            self.lora_A = nn.Linear(in_features, r * sum(enable_lora), bias=False, dtype=dtype, device=device)
             self.lora_B = nn.Conv1d(
                 r * sum(enable_lora),
                 out_features // len(enable_lora) * sum(enable_lora),
                 kernel_size=1,
                 groups=2,
                 bias=False,
+                dtype=dtype,
+                device=device,
             )
             self.scaling = self.lora_alpha / self.r
             # Freezing the pre-trained weight matrix
