@@ -56,6 +56,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "deberta": ["in_proj"],
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
+    "chatglm": ["query_key_value"],
 }
 
 
