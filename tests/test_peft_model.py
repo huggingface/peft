@@ -16,6 +16,8 @@ import os
 import tempfile
 import unittest
 
+from parameterized import parameterized
+
 import torch
 from transformers import AutoModelForCausalLM
 
@@ -28,8 +30,10 @@ from peft import (
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
+    prepare_model_for_training,
 )
 
+from .testing_utils import require_torch_gpu
 
 class PeftTestMixin:
     checkpoints_to_test = [
@@ -65,6 +69,8 @@ class PeftTestMixin:
         },
     )
 
+    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 class PeftModelTester(unittest.TestCase, PeftTestMixin):
     r"""
@@ -92,20 +98,20 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
         """
         for model_id in self.checkpoints_to_test:
             for i, config_cls in enumerate(self.config_classes):
-                model = AutoModelForCausalLM.from_pretrained(model_id)
+                model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
                 config = config_cls(
                     base_model_name_or_path=model_id,
                     **self.config_kwargs[i],
                 )
                 model = get_peft_model(model, config)
 
-                dummy_input = torch.LongTensor([[1, 1, 1]])
+                dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
                 dummy_output = model.get_input_embeddings()(dummy_input)
 
                 self.assertTrue(not dummy_output.requires_grad)
 
                 # load with `prepare_model_for_int8_training`
-                model = AutoModelForCausalLM.from_pretrained(model_id)
+                model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
                 model = prepare_model_for_int8_training(model)
 
                 for param in model.parameters():
@@ -116,18 +122,9 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
                     **self.config_kwargs[i],
                 )
                 model = get_peft_model(model, config)
+                model = prepare_model_for_training(model)
 
-                # This seems to be needed for the model to be able to compute gradients
-                if hasattr(model, "enable_input_require_grads"):
-                    model.enable_input_require_grads()
-                else:
-
-                    def make_inputs_require_grad(module, input, output):
-                        output.requires_grad_(True)
-
-                    model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-
-                dummy_input = torch.LongTensor([[1, 1, 1]])
+                dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
                 dummy_output = model.get_input_embeddings()(dummy_input)
 
                 self.assertTrue(dummy_output.requires_grad)
@@ -150,14 +147,13 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
                     **self.config_kwargs[i],
                 )
                 model = get_peft_model(model, config)
-                model.to(model.device)
+                model = model.to(self.torch_device)
 
                 with tempfile.TemporaryDirectory() as tmp_dirname:
                     model.save_pretrained(tmp_dirname)
 
                     model_from_pretrained = AutoModelForCausalLM.from_pretrained(model_id)
                     model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
-                    model_from_pretrained.to(model.device)
 
                     # check if the state dicts are equal
                     state_dict = get_peft_model_state_dict(model)
@@ -168,7 +164,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
                     # check if tensors equal
                     for key in state_dict.keys():
-                        self.assertTrue(torch.allclose(state_dict[key], state_dict_from_pretrained[key]))
+                        self.assertTrue(torch.allclose(state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)))
 
                     # check if `adapter_model.bin` is present
                     self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))

@@ -18,7 +18,6 @@ import unittest
 
 from peft import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 
-
 class PeftConfigTestMixin:
     all_config_classes = (
         LoraConfig,
