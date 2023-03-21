@@ -2,7 +2,7 @@ name: tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [ add-ci-tests ]
   pull_request:
 
 jobs:
