@@ -117,6 +117,16 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
                 )
                 model = get_peft_model(model, config)
 
+                # This seems to be needed for the model to be able to compute gradients
+                if hasattr(model, "enable_input_require_grads"):
+                    model.enable_input_require_grads()
+                else:
+
+                    def make_inputs_require_grad(module, input, output):
+                        output.requires_grad_(True)
+
+                    model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
                 dummy_input = torch.LongTensor([[1, 1, 1]])
                 dummy_output = model.get_input_embeddings()(dummy_input)
 

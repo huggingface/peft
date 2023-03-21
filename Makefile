@@ -15,4 +15,6 @@ style:
 	black $(check_dirs)
 	ruff $(check_dirs) --fix
 	doc-builder style src tests --max_len 119
-	
+
+test:
+	pytest tests/
