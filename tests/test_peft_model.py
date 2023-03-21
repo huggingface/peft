@@ -27,7 +27,7 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
-    prepare_model_for_training,
+    prepare_model_for_int8_training,
 )
 
 
@@ -104,9 +104,9 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
                 self.assertTrue(not dummy_output.requires_grad)
 
-                # load with `prepare_model_for_training`
+                # load with `prepare_model_for_int8_training`
                 model = AutoModelForCausalLM.from_pretrained(model_id)
-                model = prepare_model_for_training(model)
+                model = prepare_model_for_int8_training(model)
 
                 for param in model.parameters():
                     self.assertTrue(not param.requires_grad)
