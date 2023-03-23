@@ -25,7 +25,6 @@ from peft import (
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
-    prepare_model_for_training,
 )
 
 from .testing_common import PeftTestConfigManager
@@ -90,7 +89,16 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = prepare_model_for_training(model)
+
+        # For backward compatibility
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
+
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
