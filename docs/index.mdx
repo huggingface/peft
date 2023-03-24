@@ -1,0 +1,49 @@
+<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+-->
+
+# PEFT
+
+🤗 PEFT is a library that enables using State-of-the-art Parameter-Efficient Fine-Tuning (PEFT) methods. 
+
+PEFT methods enable efficient adaptation of pre-trained language models (PLMs) to 
+various downstream applications without fine-tuning all the model's parameters. 
+Fine-tuning large-scale PLMs is often prohibitively costly. 
+In this regard, PEFT methods only fine-tune a small number of (extra) model parameters, 
+thereby greatly decreasing the computational and storage costs. 
+Recent State-of-the-Art PEFT techniques achieve performance comparable to that of full fine-tuning.
+
+Seamlessly integrated with 🤗 Accelerate for large scale models leveraging DeepSpeed and Big Model Inference. 
+
+Supported methods, with more coming soon:
+
+1. LoRA: [LORA: LOW-RANK ADAPTATION OF LARGE LANGUAGE MODELS](https://arxiv.org/pdf/2106.09685.pdf)
+2. Prefix Tuning: [Prefix-Tuning: Optimizing Continuous Prompts for Generation](https://aclanthology.org/2021.acl-long.353/), [P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks](https://arxiv.org/pdf/2110.07602.pdf)
+3. P-Tuning: [GPT Understands, Too](https://arxiv.org/pdf/2103.10385.pdf)
+4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/pdf/2104.08691.pdf) 
+
+## Getting started
+
+```python
+from transformers import AutoModelForSeq2SeqLM
+from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
+
+model_name_or_path = "bigscience/mt0-large"
+tokenizer_name_or_path = "bigscience/mt0-large"
+
+peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+# output: trainable params: 2359296 || all params: 1231940608 || trainable%: 0.19151053100118282
+```
+
