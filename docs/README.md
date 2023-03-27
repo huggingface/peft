@@ -43,7 +43,7 @@ Once you have setup the `doc-builder` and additional packages, you can generate 
 typing the following command:
 
 ```bash
-doc-builder build accelerate docs/source/ --build_dir ~/tmp/test-build
+doc-builder build peft docs/source/ --build_dir ~/tmp/test-build
 ```
 
 You can adapt the `--build_dir` to set any temporary folder that you prefer. This command will create it and generate
@@ -67,7 +67,7 @@ doc-builder preview {package_name} {path_to_docs}
 For example:
 
 ```bash
-doc-builder preview transformers docs/source/en/
+doc-builder preview peft docs/source
 ```
 
 The docs will be viewable at [http://localhost:3000](http://localhost:3000). You can also preview the docs once you have opened a PR. You will see a bot add a comment to a link where the documentation with your changes lives.
@@ -84,7 +84,7 @@ The `preview` command only works with existing doc files. When you add a complet
 Accepted files are Markdown (.md or .mdx).
 
 Create a file with its extension and put it in the source directory. You can then link it to the toc-tree by putting
-the filename without the extension in the [`_toctree.yml`](https://github.com/huggingface/accelerate/blob/main/docs/source/_toctree.yml) file.
+the filename without the extension in the [`_toctree.yml`](https://github.com/huggingface/peft/blob/main/docs/source/_toctree.yml) file.
 
 ## Renaming section headers and moving sections
 
@@ -112,7 +112,7 @@ Use the relative style to link to the new file so that the versioned docs contin
 
 ## Writing Documentation - Specification
 
-The `huggingface/accelerate` documentation follows the
+The `huggingface/peft` documentation follows the
 [Google documentation](https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html) style for docstrings,
 although we can write them directly in Markdown.
 
