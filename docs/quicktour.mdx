@@ -12,15 +12,16 @@ specific language governing permissions and limitations under the License.
 
 # Quick tour
 
-Let's have a look at the 🤗 PEFT main features and traps to avoid.
+Let's have a look at 🤗 PEFT's main features and learn how to set up a `PeftModel` and train it with 🤗 Accelerate's DeepSpeed integration and use it for inference.
 
 ## Main use
 
-To use 🤗 PEFT in your script, you have to follow below steps:
+To use 🤗 PEFT in your script:
 
-1. Create a `PeftConfig` object corresponding to your PEFT method. 
-Please refer to the [Config Page](package_reference/config) for more details. 
-Below, we will use `LoRAConfig` for demonstration.
+1. Each PEFT method is defined by a `PeftConfig` object.
+
+Create a `PeftConfig` object corresponding to your PEFT method (see the [Configuration](package_reference/config) reference for more details) and [`TaskType`], the type of task you're training your model for.
+This example trains the [`bigscience/mt0-large`](https://huggingface.co/bigscience/mt0-large) model with the Low-Rank Adaptation of Large Language Models (LoRA) method. Load the `LoRAConfig`, and specify the `task_type` for sequence-to-sequence language modeling.
 
 ```python
 from peft import LoraConfig, TaskType
@@ -41,7 +42,7 @@ tokenizer_name_or_path = "bigscience/mt0-large"
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 ```
 
-3. Preprocess your model if you use `bitsandbytes` for INT-8 quantized training; else skip this step. 
+3. Preprocess your model if you use [`bitsandbytes`](https://github.com/TimDettmers/bitsandbytes) for `int8` quantized training; otherwise, skip this step. 
 
 ```python
 from peft import prepare_model_for_int8_training
@@ -59,8 +60,7 @@ model.print_trainable_parameters()
 # output: trainable params: 2359296 || all params: 1231940608 || trainable%: 0.19151053100118282
 ```
 
-5. Voila 🎉. Now, train the model using 🤗 Transformers Trainer API, 🤗 Accelerate or any custom PyTroch training loop.
-Please refer example [peft_lora_seq2seq.ipynb](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq.ipynb) for an end-to-end example.
+5. Voila 🎉! Now, train the model using the 🤗 Transformers Trainer API, 🤗 Accelerate, or any custom PyTroch training loop (take a look at the end-to-end [example](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq.ipynb) of training [`bigscience/mt0-large`](https://huggingface.co/bigscience/mt0-large)).
 
 ### Saving/loading a model
 
@@ -71,10 +71,9 @@ model.save_pretrained("output_dir")
 # model.push_to_hub("my_awesome_peft_model") also works
 ```
 
-This will only save the incremental PEFT weights that were trained. 
-For example, you can find the `bigscience/T0_3B` tuned using LoRA on the `twitter_complaints` raft dataset here: 
-[smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM](https://huggingface.co/smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM). 
-Notice that it only contains 2 files: `adapter_config.json` and `adapter_model.bin` with the latter being just 19MB.
+This only saves the incremental PEFT weights that were trained. 
+For example, [smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM](https://huggingface.co/smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM) is a `bigscience/T0_3B`model finetuned with LoRA on the [`twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints/train) RAFT dataset. 
+Notice that it only contains 2 files: `adapter_config.json` and `adapter_model.bin`, with the latter being just 19MB.
 
 2. Load your model using the `from_pretrained` function.
 
@@ -101,14 +100,14 @@ Notice that it only contains 2 files: `adapter_config.json` and `adapter_model.b
 ## Launching your distributed script
 
 PEFT models work with 🤗 Accelerate out of the box. 
-Use 🤗 Accelerate for Distributed training on various hardware such as GPUs, Apple Silicon devices etc during training.
-Use 🤗 Accelerate for inferencing on consumer hardware with small resources.
+You can use 🤗 Accelerate for distributed training on various hardware such as GPUs, or Apple Silicon devices during training, and for inference on consumer hardware with fewer resources.
 
-### Example of PEFT model training using 🤗 Accelerate's DeepSpeed integration
+### Train with 🤗 Accelerate's DeepSpeed integration
 
-DeepSpeed version required `v0.8.0`. An example is provided in `~examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py`. 
-  a. First, run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionnaire. 
-  Below are the contents of the config file.
+You'll need DeepSpeed version `v0.8.0` for this example. Feel free to check out the full example [script](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py) for more details!
+
+1. Run `accelerate config --config_file ds_zero3_cpu.yaml` and answer the questionnaire to setup your environment. 
+Below are the contents of the config file.
   ```yaml
   compute_environment: LOCAL_MACHINE
   deepspeed_config:
@@ -133,12 +132,12 @@ DeepSpeed version required `v0.8.0`. An example is provided in `~examples/condit
   same_network: true
   use_cpu: false
   ```
-  b. run the below command to launch the example script
+2. Run the following command to launch the example script:
   ```bash
   accelerate launch --config_file ds_zero3_cpu.yaml examples/peft_lora_seq2seq_accelerate_ds_zero3_offload.py
   ```
 
-  c. output logs:
+You'll see some output logs that look like this:
   ```bash
   GPU Memory before entering the train : 1916
   GPU Memory consumed at the end of the train (end-begin): 66
@@ -163,7 +162,7 @@ DeepSpeed version required `v0.8.0`. An example is provided in `~examples/condit
   dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
   ```
 
-### Example of PEFT model inference using 🤗 Accelerate's Big Model Inferencing capabilities
+### Inference with 🤗 Accelerate's Big Model Inference
 An example is provided in `~examples/causal_language_modeling/peft_lora_clm_accelerate_big_model_inference.ipynb`. 
 
 ## Model Support matrix
