@@ -582,7 +582,10 @@ class PeftModelForCausalLM(PeftModel):
             else:
                 if "input_ids" not in kwargs:
                     raise ValueError("input_ids must be provided for Peft model generation")
-                if kwargs.get("attention_mask", None) is not None:
+                if (
+                    kwargs.get("attention_mask", None) is not None
+                    and self.peft_config.peft_type == PeftType.PROMPT_TUNING
+                ):
                     # concat prompt attention mask
                     prefix_attention_mask = torch.ones(
                         kwargs["input_ids"].shape[0], self.peft_config.num_virtual_tokens
@@ -611,6 +614,14 @@ class PeftModelForCausalLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, **kwargs):
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
         if isinstance(self.peft_config, PromptLearningConfig):
+            if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
+                prefix_attention_mask = torch.ones(
+                    model_kwargs["input_ids"].shape[0], self.peft_config.num_virtual_tokens
+                ).to(model_kwargs["input_ids"].device)
+                model_kwargs["attention_mask"] = torch.cat(
+                    (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
+                )
+
             if model_kwargs["past_key_values"] is None and self.peft_config.peft_type == PeftType.PREFIX_TUNING:
                 past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
                 model_kwargs["past_key_values"] = past_key_values
