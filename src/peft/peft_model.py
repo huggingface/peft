@@ -587,7 +587,7 @@ class PeftModelForCausalLM(PeftModel):
                 # for prompt tuning input_ids is not passed but a concatenated input_embeds is passed. Thus attention_mask needs to be of same size of num_virtual_tokens + input_ids
                 if (
                     kwargs.get("attention_mask", None) is not None
-                    and self.peft_config.peft_type == PeftType.PROMPT_TUNING
+                    and self.peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]
                 ):
                     # concat prompt attention mask
                     prefix_attention_mask = torch.ones(
