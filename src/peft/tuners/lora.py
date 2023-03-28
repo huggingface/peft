@@ -325,8 +325,8 @@ class LoraLayer:
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         if r > 0:
-            self.lora_A.update(nn.ModuleDict({nn.Linear(self.in_features, r, bias=False)}))
-            self.lora_B.update(nn.ModuleDict({nn.Linear(r, self.out_features, bias=False)}))
+            self.lora_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)}))
+            self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
             self.scaling[adapter_name] = lora_alpha / r
         self.reset_lora_parameters(adapter_name)
 
