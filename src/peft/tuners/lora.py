@@ -329,6 +329,7 @@ class LoraLayer:
             self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
             self.scaling[adapter_name] = lora_alpha / r
         self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
