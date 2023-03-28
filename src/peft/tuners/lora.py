@@ -139,7 +139,7 @@ class LoraModel(torch.nn.Module):
             if target_module_found:
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
-                parent, target, target_name = _get_submodules(key)
+                parent, target, target_name = _get_submodules(self.model, key)
                 bias = target.bias is not None
                 if isinstance(target, LoraLayer):
                     target.update_layer(adapter_name, lora_config.r, lora_config.lora_alpha, lora_config.lora_dropout)
