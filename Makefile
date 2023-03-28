@@ -17,4 +17,4 @@ style:
 	doc-builder style src tests --max_len 119
 
 test:
-	pytest tests/
+	pytest -n 3 tests/
