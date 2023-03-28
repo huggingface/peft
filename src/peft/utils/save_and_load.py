@@ -86,6 +86,8 @@ def set_peft_model_state_dict(model, adapter_name, peft_model_state_dict):
                         key = key.replace(module_name, f"{module_name}.modules_to_save.{adapter_name}")
                         break
             state_dict[key] = value
+    else:
+        state_dict = peft_model_state_dict
 
     if config.peft_type == PeftType.LORA:
         peft_model_state_dict = {}
@@ -100,7 +102,6 @@ def set_peft_model_state_dict(model, adapter_name, peft_model_state_dict):
         peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
-
     model.load_state_dict(peft_model_state_dict, strict=False)
     if isinstance(config, PromptLearningConfig):
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
