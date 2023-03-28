@@ -444,7 +444,7 @@ if is_bnb_available():
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
 
-            self.update_layer(self, adapter_name, r, lora_alpha, lora_dropout)
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout)
             self.active_adapter = adapter_name
 
         def forward(self, x: torch.Tensor):
