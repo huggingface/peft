@@ -361,7 +361,7 @@ class Linear(nn.Linear):
             self.weight.data = self.weight.data.T
 
         nn.Linear.reset_parameters(self)
-        self.update_layer(self, adapter_name, r, lora_alpha, lora_dropout)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout)
         self.active_adapter = adapter_name
 
     def merge(self):
