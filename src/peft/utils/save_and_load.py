@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import PeftType
+from .config import PeftType, PromptLearningConfig
 
 
-def get_peft_model_state_dict(model, state_dict=None):
+def get_peft_model_state_dict(model, adapter_name, state_dict=None):
     """
     Get the state dict of the Peft model.
 
@@ -27,13 +27,14 @@ def get_peft_model_state_dict(model, state_dict=None):
             The state dict of the model. If not provided, the state dict of the model
         will be used.
     """
+    config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
-    if model.peft_config.peft_type == PeftType.LORA:
+    if config.peft_type == PeftType.LORA:
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
-        # to directly with the state dict which is necessary when using DeepSpeed or FSDP
-        bias = model.peft_config.bias
+        # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
+        bias = config.bias
         if bias == "none":
             to_return = {k: state_dict[k] for k in state_dict if "lora_" in k}
         elif bias == "all":
@@ -48,21 +49,26 @@ def get_peft_model_state_dict(model, state_dict=None):
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
-    else:
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
+    elif isinstance(config, PromptLearningConfig):
         to_return = {}
-        if model.peft_config.inference_mode:
+        if config.inference_mode:
             prompt_embeddings = model.prompt_encoder.embedding.weight
         else:
-            prompt_embeddings = model.get_prompt_embedding_to_save()
+            prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
+    else:
+        raise NotImplementedError
     if model.modules_to_save is not None:
         for key, value in state_dict.items():
-            if any(module_name in key for module_name in model.modules_to_save):
-                to_return[key] = value
+            if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
+                to_return[key.replace("modules_to_save.", "")] = value
+
+    to_return = {k.replace(f"{adapter_name}.", ""): v for k, v in to_return.items()}
     return to_return
 
 
-def set_peft_model_state_dict(model, peft_model_state_dict):
+def set_peft_model_state_dict(model, adapter_name, peft_model_state_dict):
     """
     Set the state dict of the Peft model.
 
@@ -70,10 +76,33 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
         model ([`PeftModel`]): The Peft model.
         peft_model_state_dict (`dict`): The state dict of the Peft model.
     """
+    config = model.peft_config[adapter_name]
+    state_dict = {}
+    if model.modules_to_save is not None:
+        for key, value in peft_model_state_dict.items():
+            if any(module_name in key for module_name in model.modules_to_save):
+                for module_name in model.modules_to_save:
+                    if module_name in key:
+                        key = key.replace(module_name, f"{module_name}.modules_to_save.{adapter_name}")
+                        break
+            state_dict[key] = value
+
+    if config.peft_type == PeftType.LORA:
+        peft_model_state_dict = {}
+        for k, v in state_dict.items():
+            if "lora_" in k:
+                suffix_to_replace = ".".join(k.split("lora_")[1].split(".")[1:])
+                k = k.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+                peft_model_state_dict[k] = v
+            else:
+                peft_model_state_dict[k] = v
+    elif isinstance(config, PromptLearningConfig):
+        peft_model_state_dict = state_dict
+    else:
+        raise NotImplementedError
 
     model.load_state_dict(peft_model_state_dict, strict=False)
-    if model.peft_config.peft_type != PeftType.LORA:
-        model.prompt_encoder.embedding.load_state_dict(
+    if isinstance(config, PromptLearningConfig):
+        model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
-    return model
