@@ -85,6 +85,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_config = {}
         self.active_adapter = adapter_name
         if not isinstance(peft_config, PromptLearningConfig):
+            self.peft_config[adapter_name] = peft_config
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
                 self.base_model, self.peft_config, adapter_name
             )
