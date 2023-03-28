@@ -32,7 +32,12 @@ from .testing_common import PeftTestConfigManager
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
 PEFT_MODELS_TO_TEST = [
-    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"target_modules": ["q_proj", "v_proj"]}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {}, {}, {}, {}),
+    ("HuggingFaceM4/tiny-random-LlamaForCausalLM", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-GPT2LMHeadModel", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-BloomForCausalLM", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-gpt_neo", {}, {}, {}, {}),
 ]
 
 
