@@ -86,9 +86,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.active_adapter = adapter_name
         if not isinstance(peft_config, PromptLearningConfig):
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
-                self.base_model, peft_config, adapter_name
+                self.base_model, self.peft_config, adapter_name
             )
-        self.add_adapter(adapter_name, peft_config)
+        else:
+            self.add_adapter(adapter_name, peft_config)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
