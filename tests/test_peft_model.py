@@ -31,13 +31,14 @@ from .testing_common import PeftTestConfigManager
 
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
-PEFT_MODELS_TO_TEST = [
+PEFT_DECODER_MODELS_TO_TEST = [
     ("hf-internal-testing/tiny-random-OPTForCausalLM", {}, {}, {}, {}),
     ("HuggingFaceM4/tiny-random-LlamaForCausalLM", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-GPT2LMHeadModel", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-BloomForCausalLM", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-gpt_neo", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-GPTJForCausalLM", {}, {}, {}, {}),
 ]
 
 
@@ -53,7 +54,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     We use parametrized.expand for debugging purposes to test each model individually.
     """
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
@@ -110,7 +111,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
         self.assertTrue(dummy_output.requires_grad)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
@@ -156,6 +157,6 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
