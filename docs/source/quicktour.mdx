@@ -29,9 +29,6 @@ from peft import LoraConfig, TaskType
 peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
 ```
 
-Here, `task_type` is the type of task you are training your model for. 
-For available task types, please refer [TaskType](package_reference/config#peft.config.TaskType).
-
 2. Load the base model you want to fine-tune.
 
 ```python
