@@ -24,6 +24,7 @@ from peft import (
     PeftModel,
     get_peft_model,
     get_peft_model_state_dict,
+    merge_lora,
     prepare_model_for_int8_training,
 )
 
@@ -32,7 +33,7 @@ from .testing_common import PeftTestConfigManager
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
 PEFT_MODELS_TO_TEST = [
-    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"target_modules": ["q_proj", "v_proj"]}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"bias": "all"}, {}, {}, {}),
 ]
 
 
@@ -48,10 +49,6 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     We use parametrized.expand for debugging purposes to test each model individually.
     """
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
-    def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_model_attr(model_id, config_cls, config_kwargs)
-
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = AutoModelForCausalLM.from_pretrained(model_id)
         config = config_cls(
@@ -63,6 +60,10 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
         self.assertTrue(hasattr(model, "save_pretrained"))
         self.assertTrue(hasattr(model, "from_pretrained"))
         self.assertTrue(hasattr(model, "push_to_hub"))
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_model_attr(model_id, config_cls, config_kwargs)
 
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
@@ -154,3 +155,43 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
+
+    def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        if config.peft_type != "LORA":
+            with self.assertRaises(ValueError):
+                merged_model = merge_lora(model)
+        else:
+            dummy_input = torch.LongTensor([[1, 2, 3, 2, 1]]).to(self.torch_device)
+            logits_lora = model(dummy_input)[0]
+
+            model = merge_lora(model)
+
+            logits_merged = model(dummy_input)[0]
+
+            transformers_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+
+            logits_transformers = transformers_model(dummy_input)[0]
+
+            self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-3, rtol=1e-3))
+            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-3, rtol=1e-3))
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                merged_model.save_pretrained(tmp_dirname)
+
+                model_from_pretrained = AutoModelForCausalLM.from_pretrained(tmp_dirname)
+
+                logits_merged_from_pretrained = model_from_pretrained(dummy_input)[0]
+
+                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-3, rtol=1e-3))
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_merge_layers(model_id, config_cls, config_kwargs)

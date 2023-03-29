@@ -26,5 +26,6 @@ from .other import (
     prepare_model_for_int8_training,
     shift_tokens_right,
     transpose,
+    merge_lora,
 )
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
