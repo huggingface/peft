@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from ..utils import PeftConfig, PeftType, transpose
-from .lora import LoraConfig, LoraModel, LoRALayer, mark_only_lora_as_trainable
+from .lora import LoraConfig, LoraModel, LoraLayer, mark_only_lora_as_trainable
 
 
 def is_bnb_available():
@@ -30,17 +30,15 @@ class AdaLoraConfig(LoraConfig):
     This is the configuration class to store the configuration of a [`~peft.AdaLora`].
 
     Args:
-        r (`int`): Lora attention dimension
-        target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
-        lora_alpha (`float`): The alpha parameter for Lora scaling.
-        lora_dropout (`float`): The dropout probability for Lora layers.
-        merge_weights (`bool`):
-            Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
-        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        enable_lora ( `List[bool]`): Used with `lora.MergedLinear`.
-        bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
-        modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
-            and saved in the final checkpoint.
+        target_r (`int`): The target average rank of incremental matrix. 
+        init_r (`int`): The initial rank for each incremental matrix. 
+        tinit (`int`): The steps of initial fine-tuning warmup. 
+        tfinal (`int`): The step of final fine-tuning. 
+        deltaT (`int`): The time internval between two budget allocations. 
+        beta1 (`float`): The hyperparameter of EMA for sensitivity smoothing.
+        beta2 (`float`): The hyperparameter of EMA for undertainty quantification. 
+        orth_reg_weight (`float`): The coefficient of orthogonal regularization. 
+        total_step (`int`): The total training steps that should be specified before training. 
     """
     target_r: int = field(default=8, metadata={"help": "Target Lora matrix dimension."})
     init_r: int = field(default=12, metadata={"help": "Intial Lora matrix dimension."})
@@ -65,36 +63,37 @@ class AdaLoraConfig(LoraConfig):
 
 class AdaLoraModel(LoraModel):
     """
-    Creates Adaptive LoRA (AdaLora) model from a pretrained transformers model.
+    Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model.
+    Paper: https://openreview.net/pdf?id=lq62uWRJjiY 
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`LoraConfig`]): The configuration of the Lora model.
+        config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
 
     Returns:
-        `torch.nn.Module`: The Lora model.
+        `torch.nn.Module`: The AdaLora model.
 
     Example::
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import LoraModel, LoraConfig >>>
-        config = LoraConfig(
-            peft_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
-            lora_dropout=0.01, )
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoraModel(config, model)
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import AdaLoraModel, AdaLoraConfig 
+        >>> config = AdaLoraConfig(
+                peft_type="ADALORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
+                lora_dropout=0.01,
+            )
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") 
+        >>> model = AdaLoraModel(config, model)
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
+        - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
 
     def __init__(self, config, model):
-        # super().__init__()
         nn.Module.__init__(self)
         self.peft_config = config
         self.model = model
         self._find_and_replace()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
-        # self.forward = self.model.forward
         self.rankallocator = RankAllocator(config, self.named_parameters())
 
     def _find_and_replace(self):
@@ -173,7 +172,7 @@ class AdaLoraModel(LoraModel):
         assert orth_reg_weight > 0 
 
         if hasattr(outputs, "loss"):
-            regu_loss = None 
+            regu_loss = 0 
             num_param = 0 
             for n,p in self.model.named_parameters():
                 if "lora_A" in n or "lora_B" in n:
@@ -181,12 +180,9 @@ class AdaLoraModel(LoraModel):
                     I = torch.eye(*para_cov.size(), out=torch.empty_like(para_cov))
                     I.requires_grad = False
                     num_param += 1
-                    if regu_loss is None:
-                        regu_loss = torch.norm(para_cov-I, p="fro")
-                    else:
-                        regu_loss += torch.norm(para_cov-I, p="fro") 
-
-            outputs.loss += orth_reg_weight * regu_loss 
+                    regu_loss += torch.norm(para_cov-I, p="fro")
+            regu_loss = regu_loss / num_param 
+            outputs.loss += orth_reg_weight * regu_loss  
         return outputs 
 
     def update_and_allocate(self, global_step):
@@ -194,10 +190,8 @@ class AdaLoraModel(LoraModel):
 
 
 
-
-
-class SVDLinear(nn.Linear, LoRALayer):
-    # SVD-based adaptation for a dense layer
+class SVDLinear(nn.Linear, LoraLayer):
+    # SVD-based adaptation by a dense layer
     def __init__(
         self, 
         in_features: int, 
@@ -210,7 +204,7 @@ class SVDLinear(nn.Linear, LoRALayer):
         **kwargs
     ):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        LoRALayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout,
+        LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout,
                            merge_weights=merge_weights)
 
         self.fan_in_fan_out = fan_in_fan_out
@@ -241,8 +235,6 @@ class SVDLinear(nn.Linear, LoRALayer):
             nn.init.normal_(self.lora_B, mean=0.0, std=0.02)
 
     def train(self, mode: bool = True):
-        # def T(w):
-        #     return w.T if self.fan_in_fan_out else w
         nn.Linear.train(self, mode)
         if self.merge_weights and self.merged:
             # Make sure that the weights are not merged
@@ -253,8 +245,6 @@ class SVDLinear(nn.Linear, LoRALayer):
             self.merged = False
     
     def eval(self):
-        # def T(w):
-        #     return w.T if self.fan_in_fan_out else w
         nn.Linear.eval(self)
         if self.merge_weights and not self.merged:
             # Merge the weights and mark it
@@ -265,8 +255,6 @@ class SVDLinear(nn.Linear, LoRALayer):
             self.merged = True
 
     def forward(self, x: torch.Tensor):
-        # def T(w):
-        #     return w.T if self.fan_in_fan_out else w
         if self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
@@ -279,9 +267,8 @@ class SVDLinear(nn.Linear, LoRALayer):
 
 
 if is_bnb_available():
-
     class SVDLinear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
-        # Lora implemented in a dense layer
+        # Low-rank matrix for SVD-based adaptation 
         def __init__(
             self,
             in_features,
@@ -317,20 +304,11 @@ if is_bnb_available():
                 # Freezing the pre-trained weight matrix
                 self.weight.requires_grad = False
                 self.ranknum.requires_grad = False
-
-                # self.lora_A = nn.Linear(in_features, r, bias=False)
-                # self.lora_B = nn.Linear(r, out_features, bias=False)
-                # self.scaling = self.lora_alpha / self.r
-                # # Freezing the pre-trained weight matrix
-                # self.weight.requires_grad = False
             self.reset_parameters()
 
         def reset_parameters(self):
             if hasattr(self, "lora_A"):
                 # initialize A the same way as the default for nn.Linear and B to zero
-                # nn.init.kaiming_uniform_(self.lora_A.weight, a=math.sqrt(5))
-                # nn.init.zeros_(self.lora_B.weight)
-
                 nn.init.zeros_(self.lora_E)
                 nn.init.normal_(self.lora_A, mean=0.0, std=0.02)
                 nn.init.normal_(self.lora_B, mean=0.0, std=0.02)
@@ -349,13 +327,11 @@ if is_bnb_available():
                     output = (
                         self.lora_dropout(x) @ (self.lora_A*self.lora_E).T @ self.lora_B.T /(self.ranknum+1e-5)
                     ).to(expected_dtype) * self.scaling 
-                    # output = self.lora_B(self.lora_A(self.lora_dropout(x))).to(expected_dtype) * self.scaling
                     result += output
                 else:
                     output = (
                         self.lora_dropout(x) @ (self.lora_A*self.lora_E).T @ self.lora_B.T /(self.ranknum+1e-5)
                     ) * self.scaling 
-                    # output = self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
                     result += output
             return result
 
@@ -402,8 +378,8 @@ class RankAllocator(object):
         if step <= tinit: 
             budget = self.init_bgt 
             mask_ind = False 
-        # Final warmup 
-        elif step > self.total_step - tfinal: 
+        # Final fine-tuning 
+        elif step > total_step - tfinal: 
             budget = self.target_bgt 
             mask_ind = True 
         else: 
@@ -417,6 +393,7 @@ class RankAllocator(object):
 
 
     def update_ipt(self, model): 
+        # Update the sensitivity and uncertainty for every weight 
         for n,p in model.named_parameters():
             if "lora_" in n: 
                 if n not in self.ipt:
@@ -425,8 +402,10 @@ class RankAllocator(object):
                     self.exp_avg_unc[n] = torch.zeros_like(p) 
                 with torch.no_grad():
                     self.ipt[n] = (p * p.grad).abs().detach()
+                    # Sensitivity smoothing 
                     self.exp_avg_ipt[n] = self.beta1 * self.exp_avg_ipt[n] + \
                         (1 - self.beta1)*self.ipt[n]
+                    # Uncertainty quantification 
                     self.exp_avg_unc[n] = self.beta2 * self.exp_avg_unc[n] + \
                         (1-self.beta2)*(self.ipt[n]-self.exp_avg_ipt[n]).abs()
 
@@ -445,29 +424,31 @@ class RankAllocator(object):
         value_ipt = {}
         vector_ipt = {} 
         triplet_ipt = {}
+        # Get the importance score for A, E, B
         for n,p in model.named_parameters(): 
             if "lora_A" in n: 
-                ipt_score = self._element_score(n)
-                comb_ipt = torch.mean(ipt_score, dim=1, keepdim=True)
+                entry_ipt = self._element_score(n)
+                comb_ipt = torch.mean(entry_ipt, dim=1, keepdim=True)
                 name_m = n.replace("lora_A", "%s")
                 if name_m not in vector_ipt: 
                     vector_ipt[name_m] = [comb_ipt]
                 else:
                     vector_ipt[name_m].append(comb_ipt)
             if "lora_B" in n: 
-                ipt_score = self._element_score(n)
-                comb_ipt = torch.mean(ipt_score, dim=0, keepdim=False).view(-1, 1)
+                entry_ipt = self._element_score(n)
+                comb_ipt = torch.mean(entry_ipt, dim=0, keepdim=False).view(-1, 1)
                 name_m = n.replace("lora_B", "%s")
                 if name_m not in vector_ipt: 
                     vector_ipt[name_m] = [comb_ipt]
                 else:
                     vector_ipt[name_m].append(comb_ipt)
             if "lora_E" in n:
-                ipt_score = self._element_score(n)                 
+                entry_ipt = self._element_score(n)                 
                 name_m = n.replace("lora_E", "%s")
-                value_ipt[name_m] = ipt_score
+                value_ipt[name_m] = entry_ipt
 
         all_score = []
+        # Calculate the score for each triplet 
         for name_m in vector_ipt: 
             ipt_E = value_ipt[name_m] 
             ipt_AB = torch.cat(vector_ipt[name_m], dim=1)
@@ -476,11 +457,13 @@ class RankAllocator(object):
             triplet_ipt[name_E] = sum_ipt.view(-1, 1)
             all_score.append(sum_ipt.view(-1))
 
+        # Get the threshold by ranking ipt
         mask_threshold = torch.kthvalue(
             torch.cat(all_score), 
             k = self.init_bgt - budget,
         )[0].item()
 
+        # Mask the unimportant triplets 
         with torch.no_grad():
             for n,p in model.named_parameters():
                 if "lora_E" in n: 
@@ -488,14 +471,17 @@ class RankAllocator(object):
         return mask_threshold
 
     def update_and_allocate(self, model, global_step):
-        if global_step < self.peft_config.total_step - self.tfinal:
+        # Update the importance score and allocate the budget 
+        if global_step < self.peft_config.total_step - self.peft_config.tfinal:
             self.update_ipt(model)
+            # TODO: Finalize the budget distribution by replacing with new Linear. 
         budget, mask_ind = self.budget_schedule(global_step)
+        print("budget:", budget)
         if mask_ind:
-            mask_threshold = self.mask_to_budget(model, budget) 
+            mask_threshold = self.mask_to_budget(model, budget)
+            print("mask threshold:", mask_threshold) 
         else:
             mask_threshold = None 
-
         return budget, mask_threshold
 
 

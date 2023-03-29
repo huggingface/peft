@@ -1,5 +1,5 @@
 from transformers import AutoModelForSeq2SeqLM
-from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, LoraConfig, TaskType
+from peft import get_peft_model, AdaLoraConfig, AdaLoraModel, TaskType
 import torch
 from datasets import load_dataset
 import os
@@ -12,20 +12,27 @@ from tqdm import tqdm
 from datasets import load_dataset
 
 device = "cuda"
-model_name_or_path = "bigscience/mt0-large"
-tokenizer_name_or_path = "bigscience/mt0-large"
+model_name_or_path = "facebook/bart-base"
+tokenizer_name_or_path = "facebook/bart-base"
 
 checkpoint_name = "financial_sentiment_analysis_lora_v1.pt"
 text_column = "sentence"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
-num_epochs = 3
+num_epochs = 8
 batch_size = 8
 
 
 # creating model
-peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+peft_config = AdaLoraConfig(
+    init_r=12, target_r=8, 
+    beta1=0.85, beta2=0.85, 
+    tinit=200, tfinal=1000, deltaT=10,
+    lora_alpha=32, lora_dropout=0.1,
+    task_type=TaskType.SEQ_2_SEQ_LM, 
+    inference_mode=False
+)
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
@@ -89,11 +96,12 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_warmup_steps=0,
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
+model.base_model.peft_config.total_step = len(train_dataloader) * num_epochs
 
 
 # training and evaluation
 model = model.to(device)
-
+global_step = 0 
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
@@ -105,7 +113,11 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
         lr_scheduler.step()
+        # Update the importance of low-rank matrices 
+        # and allocate the budget accordingly. 
+        model.base_model.update_and_allocate(global_step)
         optimizer.zero_grad()
+        global_step += 1
 
     model.eval()
     eval_loss = 0
@@ -146,7 +158,7 @@ model.save_pretrained(peft_model_id)
 
 
 ckpt = f"{peft_model_id}/adapter_model.bin"
-get_ipython().system('du -h $ckpt')
+# get_ipython().system('du -h $ckpt')
 
 
 from peft import PeftModel, PeftConfig
