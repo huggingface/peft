@@ -185,8 +185,63 @@ class AdaLoraModel(LoraModel):
             outputs.loss += orth_reg_weight * regu_loss  
         return outputs 
 
+
+    def _prepare_new_module(self, target, rank_idx):
+        rank = rank_idx.sum().item()
+        kwargs = {
+            "r": rank,
+            "lora_alpha": self.peft_config.lora_alpha,
+            "lora_dropout": self.peft_config.lora_dropout,
+            "fan_in_fan_out": self.peft_config.fan_in_fan_out,
+            "merge_weights": self.peft_config.merge_weights or self.peft_config.inference_mode,
+        }
+        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt) and self.peft_config.enable_lora is None:
+            kwargs.update(
+                {
+                    "has_fp16_weights": target.state.has_fp16_weights,
+                    "memory_efficient_backward": target.state.memory_efficient_backward,
+                    "threshold": target.state.threshold,
+                    "index": target.index,
+                }
+            )
+            new_module = SVDLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
+        elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
+            new_module = SVDLinear(target.in_features, target.out_features, bias=bias, **kwargs)
+
+        with torch.no_grad():
+            new_module = new_module.to(target.weight.device)
+            new_module.weight.copy_(target.weight)
+            if bias:
+                new_module.bias.copy_(target.bias)
+            if rank > 0:
+                rank_idx = rank_idx.view(-1)
+                new_module.lora_E.copy_(target.lora_E[rank_idx])
+                new_module.lora_A.copy_(target.lora_A[rank_idx])
+                new_module.lora_B.copy_(target.lora_B[:,rank_idx])
+                # The scaling is exactly as the previous 
+                new_module.ranknum.copy_(target.ranknum)
+
+        return new_module
+
+
     def update_and_allocate(self, global_step):
-        self.rankallocator.update_and_allocate(self, global_step)
+        # Update the importance score and allocate the budget 
+        if global_step < self.peft_config.total_step - self.peft_config.tfinal:
+            budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step)
+        # Finalize the budget allocation 
+        elif global_step == self.peft_config.total_step - self.peft_config.tfinal: 
+            budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step)
+
+            for name,rank_idx in rank_pattern.items():
+                key = ".".join(name.split(".")[1:-1]) 
+                parent, target, target_name = self._get_submodules(key) 
+
+                new_module = self._prepare_new_module(target, rank_idx)
+                self._replace_module(parent, target_name, new_module, target)
+        # Pass the function to do forward propagation 
+        else: 
+            return None
 
 
 
@@ -463,25 +518,24 @@ class RankAllocator(object):
             k = self.init_bgt - budget,
         )[0].item()
 
+        rank_pattern = {}
         # Mask the unimportant triplets 
         with torch.no_grad():
             for n,p in model.named_parameters():
                 if "lora_E" in n: 
-                    p.data.masked_fill_(triplet_ipt[n]<=mask_threshold, 0.0)
-        return mask_threshold
+                    p.masked_fill_(triplet_ipt[n]<=mask_threshold, 0.0)
+                    rank_pattern[n] = (~(triplet_ipt[n]<=mask_threshold)).to(p.device)
+        return rank_pattern
 
     def update_and_allocate(self, model, global_step):
-        # Update the importance score and allocate the budget 
+        # # Update the importance score and allocate the budget 
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
             self.update_ipt(model)
-            # TODO: Finalize the budget distribution by replacing with new Linear. 
         budget, mask_ind = self.budget_schedule(global_step)
-        print("budget:", budget)
         if mask_ind:
-            mask_threshold = self.mask_to_budget(model, budget)
-            print("mask threshold:", mask_threshold) 
+            rank_pattern = self.mask_to_budget(model, budget)
         else:
-            mask_threshold = None 
-        return budget, mask_threshold
+            rank_pattern = None 
+        return budget, rank_pattern
 
 
