@@ -184,6 +184,12 @@ def merge_lora(model):
         if isinstance(target, peft.tuners.lora.Linear):
             bias = target.bias is not None
             new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+
+            # manually merge if not merged
+            if not target.merged:
+                target.merge_weights = True
+                target.train(False)
+
             model.base_model._replace_module(parent, target_name, new_module, target)
 
     model = model.base_model.model

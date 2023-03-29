@@ -82,6 +82,10 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
+    init_lora_weights: bool = field(
+        default=True,
+        metadata={"help": "Whether to initialize the weights of the Lora layers."},
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
@@ -135,6 +139,7 @@ class LoraModel(torch.nn.Module):
             "fan_in_fan_out": self.peft_config.fan_in_fan_out,
             "merge_weights": (self.peft_config.merge_weights or self.peft_config.inference_mode)
             and not is_hf_device_map_available,
+            "init_lora_weights": self.peft_config.init_lora_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
@@ -297,6 +302,8 @@ class Linear(nn.Linear, LoraLayer):
         merge_weights: bool = True,
         **kwargs,
     ):
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
 
@@ -308,7 +315,8 @@ class Linear(nn.Linear, LoraLayer):
             self.scaling = self.lora_alpha / self.r
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
-        self.reset_parameters()
+        if init_lora_weights:
+            self.reset_parameters()
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
 

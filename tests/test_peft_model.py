@@ -33,7 +33,8 @@ from .testing_common import PeftTestConfigManager
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
 PEFT_MODELS_TO_TEST = [
-    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"bias": "all"}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"init_lora_weights":False}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"merge_weights":True}, {}, {}, {}),
 ]
 
 
@@ -170,6 +171,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
                 merged_model = merge_lora(model)
         else:
             dummy_input = torch.LongTensor([[1, 2, 3, 2, 1]]).to(self.torch_device)
+            model.eval()
             logits_lora = model(dummy_input)[0]
 
             model = merge_lora(model)
@@ -184,9 +186,9 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-3, rtol=1e-3))
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
-                merged_model.save_pretrained(tmp_dirname)
+                model.save_pretrained(tmp_dirname)
 
-                model_from_pretrained = AutoModelForCausalLM.from_pretrained(tmp_dirname)
+                model_from_pretrained = AutoModelForCausalLM.from_pretrained(tmp_dirname).to(self.torch_device)
 
                 logits_merged_from_pretrained = model_from_pretrained(dummy_input)[0]
 
