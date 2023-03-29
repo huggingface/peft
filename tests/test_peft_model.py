@@ -32,8 +32,8 @@ from .testing_common import PeftTestConfigManager
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
 PEFT_DECODER_MODELS_TO_TEST = [
+    # ("HuggingFaceM4/tiny-random-LlamaForCausalLM", {}, {}, {}, {}), wait until the next `transformers` release
     ("hf-internal-testing/tiny-random-OPTForCausalLM", {}, {}, {}, {}),
-    ("HuggingFaceM4/tiny-random-LlamaForCausalLM", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-GPT2LMHeadModel", {}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-BloomForCausalLM", {}, {}, {}, {}),
