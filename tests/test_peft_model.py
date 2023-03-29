@@ -33,8 +33,8 @@ from .testing_common import PeftTestConfigManager
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
 PEFT_MODELS_TO_TEST = [
-    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"init_lora_weights":False}, {}, {}, {}),
-    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"merge_weights":True}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"init_lora_weights": False}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {"merge_weights": True}, {}, {}, {}),
 ]
 
 
@@ -168,7 +168,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
         if config.peft_type != "LORA":
             with self.assertRaises(ValueError):
-                merged_model = merge_lora(model)
+                merge_lora(model)
         else:
             dummy_input = torch.LongTensor([[1, 2, 3, 2, 1]]).to(self.torch_device)
             model.eval()
