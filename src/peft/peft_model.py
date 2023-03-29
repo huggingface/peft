@@ -585,10 +585,10 @@ class PeftModelForCausalLM(PeftModel):
                 # For gpt2 models, we construct postion_ids on the fly by using attention mask, and position ids need to match input_shape.
                 # for prefix tuning, input shape is determined using `input_ids`. Thus we should not expand 'attention_mask' here
                 # for prompt tuning input_ids is not passed but a concatenated input_embeds is passed. Thus attention_mask needs to be of same size of num_virtual_tokens + input_ids
-                if (
-                    kwargs.get("attention_mask", None) is not None
-                    and self.peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]
-                ):
+                if kwargs.get("attention_mask", None) is not None and self.peft_config.peft_type in [
+                    PeftType.PROMPT_TUNING,
+                    PeftType.P_TUNING,
+                ]:
                     # concat prompt attention mask
                     prefix_attention_mask = torch.ones(
                         kwargs["input_ids"].shape[0], self.peft_config.num_virtual_tokens
