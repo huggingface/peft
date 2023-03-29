@@ -20,7 +20,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .tuners import LoraConfig, AdaLoraConfig PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from .tuners import LoraConfig, AdaLoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PromptLearningConfig
 
 
