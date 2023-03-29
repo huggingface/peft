@@ -31,7 +31,6 @@ from peft import (
 from .testing_common import PeftTestConfigManager
 
 
-# This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs,
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
