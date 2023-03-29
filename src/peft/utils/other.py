@@ -176,12 +176,15 @@ def merge_lora(model):
     if model.peft_config.peft_type != "LORA":
         raise ValueError("The input model should be a LORA model")
 
+    if model.config.model_type == "gpt2":
+        raise ValueError("GPT2 models are not supported for merging LORA layers")
+
     model.eval()
 
     key_list = [key for key, _ in model.base_model.model.named_modules() if "lora" not in key]
     for key in key_list:
         parent, target, target_name = model.base_model._get_submodules(key)
-        if isinstance(target, peft.tuners.lora.Linear):
+        if isinstance(target, (peft.tuners.lora.Linear, peft.tuners.lora.MergedLinear)):
             bias = target.bias is not None
             new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
 
@@ -191,6 +194,7 @@ def merge_lora(model):
                 target.train(False)
 
             model.base_model._replace_module(parent, target_name, new_module, target)
+        # elif isinstance(target, peft.tuners.lora.MergedLinear):
 
     model = model.base_model.model
     return model

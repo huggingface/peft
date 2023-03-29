@@ -174,7 +174,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type != "LORA":
+        if config.peft_type != "LORA" or model.config.model_type == "gpt2":
             with self.assertRaises(ValueError):
                 merge_lora(model)
         else:
@@ -202,7 +202,14 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
                 self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-3, rtol=1e-3))
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False], "merge_weights": [False, True]},
+            },
+        )
+    )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
@@ -225,13 +232,6 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             # check if `generate` raises an error if no positional arguments are passed
             _ = model.generate(input_ids, attention_mask=attention_mask)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False], "merge_lora": [False, True]},
-            }
-        )
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)

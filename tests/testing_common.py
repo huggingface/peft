@@ -71,24 +71,45 @@ class ClassInstantier(OrderedDict):
 
         return super().__getitem__(key, *args, **kwargs)
 
-    def get_grid_parameters(self, grid_parameters):
+    def get_grid_parameters(self, grid_parameters, filter_params_func=None):
         r"""
         Returns a list of all possible combinations of the parameters in the config classes.
+
+        Args:
+            grid_parameters (`dict`):
+                A dictionary containing the parameters to be tested. There should be at least the key "model_ids" which
+                contains a list of model ids to be tested. The other keys should be the name of the config class
+                post-fixed with "_kwargs" and the value should be a dictionary containing the parameters to be tested
+                for that config class.
+            filter_params_func (`callable`, `optional`):
+                A function that takes a list of tuples and returns a list of tuples. This function is used to filter
+                out the tests that needs for example to be skipped.
+
+        Returns:
+            generated_tests (`list`):
+                A list of tuples containing the name of the test, the model id, the config class and the config class
+                kwargs.
         """
         generated_tests = []
         model_list = grid_parameters["model_ids"]
 
         for model_id in model_list:
             for key, value in self.items():
-                peft_methods = [value[1].copy()]
-
                 if "{}_kwargs".format(key) in grid_parameters:
+                    peft_configs = []
+                    current_peft_config = value[1].copy()
                     for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
                         for kwarg in current_value:
-                            peft_methods.append(value[1].copy().update({current_key: kwarg}))
+                            current_peft_config.update({current_key: kwarg})
+                            peft_configs.append(current_peft_config)
+                else:
+                    peft_configs = [value[1].copy()]
 
-                for peft_method in peft_methods:
-                    generated_tests.append((f"test_{model_id}_{key}", model_id, value[0], peft_method))
+                for peft_config in peft_configs:
+                    generated_tests.append((f"test_{model_id}_{key}", model_id, value[0], peft_config))
+
+        if filter_params_func is not None:
+            generated_tests = filter_params_func(generated_tests)
 
         return generated_tests
 
