@@ -11,7 +11,10 @@ import warnings
 from pathlib import Path
 from typing import Optional
 
+import datasets
+import diffusers
 import numpy as np
+import psutil
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
@@ -19,12 +22,6 @@ import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
-from torch.utils.data import Dataset
-from transformers import AutoTokenizer, PretrainedConfig
-
-import datasets
-import diffusers
-import psutil
 from diffusers import (
     AutoencoderKL,
     DDPMScheduler,
@@ -36,10 +33,13 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from huggingface_hub import HfFolder, Repository, whoami
-from peft import LoraConfig, LoraModel, get_peft_model_state_dict
 from PIL import Image
+from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
+from transformers import AutoTokenizer, PretrainedConfig
+
+from peft import LoraConfig, LoraModel, get_peft_model_state_dict
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -999,7 +999,10 @@ def main(args):
                     pipeline.set_progress_bar_config(disable=True)
 
                     # run inference
-                    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                    if args.seed is not None:
+                        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+                    else:
+                        generator = None
                     images = []
                     for _ in range(args.num_validation_images):
                         image = pipeline(args.validation_prompt, num_inference_steps=25, generator=generator).images[0]
@@ -1050,15 +1053,17 @@ def main(args):
     if accelerator.is_main_process:
         if args.use_lora:
             lora_config = {}
-            state_dict = get_peft_model_state_dict(unet, state_dict=accelerator.get_state_dict(unet))
-            lora_config["peft_config"] = unet.get_peft_config_as_dict(inference=True)
+            unwarpped_unet = accelerator.unwrap_model(unet)
+            state_dict = get_peft_model_state_dict(unwarpped_unet, state_dict=accelerator.get_state_dict(unet))
+            lora_config["peft_config"] = unwarpped_unet.get_peft_config_as_dict(inference=True)
             if args.train_text_encoder:
+                unwarpped_text_encoder = accelerator.unwrap_model(text_encoder)
                 text_encoder_state_dict = get_peft_model_state_dict(
-                    text_encoder, state_dict=accelerator.get_state_dict(text_encoder)
+                    unwarpped_text_encoder, state_dict=accelerator.get_state_dict(text_encoder)
                 )
                 text_encoder_state_dict = {f"text_encoder_{k}": v for k, v in text_encoder_state_dict.items()}
                 state_dict.update(text_encoder_state_dict)
-                lora_config["text_encoder_peft_config"] = text_encoder.get_peft_config_as_dict(inference=True)
+                lora_config["text_encoder_peft_config"] = unwarpped_text_encoder.get_peft_config_as_dict(inference=True)
 
             accelerator.print(state_dict)
             accelerator.save(state_dict, os.path.join(args.output_dir, f"{args.instance_prompt}_lora.pt"))
