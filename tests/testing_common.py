@@ -71,34 +71,26 @@ class ClassInstantier(OrderedDict):
 
         return super().__getitem__(key, *args, **kwargs)
 
-    def get_grid_parameters(self, model_list):
+    def get_grid_parameters(self, grid_parameters):
         r"""
         Returns a list of all possible combinations of the parameters in the config classes.
         """
-        grid_parameters = []
-        for model_tuple in model_list:
-            model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs = model_tuple
-            for key, value in self.items():
-                peft_method = value[1].copy()
-                if key == "lora":
-                    # update value[1] if necessary
-                    if lora_kwargs is not None:
-                        peft_method.update(lora_kwargs)
-                elif key == "prefix_tuning":
-                    # update value[1] if necessary
-                    if prefix_tuning_kwargs is not None:
-                        peft_method.update(prefix_tuning_kwargs)
-                elif key == "prompt_encoder":
-                    # update value[1] if necessary
-                    if prompt_encoder_kwargs is not None:
-                        peft_method.update(prompt_encoder_kwargs)
-                else:
-                    # update value[1] if necessary
-                    if prompt_tuning_kwargs is not None:
-                        peft_method.update(prompt_tuning_kwargs)
-                grid_parameters.append((f"test_{model_id}_{key}", model_id, value[0], peft_method))
+        generated_tests = []
+        model_list = grid_parameters["model_ids"]
 
-        return grid_parameters
+        for model_id in model_list:
+            for key, value in self.items():
+                peft_methods = [value[1].copy()]
+
+                if "{}_kwargs".format(key) in grid_parameters:
+                    for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
+                        for kwarg in current_value:
+                            peft_methods.append(value[1].copy().update({current_key: kwarg}))
+
+                for peft_method in peft_methods:
+                    generated_tests.append((f"test_{model_id}_{key}", model_id, value[0], peft_method))
+
+        return generated_tests
 
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)

@@ -383,6 +383,8 @@ class MergedLinear(nn.Linear, LoraLayer):
         merge_weights: bool = True,
         **kwargs,
     ):
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
         if out_features % len(enable_lora) != 0:
@@ -406,7 +408,9 @@ class MergedLinear(nn.Linear, LoraLayer):
             self.lora_ind = self.weight.new_zeros((out_features,), dtype=torch.bool).view(len(enable_lora), -1)
             self.lora_ind[enable_lora, :] = True
             self.lora_ind = self.lora_ind.view(-1)
-        self.reset_parameters()
+
+        if init_lora_weights:
+            self.reset_parameters()
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
 
