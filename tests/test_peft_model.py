@@ -32,9 +32,16 @@ from .testing_common import PeftTestConfigManager
 
 
 # This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
-PEFT_MODELS_TO_TEST = [
+PEFT_DECODER_MODELS_TO_TEST = [
+    # ("HuggingFaceM4/tiny-random-LlamaForCausalLM", {}, {}, {}, {}), wait until the next `transformers` release
     ("hf-internal-testing/tiny-random-OPTForCausalLM", {"init_lora_weights": False}, {}, {}, {}),
     ("hf-internal-testing/tiny-random-OPTForCausalLM", {"merge_weights": True}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-OPTForCausalLM", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-GPT2LMHeadModel", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-BloomForCausalLM", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-gpt_neo", {}, {}, {}, {}),
+    ("hf-internal-testing/tiny-random-GPTJForCausalLM", {}, {}, {}, {}),
 ]
 
 
@@ -61,8 +68,8 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
         self.assertTrue(hasattr(model, "save_pretrained"))
         self.assertTrue(hasattr(model, "from_pretrained"))
         self.assertTrue(hasattr(model, "push_to_hub"))
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+   
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
@@ -107,7 +114,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
         self.assertTrue(dummy_output.requires_grad)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
@@ -153,7 +160,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
@@ -197,3 +204,27 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_MODELS_TO_TEST))
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+
+    def _test_generate(self, model_id, config_cls, config_kwargs):
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # check if `generate` works
+        _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
+
+        with self.assertRaises(TypeError):
+            # check if `generate` raises an error if no positional arguments are passed
+            _ = model.generate(input_ids, attention_mask=attention_mask)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
+    def test_generate(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_generate(model_id, config_cls, config_kwargs)
