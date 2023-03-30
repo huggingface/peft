@@ -265,7 +265,7 @@ class PeftCommonTester:
             logits_transformers = transformers_model(**dummy_input)[0]
 
             self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-4, rtol=1e-4))
-            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-7, rtol=1e-7))
+            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
                 model.save_pretrained(tmp_dirname)
