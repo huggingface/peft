@@ -1,1 +1,35 @@
 # Tuners
+
+Each tuner (or PEFT method) has a configuration and model.
+
+## LoRA
+
+For finetuning a model with LoRA.
+
+[[autodoc]] LoraConfig
+
+[[autodoc]] LoraModel
+
+[[autodoc]] LoraLayer
+
+[[autodoc]] Linear
+
+[[autodoc]] MergedLinear
+
+## P-tuning
+
+[[autodoc]] PromptEncoderConfig
+
+[[autodoc]] PromptEncoder
+
+## Prefix tuning
+
+[[autodoc]] PrefixTuningConfig
+
+[[autodoc]] PrefixEncoder
+
+## Prompt tuning
+
+[[autodoc]] PromptTuningConfig
+
+[[autodoc]] PromptEmbedding
