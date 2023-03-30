@@ -55,6 +55,10 @@ class AdaLoraConfig(LoraConfig):
         default=None, 
         metadata={"help": "The total training steps."}
     )
+    rank_pattern: Optional[dict] = field(
+        default=None, 
+        metadata={"help":"The saved rank pattern."}
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADALORA
@@ -229,6 +233,8 @@ class AdaLoraModel(LoraModel):
         # Update the importance score and allocate the budget 
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
             budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step)
+            if rank_pattern:
+                self.peft_config.rank_pattern = rank_pattern 
         # Finalize the budget allocation 
         elif global_step == self.peft_config.total_step - self.peft_config.tfinal: 
             budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step, force_mask=True)
