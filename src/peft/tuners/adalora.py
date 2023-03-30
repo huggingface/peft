@@ -191,7 +191,13 @@ class AdaLoraModel(LoraModel):
 
 
     def _prepare_new_module(self, target, rank_idx):
-        rank = rank_idx.sum().item()
+        if isinstance(rank_idx, list):
+            rank = sum(rank_idx)
+        elif isinstance(rank_idx, torch.Tensor):
+            rank_idx = rank_idx.view(-1)
+            rank = rank_idx.sum().item()
+        else:
+            raise ValueError("Unexcepted type of rank_idx")
         kwargs = {
             "r": rank,
             "lora_alpha": self.peft_config.lora_alpha,
@@ -220,13 +226,20 @@ class AdaLoraModel(LoraModel):
             if bias:
                 new_module.bias.copy_(target.bias)
             if rank > 0:
-                rank_idx = rank_idx.view(-1)
                 new_module.lora_E.copy_(target.lora_E[rank_idx])
                 new_module.lora_A.copy_(target.lora_A[rank_idx])
                 new_module.lora_B.copy_(target.lora_B[:,rank_idx])
                 # The scaling is exactly as the previous 
                 new_module.ranknum.copy_(target.ranknum)
         return new_module
+
+
+    def resize_modules_by_rank_pattern(self, rank_pattern):
+        for name,rank_idx in rank_pattern.items():
+            key = ".".join(name.split(".")[1:-1]) 
+            parent, target, target_name = self._get_submodules(key) 
+            new_module = self._prepare_new_module(target, rank_idx)
+            self._replace_module(parent, target_name, new_module, target)
 
 
     def update_and_allocate(self, global_step):
@@ -238,15 +251,10 @@ class AdaLoraModel(LoraModel):
         # Finalize the budget allocation 
         elif global_step == self.peft_config.total_step - self.peft_config.tfinal: 
             budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step, force_mask=True)
-
-            for name,rank_idx in rank_pattern.items():
-                key = ".".join(name.split(".")[1:-1]) 
-                parent, target, target_name = self._get_submodules(key) 
-
-                new_module = self._prepare_new_module(target, rank_idx)
-                self._replace_module(parent, target_name, new_module, target)
+            self.resize_modules_by_rank_pattern(rank_pattern)
+            self.peft_config.rank_pattern = rank_pattern
+            self.rankallocator.reset_ipt() 
             print("Finalize the rank pattern.")
-            self.rankallocator.reset_ipt()
         # Pass the function and do forward propagation 
         else: 
             return None
@@ -542,7 +550,7 @@ class RankAllocator(object):
             for n,p in model.named_parameters():
                 if "lora_E" in n: 
                     p.masked_fill_(triplet_ipt[n]<=mask_threshold, 0.0)
-                    rank_pattern[n] = (~(triplet_ipt[n]<=mask_threshold)).to(p.device)
+                    rank_pattern[n] = (~(triplet_ipt[n]<=mask_threshold)).view(-1).tolist()
         return rank_pattern
 
     def update_and_allocate(self, model, global_step, force_mask=False):
