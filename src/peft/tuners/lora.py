@@ -263,7 +263,7 @@ class LoraModel(torch.nn.Module):
                         target.weight.data += (
                             transpose(target.lora_B.weight @ target.lora_A.weight, target.fan_in_fan_out)
                             * target.scaling
-                        )
+                        ).to(target.weight.dtype)
                     target.merged = True
 
                 self._replace_module(parent, target_name, new_module, target)
