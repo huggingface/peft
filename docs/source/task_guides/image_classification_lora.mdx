@@ -40,9 +40,9 @@ import peft
 print(f"Transformers version: {transformers.__version__}")
 print(f"Accelerate version: {accelerate.__version__}")
 print(f"PEFT version: {peft.__version__}")
-'Transformers version: 4.26.0'
-'Accelerate version: 0.16.0'
-'PEFT version: 0.1.0.dev0'
+"Transformers version: 4.26.0"
+"Accelerate version: 0.16.0"
+"PEFT version: 0.1.0.dev0"
 ```
 
 ## Authenticate to share your model
@@ -89,7 +89,7 @@ for i, label in enumerate(labels):
     id2label[i] = label
 
 id2label[2]
-'baklava'
+"baklava"
 ```
 
 Next, load the image processor of the model you're fine-tuning:
@@ -203,7 +203,7 @@ Before creating a `PeftModel`, you can check the number of trainable parameters 
 
 ```python
 print_trainable_parameters(model)
-'trainable params: 85876325 || all params: 85876325 || trainable%: 100.00'
+"trainable params: 85876325 || all params: 85876325 || trainable%: 100.00"
 ```
 
 Next, use `PeftModel` to wrap the base model so that "update" matrices are added to the respective places.
@@ -221,7 +221,7 @@ config = LoraConfig(
 )
 lora_model = get_peft_model(model, config)
 print_trainable_parameters(lora_model)
-'trainable params: 667493 || all params: 86466149 || trainable%: 0.77'
+"trainable params: 667493 || all params: 86466149 || trainable%: 0.77"
 ```
 
 Let's unpack what's going on here.
@@ -295,6 +295,7 @@ import evaluate
 
 metric = evaluate.load("accuracy")
 
+
 # the compute_metrics function takes a Named Tuple as input:
 # predictions, which are the logits of the model as Numpy arrays,
 # and label_ids, which are the ground-truth labels as Numpy arrays.
@@ -302,7 +303,6 @@ def compute_metrics(eval_pred):
     """Computes accuracy on a batch of predictions"""
     predictions = np.argmax(eval_pred.predictions, axis=1)
     return metric.compute(predictions=predictions, references=eval_pred.label_ids)
-
 ```
 
 ## Define collation function
@@ -312,6 +312,7 @@ format that is acceptable by the underlying model.
 
 ```python
 import torch
+
 
 def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
@@ -341,12 +342,14 @@ subset of the training dataset.
 
 ```python
 trainer.evaluate(val_ds)
-{'eval_loss': 0.14475855231285095,
- 'eval_accuracy': 0.96,
- 'eval_runtime': 3.5725,
- 'eval_samples_per_second': 139.958,
- 'eval_steps_per_second': 1.12,
- 'epoch': 5.0}
+{
+    "eval_loss": 0.14475855231285095,
+    "eval_accuracy": 0.96,
+    "eval_runtime": 3.5725,
+    "eval_samples_per_second": 139.958,
+    "eval_steps_per_second": 1.12,
+    "epoch": 5.0,
+}
 ```
 
 ## Share your model and run inference
@@ -417,7 +420,7 @@ with torch.no_grad():
 
 predicted_class_idx = logits.argmax(-1).item()
 print("Predicted class:", inference_model.config.id2label[predicted_class_idx])
-'Predicted class: beignets'
+"Predicted class: beignets"
 ```
 
 
