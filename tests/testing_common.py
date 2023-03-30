@@ -12,13 +12,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+import tempfile
 from collections import OrderedDict
+
+import torch
 
 from peft import (
     LoraConfig,
+    PeftModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+    prepare_model_for_int8_training,
 )
 
 
@@ -115,3 +123,173 @@ class ClassInstantier(OrderedDict):
 
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)
+
+
+class PeftCommonTester:
+    r"""
+    A large testing suite for testing common functionality of the PEFT models.
+
+    Attributes:
+        torch_device (`torch.device`):
+            The device on which the tests will be run.
+        transformers_class (`transformers.PreTrainedModel`):
+            The transformers class that is being tested.
+    """
+    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    transformers_class = None
+
+    def prepare_inputs_for_common(self):
+        raise NotImplementedError
+
+    def _test_model_attr(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        self.assertTrue(hasattr(model, "save_pretrained"))
+        self.assertTrue(hasattr(model, "from_pretrained"))
+        self.assertTrue(hasattr(model, "push_to_hub"))
+
+    def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        dummy_input = self.prepare_inputs_for_testing()
+        dummy_output = model.get_input_embeddings()(dummy_input["input_ids"])
+
+        self.assertTrue(not dummy_output.requires_grad)
+
+        # load with `prepare_model_for_int8_training`
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = prepare_model_for_int8_training(model)
+
+        for param in model.parameters():
+            self.assertTrue(not param.requires_grad)
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        # For backward compatibility
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
+
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+        dummy_input = self.prepare_inputs_for_testing()
+        dummy_output = model.get_input_embeddings()(dummy_input["input_ids"])
+
+        self.assertTrue(dummy_output.requires_grad)
+
+    def _test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+
+            # check if same keys
+            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                self.assertTrue(
+                    torch.allclose(
+                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                    )
+                )
+
+            # check if `adapter_model.bin` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+
+            # check if `adapter_config.json` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+
+            # check if `pytorch_model.bin` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+
+            # check if `config.json` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+    def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        if config.peft_type != "LORA":
+            with self.assertRaises(AttributeError):
+                model = model.merge_and_unload()
+        elif model.config.model_type == "gpt2":
+            with self.assertRaises(ValueError):
+                model = model.merge_and_unload()
+        else:
+            dummy_input = self.prepare_inputs_for_testing()
+            model.eval()
+            logits_lora = model(**dummy_input)[0]
+
+            model = model.merge_and_unload()
+
+            logits_merged = model(**dummy_input)[0]
+
+            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+            logits_transformers = transformers_model(**dummy_input)[0]
+
+            self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-7, rtol=1e-7))
+            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-7, rtol=1e-7))
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+
+                model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
+
+                logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
+
+                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-7, rtol=1e-7))
+
+    def _test_generate(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        # check if `generate` works
+        _ = model.generate(**inputs)
+
+        with self.assertRaises(TypeError):
+            # check if `generate` raises an error if no positional arguments are passed
+            _ = model.generate(inputs["input_ids"])
