@@ -246,6 +246,9 @@ class LoraModel(torch.nn.Module):
         if self.config.model_type == "gpt2":
             raise ValueError("GPT2 models are not supported for merging LORA layers")
 
+        if getattr(self.model, "is_loaded_in_8bit", False):
+            raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
+
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             parent, target, target_name = self._get_submodules(key)
