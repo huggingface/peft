@@ -195,6 +195,7 @@ class AdaLoraModel(LoraModel):
             "fan_in_fan_out": self.peft_config.fan_in_fan_out,
             "merge_weights": self.peft_config.merge_weights or self.peft_config.inference_mode,
         }
+        bias = target.bias is not None
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt) and self.peft_config.enable_lora is None:
             kwargs.update(
@@ -208,9 +209,9 @@ class AdaLoraModel(LoraModel):
             new_module = SVDLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
         elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
             new_module = SVDLinear(target.in_features, target.out_features, bias=bias, **kwargs)
+        new_module = new_module.to(target.weight.device)
 
         with torch.no_grad():
-            new_module = new_module.to(target.weight.device)
             new_module.weight.copy_(target.weight)
             if bias:
                 new_module.bias.copy_(target.bias)
@@ -221,7 +222,6 @@ class AdaLoraModel(LoraModel):
                 new_module.lora_B.copy_(target.lora_B[:,rank_idx])
                 # The scaling is exactly as the previous 
                 new_module.ranknum.copy_(target.ranknum)
-
         return new_module
 
 
@@ -231,7 +231,7 @@ class AdaLoraModel(LoraModel):
             budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step)
         # Finalize the budget allocation 
         elif global_step == self.peft_config.total_step - self.peft_config.tfinal: 
-            budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step)
+            budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step, force_mask=True)
 
             for name,rank_idx in rank_pattern.items():
                 key = ".".join(name.split(".")[1:-1]) 
@@ -239,7 +239,9 @@ class AdaLoraModel(LoraModel):
 
                 new_module = self._prepare_new_module(target, rank_idx)
                 self._replace_module(parent, target_name, new_module, target)
-        # Pass the function to do forward propagation 
+            print("Finalize the rank pattern.")
+            self.rankallocator.reset_ipt()
+        # Pass the function and do forward propagation 
         else: 
             return None
 
@@ -393,24 +395,34 @@ if is_bnb_available():
 
 
 class RankAllocator(object):
+    """
+    The RankAllocator for AdaLoraModel. 
+    Paper: https://openreview.net/pdf?id=lq62uWRJjiY 
+
+    Args:
+        config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
+        param_iterator: the parameter iterator to initalize the rankallocator. 
+
+    """
     def __init__(self, peft_config, param_iterator):
         self.peft_config = peft_config
-
-        self.ipt = {} 
-        self.exp_avg_ipt = {}
-        self.exp_avg_unc = {}
-        self.cat_ipt = {}
-
         self.beta1 = peft_config.beta1 
         self.beta2 = peft_config.beta2 
         assert (self.beta1>0 and self.beta1<1)
         assert (self.beta2>0 and self.beta2<1)
 
+        self.reset_ipt()
         self._set_budget_scheduler(param_iterator)
 
 
     def set_total_step(self, total_step):
         self.peft_config.total_step = total_step
+
+
+    def reset_ipt(self):
+        self.ipt = {} 
+        self.exp_avg_ipt = {}
+        self.exp_avg_unc = {}
 
 
     def _set_budget_scheduler(self, param_iterator):
@@ -527,12 +539,13 @@ class RankAllocator(object):
                     rank_pattern[n] = (~(triplet_ipt[n]<=mask_threshold)).to(p.device)
         return rank_pattern
 
-    def update_and_allocate(self, model, global_step):
+    def update_and_allocate(self, model, global_step, force_mask=False):
         # # Update the importance score and allocate the budget 
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
             self.update_ipt(model)
         budget, mask_ind = self.budget_schedule(global_step)
-        if mask_ind:
+        print("budget:", budget) 
+        if mask_ind or force_mask:
             rank_pattern = self.mask_to_budget(model, budget)
         else:
             rank_pattern = None 
