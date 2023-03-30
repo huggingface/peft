@@ -225,6 +225,15 @@ class AdaLoraModel(LoraModel):
         return new_module
 
 
+    def resize_modules_by_rank_pattern(self, rank_pattern):
+        for name,rank_idx in rank_pattern.items():
+            key = ".".join(name.split(".")[1:-1]) 
+            parent, target, target_name = self._get_submodules(key) 
+
+            new_module = self._prepare_new_module(target, rank_idx)
+            self._replace_module(parent, target_name, new_module, target)
+
+
     def update_and_allocate(self, global_step):
         # Update the importance score and allocate the budget 
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
@@ -233,14 +242,17 @@ class AdaLoraModel(LoraModel):
         elif global_step == self.peft_config.total_step - self.peft_config.tfinal: 
             budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step, force_mask=True)
 
-            for name,rank_idx in rank_pattern.items():
-                key = ".".join(name.split(".")[1:-1]) 
-                parent, target, target_name = self._get_submodules(key) 
+            self.resize_modules_by_rank_pattern(rank_pattern)
 
-                new_module = self._prepare_new_module(target, rank_idx)
-                self._replace_module(parent, target_name, new_module, target)
+            # for name,rank_idx in rank_pattern.items():
+            #     key = ".".join(name.split(".")[1:-1]) 
+            #     parent, target, target_name = self._get_submodules(key) 
+
+            #     new_module = self._prepare_new_module(target, rank_idx)
+            #     self._replace_module(parent, target_name, new_module, target)
             print("Finalize the rank pattern.")
             self.rankallocator.reset_ipt()
+            self.rank_pattern = rank_pattern 
         # Pass the function and do forward propagation 
         else: 
             return None
