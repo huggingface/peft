@@ -98,7 +98,7 @@ class AdaLoraModel(LoraModel):
         self.model = model
         self._find_and_replace()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
-        self.rankallocator = RankAllocator(config, self.named_parameters())
+        self.rankallocator = RankAllocator(config, self.model)
 
     def _find_and_replace(self):
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
@@ -236,7 +236,7 @@ class AdaLoraModel(LoraModel):
 
     def resize_modules_by_rank_pattern(self, rank_pattern):
         for name,rank_idx in rank_pattern.items():
-            key = ".".join(name.split(".")[1:-1]) 
+            key = ".".join(name.split(".")[0:-1]) 
             parent, target, target_name = self._get_submodules(key) 
             new_module = self._prepare_new_module(target, rank_idx)
             self._replace_module(parent, target_name, new_module, target)
@@ -245,12 +245,14 @@ class AdaLoraModel(LoraModel):
     def update_and_allocate(self, global_step):
         # Update the importance score and allocate the budget 
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
-            budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step)
+            budget, rank_pattern = self.rankallocator.update_and_allocate(self.model, global_step)
             if rank_pattern:
                 self.peft_config.rank_pattern = rank_pattern 
         # Finalize the budget allocation 
         elif global_step == self.peft_config.total_step - self.peft_config.tfinal: 
-            budget, rank_pattern = self.rankallocator.update_and_allocate(self, global_step, force_mask=True)
+            budget, rank_pattern = self.rankallocator.update_and_allocate(
+                self.model, global_step, force_mask=True
+            )
             self.resize_modules_by_rank_pattern(rank_pattern)
             self.peft_config.rank_pattern = rank_pattern
             self.rankallocator.reset_ipt() 
@@ -415,10 +417,10 @@ class RankAllocator(object):
 
     Args:
         config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
-        param_iterator: the parameter iterator to initalize the rankallocator. 
+        model: the model that we apply AdaLoRA to.  
 
     """
-    def __init__(self, peft_config, param_iterator):
+    def __init__(self, peft_config, model):
         self.peft_config = peft_config
         self.beta1 = peft_config.beta1 
         self.beta2 = peft_config.beta2 
@@ -426,30 +428,26 @@ class RankAllocator(object):
         assert (self.beta2>0 and self.beta2<1)
 
         self.reset_ipt()
-        self._set_budget_scheduler(param_iterator)
-
+        self._set_budget_scheduler(model)
 
     def set_total_step(self, total_step):
         self.peft_config.total_step = total_step
-
 
     def reset_ipt(self):
         self.ipt = {} 
         self.exp_avg_ipt = {}
         self.exp_avg_unc = {}
 
-
-    def _set_budget_scheduler(self, param_iterator):
+    def _set_budget_scheduler(self, model):
         self.init_bgt = 0 
         self.name_set = set() 
-        for n,p in param_iterator:
+        for n,p in model.named_parameters():
             if "lora_A" in n: 
                 self.init_bgt += p.size(0) 
                 self.name_set.add(n.replace("lora_A", "%s"))
         self.name_set = list(sorted(self.name_set)) 
         # The total final rank budget 
         self.target_bgt = self.peft_config.target_r * len(self.name_set) 
-
 
     def budget_schedule(self, step:int):
         tinit = self.peft_config.tinit 
@@ -472,7 +470,6 @@ class RankAllocator(object):
             mask_ind = True if step % self.peft_config.deltaT == 0 else False 
         return budget, mask_ind 
 
-
     def update_ipt(self, model): 
         # Update the sensitivity and uncertainty for every weight 
         for n,p in model.named_parameters():
@@ -490,16 +487,13 @@ class RankAllocator(object):
                     self.exp_avg_unc[n] = self.beta2 * self.exp_avg_unc[n] + \
                         (1-self.beta2)*(self.ipt[n]-self.exp_avg_ipt[n]).abs()
 
-
     def _element_score(self, n):
         return self.exp_avg_ipt[n] * self.exp_avg_unc[n]
-
 
     def _combine_ipt(self, ipt_E, ipt_AB):
         ipt_AB = ipt_AB.sum(dim=1, keepdim=False)
         sum_ipt = ipt_E.view(-1) + ipt_AB.view(-1) 
         return sum_ipt 
-
 
     def mask_to_budget(self, model, budget): 
         value_ipt = {}
