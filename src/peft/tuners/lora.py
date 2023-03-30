@@ -82,6 +82,10 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
+    init_lora_weights: bool = field(
+        default=True,
+        metadata={"help": "Whether to initialize the weights of the Lora layers."},
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
@@ -135,6 +139,7 @@ class LoraModel(torch.nn.Module):
             "fan_in_fan_out": self.peft_config.fan_in_fan_out,
             "merge_weights": (self.peft_config.merge_weights or self.peft_config.inference_mode)
             and not is_hf_device_map_available,
+            "init_lora_weights": self.peft_config.init_lora_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
@@ -233,6 +238,37 @@ class LoraModel(torch.nn.Module):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
+    def merge_and_unload(self):
+        r"""
+        This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
+        """
+        if self.config.model_type == "gpt2":
+            raise ValueError("GPT2 models are not supported for merging LORA layers")
+
+        if getattr(self.model, "is_loaded_in_8bit", False):
+            raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            parent, target, target_name = self._get_submodules(key)
+            if isinstance(target, LoraLayer):
+                bias = target.bias is not None
+                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+
+                # manually merge if not merged
+                if not target.merged:
+                    # merge weights per: https://arxiv.org/pdf/2106.09685.pdf / page 4
+                    if target.r > 0:
+                        target.weight.data += (
+                            transpose(target.lora_B.weight @ target.lora_A.weight, target.fan_in_fan_out)
+                            * target.scaling
+                        ).to(target.weight.dtype)
+                    target.merged = True
+
+                self._replace_module(parent, target_name, new_module, target)
+        return self.model
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -297,6 +333,8 @@ class Linear(nn.Linear, LoraLayer):
         merge_weights: bool = True,
         **kwargs,
     ):
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
 
@@ -308,7 +346,8 @@ class Linear(nn.Linear, LoraLayer):
             self.scaling = self.lora_alpha / self.r
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
-        self.reset_parameters()
+        if init_lora_weights:
+            self.reset_parameters()
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
 
@@ -375,6 +414,8 @@ class MergedLinear(nn.Linear, LoraLayer):
         merge_weights: bool = True,
         **kwargs,
     ):
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout, merge_weights=merge_weights)
         if out_features % len(enable_lora) != 0:
@@ -398,7 +439,9 @@ class MergedLinear(nn.Linear, LoraLayer):
             self.lora_ind = self.weight.new_zeros((out_features,), dtype=torch.bool).view(len(enable_lora), -1)
             self.lora_ind[enable_lora, :] = True
             self.lora_ind = self.lora_ind.view(-1)
-        self.reset_parameters()
+
+        if init_lora_weights:
+            self.reset_parameters()
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
 

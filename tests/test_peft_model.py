@@ -30,16 +30,18 @@ from peft import (
 from .testing_common import PeftTestConfigManager
 
 
-# This has to be in the order: model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs
 PEFT_DECODER_MODELS_TO_TEST = [
-    # ("HuggingFaceM4/tiny-random-LlamaForCausalLM", {}, {}, {}, {}), wait until the next `transformers` release
-    ("hf-internal-testing/tiny-random-OPTForCausalLM", {}, {}, {}, {}),
-    ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", {}, {}, {}, {}),
-    ("hf-internal-testing/tiny-random-GPT2LMHeadModel", {}, {}, {}, {}),
-    ("hf-internal-testing/tiny-random-BloomForCausalLM", {}, {}, {}, {}),
-    ("hf-internal-testing/tiny-random-gpt_neo", {}, {}, {}, {}),
-    ("hf-internal-testing/tiny-random-GPTJForCausalLM", {}, {}, {}, {}),
+    "hf-internal-testing/tiny-random-OPTForCausalLM",
+    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+    "hf-internal-testing/tiny-random-GPT2LMHeadModel",
+    "hf-internal-testing/tiny-random-BloomForCausalLM",
+    "hf-internal-testing/tiny-random-gpt_neo",
+    "hf-internal-testing/tiny-random-GPTJForCausalLM",
 ]
+
+FULL_GRID = {
+    "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+}
 
 
 class PeftTestMixin:
@@ -54,10 +56,6 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     We use parametrized.expand for debugging purposes to test each model individually.
     """
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
-    def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_model_attr(model_id, config_cls, config_kwargs)
-
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = AutoModelForCausalLM.from_pretrained(model_id)
         config = config_cls(
@@ -69,6 +67,10 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
         self.assertTrue(hasattr(model, "save_pretrained"))
         self.assertTrue(hasattr(model, "from_pretrained"))
         self.assertTrue(hasattr(model, "push_to_hub"))
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_model_attr(model_id, config_cls, config_kwargs)
 
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
@@ -111,7 +113,7 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
 
         self.assertTrue(dummy_output.requires_grad)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
@@ -157,9 +159,60 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
+
+    def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        if config.peft_type != "LORA":
+            with self.assertRaises(AttributeError):
+                model = model.merge_and_unload()
+        elif model.config.model_type == "gpt2":
+            with self.assertRaises(ValueError):
+                model = model.merge_and_unload()
+        else:
+            dummy_input = torch.LongTensor([[1, 2, 3, 2, 1]]).to(self.torch_device)
+            model.eval()
+            logits_lora = model(dummy_input)[0]
+
+            model = model.merge_and_unload()
+
+            logits_merged = model(dummy_input)[0]
+
+            transformers_model = AutoModelForCausalLM.from_pretrained(model_id).to(self.torch_device)
+
+            logits_transformers = transformers_model(dummy_input)[0]
+
+            self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-3, rtol=1e-3))
+            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-3, rtol=1e-3))
+
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+
+                model_from_pretrained = AutoModelForCausalLM.from_pretrained(tmp_dirname).to(self.torch_device)
+
+                logits_merged_from_pretrained = model_from_pretrained(dummy_input)[0]
+
+                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-3, rtol=1e-3))
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False], "merge_weights": [False, True]},
+            },
+        )
+    )
+    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = AutoModelForCausalLM.from_pretrained(model_id)
@@ -180,6 +233,6 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
             # check if `generate` raises an error if no positional arguments are passed
             _ = model.generate(input_ids, attention_mask=attention_mask)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(PEFT_DECODER_MODELS_TO_TEST))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
