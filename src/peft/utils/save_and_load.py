@@ -70,7 +70,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
         model ([`PeftModel`]): The Peft model.
         peft_model_state_dict (`dict`): The state dict of the Peft model.
     """
-    if model.peft_config.peft_type is PeftType.ADALORA:
+    if model.peft_config.peft_type == PeftType.ADALORA:
         rank_pattern = model.peft_config.rank_pattern
         if rank_pattern: 
             model.base_model.resize_modules_by_rank_pattern(rank_pattern)

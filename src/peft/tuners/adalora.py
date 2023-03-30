@@ -39,6 +39,7 @@ class AdaLoraConfig(LoraConfig):
         beta2 (`float`): The hyperparameter of EMA for undertainty quantification. 
         orth_reg_weight (`float`): The coefficient of orthogonal regularization. 
         total_step (`int`): The total training steps that should be specified before training. 
+        rank_pattern (`list`): The allocated rank for each weight matrix by RankAllocator. 
     """
     target_r: int = field(default=8, metadata={"help": "Target Lora matrix dimension."})
     init_r: int = field(default=12, metadata={"help": "Intial Lora matrix dimension."})
@@ -159,14 +160,12 @@ class AdaLoraModel(LoraModel):
                 f"Please check the target modules and try again."
             )
 
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.model, name)
-
 
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs) 
@@ -197,7 +196,7 @@ class AdaLoraModel(LoraModel):
             rank_idx = rank_idx.view(-1)
             rank = rank_idx.sum().item()
         else:
-            raise ValueError("Unexcepted type of rank_idx")
+            raise ValueError(f"Unexcepted type of rank_idx")
         kwargs = {
             "r": rank,
             "lora_alpha": self.peft_config.lora_alpha,
@@ -233,14 +232,12 @@ class AdaLoraModel(LoraModel):
                 new_module.ranknum.copy_(target.ranknum)
         return new_module
 
-
     def resize_modules_by_rank_pattern(self, rank_pattern):
         for name,rank_idx in rank_pattern.items():
             key = ".".join(name.split(".")[0:-1]) 
             parent, target, target_name = self._get_submodules(key) 
             new_module = self._prepare_new_module(target, rank_idx)
             self._replace_module(parent, target_name, new_module, target)
-
 
     def update_and_allocate(self, global_step):
         # Update the importance score and allocate the budget 
@@ -256,7 +253,6 @@ class AdaLoraModel(LoraModel):
             self.resize_modules_by_rank_pattern(rank_pattern)
             self.peft_config.rank_pattern = rank_pattern
             self.rankallocator.reset_ipt() 
-            print("Finalize the rank pattern.")
         # Pass the function and do forward propagation 
         else: 
             return None
@@ -279,7 +275,7 @@ class SVDLinear(nn.Linear, LoraLayer):
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, r=r, lora_alpha=lora_alpha, lora_dropout=lora_dropout,
                            merge_weights=merge_weights)
-
+        
         self.fan_in_fan_out = fan_in_fan_out
         # Actual trainable parameters
         if r > 0:
@@ -552,7 +548,7 @@ class RankAllocator(object):
         if global_step < self.peft_config.total_step - self.peft_config.tfinal:
             self.update_ipt(model)
         budget, mask_ind = self.budget_schedule(global_step)
-        print("budget:", budget) 
+        # Allocate the budget according to importance scores 
         if mask_ind or force_mask:
             rank_pattern = self.mask_to_budget(model, budget)
         else:

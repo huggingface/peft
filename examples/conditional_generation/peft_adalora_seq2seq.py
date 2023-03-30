@@ -20,7 +20,7 @@ text_column = "sentence"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
-num_epochs = 2
+num_epochs = 8 
 batch_size = 8
 
 
@@ -28,7 +28,7 @@ batch_size = 8
 peft_config = AdaLoraConfig(
     init_r=12, target_r=8, 
     beta1=0.85, beta2=0.85, 
-    tinit=2, tfinal=300, deltaT=10,
+    tinit=200, tfinal=1000, deltaT=10,
     lora_alpha=32, lora_dropout=0.1,
     task_type=TaskType.SEQ_2_SEQ_LM, 
     inference_mode=False
@@ -37,7 +37,6 @@ peft_config = AdaLoraConfig(
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
-model
 
 
 # loading dataset
@@ -52,8 +51,6 @@ dataset = dataset.map(
     batched=True,
     num_proc=1,
 )
-
-dataset["train"][0]
 
 
 # data preprocessing
