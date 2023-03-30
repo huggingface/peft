@@ -98,7 +98,7 @@ class PeftConfigMixin(PushToHubMixin):
             try:
                 config_file = hf_hub_download(pretrained_model_name_or_path, CONFIG_NAME)
             except Exception:
-                raise ValueError(f"Can't find config.json at '{pretrained_model_name_or_path}'")
+                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'")
 
         loaded_attributes = cls.from_json_file(config_file)
 
