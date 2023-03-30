@@ -17,4 +17,4 @@ style:
 	doc-builder style src/peft tests docs/source --max_len 119
 
 test:
-	pytest tests/
+	pytest -n 3 tests/

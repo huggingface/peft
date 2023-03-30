@@ -79,23 +79,24 @@ class ClassInstantier(OrderedDict):
         for model_tuple in model_list:
             model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs = model_tuple
             for key, value in self.items():
+                peft_method = value[1].copy()
                 if key == "lora":
                     # update value[1] if necessary
                     if lora_kwargs is not None:
-                        value[1].update(lora_kwargs)
+                        peft_method.update(lora_kwargs)
                 elif key == "prefix_tuning":
                     # update value[1] if necessary
                     if prefix_tuning_kwargs is not None:
-                        value[1].update(prefix_tuning_kwargs)
+                        peft_method.update(prefix_tuning_kwargs)
                 elif key == "prompt_encoder":
                     # update value[1] if necessary
                     if prompt_encoder_kwargs is not None:
-                        value[1].update(prompt_encoder_kwargs)
+                        peft_method.update(prompt_encoder_kwargs)
                 else:
                     # update value[1] if necessary
                     if prompt_tuning_kwargs is not None:
-                        value[1].update(prompt_tuning_kwargs)
-                grid_parameters.append((f"test_{model_id}_{key}", model_id, value[0], value[1]))
+                        peft_method.update(prompt_tuning_kwargs)
+                grid_parameters.append((f"test_{model_id}_{key}", model_id, value[0], peft_method))
 
         return grid_parameters
 
