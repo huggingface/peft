@@ -266,18 +266,19 @@ class LoraModel(torch.nn.Module):
                                 * target.scaling
                             ).to(target.weight.dtype)
                     else:
-                        delta_w = (
-                            F.conv1d(
-                                target.lora_A.weight.data.unsqueeze(0),
-                                target.lora_B.weight.data,
-                                groups=sum(target.enable_lora),
+                        if target.r > 0:
+                            delta_w = (
+                                F.conv1d(
+                                    target.lora_A.weight.data.unsqueeze(0),
+                                    target.lora_B.weight.data,
+                                    groups=sum(target.enable_lora),
+                                )
+                                .squeeze(0)
+                                .transpose(-2, -1)
                             )
-                            .squeeze(0)
-                            .transpose(-2, -1)
-                        )
-                        target.weight.data += transpose(
-                            target.zero_pad(delta_w * target.scaling), not target.fan_in_fan_out
-                        ).to(target.weight.dtype)
+                            target.weight.data += transpose(
+                                target.zero_pad(delta_w * target.scaling), not target.fan_in_fan_out
+                            ).to(target.weight.dtype)
                     target.merged = True
 
                 self._replace_module(parent, target_name, new_module, target)
