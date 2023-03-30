@@ -73,7 +73,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
         PeftTestConfigManager.get_grid_parameters(
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
+                "lora_kwargs": {"init_lora_weights": [False], "merge_weights": [True, False]},
             },
         )
     )

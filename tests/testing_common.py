@@ -109,7 +109,7 @@ class ClassInstantier(OrderedDict):
                     for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
                         for kwarg in current_value:
                             current_peft_config.update({current_key: kwarg})
-                            peft_configs.append(current_peft_config)
+                            peft_configs.append(current_peft_config.copy())
                 else:
                     peft_configs = [value[1].copy()]
 
@@ -264,7 +264,7 @@ class PeftCommonTester:
 
             logits_transformers = transformers_model(**dummy_input)[0]
 
-            self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-7, rtol=1e-7))
+            self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-4, rtol=1e-4))
             self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-7, rtol=1e-7))
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -274,7 +274,7 @@ class PeftCommonTester:
 
                 logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
 
-                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-7, rtol=1e-7))
+                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)

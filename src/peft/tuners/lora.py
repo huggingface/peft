@@ -259,10 +259,24 @@ class LoraModel(torch.nn.Module):
                 # manually merge if not merged
                 if not target.merged:
                     # merge weights per: https://arxiv.org/pdf/2106.09685.pdf / page 4
-                    if target.r > 0:
-                        target.weight.data += (
-                            transpose(target.lora_B.weight @ target.lora_A.weight, target.fan_in_fan_out)
-                            * target.scaling
+                    if isinstance(target, Linear):
+                        if target.r > 0:
+                            target.weight.data += (
+                                transpose(target.lora_B.weight @ target.lora_A.weight, target.fan_in_fan_out)
+                                * target.scaling
+                            ).to(target.weight.dtype)
+                    else:
+                        delta_w = (
+                            F.conv1d(
+                                target.lora_A.weight.data.unsqueeze(0),
+                                target.lora_B.weight.data,
+                                groups=sum(target.enable_lora),
+                            )
+                            .squeeze(0)
+                            .transpose(-2, -1)
+                        )
+                        target.weight.data += transpose(
+                            target.zero_pad(delta_w * target.scaling), not target.fan_in_fan_out
                         ).to(target.weight.dtype)
                     target.merged = True
 
