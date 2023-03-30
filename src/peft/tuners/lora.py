@@ -252,7 +252,7 @@ class LoraModel(torch.nn.Module):
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             parent, target, target_name = self._get_submodules(key)
-            if isinstance(target, (Linear, MergedLinear)):
+            if isinstance(target, LoraLayer):
                 bias = target.bias is not None
                 new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
 
