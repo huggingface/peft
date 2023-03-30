@@ -6,6 +6,10 @@
 		title: Quicktour
 	- local: installation
 		title: Installation
+- title: Task Guides
+	sections:
+	- local: task_guides/image_classification_lora
+		title: Image classification using LoRA
 - title: Reference
 	sections:
 	- local: package_reference/peft_model
