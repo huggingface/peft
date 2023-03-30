@@ -1063,7 +1063,9 @@ def main(args):
                 )
                 text_encoder_state_dict = {f"text_encoder_{k}": v for k, v in text_encoder_state_dict.items()}
                 state_dict.update(text_encoder_state_dict)
-                lora_config["text_encoder_peft_config"] = unwarpped_text_encoder.get_peft_config_as_dict(inference=True)
+                lora_config["text_encoder_peft_config"] = unwarpped_text_encoder.get_peft_config_as_dict(
+                    inference=True
+                )
 
             accelerator.print(state_dict)
             accelerator.save(state_dict, os.path.join(args.output_dir, f"{args.instance_prompt}_lora.pt"))
