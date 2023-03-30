@@ -238,6 +238,29 @@ class LoraModel(torch.nn.Module):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
+    def merge_and_unload(self):
+        r"""
+        This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
+        """
+        if self.config.model_type == "gpt2":
+            raise ValueError("GPT2 models are not supported for merging LORA layers")
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            parent, target, target_name = self._get_submodules(key)
+            if isinstance(target, (Linear, MergedLinear)):
+                bias = target.bias is not None
+                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+
+                # manually merge if not merged
+                if not target.merged:
+                    target.merge_weights = True
+                    target.train(False)
+
+                self._replace_module(parent, target_name, new_module, target)
+        return self.model
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP

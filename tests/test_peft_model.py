@@ -24,7 +24,6 @@ from peft import (
     PeftModel,
     get_peft_model,
     get_peft_model_state_dict,
-    merge_lora,
     prepare_model_for_int8_training,
 )
 
@@ -173,15 +172,18 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type != "LORA" or model.config.model_type == "gpt2":
+        if config.peft_type != "LORA":
+            with self.assertRaises(AttributeError):
+                model = model.merge_and_unload()
+        elif model.config.model_type == "gpt2":
             with self.assertRaises(ValueError):
-                merge_lora(model)
+                model = model.merge_and_unload()
         else:
             dummy_input = torch.LongTensor([[1, 2, 3, 2, 1]]).to(self.torch_device)
             model.eval()
             logits_lora = model(dummy_input)[0]
 
-            model = merge_lora(model)
+            model = model.merge_and_unload()
 
             logits_merged = model(dummy_input)[0]
 

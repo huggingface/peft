@@ -15,8 +15,6 @@
 
 import torch
 
-import peft
-
 
 # needed for prefix-tuning of bloom model
 def bloom_model_postprocess_past_key_value(past_key_values):
@@ -159,42 +157,3 @@ def fsdp_auto_wrap_policy(model):
 
 def transpose(weight, fan_in_fan_out):
     return weight.T if fan_in_fan_out else weight
-
-
-def merge_lora(model):
-    r"""
-    This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model as a
-    standalone model.
-
-    Args:
-        model, (`PeftModel`):
-            The input PeftModel that needs to be merged
-    """
-    if not isinstance(model, peft.PeftModel):
-        raise ValueError("The input model should be a PeftModel")
-
-    if model.peft_config.peft_type != "LORA":
-        raise ValueError("The input model should be a LORA model")
-
-    if model.config.model_type == "gpt2":
-        raise ValueError("GPT2 models are not supported for merging LORA layers")
-
-    model.eval()
-
-    key_list = [key for key, _ in model.base_model.model.named_modules() if "lora" not in key]
-    for key in key_list:
-        parent, target, target_name = model.base_model._get_submodules(key)
-        if isinstance(target, (peft.tuners.lora.Linear, peft.tuners.lora.MergedLinear)):
-            bias = target.bias is not None
-            new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
-
-            # manually merge if not merged
-            if not target.merged:
-                target.merge_weights = True
-                target.train(False)
-
-            model.base_model._replace_module(parent, target_name, new_module, target)
-        # elif isinstance(target, peft.tuners.lora.MergedLinear):
-
-    model = model.base_model.model
-    return model
