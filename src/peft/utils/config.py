@@ -42,7 +42,7 @@ class TaskType(str, enum.Enum):
 class PeftConfigMixin(PushToHubMixin):
     r"""
     This is the base configuration class for PEFT adapter models. It contains all the methods that are common to all
-    PEFT adapter models. This class inherits from `transformers.utils.PushToHubMixin` which contains the methods to
+    PEFT adapter models. This class inherits from [`~transformers.utils.PushToHubMixin`] which contains the methods to
     push your model to the Hub. The method `save_pretrained` will save the configuration of your adapter model in a
     directory. The method `from_pretrained` will load the configuration of your adapter model from a directory.
 
@@ -65,8 +65,8 @@ class PeftConfigMixin(PushToHubMixin):
         Args:
             save_directory (`str`):
                 The directory where the configuration will be saved.
-            **kwargs:
-                Additional keyword arguments passed along to the `transformers.utils.PushToHubMixin.push_to_hub`
+            kwargs:
+                Additional keyword arguments passed along to the [`~transformers.utils.PushToHubMixin.push_to_hub`]
                 method.
         """
         if os.path.isfile(save_directory):
@@ -88,8 +88,8 @@ class PeftConfigMixin(PushToHubMixin):
 
         Args:
             pretrained_model_name_or_path (`str`):
-                The directory or the hub-id where the configuration is saved.
-            **kwargs:
+                The directory or the Hub repository id where the configuration is saved.
+            kwargs:
                 Additional keyword arguments passed along to the child class initialization.
         """
         if os.path.isfile(os.path.join(pretrained_model_name_or_path, CONFIG_NAME)):
@@ -128,7 +128,7 @@ class PeftConfigMixin(PushToHubMixin):
 @dataclass
 class PeftConfig(PeftConfigMixin):
     """
-    This is the base configuration class to store the configuration of a :class:`~peft.PeftModel`.
+    This is the base configuration class to store the configuration of a [`PeftModel`].
 
     Args:
         peft_type (Union[[`~peft.utils.config.PeftType`], `str`]): The type of Peft method to use.

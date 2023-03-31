@@ -39,19 +39,19 @@ if is_bnb_available():
 @dataclass
 class LoraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`~peft.Lora`].
+    This is the configuration class to store the configuration of a [`LoraModel`].
 
     Args:
-        r (`int`): Lora attention dimension
+        r (`int`): Lora attention dimension.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
         lora_alpha (`float`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
         merge_weights (`bool`):
             Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
-        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        enable_lora ( `List[bool]`): Used with `lora.MergedLinear`.
-        bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
-        modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
+        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (`fan_in`, `fan_out`).
+        enable_lora ( `List[bool]`): Used with [`lora.MergedLinear`].
+        bias (`str`): Bias type for Lora. Can be `none`, `all` or `lora_only`.
+        modules_to_save (`List[str]`): List of modules apart from Lora layers to be set as trainable
             and saved in the final checkpoint.
     """
 
@@ -96,22 +96,33 @@ class LoraModel(torch.nn.Module):
     Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
     Args:
-        model ([`transformers.PreTrainedModel`]): The model to be adapted.
+        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
 
     Returns:
         `torch.nn.Module`: The Lora model.
 
-    Example::
+    Example:
 
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig >>> from peft import LoraModel, LoraConfig >>>
-        config = LoraConfig(
-            peft_type="LORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
-            lora_dropout=0.01, )
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> lora_model = LoraModel(config, model)
+        ```py
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig
+        >>> from peft import LoraModel, LoraConfig
+
+        >>> config = LoraConfig(
+        ...     peft_type="LORA",
+        ...     task_type="SEQ_2_SEQ_LM",
+        ...     r=8,
+        ...     lora_alpha=32,
+        ...     target_modules=["q", "v"],
+        ...     lora_dropout=0.01,
+        ... )
+
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        >>> lora_model = LoraModel(config, model)
+        ```
 
     **Attributes**:
-        - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
+        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
 
