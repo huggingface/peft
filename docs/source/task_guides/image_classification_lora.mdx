@@ -10,7 +10,7 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Fine-tuning for image classification using LoRA
+# Image classification using LoRA
 
 This guide demonstrates how to use LoRA, a low-rank approximation technique, to fine-tune an image classification model.
 By using LoRA from 🤗 PEFT, we can reduce the number of trainable parameters in the model to only 0.77% of the original.
@@ -27,10 +27,10 @@ Install the libraries required for model training. To ensure you have access to 
 install it from source:
 
 ```bash
-pip install transformers accelerate evaluate datasets loralib git+https://github.com/huggingface/peft -q
+!pip install transformers accelerate evaluate datasets loralib git+https://github.com/huggingface/peft -q
 ```
 
-Check the versions of all required libraries:
+Check the versions of all required libraries to make sure you are up to date:
 
 ```python
 import transformers
@@ -48,7 +48,7 @@ print(f"PEFT version: {peft.__version__}")
 ## Authenticate to share your model
 
 To share the fine-tuned model at the end of the training with the community, authenticate using your 🤗 token.
-You can obtain your token from [here](https://huggingface.co/settings/token).
+You can obtain your token from your [account settings](https://huggingface.co/settings/token).
 
 ```python
 from huggingface_hub import notebook_login
@@ -58,7 +58,7 @@ notebook_login()
 
 ## Select a model checkpoint to fine-tune
 
-Choose a model checkpoint from any of the model architectures supported for image classification. When in doubt, refer to
+Choose a model checkpoint from any of the model architectures supported for [image classification](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads). When in doubt, refer to
 the [image classification task guide](https://huggingface.co/docs/transformers/v4.27.2/en/tasks/image_classification) in
 🤗 Transformers documentation.
 
@@ -68,7 +68,7 @@ model_checkpoint = "google/vit-base-patch16-224-in21k"
 
 ## Load a dataset
 
-To keep this example's runtime short, let's only load the first 5000 instances from the training set of the Food-101 dataset:
+To keep this example's runtime short, let's only load the first 5000 instances from the training set of the [Food-101 dataset](https://huggingface.co/datasets/food101):
 
 ```python
 from datasets import load_dataset
@@ -76,7 +76,7 @@ from datasets import load_dataset
 dataset = load_dataset("food101", split="train[:5000]")
 ```
 
-## Dataset Preparation
+## Dataset preparation
 
 To prepare the dataset for training and evaluation, create `label2id` and `id2label` dictionaries. These will come in
 handy when performing inference and for metadata information:
@@ -180,8 +180,8 @@ def print_trainable_parameters(model):
     )
 ```
 
-It's important for to initialize the original model correctly as it will be used as a base to create a `PeftModel` you'll
-actually fine-tune. Specify the `label2id` and `id2label` so that `AutoModelForImageClassification` can append a classification
+It's important to initialize the original model correctly as it will be used as a base to create the `PeftModel` you'll
+actually fine-tune. Specify the `label2id` and `id2label` so that [`~transformers.AutoModelForImageClassification`] can append a classification
 head to the underlying model, adapted for this dataset. You should see the following output:
 
 ```
@@ -206,7 +206,7 @@ print_trainable_parameters(model)
 "trainable params: 85876325 || all params: 85876325 || trainable%: 100.00"
 ```
 
-Next, use `PeftModel` to wrap the base model so that "update" matrices are added to the respective places.
+Next, use `get_peft_model` to wrap the base model so that "update" matrices are added to the respective places.
 
 ```python
 from peft import LoraConfig, get_peft_model
@@ -225,10 +225,10 @@ print_trainable_parameters(lora_model)
 ```
 
 Let's unpack what's going on here.
-To use LoRA, you need to specify the target modules to `LoraConfig` so that `get_peft_model()`` knows which modules
+To use LoRA, you need to specify the target modules in `LoraConfig` so that `get_peft_model()` knows which modules
 inside our model need to be amended with LoRA matrices. In this example, we're only interested in targeting the query and
 value matrices of the attention blocks of the base model. Since the parameters corresponding to these matrices are "named"
-with "query" and "value" respectively, we specify them accordingly in the `target_modules` argument of `LoraConfig`.
+"query" and "value" respectively, we specify them accordingly in the `target_modules` argument of `LoraConfig`.
 
 We also specify `modules_to_save`. After wrapping the base model with `get_peft_model()` along with the `config`, we get
 a new model where only the LoRA parameters are trainable (so-called "update matrices") while the pre-trained parameters
@@ -239,9 +239,9 @@ and `push_to_hub()`.
 
 Here's what the other parameters mean:
 
-`r`: The dimension used by the LoRA update matrices.
-`alpha`: Scaling factor.
-`bias`: Specifies if the `bias` parameters should be trained. `None` denotes none of the `bias` parameters will be trained.
+- `r`: The dimension used by the LoRA update matrices.
+- `alpha`: Scaling factor.
+- `bias`: Specifies if the `bias` parameters should be trained. `None` denotes none of the `bias` parameters will be trained.
 
 `r` and `alpha` together control the total number of final trainable parameters when using LoRA, giving you the flexibility
 to balance a trade-off between end performance and compute efficiency.
@@ -252,8 +252,8 @@ in comparison to the original model, which is indeed the case here.
 
 ## Define training arguments
 
-For model fine-tuning, use [🤗 Trainer](https://huggingface.co/docs/transformers/main_classes/trainer). It accepts
-several arguments which you can wrap using `TrainingArguments`.
+For model fine-tuning, use [`~transformers.Trainer`]. It accepts
+several arguments which you can wrap using [`~transformers.TrainingArguments`].
 
 ```python
 from transformers import TrainingArguments, Trainer
@@ -281,11 +281,10 @@ args = TrainingArguments(
 )
 ```
 
-Compared to fine-tuning the original model, you can use a larger batch size since there is only a handful of parameters to train.
+Compared to non-PEFT methods, you can use a larger batch size since there are fewer parameters to train.
 You can also set a larger learning rate than the normal (1e-5 for example).
 
-This is a byproduct of the fact that the training affects only a small number of parameters. This can
-potentially also reduce the need to conduct expensive hyperparameter tuning experiments.
+This can potentially also reduce the need to conduct expensive hyperparameter tuning experiments.
 
 ## Prepare evaluation metric
 
@@ -307,7 +306,7 @@ def compute_metrics(eval_pred):
 
 ## Define collation function
 
-A collation function is used by `Trainer` to gather a batch of training and evaluation examples and prepare them in a
+A collation function is used by [`~transformers.Trainer`] to gather a batch of training and evaluation examples and prepare them in a
 format that is acceptable by the underlying model.
 
 ```python
@@ -361,12 +360,12 @@ repo_name = f"sayakpaul/{model_name}-finetuned-lora-food101"
 lora_model.push_to_hub(repo_name)
 ```
 
-When calling `push_to_hub()` on the `lora_model`, only the LoRA parameters along with any modules specified in `modules_to_save`
+When calling [`~transformers.PreTrainedModel.push_to_hub`] on the `lora_model`, only the LoRA parameters along with any modules specified in `modules_to_save`
 are saved. Take a look at the [trained LoRA parameters](https://huggingface.co/sayakpaul/vit-base-patch16-224-in21k-finetuned-lora-food101/blob/main/adapter_model.bin).
-You'll see that it's only 2.6 MB! This greatly helps with portability especially when using a very large model to fine-tune (such as [BLOOM](https://huggingface.co/bigscience/bloom).
+You'll see that it's only 2.6 MB! This greatly helps with portability, especially when using a very large model to fine-tune (such as [BLOOM](https://huggingface.co/bigscience/bloom)).
 
 Next, let's see how to load the LoRA updated parameters along with our base model for inference. When you wrap a base model
-with `PeftModel` that modifications are DONE in place. So to mitigate any concerns that might stem from in place modifications,
+with `PeftModel`, modifications are done *in-place*. To mitigate any concerns that might stem from in-place modifications,
 initialize the base model just like you did earlier and construct the inference model.
 
 ```python
@@ -374,7 +373,7 @@ from peft import PeftConfig, PeftModel
 
 
 config = PeftConfig.from_pretrained(repo_name)
-model = model = AutoModelForImageClassification.from_pretrained(
+model = AutoModelForImageClassification.from_pretrained(
     config.base_model_name_or_path,
     label2id=label2id,
     id2label=id2label,
