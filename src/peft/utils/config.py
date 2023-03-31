@@ -65,7 +65,7 @@ class PeftConfigMixin(PushToHubMixin):
         Args:
             save_directory (`str`):
                 The directory where the configuration will be saved.
-            kwargs:
+            kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the [`~transformers.utils.PushToHubMixin.push_to_hub`]
                 method.
         """
@@ -89,7 +89,7 @@ class PeftConfigMixin(PushToHubMixin):
         Args:
             pretrained_model_name_or_path (`str`):
                 The directory or the Hub repository id where the configuration is saved.
-            kwargs:
+            kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the child class initialization.
         """
         if os.path.isfile(os.path.join(pretrained_model_name_or_path, CONFIG_NAME)):
@@ -145,8 +145,8 @@ class PeftConfig(PeftConfigMixin):
 @dataclass
 class PromptLearningConfig(PeftConfig):
     """
-    This is the base configuration class to store the configuration of a Union[[`~peft.PrefixTuning`],
-    [`~peft.PromptEncoder`], [`~peft.PromptTuning`]].
+    This is the base configuration class to store the configuration of [`PrefixTuning`], [`PromptEncoder`], or
+    [`PromptTuning`].
 
     Args:
         num_virtual_tokens (`int`): The number of virtual tokens to use.
