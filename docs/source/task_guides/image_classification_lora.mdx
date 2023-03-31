@@ -23,11 +23,10 @@ For more information on LoRA, please refer to the [original LoRA paper](https://
 
 ## Install dependencies
 
-Install the libraries required for model training. To ensure you have access to all the latest features of 🤗 PEFT,
-install it from source:
+Install the libraries required for model training:
 
 ```bash
-!pip install transformers accelerate evaluate datasets loralib git+https://github.com/huggingface/peft -q
+!pip install transformers accelerate evaluate datasets loralib peft -q
 ```
 
 Check the versions of all required libraries to make sure you are up to date:
@@ -40,9 +39,9 @@ import peft
 print(f"Transformers version: {transformers.__version__}")
 print(f"Accelerate version: {accelerate.__version__}")
 print(f"PEFT version: {peft.__version__}")
-"Transformers version: 4.26.0"
-"Accelerate version: 0.16.0"
-"PEFT version: 0.1.0.dev0"
+"Transformers version: 4.27.4"
+"Accelerate version: 0.18.0"
+"PEFT version: 0.2.0"
 ```
 
 ## Authenticate to share your model
