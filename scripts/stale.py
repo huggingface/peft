@@ -45,14 +45,12 @@ def main():
             and (dt.utcnow() - issue.created_at).days >= 30
             and not any(label.name.lower() in LABELS_TO_EXEMPT for label in issue.get_labels())
         ):
-            # print(f"Would close issue {issue.number} since it has been 7 days of inactivity since bot mention.")
             issue.edit(state="closed")
         elif (
             (dt.utcnow() - issue.updated_at).days > 23
             and (dt.utcnow() - issue.created_at).days >= 30
             and not any(label.name.lower() in LABELS_TO_EXEMPT for label in issue.get_labels())
         ):
-            # print(f"Would add stale comment to {issue.number}")
             issue.create_comment(
                 "This issue has been automatically marked as stale because it has not had "
                 "recent activity. If you think this still needs to be addressed "
