@@ -294,14 +294,14 @@ import evaluate
 metric = evaluate.load("accuracy")
 
 
-# the compute_metrics function takes a Named Tuple as input:
-# predictions, which are the logits of the model as Numpy arrays,
-# and label_ids, which are the ground-truth labels as Numpy arrays.
 def compute_metrics(eval_pred):
     """Computes accuracy on a batch of predictions"""
     predictions = np.argmax(eval_pred.predictions, axis=1)
     return metric.compute(predictions=predictions, references=eval_pred.label_ids)
 ```
+
+The `compute_metrics` function takes a named tuple as input: `predictions`, which are the logits of the model as Numpy arrays,
+and `label_ids`, which are the ground-truth labels as Numpy arrays.
 
 ## Define collation function
 
