@@ -92,7 +92,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
                 exist).
-            **kwargs:
+            kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
         if os.path.isfile(save_directory):
