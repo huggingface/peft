@@ -164,7 +164,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "hf_device_map", None) is not None:
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
-            offload_index = kwargs.get("offload_index", None)
             offload_dir = kwargs.get("offload_dir", None)
 
             no_split_module_classes = model._no_split_modules
@@ -183,7 +182,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = dispatch_model(
                 model,
                 device_map=device_map,
-                offload_index=offload_index,
                 offload_dir=offload_dir,
             )
             hook = AlignDevicesHook(io_same_device=True)
