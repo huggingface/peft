@@ -165,6 +165,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
             offload_dir = kwargs.get("offload_dir", None)
+            offload_index = kwargs.get("offload_index", None)
+
+            dispatch_model_kwargs = {}
+            # Safety checker for previous `accelerate` versions
+            # `offload_index` was introduced in https://github.com/huggingface/accelerate/pull/873/
+            if "offload_index" in inspect.signature(dispatch_model).parameters:
+                dispatch_model_kwargs["offload_index"] = offload_index
 
             no_split_module_classes = model._no_split_modules
             if device_map != "sequential":
@@ -183,6 +190,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 model,
                 device_map=device_map,
                 offload_dir=offload_dir,
+                **dispatch_model_kwargs,
             )
             hook = AlignDevicesHook(io_same_device=True)
             if model.peft_config.peft_type == PeftType.LORA:
