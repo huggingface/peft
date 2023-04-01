@@ -13,5 +13,6 @@ jobs:
     with:
       commit_sha: ${{ github.sha }}
       package: peft
+      notebook_folder: peft_docs
     secrets:
       token: ${{ secrets.HUGGINGFACE_PUSH }}
