@@ -51,4 +51,3 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-from .import_utils import is_bnb_available
