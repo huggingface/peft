@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import gc
+import importlib
 import unittest
 
 import pytest
@@ -20,9 +21,16 @@ import torch
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, WhisperForConditionalGeneration
 
 from peft import LoraConfig, PeftModel, get_peft_model
-from peft.tuners.lora import Linear8bitLt
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
+
+
+def is_bnb_available():
+    return importlib.util.find_spec("bitsandbytes") is not None
+
+
+if is_bnb_available():
+    from peft.tuners.lora import Linear8bitLt
 
 
 @require_torch_gpu
