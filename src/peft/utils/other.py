@@ -34,7 +34,7 @@ def prepare_model_for_int8_training(
     model, output_embedding_layer_name="lm_head", use_gradient_checkpointing=True, layer_norm_names=["layer_norm"]
 ):
     r"""
-    This method wrapps the entire protocol for preparing a model before running a training. This includes:
+    This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
         head to fp32
 
