@@ -24,7 +24,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
-from ..utils import PeftConfig, PeftType, is_bnb_available, transpose
+from ..import_utils import is_bnb_available
+from ..utils import PeftConfig, PeftType, transpose
 
 
 if is_bnb_available():
