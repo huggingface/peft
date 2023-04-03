@@ -164,7 +164,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "hf_device_map", None) is not None:
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
-            offload_dir = kwargs.get("offload_dir", None)
+            offload_dir = kwargs.get("offload_folder", None)
             offload_index = kwargs.get("offload_index", None)
 
             dispatch_model_kwargs = {}
