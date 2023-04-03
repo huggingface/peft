@@ -20,7 +20,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, WhisperForConditionalGeneration
 
 from peft import LoraConfig, PeftModel, get_peft_model
-from peft.utils import is_bnb_available
+from peft.import_utils import is_bnb_available
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
