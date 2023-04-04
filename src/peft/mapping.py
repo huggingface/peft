@@ -46,7 +46,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "bart": ["q_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "bloom": ["query_key_value"],
-    "blip2": ["q", "v", "q_proj", "v_proj"],
+    "blip-2": ["q", "v", "q_proj", "v_proj"],
     "opt": ["q_proj", "v_proj"],
     "gptj": ["q_proj", "v_proj"],
     "gpt_neox": ["query_key_value"],
