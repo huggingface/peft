@@ -1034,3 +1034,72 @@ class PeftModelForTokenClassification(PeftModel):
                 hidden_states=outputs.hidden_states,
                 attentions=outputs.attentions,
             )
+
+
+class PeftModelForVision2Seq(PeftModel):
+    """
+    Peft model for vision to text models.
+
+    Args:
+        model ([`~transformers.PreTrainedModel`]): Base transformer model.
+        peft_config ([`PeftConfig`]): Peft config.
+
+
+    Example:
+
+        ```py
+        >>> from transformers import AutoModelForVision2Seq
+        >>> from peft import PeftModelForVision2Seq, get_peft_config
+
+        >>> config = {
+        ...     "peft_type": "LORA",
+        ...     "task_type": "VISION_2_SEQ",
+        ...     "inference_mode": False,
+        ...     "r": 8,
+        ...     "target_modules": ["q", "v"],
+        ...     "lora_alpha": 32,
+        ...     "lora_dropout": 0.1,
+        ...     "merge_weights": False,
+        ...     "fan_in_fan_out": False,
+        ...     "enable_lora": None,
+        ...     "bias": "none",
+        ... }
+
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForCausalLM.from_pretrained("Salesforce/blip2-flan-t5-xl")
+        >>> peft_model = PeftModelForVision2Seq(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        trainable params: 1843200 || all params: 775873280 || trainable%: 0.23756456724479544
+        ```
+    """
+
+    def __init__(self, model, peft_config: PeftConfig):
+        super().__init__(model, peft_config)
+        self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
+
+    def forward(
+        self,
+        pixel_values=None,
+        attention_mask=None,
+        decoder_input_ids=None,
+        decoder_attention_mask=None,
+        labels=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        **kwargs,
+    ):
+        r"""
+        A simple wrapper around the base model's forward method.
+        """
+        return self.base_model(
+            pixel_values=pixel_values,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            labels=labels,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            **kwargs,
+        )
