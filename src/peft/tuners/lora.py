@@ -477,7 +477,7 @@ class Linear(nn.Linear, LoraLayer):
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.r[self.active_adapter] > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             result += (
@@ -487,7 +487,8 @@ class Linear(nn.Linear, LoraLayer):
                 * self.scaling[self.active_adapter]
             )
         else:
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+        return result
 
 
 if is_bnb_available():
