@@ -404,7 +404,7 @@ class LoraLayer:
             nn.init.zeros_(self.lora_B[adapter_name].weight)
 
 
-class Linear(nn.Linear):
+class Linear(nn.Linear, LoraLayer):
     # Lora implemented in a dense layer
     def __init__(
         self,
