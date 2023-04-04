@@ -24,7 +24,7 @@ from ..utils import PeftType, PromptLearningConfig
 @dataclass
 class PrefixTuningConfig(PromptLearningConfig):
     """
-    This is the configuration class to store the configuration of a [`~peft.PrefixEncoder`].
+    This is the configuration class to store the configuration of a [`PrefixEncoder`].
 
     Args:
         encoder_hidden_size (`int`): The hidden size of the prompt encoder.
@@ -48,30 +48,38 @@ class PrefixTuningConfig(PromptLearningConfig):
 # with some refactor
 class PrefixEncoder(torch.nn.Module):
     r"""
-    The torch.nn model to encode the prefix
+    The `torch.nn` model to encode the prefix.
 
     Args:
         config ([`PrefixTuningConfig`]): The configuration of the prefix encoder.
 
-    Example::
+    Example:
 
-        >>> from peft import PrefixEncoder, PrefixTuningConfig >>> config = PrefixTuningConfig(
-                peft_type="PREFIX_TUNING", task_type="SEQ_2_SEQ_LM", num_virtual_tokens=20, token_dim=768,
-                num_transformer_submodules=1, num_attention_heads=12, num_layers=12, encoder_hidden_size=768
-            )
-        >>> prefix_encoder = PrefixEncoder(config)
+    ```py
+    >>> from peft import PrefixEncoder, PrefixTuningConfig
 
+    >>> config = PrefixTuningConfig(
+    ...     peft_type="PREFIX_TUNING",
+    ...     task_type="SEQ_2_SEQ_LM",
+    ...     num_virtual_tokens=20,
+    ...     token_dim=768,
+    ...     num_transformer_submodules=1,
+    ...     num_attention_heads=12,
+    ...     num_layers=12,
+    ...     encoder_hidden_size=768,
+    ... )
+    >>> prefix_encoder = PrefixEncoder(config)
+    ```
 
     **Attributes**:
-        - **embedding** (`torch.nn.Embedding`) --
-            The embedding layer of the prefix encoder.
-        - **transform** (`torch.nn.Sequential`) -- The
-        two-layer MLP to transform the prefix embeddings if `prefix_projection` is `True`.
+        - **embedding** (`torch.nn.Embedding`) -- The embedding layer of the prefix encoder.
+        - **transform** (`torch.nn.Sequential`) -- The two-layer MLP to transform the prefix embeddings if
+          `prefix_projection` is `True`.
         - **prefix_projection** (`bool`) -- Whether to project the prefix embeddings.
 
-    Input shape: (batch_size, num_virtual_tokens)
+    Input shape: (`batch_size`, `num_virtual_tokens`)
 
-    Output shape: (batch_size, num_virtual_tokens, 2*layers*hidden)
+    Output shape: (`batch_size`, `num_virtual_tokens`, `2*layers*hidden`)
     """
 
     def __init__(self, config):

@@ -71,33 +71,47 @@ class ClassInstantier(OrderedDict):
 
         return super().__getitem__(key, *args, **kwargs)
 
-    def get_grid_parameters(self, model_list):
+    def get_grid_parameters(self, grid_parameters, filter_params_func=None):
         r"""
         Returns a list of all possible combinations of the parameters in the config classes.
-        """
-        grid_parameters = []
-        for model_tuple in model_list:
-            model_id, lora_kwargs, prefix_tuning_kwargs, prompt_encoder_kwargs, prompt_tuning_kwargs = model_tuple
-            for key, value in self.items():
-                if key == "lora":
-                    # update value[1] if necessary
-                    if lora_kwargs is not None:
-                        value[1].update(lora_kwargs)
-                elif key == "prefix_tuning":
-                    # update value[1] if necessary
-                    if prefix_tuning_kwargs is not None:
-                        value[1].update(prefix_tuning_kwargs)
-                elif key == "prompt_encoder":
-                    # update value[1] if necessary
-                    if prompt_encoder_kwargs is not None:
-                        value[1].update(prompt_encoder_kwargs)
-                else:
-                    # update value[1] if necessary
-                    if prompt_tuning_kwargs is not None:
-                        value[1].update(prompt_tuning_kwargs)
-                grid_parameters.append((f"test_{model_id}_{key}", model_id, value[0], value[1]))
 
-        return grid_parameters
+        Args:
+            grid_parameters (`dict`):
+                A dictionary containing the parameters to be tested. There should be at least the key "model_ids" which
+                contains a list of model ids to be tested. The other keys should be the name of the config class
+                post-fixed with "_kwargs" and the value should be a dictionary containing the parameters to be tested
+                for that config class.
+            filter_params_func (`callable`, `optional`):
+                A function that takes a list of tuples and returns a list of tuples. This function is used to filter
+                out the tests that needs for example to be skipped.
+
+        Returns:
+            generated_tests (`list`):
+                A list of tuples containing the name of the test, the model id, the config class and the config class
+                kwargs.
+        """
+        generated_tests = []
+        model_list = grid_parameters["model_ids"]
+
+        for model_id in model_list:
+            for key, value in self.items():
+                if "{}_kwargs".format(key) in grid_parameters:
+                    peft_configs = []
+                    current_peft_config = value[1].copy()
+                    for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
+                        for kwarg in current_value:
+                            current_peft_config.update({current_key: kwarg})
+                            peft_configs.append(current_peft_config)
+                else:
+                    peft_configs = [value[1].copy()]
+
+                for peft_config in peft_configs:
+                    generated_tests.append((f"test_{model_id}_{key}", model_id, value[0], peft_config))
+
+        if filter_params_func is not None:
+            generated_tests = filter_params_func(generated_tests)
+
+        return generated_tests
 
 
 PeftTestConfigManager = ClassInstantier(CLASSES_MAPPING)

@@ -1,0 +1,23 @@
+- title: Get started
+  sections:
+  - local: index
+    title: 🤗 PEFT
+  - local: quicktour
+    title: Quicktour
+  - local: install
+    title: Installation
+
+- title: Task guides
+  sections:
+  - local: task_guides/image_classification_lora
+    title: Image classification using LoRA
+
+- title: Reference
+  sections:
+  - local: package_reference/peft_model
+    title: PEFT model
+  - local: package_reference/config
+    title: Configuration
+  - local: package_reference/tuners
+    title: Tuners
+

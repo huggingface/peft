@@ -1,0 +1,36 @@
+# Models
+
+[`PeftModel`] is the base model class for specifying the base Transformer model and configuration to apply a PEFT method to. The base `PeftModel` contains methods for loading and saving models from the Hub, and supports the [`PromptEncoder`] for prompt learning.
+
+## PeftModel
+
+[[autodoc]] PeftModel
+    - all
+
+## PeftModelForSequenceClassification
+
+A `PeftModel` for sequence classification tasks.
+
+[[autodoc]] PeftModelForSequenceClassification
+    - all
+
+## PeftModelForTokenClassification
+
+A `PeftModel` for token classification tasks.
+
+[[autodoc]] PeftModelForTokenClassification
+    - all
+
+## PeftModelForCausalLM
+
+A `PeftModel` for causal language modeling.
+
+[[autodoc]] PeftModelForCausalLM
+    - all
+
+## PeftModelForSeq2SeqLM
+
+A `PeftModel` for sequence-to-sequence language modeling.
+
+[[autodoc]] PeftModelForSeq2SeqLM
+    - all
