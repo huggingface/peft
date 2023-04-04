@@ -394,7 +394,6 @@ class Linear(nn.Linear, LoraLayer):
         self.lora_B.eval()
 
     def forward(self, x: torch.Tensor):
-
         if self.disable_adapters:
             if self.r > 0 and self.merged:
                 self.weight.data -= (
