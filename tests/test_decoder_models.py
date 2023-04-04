@@ -32,6 +32,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
 
 FULL_GRID = {
     "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+    "task_type": "CAUSAL_LM",
 }
 
 
@@ -72,6 +73,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False], "merge_weights": [False, True]},
+                "task_type": "CAUSAL_LM",
             },
         )
     )

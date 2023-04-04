@@ -43,20 +43,16 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
         "lora_dropout": 0.05,
         "bias": "none",
-        "task_type": "CAUSAL_LM",
     },
     {
         "num_virtual_tokens": 10,
-        "task_type": "CAUSAL_LM",
     },
     {
         "num_virtual_tokens": 10,
         "encoder_hidden_size": 32,
-        "task_type": "CAUSAL_LM",
     },
     {
         "num_virtual_tokens": 10,
-        "task_type": "CAUSAL_LM",
     },
 )
 
@@ -100,6 +96,7 @@ class ClassInstantier(OrderedDict):
         """
         generated_tests = []
         model_list = grid_parameters["model_ids"]
+        task_type = grid_parameters["task_type"] if "task_type" in grid_parameters else None
 
         for model_id in model_list:
             for key, value in self.items():
@@ -109,9 +106,16 @@ class ClassInstantier(OrderedDict):
                     for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
                         for kwarg in current_value:
                             current_peft_config.update({current_key: kwarg})
+
+                            if task_type is not None:
+                                current_peft_config.update({"task_type": task_type})
+
                             peft_configs.append(current_peft_config.copy())
                 else:
-                    peft_configs = [value[1].copy()]
+                    current_peft_config = value[1].copy()
+                    if task_type is not None:
+                        current_peft_config.update({"task_type": task_type})
+                    peft_configs = [current_peft_config]
 
                 for peft_config in peft_configs:
                     generated_tests.append((f"test_{model_id}_{key}", model_id, value[0], peft_config))
