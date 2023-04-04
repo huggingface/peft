@@ -166,7 +166,7 @@ class LoraModel(torch.nn.Module):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "merge_weights": (lora_config.merge_weights or lora_config.inference_mode)
             and not is_hf_device_map_available,
-            "init_lora_weights": self.peft_config.init_lora_weights,
+            "init_lora_weights": lora_config.init_lora_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
