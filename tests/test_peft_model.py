@@ -236,3 +236,26 @@ class PeftModelTester(unittest.TestCase, PeftTestMixin):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
+
+    def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
+        model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # check if `generate` works
+        _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
+
+        with self.assertRaises(TypeError):
+            # check if `generate` raises an error if no positional arguments are passed
+            _ = model.generate(input_ids, attention_mask=attention_mask)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
