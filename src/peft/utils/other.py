@@ -139,7 +139,7 @@ def _set_trainable(model, adapter_name):
     for key in key_list:
         target_module_found = any(key.endswith(target_key) for target_key in model.modules_to_save)
         if target_module_found:
-            parent, target, target_name = _get_submodules(key)
+            parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, ModulesToSaveWrapper):
                 target.update(adapter_name)
             else:
