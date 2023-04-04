@@ -81,6 +81,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.modules_to_save = self.peft_config.modules_to_save
             _set_trainable(self)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.base_model_torch_dtype = getattr(model, "dtype", None)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
@@ -673,6 +674,22 @@ class PeftModelForCausalLM(PeftModel):
 
             if model_kwargs["past_key_values"] is None and self.peft_config.peft_type == PeftType.PREFIX_TUNING:
                 past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+
+                if self.base_model_torch_dtype is not None:
+                    # handle the case for Bloom where it outputs tuple of tuples
+                    if isinstance(past_key_values[0], tuple):
+                        past_key_values = tuple(
+                            tuple(
+                                past_key_value.to(self.base_model_torch_dtype)
+                                for past_key_value in past_key_value_tuple
+                            )
+                            for past_key_value_tuple in past_key_values
+                        )
+                    else:
+                        past_key_values = tuple(
+                            past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_values
+                        )
+
                 model_kwargs["past_key_values"] = past_key_values
             else:
                 if model_kwargs["past_key_values"] is None:
