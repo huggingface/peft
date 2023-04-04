@@ -434,6 +434,8 @@ class Linear(nn.Linear):
         self.active_adapter = adapter_name
 
     def merge(self):
+        if self.active_adapter not in self.lora_A.keys():
+            return
         if not self.merge_weights:
             warnings.warn("Nothing to merge. Set merge_weights to True to enable merging.")
             return
@@ -451,6 +453,8 @@ class Linear(nn.Linear):
             self.merged = True
 
     def unmerge(self):
+        if self.active_adapter not in self.lora_A.keys():
+            return
         if not self.merge_weights:
             warnings.warn("Nothing to unmerge. Set merge_weights to True to enable (un)merging.")
             return
@@ -468,6 +472,8 @@ class Linear(nn.Linear):
             self.merged = False
 
     def forward(self, x: torch.Tensor):
+        if self.active_adapter not in self.lora_A.keys():
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
@@ -520,7 +526,7 @@ if is_bnb_available():
         def forward(self, x: torch.Tensor):
             result = super().forward(x)
 
-            if self.disable_adapters:
+            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
                 return result
             elif self.r[self.active_adapter] > 0:
                 if not torch.is_autocast_enabled():
