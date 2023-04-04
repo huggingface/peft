@@ -19,6 +19,7 @@ from .peft_model import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftModelForVision2Seq,
 )
 from .tuners import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PromptLearningConfig
@@ -29,6 +30,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
+    "VISION_2_SEQ": PeftModelForVision2Seq,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
@@ -44,6 +46,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "bart": ["q_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "bloom": ["query_key_value"],
+    "blip2": ["q", "v", "q_proj", "v_proj"],
     "opt": ["q_proj", "v_proj"],
     "gptj": ["q_proj", "v_proj"],
     "gpt_neox": ["query_key_value"],
@@ -134,9 +137,12 @@ def get_peft_model(model, peft_config):
         model ([`transformers.PreTrainedModel`]): Model to be wrapped.
         peft_config ([`PeftConfig`]): Configuration object containing the parameters of the Peft model.
     """
-
     model_config = model.config.to_dict()
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+
+    if peft_config.task_type == "VISION_2_SEQ" and not isinstance(peft_config, LoraConfig):
+        raise ValueError("Vision2Seq task type is only supported with LORA")
+
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
         peft_config = _prepare_lora_config(peft_config, model_config)
         return PeftModel(model, peft_config)
