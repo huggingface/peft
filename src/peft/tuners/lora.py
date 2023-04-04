@@ -405,8 +405,6 @@ class Linear(nn.Linear, LoraLayer):
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
-                x = x.to(self.lora_A.weight.dtype)
-
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
             return result
         else:
