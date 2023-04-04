@@ -31,7 +31,9 @@ if is_bnb_available():
 
 @require_torch_gpu
 class PeftGPUCommonTests(unittest.TestCase):
-    r""" """
+    r"""
+    A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
+    """
 
     def setUp(self):
         self.seq2seq_model_id = "google/flan-t5-base"
