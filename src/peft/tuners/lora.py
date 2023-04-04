@@ -415,7 +415,6 @@ class Linear(nn.Linear, LoraLayer):
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
 
-
 class MergedLinear(nn.Linear, LoraLayer):
     # Lora implemented in a dense layer
     def __init__(
