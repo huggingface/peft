@@ -19,7 +19,6 @@ from .peft_model import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
-    PeftModelForVision2Seq,
 )
 from .tuners import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PromptLearningConfig
@@ -30,7 +29,6 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
-    "VISION_2_SEQ": PeftModelForVision2Seq,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
@@ -139,9 +137,6 @@ def get_peft_model(model, peft_config):
     """
     model_config = model.config.to_dict()
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
-
-    if peft_config.task_type == "VISION_2_SEQ" and not isinstance(peft_config, LoraConfig):
-        raise ValueError("Vision2Seq task type is only supported with LORA")
 
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
         peft_config = _prepare_lora_config(peft_config, model_config)
