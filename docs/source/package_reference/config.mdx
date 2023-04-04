@@ -1,0 +1,18 @@
+# Configuration
+
+The configuration classes stores the configuration of a [`PeftModel`], PEFT adapter models, and the configurations of [`PrefixTuning`], [`PromptTuning`], and [`PromptEncoder`]. They contain methods for saving and loading model configurations from the Hub, specifying the PEFT method to use, type of task to perform, and model configurations like number of layers and number of attention heads.
+
+## PeftConfigMixin
+
+[[autodoc]] utils.config.PeftConfigMixin
+    - all
+
+## PeftConfig
+
+[[autodoc]] PeftConfig
+    - all
+
+## PromptLearningConfig
+
+[[autodoc]] PromptLearningConfig
+    - all

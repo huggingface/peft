@@ -45,10 +45,10 @@ if is_bnb_available():
 @dataclass
 class LoraConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`~peft.Lora`].
+    This is the configuration class to store the configuration of a [`LoraModel`].
 
     Args:
-        r (`int`): Lora attention dimension
+        r (`int`): Lora attention dimension.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
         lora_alpha (`float`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
@@ -56,7 +56,6 @@ class LoraConfig(PeftConfig):
             Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
-        enable_lora ( `List[bool]`): Used with `lora.MergedLinear`. Usually set to [True, False, True].
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
         modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
             and saved in the final checkpoint.
@@ -88,12 +87,50 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
+    init_lora_weights: bool = field(
+        default=True,
+        metadata={"help": "Whether to initialize the weights of the Lora layers."},
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
 
 
 class LoraModel(torch.nn.Module):
+    """
+    Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
+
+    Args:
+        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
+        config ([`LoraConfig`]): The configuration of the Lora model.
+
+    Returns:
+        `torch.nn.Module`: The Lora model.
+
+    Example:
+
+        ```py
+        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig
+        >>> from peft import LoraModel, LoraConfig
+
+        >>> config = LoraConfig(
+        ...     peft_type="LORA",
+        ...     task_type="SEQ_2_SEQ_LM",
+        ...     r=8,
+        ...     lora_alpha=32,
+        ...     target_modules=["q", "v"],
+        ...     lora_dropout=0.01,
+        ... )
+
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        >>> lora_model = LoraModel(config, model)
+        ```
+
+    **Attributes**:
+        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
+        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
+    """
+
     def __init__(self, model, config, adapter_name):
         super().__init__()
         self.model = model
@@ -129,6 +166,7 @@ class LoraModel(torch.nn.Module):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "merge_weights": (lora_config.merge_weights or lora_config.inference_mode)
             and not is_hf_device_map_available,
+            "init_lora_weights": self.peft_config.init_lora_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
@@ -142,7 +180,13 @@ class LoraModel(torch.nn.Module):
                 parent, target, target_name = _get_submodules(self.model, key)
                 bias = target.bias is not None
                 if isinstance(target, LoraLayer):
-                    target.update_layer(adapter_name, lora_config.r, lora_config.lora_alpha, lora_config.lora_dropout)
+                    target.update_layer(
+                        adapter_name,
+                        lora_config.r,
+                        lora_config.lora_alpha,
+                        lora_config.lora_dropout,
+                        lora_config.init_lora_weights,
+                    )
                 else:
                     if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
                         kwargs.update(
@@ -262,6 +306,37 @@ class LoraModel(torch.nn.Module):
             peft_config.merge_weights = True
         return peft_config
 
+    def merge_and_unload(self):
+        r"""
+        This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
+        """
+        if self.config.model_type == "gpt2":
+            raise ValueError("GPT2 models are not supported for merging LORA layers")
+
+        if getattr(self.model, "is_loaded_in_8bit", False):
+            raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            parent, target, target_name = self._get_submodules(key)
+            if isinstance(target, LoraLayer):
+                bias = target.bias is not None
+                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+
+                # manually merge if not merged
+                if not target.merged:
+                    # merge weights per: https://arxiv.org/pdf/2106.09685.pdf / page 4
+                    if target.r > 0:
+                        target.weight.data += (
+                            transpose(target.lora_B.weight @ target.lora_A.weight, target.fan_in_fan_out)
+                            * target.scaling
+                        ).to(target.weight.dtype)
+                    target.merged = True
+
+                self._replace_module(parent, target_name, new_module, target)
+        return self.model
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -312,7 +387,7 @@ class LoraLayer:
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -328,7 +403,8 @@ class LoraLayer:
             self.lora_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)}))
             self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
             self.scaling[adapter_name] = lora_alpha / r
-        self.reset_lora_parameters(adapter_name)
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
 
     def reset_lora_parameters(self, adapter_name):
@@ -352,6 +428,8 @@ class Linear(nn.Linear):
         merge_weights: bool = True,
         **kwargs,
     ):
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         LoraLayer.__init__(self, merge_weights=merge_weights, in_features=in_features, out_features=out_features)
         # Freezing the pre-trained weight matrix
@@ -362,7 +440,7 @@ class Linear(nn.Linear):
             self.weight.data = self.weight.data.T
 
         nn.Linear.reset_parameters(self)
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
     def merge(self):
@@ -445,7 +523,8 @@ if is_bnb_available():
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
 
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout)
+            init_lora_weights = kwargs.pop("init_lora_weights", True)
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
         def forward(self, x: torch.Tensor):

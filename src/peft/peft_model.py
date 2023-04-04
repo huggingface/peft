@@ -54,26 +54,26 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
-    Parameter-Efficient Fine-Tuning Model. Base model encompassing various Peft methods.
+    Base model encompassing various Peft methods.
 
     Args:
-        model ([`PreTrainedModel`]): The base transformer model used for Peft.
+        model ([`~transformers.PreTrainedModel`]): The base transformer model used for Peft.
         peft_config ([`PeftConfig`]): The configuration of the Peft model.
 
 
     **Attributes**:
-        - **base_model** ([`PreTrainedModel`]) -- The base transformer model used for Peft.
+        - **base_model** ([`~transformers.PreTrainedModel`]) -- The base transformer model used for Peft.
         - **peft_config** ([`PeftConfig`]) -- The configuration of the Peft model.
         - **modules_to_save** (`list` of `str`) -- The list of sub-module names to save when
         saving the model.
         - **prompt_encoder** ([`PromptEncoder`]) -- The prompt encoder used for Peft if
-        `isinstance(self.peft_config, PromptLearningConfig)`.
+        using [`PromptLearningConfig`].
         - **prompt_tokens** (`torch.Tensor`) -- The virtual prompt tokens used for Peft if
-        `isinstance(self.peft_config, PromptLearningConfig)`.
+        using [`PromptLearningConfig`].
         - **transformer_backbone_name** (`str`) -- The name of the transformer
-        backbone in the base model if `isinstance(self.peft_config, PromptLearningConfig)`.
+        backbone in the base model if using [`PromptLearningConfig`].
         - **word_embeddings** (`torch.nn.Embedding`) -- The word embeddings of the transformer backbone
-        in the base model if `isinstance(self.peft_config, PromptLearningConfig)`.
+        in the base model if using [`PromptLearningConfig`].
     """
 
     def __init__(self, model, peft_config: PeftConfig, adapter_name="default"):
@@ -94,14 +94,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
-        Args:
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
-        re-loaded using the `LoraModel.from_pretrained` class method, and also used by the `LoraModel.push_to_hub`
+        reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
         method.
+
+        Args:
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
                 exist).
-            **kwargs:
+            kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
         if os.path.isfile(save_directory):
@@ -130,17 +131,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @classmethod
     def from_pretrained(cls, model, model_id, adapter_name="default", **kwargs):
         r"""
+        Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
+
         Args:
-        Instantiate a `PeftModel` from a pretrained Peft configuration and weights.
-            model (`transformers.PreTrainedModel`):
-                The model to be adapted. The model should be initialized with the `from_pretrained` method. from
-                `transformers` library.
-            model_id (`str`):
+            model ([`~transformers.PreTrainedModel`]):
+                The model to be adapted. The model should be initialized with the
+                [`~transformers.PreTrainedModel.from_pretrained`] method from the 🤗 Transformers library.
+            model_id (`str` or `os.PathLike`):
                 The name of the Lora configuration to use. Can be either:
-                    - A string, the `model id` of a Lora configuration hosted inside a model repo on
-                        huggingface Hub
-                    - A path to a directory containing a Lora configuration file saved using the
-                        `save_pretrained` method, e.g., ``./my_lora_config_directory/``.
+                    - A string, the `model id` of a Lora configuration hosted inside a model repo on the Hugging Face
+                      Hub.
+                    - A path to a directory containing a Lora configuration file saved using the `save_pretrained`
+                      method (`./my_lora_config_directory/`).
         """
         from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
 
@@ -349,7 +351,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ):
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
+            offload_dir = kwargs.get("offload_folder", None)
+            offload_index = kwargs.get("offload_index", None)
+
+            dispatch_model_kwargs = {}
+            # Safety checker for previous `accelerate` versions
+            # `offload_index` was introduced in https://github.com/huggingface/accelerate/pull/873/
+            if "offload_index" in inspect.signature(dispatch_model).parameters:
+                dispatch_model_kwargs["offload_index"] = offload_index
+
             no_split_module_classes = self._no_split_modules
+
             if device_map != "sequential":
                 max_memory = get_balanced_memory(
                     self,
@@ -361,7 +373,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 device_map = infer_auto_device_map(
                     self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
                 )
-            dispatch_model(self, device_map=device_map)
+            dispatch_model(
+                self,
+                device_map=device_map,
+                offload_dir=offload_dir,
+                **dispatch_model_kwargs,
+            )
             hook = AlignDevicesHook(io_same_device=True)
             if not isinstance(self.peft_config[adapter_name]) == PeftType.LORA:
                 add_hook_to_module(self.base_model.model, hook)
@@ -386,25 +403,39 @@ class PeftModelForSequenceClassification(PeftModel):
     Peft model for sequence classification tasks.
 
     Args:
-        model ([`PreTrainedModel`]): Base transformer model
+        model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
 
     **Attributes**:
-        - **config** ([`PretrainedConfig`]) -- The configuration object of the base model.
+        - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
         - **cls_layer_name** (`str`) -- The name of the classification layer.
 
-    Example::
+    Example:
 
-        >>> from transformers import AutoModelForSequenceClassification >>> from peft import
-        PeftModelForSequenceClassification, get_peft_config >>> config = {
-                'peft_type': 'PREFIX_TUNING', 'task_type': 'SEQ_CLS', 'inference_mode': False, 'num_virtual_tokens':
-                20, 'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
-                'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
-            }
-        >>> peft_config = get_peft_config(config) >>> model =
-        AutoModelForSequenceClassification.from_pretrained("bert-base-cased") >>> peft_model =
-        PeftModelForSequenceClassification(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
-        params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
+        ```py
+        >>> from transformers import AutoModelForSequenceClassification
+        >>> from peft import PeftModelForSequenceClassification, get_peft_config
+
+        >>> config = {
+        ...     "peft_type": "PREFIX_TUNING",
+        ...     "task_type": "SEQ_CLS",
+        ...     "inference_mode": False,
+        ...     "num_virtual_tokens": 20,
+        ...     "token_dim": 768,
+        ...     "num_transformer_submodules": 1,
+        ...     "num_attention_heads": 12,
+        ...     "num_layers": 12,
+        ...     "encoder_hidden_size": 768,
+        ...     "prefix_projection": False,
+        ...     "postprocess_past_key_value_function": None,
+        ... }
+
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased")
+        >>> peft_model = PeftModelForSequenceClassification(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        trainable params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
+        ```
     """
 
     def __init__(self, model, peft_config: PeftConfig, adapter_name="default"):
@@ -557,24 +588,39 @@ class PeftModelForSequenceClassification(PeftModel):
 
 class PeftModelForCausalLM(PeftModel):
     """
-    Peft model for Causal LM
+    Peft model for causal language modeling.
 
     Args:
-        model ([`PreTrainedModel`]): Base transformer model
+        model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
 
 
-    Example::
+    Example:
 
-        >>> from transformers import AutoModelForCausalLM >>> from peft import PeftModelForCausalLM, get_peft_config
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import PeftModelForCausalLM, get_peft_config
+
         >>> config = {
-                'peft_type': 'PREFIX_TUNING', 'task_type': 'CAUSAL_LM', 'inference_mode': False, 'num_virtual_tokens':
-                20, 'token_dim': 1280, 'num_transformer_submodules': 1, 'num_attention_heads': 20, 'num_layers': 36,
-                'encoder_hidden_size': 1280, 'prefix_projection': False, 'postprocess_past_key_value_function': None
-            }
-        >>> peft_config = get_peft_config(config) >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large") >>>
-        peft_model = PeftModelForCausalLM(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
-        params: 1843200 || all params: 775873280 || trainable%: 0.23756456724479544
+        ...     "peft_type": "PREFIX_TUNING",
+        ...     "task_type": "CAUSAL_LM",
+        ...     "inference_mode": False,
+        ...     "num_virtual_tokens": 20,
+        ...     "token_dim": 1280,
+        ...     "num_transformer_submodules": 1,
+        ...     "num_attention_heads": 20,
+        ...     "num_layers": 36,
+        ...     "encoder_hidden_size": 1280,
+        ...     "prefix_projection": False,
+        ...     "postprocess_past_key_value_function": None,
+        ... }
+
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForCausalLM.from_pretrained("gpt2-large")
+        >>> peft_model = PeftModelForCausalLM(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        trainable params: 1843200 || all params: 775873280 || trainable%: 0.23756456724479544
+        ```
     """
 
     def __init__(self, model, peft_config: PeftConfig, adapter_name="default"):
@@ -649,7 +695,13 @@ class PeftModelForCausalLM(PeftModel):
             else:
                 if "input_ids" not in kwargs:
                     raise ValueError("input_ids must be provided for Peft model generation")
-                if kwargs.get("attention_mask", None) is not None:
+                # For gpt2 models, we construct postion_ids on the fly by using attention mask, and position ids need to match input_shape.
+                # for prefix tuning, input shape is determined using `input_ids`. Thus we should not expand 'attention_mask' here
+                # for prompt tuning input_ids is not passed but a concatenated input_embeds is passed. Thus attention_mask needs to be of same size of num_virtual_tokens + input_ids
+                if kwargs.get("attention_mask", None) is not None and self.peft_config.peft_type in [
+                    PeftType.PROMPT_TUNING,
+                    PeftType.P_TUNING,
+                ]:
                     # concat prompt attention mask
                     prefix_attention_mask = torch.ones(
                         kwargs["input_ids"].shape[0], self.peft_config.num_virtual_tokens
@@ -678,6 +730,14 @@ class PeftModelForCausalLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, **kwargs):
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
         if isinstance(self.peft_config, PromptLearningConfig):
+            if self.peft_config.peft_type == PeftType.PREFIX_TUNING:
+                prefix_attention_mask = torch.ones(
+                    model_kwargs["input_ids"].shape[0], self.peft_config.num_virtual_tokens
+                ).to(model_kwargs["input_ids"].device)
+                model_kwargs["attention_mask"] = torch.cat(
+                    (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
+                )
+
             if model_kwargs["past_key_values"] is None and self.peft_config.peft_type == PeftType.PREFIX_TUNING:
                 past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
                 model_kwargs["past_key_values"] = past_key_values
@@ -694,24 +754,39 @@ class PeftModelForCausalLM(PeftModel):
 
 class PeftModelForSeq2SeqLM(PeftModel):
     """
-    Peft model for Seq2Seq LM
+    Peft model for sequence-to-sequence language modeling.
 
     Args:
-        model ([`PreTrainedModel`]): Base transformer model
+        model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
 
 
-    Example::
+    Example:
 
-        >>> from transformers import AutoModelForSeq2SeqLM >>> from peft import PeftModelForSeq2SeqLM, get_peft_config
+        ```py
+        >>> from transformers import AutoModelForSeq2SeqLM
+        >>> from peft import PeftModelForSeq2SeqLM, get_peft_config
+
         >>> config = {
-                'peft_type': 'LORA', 'task_type': 'SEQ_2_SEQ_LM', 'inference_mode': False, 'r': 8, 'target_modules':
-                ['q', 'v'], 'lora_alpha': 32, 'lora_dropout': 0.1, 'merge_weights': False, 'fan_in_fan_out': False,
-                'enable_lora': None, 'bias': 'none'
-            }
-        >>> peft_config = get_peft_config(config) >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>>
-        peft_model = PeftModelForSeq2SeqLM(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
-        params: 884736 || all params: 223843584 || trainable%: 0.3952474242013566
+        ...     "peft_type": "LORA",
+        ...     "task_type": "SEQ_2_SEQ_LM",
+        ...     "inference_mode": False,
+        ...     "r": 8,
+        ...     "target_modules": ["q", "v"],
+        ...     "lora_alpha": 32,
+        ...     "lora_dropout": 0.1,
+        ...     "merge_weights": False,
+        ...     "fan_in_fan_out": False,
+        ...     "enable_lora": None,
+        ...     "bias": "none",
+        ... }
+
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        >>> peft_model = PeftModelForSeq2SeqLM(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        trainable params: 884736 || all params: 223843584 || trainable%: 0.3952474242013566
+        ```
     """
 
     def __init__(self, model, peft_config: PeftConfig, adapter_name="default"):
@@ -861,28 +936,42 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
 class PeftModelForTokenClassification(PeftModel):
     """
-    Peft model for sequence classification tasks.
+    Peft model for token classification tasks.
 
     Args:
-        model ([`PreTrainedModel`]): Base transformer model
+        model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
 
     **Attributes**:
-        - **config** ([`PretrainedConfig`]) -- The configuration object of the base model.
+        - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
         - **cls_layer_name** (`str`) -- The name of the classification layer.
 
-    Example::
+    Example:
 
-        >>> from transformers import AutoModelForSequenceClassification >>> from peft import
-        PeftModelForTokenClassification, get_peft_config >>> config = {
-                'peft_type': 'PREFIX_TUNING', 'task_type': 'TOKEN_CLS', 'inference_mode': False, 'num_virtual_tokens':
-                20, 'token_dim': 768, 'num_transformer_submodules': 1, 'num_attention_heads': 12, 'num_layers': 12,
-                'encoder_hidden_size': 768, 'prefix_projection': False, 'postprocess_past_key_value_function': None
-            }
-        >>> peft_config = get_peft_config(config) >>> model =
-        AutoModelForTokenClassification.from_pretrained("bert-base-cased") >>> peft_model =
-        PeftModelForTokenClassification(model, peft_config) >>> peft_model.print_trainable_parameters() trainable
-        params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
+        ```py
+        >>> from transformers import AutoModelForSequenceClassification
+        >>> from peft import PeftModelForTokenClassification, get_peft_config
+
+        >>> config = {
+        ...     "peft_type": "PREFIX_TUNING",
+        ...     "task_type": "TOKEN_CLS",
+        ...     "inference_mode": False,
+        ...     "num_virtual_tokens": 20,
+        ...     "token_dim": 768,
+        ...     "num_transformer_submodules": 1,
+        ...     "num_attention_heads": 12,
+        ...     "num_layers": 12,
+        ...     "encoder_hidden_size": 768,
+        ...     "prefix_projection": False,
+        ...     "postprocess_past_key_value_function": None,
+        ... }
+
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModelForTokenClassification.from_pretrained("bert-base-cased")
+        >>> peft_model = PeftModelForTokenClassification(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        trainable params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
+        ```
     """
 
     def __init__(self, model, peft_config: PeftConfig = None, adapter_name="default"):
