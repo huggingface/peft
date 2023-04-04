@@ -16,7 +16,7 @@
 from .config import PeftType, PromptLearningConfig
 
 
-def get_peft_model_state_dict(model, adapter_name, state_dict=None):
+def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
     """
     Get the state dict of the Peft model.
 
@@ -68,7 +68,7 @@ def get_peft_model_state_dict(model, adapter_name, state_dict=None):
     return to_return
 
 
-def set_peft_model_state_dict(model, adapter_name, peft_model_state_dict):
+def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="default"):
     """
     Set the state dict of the Peft model.
 
