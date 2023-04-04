@@ -352,7 +352,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)
-            and len(self.peft_config == 1)
+            and len(self.peft_config) == 1
         ):
             device_map = kwargs.get("device_map", "auto")
             max_memory = kwargs.get("max_memory", None)
