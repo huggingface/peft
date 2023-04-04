@@ -412,9 +412,8 @@ class Linear(nn.Linear, LoraLayer):
                 result += self.lora_B(self.lora_A(self.lora_dropout(x))) * self.scaling
             return result
         else:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
-            return result
 
 
 class MergedLinear(nn.Linear, LoraLayer):
