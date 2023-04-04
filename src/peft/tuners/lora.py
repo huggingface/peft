@@ -135,22 +135,22 @@ class LoraModel(torch.nn.Module):
         super().__init__()
         self.model = model
         self.forward = self.model.forward
-        self.config = config
-        self.add_adapter(adapter_name, self.config[adapter_name])
+        self.peft_config = config
+        self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
             config = self._prepare_lora_config(config, self.model.config.to_dict())
-            self.config[adapter_name] = config
+            self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
-        if len(self.config) > 1 and self.config[adapter_name].bias != "none":
+        if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
             raise ValueError(
                 "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
             )
-        mark_only_lora_as_trainable(self.model, self.config[adapter_name].bias)
+        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
 
     def _find_and_replace(self, adapter_name):
-        lora_config = self.config[adapter_name]
+        lora_config = self.peft_config[adapter_name]
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and not is_bnb_available():
             raise ImportError(
@@ -260,7 +260,7 @@ class LoraModel(torch.nn.Module):
 
     def get_peft_config_as_dict(self, inference: bool = False):
         config_dict = {}
-        for key, value in self.config.items():
+        for key, value in self.peft_config.items():
             config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
             if inference:
                 config["inference_mode"] = True
