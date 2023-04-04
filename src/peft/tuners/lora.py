@@ -401,9 +401,7 @@ class Linear(nn.Linear, LoraLayer):
                 )
                 self.merged = False
 
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-
-            return result
+            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.r > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
             if self.r > 0:
