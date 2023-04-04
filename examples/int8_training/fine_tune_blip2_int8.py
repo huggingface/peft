@@ -26,7 +26,6 @@ config = LoraConfig(
     lora_alpha=32,
     lora_dropout=0.05,
     bias="none",
-    task_type="VISION_2_SEQ",
 )
 
 # We load our model and processor using `transformers`
