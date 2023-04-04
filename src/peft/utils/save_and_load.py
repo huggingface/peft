@@ -53,7 +53,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
         if config.inference_mode:
-            prompt_embeddings = model.prompt_encoder.embedding.weight
+            prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
         else:
             prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
