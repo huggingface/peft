@@ -1066,7 +1066,7 @@ class PeftModelForVision2Seq(PeftModel):
         ... }
 
         >>> peft_config = get_peft_config(config)
-        >>> model = AutoModelForCausalLM.from_pretrained("Salesforce/blip2-flan-t5-xl")
+        >>> model = AutoModelForVision2Seq.from_pretrained("Salesforce/blip2-flan-t5-xl")
         >>> peft_model = PeftModelForVision2Seq(model, peft_config)
         >>> peft_model.print_trainable_parameters()
         trainable params: 1843200 || all params: 775873280 || trainable%: 0.23756456724479544
