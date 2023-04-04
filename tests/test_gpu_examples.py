@@ -16,17 +16,25 @@ import gc
 import os
 import tempfile
 import unittest
+from dataclasses import dataclass
+from typing import Any, Dict, List, Union
 
 import pytest
 import torch
-from datasets import load_dataset
+from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
     Trainer,
     TrainingArguments,
+    WhisperFeatureExtractor,
+    WhisperForConditionalGeneration,
+    WhisperProcessor,
+    WhisperTokenizer,
 )
 
 from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
@@ -36,6 +44,38 @@ from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torc
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
 # rely on the example scripts to test the features.
+
+
+@dataclass
+class DataCollatorSpeechSeq2SeqWithPadding:
+    r"""
+    Directly copied from:
+    https://github.com/huggingface/peft/blob/main/examples/int8_training/peft_bnb_whisper_large_v2_training.ipynb
+    """
+    processor: Any
+
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+        # split inputs and labels since they have to be of different lengths and need different padding methods
+        # first treat the audio inputs by simply returning torch tensors
+        input_features = [{"input_features": feature["input_features"]} for feature in features]
+        batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt")
+
+        # get the tokenized label sequences
+        label_features = [{"input_ids": feature["labels"]} for feature in features]
+        # pad the labels to max length
+        labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
+
+        # replace padding with -100 to ignore loss correctly
+        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
+
+        # if bos token is appended in previous tokenization step,
+        # cut bos token here as it's append later anyways
+        if (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
+            labels = labels[:, 1:]
+
+        batch["labels"] = labels
+
+        return batch
 
 
 @require_torch_gpu
@@ -99,7 +139,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset("ybelkada/english_quotes_copy")
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -113,7 +153,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
-                    output_dir="outputs",
+                    output_dir=tmp_dir,
                 ),
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
@@ -177,7 +217,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
-                    output_dir="outputs",
+                    output_dir=tmp_dir,
                 ),
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
@@ -193,7 +233,6 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
     def test_seq2seq_lm_training_single_gpu(self):
         r"""
         Test the Seq2SeqLM training on a single GPU device. This test is a converted version of
@@ -224,7 +263,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset("ybelkada/english_quotes_copy")
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -238,7 +277,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
                     learning_rate=2e-4,
                     fp16=True,
                     logging_steps=1,
-                    output_dir="outputs",
+                    output_dir=tmp_dir,
                 ),
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
@@ -285,7 +324,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
 
             model = get_peft_model(model, config)
 
-            data = load_dataset("Abirate/english_quotes")
+            data = load_dataset("ybelkada/english_quotes_copy")
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
             trainer = Trainer(
@@ -304,6 +343,97 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    def test_audio_model_training(self):
+        r"""
+        Test the audio model training on a single GPU device. This test is a converted version of
+        https://github.com/huggingface/peft/blob/main/examples/int8_training/peft_bnb_whisper_large_v2_training.ipynb
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dataset_name = "ybelkada/common_voice_mr_11_0_copy"
+            task = "transcribe"
+            language = "Marathi"
+            common_voice = DatasetDict()
+
+            common_voice["train"] = load_dataset(dataset_name, split="train+validation")
+
+            common_voice = common_voice.remove_columns(
+                ["accent", "age", "client_id", "down_votes", "gender", "locale", "path", "segment", "up_votes"]
+            )
+
+            feature_extractor = WhisperFeatureExtractor.from_pretrained(self.audio_model_id)
+            tokenizer = WhisperTokenizer.from_pretrained(self.audio_model_id, language=language, task=task)
+            processor = WhisperProcessor.from_pretrained(self.audio_model_id, language=language, task=task)
+
+            common_voice = common_voice.cast_column("audio", Audio(sampling_rate=16000))
+
+            def prepare_dataset(batch):
+                # load and resample audio data from 48 to 16kHz
+                audio = batch["audio"]
+
+                # compute log-Mel input features from input audio array
+                batch["input_features"] = feature_extractor(
+                    audio["array"], sampling_rate=audio["sampling_rate"]
+                ).input_features[0]
+
+                # encode target text to label ids
+                batch["labels"] = tokenizer(batch["sentence"]).input_ids
+                return batch
+
+            common_voice = common_voice.map(
+                prepare_dataset, remove_columns=common_voice.column_names["train"], num_proc=2
+            )
+            data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
+
+            model = WhisperForConditionalGeneration.from_pretrained(
+                self.audio_model_id, load_in_8bit=True, device_map="auto"
+            )
+
+            model.config.forced_decoder_ids = None
+            model.config.suppress_tokens = []
+
+            model = prepare_model_for_int8_training(model, output_embedding_layer_name="proj_out")
+
+            config = LoraConfig(
+                r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none"
+            )
+
+            model = get_peft_model(model, config)
+            model.print_trainable_parameters()
+
+            training_args = Seq2SeqTrainingArguments(
+                output_dir=tmp_dir,  # change to a repo name of your choice
+                per_device_train_batch_size=8,
+                gradient_accumulation_steps=1,  # increase by 2x for every 2x decrease in batch size
+                learning_rate=1e-3,
+                warmup_steps=2,
+                max_steps=3,
+                fp16=True,
+                per_device_eval_batch_size=8,
+                generation_max_length=128,
+                logging_steps=25,
+                remove_unused_columns=False,  # required as the PeftModel forward doesn't have the signature of the wrapped model's forward
+                label_names=["labels"],  # same reason as above
+            )
+
+            trainer = Seq2SeqTrainer(
+                args=training_args,
+                model=model,
+                train_dataset=common_voice["train"],
+                data_collator=data_collator,
+                tokenizer=processor.feature_extractor,
+            )
+
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)
