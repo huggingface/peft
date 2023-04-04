@@ -112,7 +112,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         for adapter_name, peft_config in self.peft_config.items():
             # save only the trainable weights
-            output_state_dict = get_peft_model_state_dict(self, adapter_name, kwargs.get("state_dict", None))
+            output_state_dict = get_peft_model_state_dict(
+                self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
+            )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
             torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
@@ -346,7 +348,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
         # load the weights into the model
-        set_peft_model_state_dict(self, adapter_name, adapters_weights)
+        set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)

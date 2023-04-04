@@ -136,7 +136,7 @@ class LoraModel(torch.nn.Module):
         self.model = model
         self.forward = self.model.forward
         self.config = config
-        self.add_adapter(adapter_name)
+        self.add_adapter(adapter_name, self.config[adapter_name])
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
