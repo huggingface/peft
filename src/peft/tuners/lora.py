@@ -323,17 +323,7 @@ class LoraModel(torch.nn.Module):
             if isinstance(target, LoraLayer):
                 bias = target.bias is not None
                 new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
-
-                # manually merge if not merged
-                if not target.merged:
-                    # merge weights per: https://arxiv.org/pdf/2106.09685.pdf / page 4
-                    if target.r > 0:
-                        target.weight.data += (
-                            transpose(target.lora_B.weight @ target.lora_A.weight, target.fan_in_fan_out)
-                            * target.scaling
-                        ).to(target.weight.dtype)
-                    target.merged = True
-
+                target.merge()
                 self._replace_module(parent, target_name, new_module, target)
         return self.model
 
