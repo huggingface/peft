@@ -1,3 +1,17 @@
+# coding=utf-8
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 import torch
 from datasets import load_dataset
 from torch.utils.data import DataLoader, Dataset
@@ -6,6 +20,7 @@ from transformers import AutoModelForVision2Seq, AutoProcessor
 from peft import LoraConfig, get_peft_model
 
 
+# Let's define the LoraConfig
 config = LoraConfig(
     r=16,
     lora_alpha=32,
@@ -14,12 +29,15 @@ config = LoraConfig(
     task_type="VISION_2_SEQ",
 )
 
+# We load our model and processor using `transformers`
 model = AutoModelForVision2Seq.from_pretrained("Salesforce/blip2-opt-2.7b", load_in_8bit=True, device_map={"": 0})
 processor = AutoProcessor.from_pretrained("Salesforce/blip2-opt-2.7b")
-model = get_peft_model(model, config)
 
+# Get our peft model and print the number of trainable parameters
+model = get_peft_model(model, config)
 model.print_trainable_parameters()
 
+# Let's load the dataset here!
 dataset = load_dataset("ybelkada/football-dataset", split="train")
 
 
@@ -61,7 +79,6 @@ train_dataloader = DataLoader(train_dataset, shuffle=True, batch_size=2, collate
 optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model.to(device)
 
 model.train()
 
