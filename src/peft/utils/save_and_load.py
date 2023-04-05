@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from peft.tuners.adaption_prompt import AdaptionPromptConfig
+
 from .config import PeftType, PromptLearningConfig
 
 
@@ -49,6 +51,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
+
         to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
@@ -56,6 +59,9 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+
+    elif model.peft_config.peft_type == PeftType.ADAPTION_PROMPT:
+        to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
         if config.inference_mode:
@@ -112,7 +118,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
-    elif isinstance(config, PromptLearningConfig):
+    elif isinstance(config, (PromptLearningConfig, AdaptionPromptConfig)):
         peft_model_state_dict = state_dict
     else:
         raise NotImplementedError

@@ -20,7 +20,14 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .tuners import AdaLoraConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from .tuners import (
+    AdaLoraConfig,
+    AdaptionPromptConfig,
+    LoraConfig,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
+    PromptTuningConfig,
+)
 from .utils import PromptLearningConfig
 
 
@@ -32,6 +39,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
+    "ADAPTION_PROMPT": AdaptionPromptConfig,
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
     "P_TUNING": PromptEncoderConfig,
@@ -93,6 +101,21 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     return peft_config
 
 
+def _prepare_adaption_prompt_config(
+    peft_config: AdaptionPromptConfig,
+    model,
+) -> AdaptionPromptConfig:
+    from transformers import LlamaForCausalLM, LlamaModel
+
+    if isinstance(model, LlamaModel):
+        peft_config.target_layers = "layers"
+    elif isinstance(model, LlamaForCausalLM):
+        peft_config.target_layers = "model.layers"
+    else:
+        raise ValueError(f"Unsupported model type for adaption prompt: '{type(model)}'")
+    return peft_config
+
+
 def get_peft_model(model, peft_config):
     """
     Returns a Peft model object from a model and a config.
@@ -103,10 +126,14 @@ def get_peft_model(model, peft_config):
     """
     model_config = model.config.to_dict() if hasattr(model.config, "to_dict") else model.config
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+
+    if isinstance(peft_config, PromptLearningConfig):
+        peft_config = _prepare_prompt_learning_config(peft_config, model_config)
+    elif isinstance(peft_config, AdaptionPromptConfig):
+        peft_config = _prepare_adaption_prompt_config(peft_config, model)
+
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not isinstance(
         peft_config, PromptLearningConfig
     ):
         return PeftModel(model, peft_config)
-    if isinstance(peft_config, PromptLearningConfig):
-        peft_config = _prepare_prompt_learning_config(peft_config, model_config)
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config)
