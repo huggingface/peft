@@ -192,7 +192,7 @@ class AdaLoraModel(LoraModel):
         }
         bias = target.bias is not None
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt) and self.peft_config.enable_lora is None:
+        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
             kwargs.update(
                 {
                     "has_fp16_weights": target.state.has_fp16_weights,
