@@ -28,9 +28,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from huggingface_hub import hf_hub_download
-
-from .tuners import LoraModel, AdaLoraConfig, AdaLoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .tuners import AdaLoraConfig, AdaLoraModel, LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,

@@ -1,15 +1,15 @@
-from transformers import AutoModelForSeq2SeqLM
-from peft import get_peft_model, AdaLoraConfig, AdaLoraModel, TaskType
-import torch
-from datasets import load_dataset
 import os
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-from transformers import AutoTokenizer
-from torch.utils.data import DataLoader
-from transformers import default_data_collator, get_linear_schedule_with_warmup
-from tqdm import tqdm
+import torch
 from datasets import load_dataset
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, default_data_collator, get_linear_schedule_with_warmup
+
+from peft import AdaLoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
+
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 device = "cuda"
 model_name_or_path = "facebook/bart-base"
@@ -20,18 +20,23 @@ text_column = "sentence"
 label_column = "text_label"
 max_length = 128
 lr = 1e-3
-num_epochs = 8 
+num_epochs = 8
 batch_size = 8
 
 
 # creating model
 peft_config = AdaLoraConfig(
-    init_r=12, target_r=8, 
-    beta1=0.85, beta2=0.85, 
-    tinit=200, tfinal=1000, deltaT=10,
-    lora_alpha=32, lora_dropout=0.1,
-    task_type=TaskType.SEQ_2_SEQ_LM, 
-    inference_mode=False
+    init_r=12,
+    target_r=8,
+    beta1=0.85,
+    beta2=0.85,
+    tinit=200,
+    tfinal=1000,
+    deltaT=10,
+    lora_alpha=32,
+    lora_dropout=0.1,
+    task_type=TaskType.SEQ_2_SEQ_LM,
+    inference_mode=False,
 )
 
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
@@ -98,7 +103,7 @@ model.base_model.peft_config.total_step = len(train_dataloader) * num_epochs
 
 # training and evaluation
 model = model.to(device)
-global_step = 0 
+global_step = 0
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
@@ -110,8 +115,8 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
         lr_scheduler.step()
-        # Update the importance of low-rank matrices 
-        # and allocate the budget accordingly. 
+        # Update the importance of low-rank matrices
+        # and allocate the budget accordingly.
         model.base_model.update_and_allocate(global_step)
         optimizer.zero_grad()
         global_step += 1
@@ -158,8 +163,6 @@ ckpt = f"{peft_model_id}/adapter_model.bin"
 # get_ipython().system('du -h $ckpt')
 
 
-from peft import PeftModel, PeftConfig
-
 peft_model_id = f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}"
 
 config = PeftConfig.from_pretrained(peft_model_id)
@@ -177,5 +180,3 @@ with torch.no_grad():
     outputs = model.generate(input_ids=inputs["input_ids"], max_new_tokens=10)
     print(outputs)
     print(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True))
-
-

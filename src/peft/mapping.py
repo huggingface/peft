@@ -20,7 +20,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .tuners import LoraConfig, AdaLoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from .tuners import AdaLoraConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PromptLearningConfig
 
 
@@ -36,7 +36,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "PREFIX_TUNING": PrefixTuningConfig,
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
-    "ADALORA": AdaLoraConfig, 
+    "ADALORA": AdaLoraConfig,
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
@@ -144,6 +144,7 @@ def _prepare_lora_config(peft_config, model_config):
     if peft_config.inference_mode:
         peft_config.merge_weights = True
     return peft_config
+
 
 def _prepare_adalora_config(peft_config, model_config):
     if peft_config.target_modules is None:

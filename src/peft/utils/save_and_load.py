@@ -72,10 +72,10 @@ def set_peft_model_state_dict(model, peft_model_state_dict):
     """
     if model.peft_config.peft_type == PeftType.ADALORA:
         rank_pattern = model.peft_config.rank_pattern
-        if rank_pattern: 
+        if rank_pattern:
             model.base_model.resize_modules_by_rank_pattern(rank_pattern)
     model.load_state_dict(peft_model_state_dict, strict=False)
-    
+
     if model.peft_config.peft_type not in (PeftType.LORA, PeftType.ADALORA):
         model.prompt_encoder.embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
