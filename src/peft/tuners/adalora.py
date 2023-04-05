@@ -139,20 +139,6 @@ class AdaLoraModel(LoraModel):
                     new_module = SVDLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
                 elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
                     new_module = SVDLinear(target.in_features, target.out_features, bias=bias, **kwargs)
-                # TODO: Implement the MergedLinear of SVD Adapattion 
-                # elif self.peft_config.enable_lora is not None:
-                #     kwargs.update({"enable_lora": self.peft_config.enable_lora})
-                #     if isinstance(target, Conv1D):
-                #         in_features, out_features = target.weight.shape
-                #     else:
-                #         in_features, out_features = target.in_features, target.out_features
-                #         if kwargs["fan_in_fan_out"]:
-                #             warnings.warn(
-                #                 "fan_in_fan_out is set to True but the target module is not a Conv1D. "
-                #                 "Setting fan_in_fan_out to False."
-                #             )
-                #             kwargs["fan_in_fan_out"] = False
-                #     new_module = MergedLinear(in_features, out_features, bias=bias, **kwargs)
                 self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
             raise ValueError(
