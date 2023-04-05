@@ -202,7 +202,7 @@ class AdaLoraModel(LoraModel):
                 }
             )
             new_module = SVDLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
-        elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
+        elif isinstance(target, torch.nn.Linear):
             new_module = SVDLinear(target.in_features, target.out_features, bias=bias, **kwargs)
         new_module = new_module.to(target.weight.device)
 
