@@ -150,9 +150,6 @@ def _prepare_adalora_config(peft_config, model_config):
         if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
             raise ValueError("Please specify `target_modules` in `peft_config`")
         peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-    if len(peft_config.target_modules) == 1:
-        peft_config.fan_in_fan_out = True
-        # peft_config.enable_lora = [True, False, True]
     if peft_config.inference_mode:
         peft_config.merge_weights = True
     return peft_config
