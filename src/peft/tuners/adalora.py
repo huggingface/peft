@@ -100,6 +100,11 @@ class AdaLoraModel(LoraModel):
         self._find_and_replace()
         mark_only_lora_as_trainable(self.model, self.peft_config.bias)
         self.rankallocator = RankAllocator(config, self.model)
+        if config.enable_lora is not None:
+            raise NotImplementedError(
+                "MergedLinear has not been implemented for AdaLoRA."
+            )
+
 
     def _find_and_replace(self):
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
