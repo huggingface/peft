@@ -137,7 +137,7 @@ class AdaLoraModel(LoraModel):
                         }
                     )
                     new_module = SVDLinear8bitLt(target.in_features, target.out_features, bias=bias, **kwargs)
-                elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
+                elif isinstance(target, torch.nn.Linear):
                     new_module = SVDLinear(target.in_features, target.out_features, bias=bias, **kwargs)
                 self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
