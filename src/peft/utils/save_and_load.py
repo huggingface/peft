@@ -52,7 +52,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
-                rank_pattern = {k.replace(f"{adapter_name}.", ""): v for k, v in rank_pattern.items()}
+                rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
 
         to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
