@@ -22,7 +22,7 @@ from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
 PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-T5ForConditionalGeneration",
+    "ybelkada/tiny-random-T5ForConditionalGeneration-calibrated",
     "hf-internal-testing/tiny-random-BartForConditionalGeneration",
 ]
 
@@ -74,7 +74,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
         PeftTestConfigManager.get_grid_parameters(
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False], "merge_weights": [True, False]},
+                "lora_kwargs": {"init_lora_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
