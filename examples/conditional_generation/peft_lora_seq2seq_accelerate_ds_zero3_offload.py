@@ -102,7 +102,8 @@ class TorchTracemalloc:
 
 def main():
     accelerator = Accelerator()
-    model_name_or_path = "bigscience/T0_3B"
+    # model_name_or_path = "bigscience/T0_3B"
+    model_name_or_path = "facebook/bart-large"
     dataset_name = "twitter_complaints"
     peft_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1

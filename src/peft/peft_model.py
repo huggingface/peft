@@ -28,7 +28,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .tuners import AdaLoraModel, LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -49,6 +49,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.PROMPT_TUNING: PromptEmbedding,
     PeftType.P_TUNING: PromptEncoder,
     PeftType.PREFIX_TUNING: PrefixEncoder,
+    PeftType.ADALORA: AdaLoraModel,
 }
 
 
@@ -81,7 +82,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.base_model = model
         self.config = self.base_model.config
         self.modules_to_save = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.peft_config = {}
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
@@ -320,7 +320,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save = self.modules_to_save.update(peft_config.modules_to_save)
             _set_trainable(self, adapter_name)
 
-    def load_adapter(self, model_id, adapter_name, **kwargs):
+    def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         if adapter_name not in self.peft_config:
@@ -328,6 +328,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
                 PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None)).peft_type
             ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None))
+            if isinstance(peft_config, PromptLearningConfig) and is_trainable:
+                raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
+            else:
+                peft_config[adapter_name].inference_mode = not is_trainable
             self.add_adapter(adapter_name, peft_config)
 
         # load weights if any
@@ -388,6 +392,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(self.peft_config[adapter_name], PromptLearningConfig):
                 remove_hook_from_submodules(self.prompt_encoder)
             add_hook_to_module(self.get_base_model(), hook)
+
+            # Set model in evaluation mode to deactivate Dropout modules by default
+            self.eval()
 
     def set_adapter(self, adapter_name):
         """
