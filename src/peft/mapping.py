@@ -20,7 +20,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .tuners import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from .tuners import AdaLoraConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 from .utils import PromptLearningConfig
 
 
@@ -36,6 +36,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "PREFIX_TUNING": PrefixTuningConfig,
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
+    "ADALORA": AdaLoraConfig,
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
@@ -57,6 +58,25 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
+}
+
+TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "k", "v", "o", "wi", "wo"],
+    "mt5": ["q", "k", "v", "o", "wi_0", "wi_1", "wo"],
+    "bart": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    # "gpt2": ["c_attn"],
+    # "bloom": ["query_key_value"],
+    "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    # "gptj": ["q_proj", "v_proj"],
+    # "gpt_neox": ["query_key_value"],
+    # "gpt_neo": ["q_proj", "v_proj"],
+    # "bert": ["query", "value"],
+    "roberta": ["query", "key", "value", "dense"],
+    # "xlm-roberta": ["query", "value"],
+    # "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
+    # "deberta": ["in_proj"],
+    # "layoutlm": ["query", "value"],
 }
 
 
@@ -126,6 +146,16 @@ def _prepare_lora_config(peft_config, model_config):
     return peft_config
 
 
+def _prepare_adalora_config(peft_config, model_config):
+    if peft_config.target_modules is None:
+        if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
+            raise ValueError("Please specify `target_modules` in `peft_config`")
+        peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+    if peft_config.inference_mode:
+        peft_config.merge_weights = True
+    return peft_config
+
+
 def get_peft_model(model, peft_config):
     """
     Returns a Peft model object from a model and a config.
@@ -140,7 +170,9 @@ def get_peft_model(model, peft_config):
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
         peft_config = _prepare_lora_config(peft_config, model_config)
         return PeftModel(model, peft_config)
-    if not isinstance(peft_config, PromptLearningConfig):
+    if isinstance(peft_config, AdaLoraConfig):
+        peft_config = _prepare_adalora_config(peft_config, model_config)
+    elif not isinstance(peft_config, PromptLearningConfig):
         peft_config = _prepare_lora_config(peft_config, model_config)
     else:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)

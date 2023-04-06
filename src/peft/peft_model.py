@@ -28,7 +28,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from .tuners import LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
+from .tuners import AdaLoraConfig, AdaLoraModel, LoraModel, PrefixEncoder, PromptEmbedding, PromptEncoder
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
@@ -75,6 +75,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.modules_to_save = None
         if isinstance(self.peft_config, PromptLearningConfig):
             self._setup_prompt_encoder()
+        elif isinstance(self.peft_config, AdaLoraConfig):
+            self.base_model = AdaLoraModel(peft_config, model)
         else:
             self.base_model = LoraModel(peft_config, model)
         if getattr(self.peft_config, "modules_to_save", None) is not None:
@@ -194,6 +196,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             hook = AlignDevicesHook(io_same_device=True)
             if model.peft_config.peft_type == PeftType.LORA:
+                add_hook_to_module(model.base_model.model, hook)
+            elif model.peft_config.peft_type == PeftType.ADALORA:
                 add_hook_to_module(model.base_model.model, hook)
             else:
                 remove_hook_from_submodules(model.prompt_encoder)
