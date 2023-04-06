@@ -274,6 +274,12 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 | ViT           | ✅  |   |   |   | 
 | Swin           | ✅  |   |   |   | 
 
+### Image to text (Multi-modal models)
+
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
+| --------- | ---- | ---- | ---- | ----  |
+| Blip-2           | ✅  |   |   |   | 
+
 ___Note that we have tested LoRA for [ViT](https://huggingface.co/docs/transformers/model_doc/vit) and [Swin](https://huggingface.co/docs/transformers/model_doc/swin) for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
 examples to learn more. If you run into problems, please open an issue.___
 
