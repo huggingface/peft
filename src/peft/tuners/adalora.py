@@ -343,13 +343,13 @@ class AdaLoraLayer(LoraLayer):
         if r > 0:
             # Right singular vectors
             self.lora_A.update(
-                nn.ModuleDict({adapter_name: nn.Parameter(self.weight.new_zeros((r, self.in_features)))})
+                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((r, self.in_features)))})
             )
             # Singular values
-            self.lora_E.update(nn.ModuleDict({adapter_name: nn.Parameter(self.weight.new_zeros(r, 1))}))
+            self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros(r, 1))}))
             # Left singular vectors
             self.lora_B.update(
-                nn.ModuleDict({adapter_name: nn.Parameter(self.weight.new_zeros((self.out_features, r)))})
+                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((self.out_features, r)))})
             )
             # The current rank
             self.ranknum.update(
