@@ -243,7 +243,7 @@ class AdaLoraModel(LoraModel):
                 rank = rank_idx.sum().item()
             else:
                 raise ValueError("Unexcepted type of rank_idx")
-            key = ".".join(name.split(".")[0:-1])
+            key = ".".join(name.split(".")[0:-2])
             _, target, _ = _get_submodules(self.model, key)
             lora_E_weights = target.lora_E[adapter_name][rank_idx]
             lora_A_weights = target.lora_A[adapter_name][rank_idx]
@@ -320,19 +320,13 @@ class AdaLoraLayer(LoraLayer):
         # Actual trainable parameters
         if r > 0:
             # Right singular vectors
-            self.lora_A.update(
-                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((r, self.in_features)))})
-            )
+            self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, self.in_features))}))
             # Singular values
-            self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros(r, 1))}))
+            self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, 1))}))
             # Left singular vectors
-            self.lora_B.update(
-                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((self.out_features, r)))})
-            )
+            self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(self.out_features, r))}))
             # The current rank
-            self.ranknum.update(
-                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros(1), requires_grad=False)})
-            )
+            self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
             self.ranknum[adapter_name].data.fill_(float(r))
             self.ranknum[adapter_name].requires_grad = False
             self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
