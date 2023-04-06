@@ -393,8 +393,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 remove_hook_from_submodules(self.prompt_encoder)
             add_hook_to_module(self.get_base_model(), hook)
 
-            # Set model in evaluation mode to deactivate Dropout modules by default
-            self.eval()
+        # Set model in evaluation mode to deactivate Dropout modules by default
+        self.eval()
 
     def set_adapter(self, adapter_name):
         """
