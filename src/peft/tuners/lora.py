@@ -29,6 +29,7 @@ from ..utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     PeftConfig,
     PeftType,
+    _freeze_adapter,
     _get_submodules,
     transpose,
 )
@@ -52,8 +53,6 @@ class LoraConfig(PeftConfig):
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
         lora_alpha (`float`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
-        merge_weights (`bool`):
-            Whether to merge the weights of the Lora layers with the base transformer model in `eval` mode.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
@@ -71,9 +70,6 @@ class LoraConfig(PeftConfig):
     )
     lora_alpha: int = field(default=None, metadata={"help": "Lora alpha"})
     lora_dropout: float = field(default=None, metadata={"help": "Lora dropout"})
-    merge_weights: bool = field(
-        default=False, metadata={"help": "Merge weights of the original model and the Lora model"}
-    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -147,7 +143,10 @@ class LoraModel(torch.nn.Module):
             raise ValueError(
                 "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
             )
-        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
+        if self.peft_config[adapter_name].inference_mode:
+            _freeze_adapter(self.model, adapter_name)
+        else:
+            mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
 
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]
@@ -158,14 +157,11 @@ class LoraModel(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
         is_target_modules_in_base_model = False
-        is_hf_device_map_available = hasattr(self.model, "hf_device_map")
         kwargs = {
             "r": lora_config.r,
             "lora_alpha": lora_config.lora_alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "merge_weights": (lora_config.merge_weights or lora_config.inference_mode)
-            and not is_hf_device_map_available,
             "init_lora_weights": lora_config.init_lora_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
@@ -360,7 +356,6 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
 class LoraLayer:
     def __init__(
         self,
-        merge_weights: bool,
         in_features: int,
         out_features: int,
     ):
@@ -372,7 +367,6 @@ class LoraLayer:
         self.lora_B = nn.ModuleDict({})
         # Mark the weight as unmerged
         self.merged = False
-        self.merge_weights = merge_weights
         self.disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
@@ -415,13 +409,12 @@ class Linear(nn.Linear, LoraLayer):
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        merge_weights: bool = True,
         **kwargs,
     ):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
 
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        LoraLayer.__init__(self, merge_weights=merge_weights, in_features=in_features, out_features=out_features)
+        LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
 
@@ -435,9 +428,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def merge(self):
         if self.active_adapter not in self.lora_A.keys():
-            return
-        if not self.merge_weights:
-            warnings.warn("Nothing to merge. Set merge_weights to True to enable merging.")
             return
         if self.merged:
             warnings.warn("Already merged. Nothing to do.")
@@ -454,9 +444,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def unmerge(self):
         if self.active_adapter not in self.lora_A.keys():
-            return
-        if not self.merge_weights:
-            warnings.warn("Nothing to unmerge. Set merge_weights to True to enable (un)merging.")
             return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
@@ -515,7 +502,7 @@ if is_bnb_available():
                 threshold=kwargs.get("threshold", 0.0),
                 index=kwargs.get("index", None),
             )
-            LoraLayer.__init__(self, merge_weights=False, in_features=in_features, out_features=out_features)
+            LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
 
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
