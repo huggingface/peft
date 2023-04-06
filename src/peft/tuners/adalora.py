@@ -233,58 +233,36 @@ class AdaLoraModel(LoraModel):
             outputs.loss += orth_reg_weight * regu_loss
         return outputs
 
-    def _prepare_new_module(self, target, rank_idx, adapter_name):
-        if isinstance(rank_idx, list):
-            rank = sum(rank_idx)
-        elif isinstance(rank_idx, torch.Tensor):
-            rank_idx = rank_idx.view(-1)
-            rank = rank_idx.sum().item()
-        else:
-            raise ValueError("Unexcepted type of rank_idx")
-
-        lora_config = self.peft_config[adapter_name]
-        kwargs = {
-            "r": rank,
-            "lora_alpha": lora_config.lora_alpha,
-            "lora_dropout": lora_config.lora_dropout,
-            "fan_in_fan_out": lora_config.fan_in_fan_out,
-            "init_lora_weights": lora_config.init_lora_weights,
-        }
-        bias = target.bias is not None
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
-            kwargs.update(
-                {
-                    "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
-                    "threshold": target.state.threshold,
-                    "index": target.index,
-                }
-            )
-            new_module = SVDLinear8bitLt(adapter_name, target.in_features, target.out_features, bias=bias, **kwargs)
-        elif isinstance(target, torch.nn.Linear):
-            new_module = SVDLinear(adapter_name, target.in_features, target.out_features, bias=bias, **kwargs)
-        new_module = new_module.to(target.weight.device)
-
-        with torch.no_grad():
-            new_module.weight.copy_(target.weight)
-            if bias:
-                new_module.bias.copy_(target.bias)
-            if rank > 0:
-                new_module.lora_E[adapter_name].copy_(target.lora_E[rank_idx])
-                new_module.lora_A[adapter_name].copy_(target.lora_A[rank_idx])
-                new_module.lora_B[adapter_name].copy_(target.lora_B[:, rank_idx])
-                # The scaling is exactly as the previous
-                new_module.ranknum[adapter_name].copy_(target.ranknum)
-        return new_module
-
     def resize_modules_by_rank_pattern(self, rank_pattern, adapter_name):
+        lora_config = self.peft_config[adapter_name]
         for name, rank_idx in rank_pattern.items():
+            if isinstance(rank_idx, list):
+                rank = sum(rank_idx)
+            elif isinstance(rank_idx, torch.Tensor):
+                rank_idx = rank_idx.view(-1)
+                rank = rank_idx.sum().item()
+            else:
+                raise ValueError("Unexcepted type of rank_idx")
             key = ".".join(name.split(".")[0:-1])
-            key = f"{key}.{adapter_name}" if adapter_name not in key else key
-            parent, target, target_name = _get_submodules(self.model, key)
-            new_module = self._prepare_new_module(target, rank_idx, adapter_name)
-            self._replace_module(parent, target_name, new_module, target)
+            _, target, _ = _get_submodules(self.model, key)
+            lora_E_weights = target.lora_E[adapter_name][rank_idx]
+            lora_A_weights = target.lora_A[adapter_name][rank_idx]
+            lora_B_weights = target.lora_B[adapter_name][:, rank_idx]
+            ranknum = target.ranknum[adapter_name]
+            target.update_layer(
+                adapter_name,
+                rank,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+            with torch.no_grad():
+                if rank > 0:
+                    target.lora_E[adapter_name].copy_(lora_E_weights)
+                    target.lora_A[adapter_name].copy_(lora_A_weights)
+                    target.lora_B[adapter_name].copy_(lora_B_weights)
+                    # The scaling is exactly as the previous
+                    target.ranknum[adapter_name].copy_(ranknum)
 
     def update_and_allocate(self, global_step):
         lora_config = self.peft_config[self.trainable_adapter_name]
