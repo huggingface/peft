@@ -331,7 +331,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if isinstance(peft_config, PromptLearningConfig) and is_trainable:
                 raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
             else:
-                peft_config[adapter_name].inference_mode = not is_trainable
+                peft_config.inference_mode = not is_trainable
             self.add_adapter(adapter_name, peft_config)
 
         # load weights if any
