@@ -134,7 +134,7 @@ class AdaLoraModel(LoraModel):
             )
         is_target_modules_in_base_model = False
         kwargs = {
-            "r": lora_config.r,
+            "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
@@ -154,7 +154,7 @@ class AdaLoraModel(LoraModel):
                 if isinstance(target, LoraLayer):
                     target.update_layer(
                         adapter_name,
-                        lora_config.r,
+                        lora_config.init_r,
                         lora_config.lora_alpha,
                         lora_config.lora_dropout,
                         lora_config.init_lora_weights,
