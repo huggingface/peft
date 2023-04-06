@@ -95,7 +95,6 @@ class AdaLoraModel(LoraModel):
         nn.Module.__init__(self)
         self.model = model
         self.peft_config = config
-        self.rankallocator = RankAllocator(config, self.model)
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
     def add_adapter(self, adapter_name, config=None):
