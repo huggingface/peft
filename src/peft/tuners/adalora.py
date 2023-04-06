@@ -355,7 +355,7 @@ class AdaLoraLayer(LoraLayer):
             self.ranknum.update(
                 nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros(1), requires_grad=False)})
             )
-            self.ranknum[adapter_name].data.fill_(float(self.r))
+            self.ranknum[adapter_name].data.fill_(float(r))
             self.ranknum[adapter_name].requires_grad = False
             self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
         if init_lora_weights:
