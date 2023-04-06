@@ -49,13 +49,13 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                         to_return[bias_name] = state_dict[bias_name]
         else:
             raise NotImplementedError
+        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
-
-        to_return = {k: v for k, v in to_return.items() if (("lora_" in k and adapter_name in k) or ("bias" in k))}
+                to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
         if config.inference_mode:
@@ -70,7 +70,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
-    to_return = {k.replace(f"{adapter_name}.", ""): v for k, v in to_return.items()}
+    to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return
 
 
@@ -99,8 +99,12 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         peft_model_state_dict = {}
         for k, v in state_dict.items():
             if "lora_" in k:
-                suffix_to_replace = ".".join(k.split("lora_")[1].split(".")[1:])
-                k = k.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+                suffix = k.split("lora_")[1]
+                if "." in suffix:
+                    suffix_to_replace = ".".join(suffix.split(".")[1:])
+                    k = k.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+                else:
+                    k = f"{k}.{adapter_name}"
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
