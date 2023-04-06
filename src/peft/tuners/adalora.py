@@ -282,7 +282,7 @@ class AdaLoraModel(LoraModel):
         for name, rank_idx in rank_pattern.items():
             key = ".".join(name.split(".")[0:-1])
             key = f"{key}.{adapter_name}" if adapter_name not in key else key
-            parent, target, target_name = _get_submodules(key)
+            parent, target, target_name = _get_submodules(self.model, key)
             new_module = self._prepare_new_module(target, rank_idx, adapter_name)
             self._replace_module(parent, target_name, new_module, target)
 
