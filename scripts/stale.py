@@ -28,6 +28,7 @@ LABELS_TO_EXEMPT = [
     "feature request",
     "new model",
     "wip",
+    "PRs welcome to address this",
 ]
 
 
