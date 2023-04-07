@@ -1,0 +1,237 @@
+# P-tuning for sequence classification
+
+For very large pretrained models, it can be challenging to finetune them for downstream tasks. Instead, you can use *prompts* to steer the model towards a particular downstream task. Typically, these prompts are handcrafted which is impractical because it relies on large validation sets. P-tuning is a method for automatically searching for prompts in a continuous space, and it is optimizable so you can find better prompts.
+
+<Tip>
+
+💡 Read [GPT Understands, Too](https://arxiv.org/abs/2103.10385) to learn more about p-tuning.
+
+</Tip>
+
+This guide will show you how to train a [`roberta-large`](https://huggingface.co/roberta-large) model with p-tuning on the `mrpc` configuration of the [GLUE](https://huggingface.co/datasets/glue) benchmark.
+
+Before you begin, make sure you have all the necessary libraries installed:
+
+```bash
+!pip install -q peft transformers datasets evaluate
+```
+
+## Setup
+
+To get started, define the model, GLUE dataset, and some basic training hyperparameters:
+
+```py
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
+from peft import (
+    get_peft_config,
+    get_peft_model,
+    get_peft_model_state_dict,
+    set_peft_model_state_dict,
+    PeftType,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
+)
+from datasets import load_dataset
+from torch.optim import AdamW
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+import evaluate
+import argparse
+import torch
+import os
+
+model_name_or_path = "roberta-large"
+task = "mrpc"
+device = "cuda"
+num_epochs = 20
+lr = 1e-3
+batch_size = 32
+```
+
+## Load dataset and metric
+
+Next, load the `mrpc` configuration - a corpus of sentenced pairs labeled according to whether they're semantically equivalent or not - the [GLUE](https://huggingface.co/datasets/glue) benchmark:
+
+```py
+dataset = load_dataset("glue", task)
+datasets["train"][0]
+{
+    "sentence1": 'Amrozi accused his brother , whom he called " the witness " , of deliberately distorting his evidence .',
+    "sentence2": 'Referring to him as only " the witness " , Amrozi accused his brother of deliberately distorting his evidence .',
+    "label": 1,
+    "idx": 0,
+}
+```
+
+Then, load the metric for evaluating the model's performance. For this specific task, the evaluation module returns the accuracy and F1 scores.
+
+```py
+metric = evaluate.load("glue", task)
+```
+
+## Preprocess dataset
+
+Initialize the tokenizer and configure the padding token to use. If you're using a GPT, OPT or BLOOM model, you should set the `padding_side` to the left, otherwise it'll be set to the right. Tokenize the sentence pairs and truncate them to the maximum length.
+
+```py
+if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
+    padding_side = "left"
+else:
+    padding_side = "right"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side=padding_side)
+if getattr(tokenizer, "pad_token_id") is None:
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+
+
+def tokenize_function(examples):
+    # max_length=None => use the model max length (it's actually the default)
+    outputs = tokenizer(examples["sentence1"], examples["sentence2"], truncation=True, max_length=None)
+    return outputs
+```
+
+Use [`~datasets.Dataset.map`] to apply the `tokenize_function` to the dataset, and remove the unprocessed columns because the model won't need those. You should also rename the `label` column to `labels` because that is the expected name for the labels by models in the 🤗 Transformers library.
+
+```py
+tokenized_datasets = datasets.map(
+    tokenize_function,
+    batched=True,
+    remove_columns=["idx", "sentence1", "sentence2"],
+)
+
+tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+```
+
+Create a collator function to pad the examples in the batches to the `longest` sequence in the batch, and create a [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader) from the `train` and `validation` splits:
+
+```py
+def collate_fn(examples):
+    return tokenizer.pad(examples, padding="longest", return_tensors="pt")
+
+
+train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size)
+eval_dataloader = DataLoader(
+    tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
+)
+```
+
+## Train model
+
+Let's create the [`PeftModel`] now. P-tuning uses a prompt encoder to optimize the prompt parameters, so you'll need to initialize the [`PromptEncoderConfig`] and define the task type:
+
+```py
+peft_config = PromptEncoderConfig(task_type="SEQ_CLS", num_virtual_tokens=20, encoder_hidden_size=128)
+```
+
+Create the base `roberta-large` model from [`~transformers.AutoModelForSequenceClassification`], and then wrap the base model and `peft_config` with [`get_peft_model`] to create a [`PeftModel`]. If you're curious to see how many parameters you're actually training, you can print it out with [`~peft.PeftModel.print_trainable_parameters`]:
+
+```py
+model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
+model = get_peft_model(model, peft_config)
+model.print_trainable_parameters()
+"trainable params: 1351938 || all params: 355662082 || trainable%: 0.38011867680626127"
+```
+
+Setup an optimizer and learning rate scheduler:
+
+```py
+optimizer = AdamW(params=model.parameters(), lr=lr)
+
+lr_scheduler = get_linear_schedule_with_warmup(
+    optimizer=optimizer,
+    num_warmup_steps=0,
+    num_training_steps=(len(train_dataloader) * num_epochs),
+)
+```
+
+Move the model to the GPU, and then write a training loop that includes the `metric` you loaded earlier to evaluate the model at each epoch:
+
+```py
+model.to(device)
+for epoch in range(num_epochs):
+    model.train()
+    for step, batch in enumerate(tqdm(train_dataloader)):
+        batch.to(device)
+        outputs = model(**batch)
+        loss = outputs.loss
+        loss.backward()
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
+
+    model.eval()
+    for step, batch in enumerate(tqdm(eval_dataloader)):
+        batch.to(device)
+        with torch.no_grad():
+            outputs = model(**batch)
+        predictions = outputs.logits.argmax(dim=-1)
+        predictions, references = predictions, batch["labels"]
+        metric.add_batch(
+            predictions=predictions,
+            references=references,
+        )
+
+    eval_metric = metric.compute()
+    print(f"epoch {epoch}:", eval_metric)
+```
+
+## Share model
+
+You can store and share your model on the Hub if you'd like. Login to your Hugging Face account and enter your token when prompted:
+
+```py
+from huggingface_hub import notebook_login
+
+notebook_login()
+```
+
+Upload the model with the push_to_hub function to push your model to a specifc model repository on the Hub:
+
+```py
+peft_model_id = "your-name/roberta-large-peft-p-tuning"
+model.push_to_hub("your-name/roberta-large-peft-p-tuning", use_auth_token=True)
+```
+
+## Inference
+
+Once the model has been uploaded to the Hub, anyone can easily use it for inference. Load the configuration and model:
+
+```py
+import torch
+from peft import PeftModel, PeftConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+peft_model_id = "smangrul/roberta-large-peft-p-tuning"
+config = PeftConfig.from_pretrained(peft_model_id)
+inference_model = AutoModelForSequenceClassification.from_pretrained(config.base_model_name_or_path)
+tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
+model = PeftModel.from_pretrained(inference_model, peft_model_id)
+```
+
+Get some text to try out the model on, and tokenize it:
+
+```py
+classes = ["not equivalent", "equivalent"]
+
+sentence1 = "Coast redwood trees are the tallest trees on the planet and can grow over 300 feet tall."
+sentence2 = "The coast redwood trees, which can attain a height of over 300 feet, are the tallest trees on earth."
+
+inputs = tokenizer(sentence1, sentence2, truncation=True, padding="longest", return_tensors="pt")
+```
+
+Place the model and inputs on a GPU and classify the sentences:
+
+```py
+model.to(device)
+inputs.to(device)
+
+with torch.no_grad():
+    outputs = model(**inputs).logits
+    print(outputs)
+
+paraphrased_text = torch.softmax(outputs, dim=1).tolist()[0]
+for i in range(len(classes)):
+    print(f"{classes[i]}: {int(round(paraphrased_text[i] * 100))}%")
+"not equivalent: 4%"
+"equivalent: 96%"
+```

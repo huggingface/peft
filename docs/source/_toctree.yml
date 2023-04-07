@@ -13,6 +13,8 @@
     title: Image classification using LoRA
   - local: task_guides/seq2seq-prefix-tuning
     title: Prefix tuning for conditional generation
+  - local: task_guides/ptuning-seq-classification
+    title: P-tuning for sequence classification
 
 - title: Reference
   sections:
