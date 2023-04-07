@@ -18,6 +18,7 @@ import tempfile
 from unittest import TestCase
 
 import torch
+from torch.testing import assert_close
 
 from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
@@ -53,7 +54,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             vocab_size=16,
             hidden_size=8,
             intermediate_size=8,
-            num_hidden_layers=2,
+            num_hidden_layers=8,
             num_attention_heads=4,
             use_cache=False,
         )
@@ -162,3 +163,117 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         with self.assertRaises(TypeError):
             # check if `generate` raises an error if no positional arguments are passed
             _ = model.generate(input_ids, attention_mask=attention_mask)
+
+    def test_sequence_adapter_ops(self) -> None:
+        """Test sequence of adapter operations."""
+        # Test input data.
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        target_ids = torch.LongTensor([[0, 0, 0], [0, 0, 0]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # Create original llama model.
+        original = LlamaForCausalLM(self._create_test_llama_config())
+        original = original.to(self.torch_device)
+        original_before = original(input_ids=input_ids, attention_mask=attention_mask)
+
+        # Get AdaptionPrompt model.
+        adapted = get_peft_model(
+            original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted = adapted.to(self.torch_device)
+        default_before = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+
+        # Test zero-init: The logits should be exactly the same.
+        assert_close(original_before.logits, default_before.logits, rtol=0, atol=0)
+
+        # Single fine-tuning step on "default" adapter.
+        optimizer = torch.optim.SGD(adapted.parameters(), lr=1)
+        optimizer.zero_grad()
+        default_before.loss.backward()
+        optimizer.step()
+
+        # Test that the output changed.
+        default_after = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        self.assertFalse(torch.allclose(default_before.logits, default_after.logits))
+
+        with adapted.disable_adapter():
+            # Test that the output is the same as the original ouput.
+            default_disabled = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+            assert_close(original_before.logits, default_disabled.logits, rtol=0, atol=0)
+
+        # Add new adapter 1.
+        adapted.add_adapter("adapter 1", AdaptionPromptConfig(adapter_layers=3, adapter_len=8, task_type="CAUSAL_LM"))
+        # Test zero-init
+        adapter_1_before = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(original_before.logits, adapter_1_before.logits, rtol=0, atol=0)
+
+        # Single fine-tuning step on adapter 1.
+        optimizer = torch.optim.SGD(adapted.parameters(), lr=1)
+        optimizer.zero_grad()
+        adapter_1_before.loss.backward()
+        optimizer.step()
+
+        # Test that adapter 1 output changed.
+        adapter_1_after = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        self.assertFalse(torch.allclose(adapter_1_before.logits, adapter_1_after.logits))
+        self.assertFalse(torch.allclose(original_before.logits, adapter_1_after.logits))
+        self.assertFalse(torch.allclose(default_after.logits, adapter_1_after.logits))
+
+        with adapted.disable_adapter():
+            # Test that the output is the same as the original output.
+            adapter_1_disabled = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+            assert_close(original_before.logits, adapter_1_disabled.logits, rtol=0, atol=0)
+
+        # Set adapter back to default.
+        adapted.set_adapter("default")
+
+        # Test that the output is the same as the default output after training.
+        default_after_set = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(default_after.logits, default_after_set.logits, rtol=0, atol=0)
+        self.assertFalse(torch.allclose(original_before.logits, default_after_set.logits))
+        self.assertFalse(torch.allclose(adapter_1_after.logits, default_after_set.logits))
+
+    def test_add_and_set_while_disabled(self):
+        """Test that adding and setting adapters while disabled works as intended."""
+        # Test input data.
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        target_ids = torch.LongTensor([[0, 0, 0], [0, 0, 0]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # Create original llama model.
+        original = LlamaForCausalLM(self._create_test_llama_config())
+        original = original.to(self.torch_device)
+        original_before = original(input_ids=input_ids, attention_mask=attention_mask)
+
+        # Get AdaptionPrompt model.
+        adapted = get_peft_model(
+            original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted = adapted.to(self.torch_device)
+
+        with adapted.disable_adapter():
+            adapted.add_adapter(
+                "adapter 1", AdaptionPromptConfig(adapter_layers=3, adapter_len=8, task_type="CAUSAL_LM")
+            )
+
+        # Test that the output is the same as the original output.
+        adapter_1_before = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(original_before.logits, adapter_1_before.logits, rtol=0, atol=0)
+
+        # Single fine-tuning step on adapter 1.
+        optimizer = torch.optim.SGD(adapted.parameters(), lr=1)
+        optimizer.zero_grad()
+        adapter_1_before.loss.backward()
+        optimizer.step()
+
+        # Test that adapter 1 output changed.
+        adapter_1_after = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        self.assertFalse(torch.allclose(original_before.logits, adapter_1_after.logits))
+
+        adapted.set_adapter("default")
+        with adapted.disable_adapter():
+            adapted.set_adapter("adapter 1")
+
+        # Test that adapter 1 is active again.
+        adapter_1_after_set = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(adapter_1_after.logits, adapter_1_after_set.logits, rtol=0, atol=0)

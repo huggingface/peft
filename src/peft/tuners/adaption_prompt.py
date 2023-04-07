@@ -16,13 +16,14 @@
 import importlib
 import math
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.utils.config import PeftConfig, PeftType
+from peft.utils.other import _freeze_adapter
 
 
 def is_llama_available() -> bool:
@@ -36,7 +37,12 @@ def is_llama_available() -> bool:
 if is_llama_available():
     # We guard the import statement so that this won't get in the way of using peft with earlier versions of
     # transformers that don't have Llama.
-    from transformers.models.llama.modeling_llama import LlamaAttention, apply_rotary_pos_emb
+    from transformers.models.llama.modeling_llama import (
+        LlamaAttention,
+        LlamaForCausalLM,
+        LlamaModel,
+        apply_rotary_pos_emb,
+    )
 
 
 def is_adaption_prompt_trainable(module: str) -> bool:
@@ -56,32 +62,134 @@ class AdaptionPromptConfig(PeftConfig):
         self.peft_type = PeftType.ADAPTION_PROMPT
 
 
+def prepare_config(
+    peft_config: AdaptionPromptConfig,
+    model,
+) -> AdaptionPromptConfig:
+    """Prepare the config based on the llama model type."""
+    if peft_config.target_layers is not None:
+        # Assume user knows what they are doing.
+        return peft_config
+
+    if isinstance(model, LlamaModel):
+        peft_config.target_layers = "layers"
+    elif isinstance(model, LlamaForCausalLM):
+        peft_config.target_layers = "model.layers"
+    else:
+        raise ValueError(f"Unsupported model type for adaption prompt: '{type(model)}'")
+    return peft_config
+
+
 class AdaptionPromptModel(nn.Module):
     """
-    Implments adaption propmts as described in https://arxiv.org/pdf/2303.16199.pdf.
+    Implements adaption prompts as described in https://arxiv.org/pdf/2303.16199.pdf.
 
-    This implementation only supports Llama models at the moment, but it can be extended to other models.
+    This implementation only supports Llama models at the moment, but it can be extended to other models. It is
+    implemented by replacing some of the LlamaAttention modules with AdaptedAttention modules that wrap the original
+    ones, but bypass the original forward() so that we can inject trainable tokens and a gate.
+
+    Notes on the multi-adapter pattern:
+    - We store the states for different adapters by keeping a dictionary of AdaptedAttention modules indexed by adapter
+      name.
+    - Every time we switch adapters, we remove the modules of the currently active adapter from the LlamaModel layers,
+      store them in the dictionary, and replace them with the modules of the new adapter.
+    - To avoid duplicated and potentially inconsistent state, the currently active adapter is always removed from the
+      dictionary.
+    - Disabling the adapter would also result in the modules being removed from the LlamaModel layers.
     """
 
-    def __init__(self, config: AdaptionPromptConfig, model):
+    def __init__(self, model, configs: Dict, adapter_name: str):
         super().__init__()
-        self.config = config
         self.model = model
-        self._find_and_replace()
+        # Store adapter configs by name.
+        self._configs = {}
+        # Store lists of cached AdaptedAttention modules by name.
+        self._cached_adapters: Dict[str, List] = {}
+        # The name of the currently active adapter.
+        self._active_adapter = None
+        # Whether the adapter is enabled.
+        self._enabled = True
+        self.forward = self.model.forward
+        self.add_adapter(adapter_name, configs[adapter_name])
         self._mark_only_adaption_prompts_as_trainable()
 
-    def _find_and_replace(self) -> None:
-        """Find and replace LlamaAttention modules with AdaptedAttention modules."""
-        layers = self.model.get_submodule(self.config.target_layers)
-
-        if len(layers) < self.config.adapter_layers:
+    def add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
+        """Add an adapter with the given name and config."""
+        config = prepare_config(config, self.model)
+        if adapter_name in self._configs:
+            raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
+        layers = self.model.get_submodule(config.target_layers)
+        if len(layers) < config.adapter_layers:
             raise ValueError(
-                f"Config specifies more adapter layers '{self.config.adapter_layers}'"
+                f"Config specifies more adapter layers '{config.adapter_layers}'"
                 f" than the model has '{len(layers)}'."
             )
 
-        for layer in layers[-self.config.adapter_layers :]:
-            layer.self_attn = AdaptedAttention(self.config.adapter_len, layer.self_attn)
+        # It is only None during initialization.
+        # If it is disabled, we don't have to remove the modules.
+        if self._active_adapter is not None and self._enabled:
+            self._remove_adapted_attentions(self._active_adapter)
+        self._active_adapter = adapter_name
+        self._configs[adapter_name] = config
+        self._create_adapted_attentions(config)
+        if not self._enabled:
+            self._remove_adapted_attentions(self._active_adapter)
+
+        if config.inference_mode:
+            _freeze_adapter(self.model, adapter_name)
+
+    def set_adapter(self, adapter_name: str) -> None:
+        """Set the model to use the adapter with the given name."""
+        if self._active_adapter == adapter_name:
+            return
+        if adapter_name not in self._configs:
+            raise ValueError(f"Adapter with name '{adapter_name}' does not exist.")
+
+        if self._enabled:
+            self._remove_adapted_attentions(self._active_adapter)
+            self._set_adapted_attentions(adapter_name)
+
+        self._active_adapter = adapter_name
+
+    def enable_adapter_layers(self):
+        """Enable adapter layers by swapping in cached AdaptedAttention modules."""
+        self._enabled = True
+        self._set_adapted_attentions(self._active_adapter)
+
+    def disable_adapter_layers(self):
+        """Disable adapter layers by swapping out AdaptedAttention modules."""
+        self._enabled = False
+        self._remove_adapted_attentions(self._active_adapter)
+
+    def _create_adapted_attentions(self, config: AdaptionPromptConfig) -> None:
+        """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
+        layers = self.model.get_submodule(config.target_layers)
+        assert config.adapter_layers <= len(layers)
+        for layer in layers[-config.adapter_layers :]:
+            layer.self_attn = AdaptedAttention(config.adapter_len, layer.self_attn)
+
+    def _set_adapted_attentions(self, adapter_name: str) -> None:
+        """Replace LlamaAttention modules with cached AdaptedAttention modules."""
+        cached = self._cached_adapters[adapter_name]
+        del self._cached_adapters[adapter_name]
+
+        layers = self.model.get_submodule(self._configs[adapter_name].target_layers)
+        for i in range(len(cached)):
+            layers[-len(cached) + i].self_attn = cached[i]
+
+    def _remove_adapted_attentions(self, adapter_name: str) -> None:
+        """Remove AdaptedAttention modules from the model and store them in the cache."""
+        config = self._configs[adapter_name]
+        layers = self.model.get_submodule(config.target_layers)
+
+        adapted_attentions = []
+        for layer in layers:
+            if isinstance(layer.self_attn, AdaptedAttention):
+                adapted_attentions.append(layer.self_attn)
+                layer.self_attn = layer.self_attn.model
+        assert len(adapted_attentions) == config.adapter_layers
+
+        self._cached_adapters[adapter_name] = adapted_attentions
 
     def _mark_only_adaption_prompts_as_trainable(self) -> None:
         """Freeze all parameters of the model except the adaption prompts."""
@@ -94,6 +202,8 @@ class AdaptionPromptModel(nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            # This is necessary as e.g. causal models have various methods that we
+            # don't want to re-implement here.
             return getattr(self.model, name)
 
 
@@ -212,7 +322,8 @@ class AdaptedAttention(nn.Module):
         "Official" paper implementation:
         https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L141
 
-        :param kwargs: See the original LlamaAttention module.
+        Args:
+            kwargs: See the original LlamaAttention module.
         """
         if kwargs.get("use_cache", False):
             raise NotImplementedError("use_cache is not currently supported.")
