@@ -32,9 +32,9 @@ SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \
     python3 -m pip install --no-cache-dir \
     git+https://github.com/huggingface/transformers \
-    git+https://github.com/huggingface/accelerate 
+    git+https://github.com/huggingface/accelerate \
+    git+https://github.com/huggingface/peft#egg=peft[test]
 
-RUN git clone https://github.com/huggingface/peft && cd peft && python3 -m pip install --no-cache-dir  -e .[test] && cd ../
 RUN python3 -m pip install --no-cache-dir bitsandbytes
 
 # Stage 2
