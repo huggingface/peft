@@ -25,7 +25,6 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from ..import_utils import is_bnb_available
-
 from ..utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     PeftConfig,
