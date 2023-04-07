@@ -267,7 +267,7 @@ def main():
                 tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
             )
         )
-        train_epoch_loss = total_loss / len(eval_dataloader)
+        train_epoch_loss = total_loss / len(train_dataloader)
         train_ppl = torch.exp(train_epoch_loss)
         accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
 
