@@ -459,6 +459,8 @@ class Linear(nn.Linear, LoraLayer):
             self.merged = False
 
     def forward(self, x: torch.Tensor):
+        previous_dtype = x.dtype
+
         if self.active_adapter not in self.lora_A.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if self.disable_adapters:
@@ -467,6 +469,9 @@ class Linear(nn.Linear, LoraLayer):
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.r[self.active_adapter] > 0 and not self.merged:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
+            x = x.to(self.lora_A[self.active_adapter].weight.dtype)
+
             result += (
                 self.lora_B[self.active_adapter](
                     self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
@@ -475,6 +480,9 @@ class Linear(nn.Linear, LoraLayer):
             )
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
+        result = result.to(previous_dtype)
+
         return result
 
 
