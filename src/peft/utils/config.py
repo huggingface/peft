@@ -21,7 +21,7 @@ from typing import Optional, Union
 from huggingface_hub import hf_hub_download
 from transformers.utils import PushToHubMixin
 
-from .adapters_utils import CONFIG_NAME
+from .other import CONFIG_NAME
 
 
 class PeftType(str, enum.Enum):
@@ -29,6 +29,7 @@ class PeftType(str, enum.Enum):
     P_TUNING = "P_TUNING"
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
+    ADALORA = "ADALORA"
 
 
 class TaskType(str, enum.Enum):
@@ -82,7 +83,7 @@ class PeftConfigMixin(PushToHubMixin):
             writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path, subfolder=None, **kwargs):
         r"""
         This method loads the configuration of your adapter model from a directory.
 
@@ -92,11 +93,16 @@ class PeftConfigMixin(PushToHubMixin):
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the child class initialization.
         """
-        if os.path.isfile(os.path.join(pretrained_model_name_or_path, CONFIG_NAME)):
-            config_file = os.path.join(pretrained_model_name_or_path, CONFIG_NAME)
+        path = (
+            os.path.join(pretrained_model_name_or_path, subfolder)
+            if subfolder is not None
+            else pretrained_model_name_or_path
+        )
+        if os.path.isfile(os.path.join(path, CONFIG_NAME)):
+            config_file = os.path.join(path, CONFIG_NAME)
         else:
             try:
-                config_file = hf_hub_download(pretrained_model_name_or_path, CONFIG_NAME)
+                config_file = hf_hub_download(pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder)
             except Exception:
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'")
 
