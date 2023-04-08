@@ -117,11 +117,11 @@ class AdaLoraModel(LoraModel):
                 "When using multiple adapters, set inference_mode to True for all adapters except the one you want to train."
             )
 
+        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
         else:
             self.trainable_adapter_name = adapter_name
-            mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
             self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
 
     def _find_and_replace(self, adapter_name):
