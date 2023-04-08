@@ -18,7 +18,7 @@ extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
-extras["test"] = extras["dev"] + ["pytest", "pytest-xdist", "parameterized"]
+extras["test"] = extras["dev"] + ["pytest", "pytest-xdist", "parameterized", "datasets"]
 
 setup(
     name="peft",
