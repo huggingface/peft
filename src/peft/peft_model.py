@@ -85,6 +85,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_config = {}
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
+        self.base_model_torch_dtype = getattr(model, "dtype", None)
         if not isinstance(peft_config, PromptLearningConfig):
             self.peft_config[adapter_name] = peft_config
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
@@ -757,6 +758,22 @@ class PeftModelForCausalLM(PeftModel):
 
             if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
                 past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+
+                if self.base_model_torch_dtype is not None:
+                    # handle the case for Bloom where it outputs tuple of tuples
+                    if isinstance(past_key_values[0], tuple):
+                        past_key_values = tuple(
+                            tuple(
+                                past_key_value.to(self.base_model_torch_dtype)
+                                for past_key_value in past_key_value_tuple
+                            )
+                            for past_key_value_tuple in past_key_values
+                        )
+                    else:
+                        past_key_values = tuple(
+                            past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_values
+                        )
+
                 model_kwargs["past_key_values"] = past_key_values
             else:
                 if model_kwargs["past_key_values"] is None:
@@ -950,7 +967,21 @@ class PeftModelForSeq2SeqLM(PeftModel):
         if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
             batch_size = model_kwargs["decoder_input_ids"].shape[0]
             past_key_values = self.get_prompt(batch_size)
+            if self.base_model_torch_dtype is not None:
+                # handle the case for Bloom where it outputs tuple of tuples
+                if isinstance(past_key_values[0], tuple):
+                    past_key_values = tuple(
+                        tuple(
+                            past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_value_tuple
+                        )
+                        for past_key_value_tuple in past_key_values
+                    )
+                else:
+                    past_key_values = tuple(
+                        past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_values
+                    )
             model_kwargs["past_key_values"] = past_key_values
+
         return model_kwargs
 
 
