@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib
 import math
 import re
 import warnings
@@ -25,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
+from ..import_utils import is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     PeftConfig,
@@ -33,10 +33,6 @@ from ..utils import (
     _get_submodules,
     transpose,
 )
-
-
-def is_bnb_available():
-    return importlib.util.find_spec("bitsandbytes") is not None
 
 
 if is_bnb_available():
