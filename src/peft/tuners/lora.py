@@ -139,10 +139,9 @@ class LoraModel(torch.nn.Module):
             raise ValueError(
                 "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
             )
+        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
-        else:
-            mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
 
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]

@@ -133,7 +133,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config.inference_mode = inference_mode
 
     @classmethod
-    def from_pretrained(cls, model, model_id, adapter_name="default", **kwargs):
+    def from_pretrained(cls, model, model_id, adapter_name="default", is_trainable=False, **kwargs):
         r"""
         Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
 
@@ -159,6 +159,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
         ) > 0:
             remove_hook_from_submodules(model)
+
+        if isinstance(config, PromptLearningConfig) and is_trainable:
+            raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
+        else:
+            config.inference_mode = not is_trainable
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
             model = cls(model, config, adapter_name)
