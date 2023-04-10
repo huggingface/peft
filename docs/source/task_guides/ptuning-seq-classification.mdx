@@ -1,6 +1,6 @@
 # P-tuning for sequence classification
 
-For very large pretrained models, it can be challenging to finetune them for downstream tasks. Instead, you can use *prompts* to steer the model towards a particular downstream task. Typically, these prompts are handcrafted which is impractical because it relies on large validation sets. P-tuning is a method for automatically searching for prompts in a continuous space, and it is optimizable so you can find better prompts.
+It is challenging to finetune large language models for downstream tasks because they have so many parameters. To work around this, you can use *prompts* to steer the model toward a particular downstream task without fully finetuning a model. Typically, these prompts are handcrafted, which is impractical because it relies on large validation sets. *P-tuning* is a method for automatically searching for prompts in a continuous space, and it is optimizable so you can find better prompts.
 
 <Tip>
 
@@ -18,7 +18,7 @@ Before you begin, make sure you have all the necessary libraries installed:
 
 ## Setup
 
-To get started, define the model, GLUE dataset, and some basic training hyperparameters:
+To get started, define the model, dataset, and some basic training hyperparameters:
 
 ```py
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
@@ -50,7 +50,7 @@ batch_size = 32
 
 ## Load dataset and metric
 
-Next, load the `mrpc` configuration - a corpus of sentenced pairs labeled according to whether they're semantically equivalent or not - the [GLUE](https://huggingface.co/datasets/glue) benchmark:
+Next, load the `mrpc` configuration - a corpus of sentenced pairs labeled according to whether they're semantically equivalent or not - of the [GLUE](https://huggingface.co/datasets/glue) benchmark:
 
 ```py
 dataset = load_dataset("glue", task)
@@ -63,7 +63,7 @@ datasets["train"][0]
 }
 ```
 
-Then, load the metric for evaluating the model's performance. For this specific task, the evaluation module returns the accuracy and F1 scores.
+Then, load the metric for evaluating the model's performance. The evaluation module returns the accuracy and F1 scores for this specific task.
 
 ```py
 metric = evaluate.load("glue", task)
@@ -71,7 +71,7 @@ metric = evaluate.load("glue", task)
 
 ## Preprocess dataset
 
-Initialize the tokenizer and configure the padding token to use. If you're using a GPT, OPT or BLOOM model, you should set the `padding_side` to the left, otherwise it'll be set to the right. Tokenize the sentence pairs and truncate them to the maximum length.
+Initialize the tokenizer and configure the padding token to use. If you're using a GPT, OPT, or BLOOM model, you should set the `padding_side` to the left; otherwise it'll be set to the right. Tokenize the sentence pairs and truncate them to the maximum length.
 
 ```py
 if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
@@ -115,7 +115,7 @@ eval_dataloader = DataLoader(
 )
 ```
 
-## Train model
+## Train
 
 Let's create the [`PeftModel`] now. P-tuning uses a prompt encoder to optimize the prompt parameters, so you'll need to initialize the [`PromptEncoderConfig`] and define the task type:
 
@@ -185,7 +185,7 @@ from huggingface_hub import notebook_login
 notebook_login()
 ```
 
-Upload the model with the push_to_hub function to push your model to a specifc model repository on the Hub:
+Upload the model to a specifc model repository on the Hub with the [`~transformers.PreTrainedModel.push_to_hub`] function:
 
 ```py
 peft_model_id = "your-name/roberta-large-peft-p-tuning"
@@ -208,7 +208,7 @@ tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
 model = PeftModel.from_pretrained(inference_model, peft_model_id)
 ```
 
-Get some text to try out the model on, and tokenize it:
+Get some text and tokenize it:
 
 ```py
 classes = ["not equivalent", "equivalent"]
