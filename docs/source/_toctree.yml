@@ -11,6 +11,8 @@
   sections:
   - local: task_guides/image_classification_lora
     title: Image classification using LoRA
+  - local: task_guides/seq2seq-prefix-tuning
+    title: Prefix tuning for conditional generation
 
 - title: Reference
   sections:
