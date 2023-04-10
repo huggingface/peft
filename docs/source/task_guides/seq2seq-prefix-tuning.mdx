@@ -2,7 +2,7 @@
 
 [[open-in-colab]]
 
-Prefix tuning is an additive method where only a sequence of continuous task-specific vectors are attached to the beginning of to the input, or *prefix*. Only the prefix parameters are optimized, and they're added to the hidden states in every layer of the model. The tokens of the input sequence are still able to attend to the prefix as *virtual tokens*. As a result, prefix tuning stores 1000x fewer parameters than a fully finetuned model which means you can use one large language model for many tasks.
+Prefix tuning is an additive method where only a sequence of continuous task-specific vectors is attached to the beginning of the input, or *prefix*. Only the prefix parameters are optimized and added to the hidden states in every layer of the model. The tokens of the input sequence can still attend to the prefix as *virtual tokens*. As a result, prefix tuning stores 1000x fewer parameters than a fully finetuned model, which means you can use one large language model for many tasks.
 
 <Tip>
 
@@ -49,7 +49,7 @@ batch_size = 8
 
 For this guide, you'll train on the `sentences_allagree` subset of the [`financial_phrasebank`](https://huggingface.co/datasets/financial_phrasebank) dataset. This dataset contains financial news categorized by sentiment.
 
-Use 🤗 [Datasets](https://huggingface.co/docs/datasets/index) [`~datasets.Dataset.train_test_split`] function to create a training and validation split, and convert the `label` value to the more readable `text_label`. All of the changes can be applied with the [`~datasets.Dataset.map`] function:
+Use 🤗 [Datasets](https://huggingface.co/docs/datasets/index) [`~datasets.Dataset.train_test_split`] function to create a training and validation split and convert the `label` value to the more readable `text_label`. All of the changes can be applied with the [`~datasets.Dataset.map`] function:
 
 ```py
 from datasets import load_dataset
@@ -89,7 +89,7 @@ def preprocess_function(examples):
     return model_inputs
 ```
 
-Use the [`~datasets.Dataset.map`] function to apply the `preprocess_function` to the dataset. You can remove the unprocessed column names since the model doesn't need them anymore:
+Use the [`~datasets.Dataset.map`] function to apply the `preprocess_function` to the dataset. You can remove the unprocessed columns since the model doesn't need them anymore:
 
 ```py
 processed_datasets = dataset.map(
@@ -102,7 +102,7 @@ processed_datasets = dataset.map(
 )
 ```
 
-Create a [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader) from the `train` and `eval` datasets. You can optionally set `pin_memory=True` to speed up the data transfer to the GPU during training if the samples in your dataset are on a CPU.
+Create a [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader) from the `train` and `eval` datasets. Set `pin_memory=True` to speed up the data transfer to the GPU during training if the samples in your dataset are on a CPU.
 
 ```py
 train_dataset = processed_datasets["train"]
@@ -116,7 +116,7 @@ eval_dataloader = DataLoader(eval_dataset, collate_fn=default_data_collator, bat
 
 ## Train model
 
-Now you can setup your model and make sure it is ready for training. Specify the task in [`PrefixTuningConfig`], create the base `t5-large` model from [`~transformers.AutoModelForSeq2SeqLM`], and then wrap the model and configuration in a [`PeftModel`]. Feel free to print the model's parameters to see how many parameters you're actually training compared to fully training the model!
+Now you can setup your model and make sure it is ready for training. Specify the task in [`PrefixTuningConfig`], create the base `t5-large` model from [`~transformers.AutoModelForSeq2SeqLM`], and then wrap the model and configuration in a [`PeftModel`]. Feel free to print the [`PeftModel`]'s parameters and compare it to fully training all the model parameters to see how much more efficient it is!
 
 ```py
 peft_config = PrefixTuningConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, num_virtual_tokens=20)
@@ -194,7 +194,7 @@ print(f"{dataset['validation']['text_label'][:10]=}")
 "dataset['validation']['text_label'][:10]=['neutral', 'positive', 'neutral', 'positive', 'neutral', 'negative', 'negative', 'neutral', 'neutral', 'neutral']"
 ```
 
-97% accuracy in just a few minutes, pretty good!
+97% accuracy in just a few minutes; pretty good!
 
 ## Share model
 
@@ -206,7 +206,7 @@ from huggingface_hub import notebook_login
 notebook_login()
 ```
 
-Upload the model with the [`~transformers.PreTrainedModel.push_to_hub`] function to push your model to a specifc model repository on the Hub:
+Upload the model to a specifc model repository on the Hub with the [`~transformers.PreTrainedModel.push_to_hub`] function:
 
 ```py
 peft_model_id = "your-name/t5-large_PREFIX_TUNING_SEQ2SEQ"
@@ -229,7 +229,7 @@ model = AutoModelForSeq2SeqLM.from_pretrained(config.base_model_name_or_path)
 model = PeftModel.from_pretrained(model, peft_model_id)
 ```
 
-Get some text about financial news and tokenize it:
+Get and tokenize some text about financial news:
 
 ```py
 inputs = tokenizer(
@@ -238,7 +238,7 @@ inputs = tokenizer(
 )
 ```
 
-Put the model on a GPU and *generate* the text sentiment:
+Put the model on a GPU and *generate* the predicted text sentiment:
 
 ```py
 model.to(device)
