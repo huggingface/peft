@@ -132,7 +132,8 @@ class LoraModel(torch.nn.Module):
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
-            config = self._prepare_lora_config(config, self.model.config.to_dict())
+            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
+            config = self._prepare_lora_config(config, model_config)
             self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
@@ -302,7 +303,7 @@ class LoraModel(torch.nn.Module):
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
         """
-        if self.config.model_type == "gpt2":
+        if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging LORA layers")
 
         if getattr(self.model, "is_loaded_in_8bit", False):

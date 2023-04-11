@@ -1,0 +1,37 @@
+accelerate launch --config_file config.yaml peft_adalora_whisper_large_training.py \
+    --model_name_or_path "openai/whisper-large-v2" \
+    --language "Marathi" \
+    --language_abbr "mr" \
+    --task "transcribe" \
+    --dataset_name "mozilla-foundation/common_voice_11_0" \
+    --push_to_hub \
+    --preprocessing_num_workers 2 \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 8 \
+    --dataloader_pin_memory \
+    --dataloader_num_workers 2 \
+    --learning_rate 1e-3 \
+    --weight_decay 1e-4 \
+    --num_train_epochs 3 \
+    --gradient_accumulation_steps 1 \
+    --lr_scheduler_type "linear" \
+    --num_warmup_steps 50 \
+    --output_dir "adalora_whisper_large_marathi_multi_adapter" \
+    --seed 42 \
+    --load_best_model \
+    --with_tracking \
+    --report_to "wandb" \
+    --hub_token $HUB_TOKEN \
+    --checkpointing_steps 2000 \
+    --evaluation_steps 2000 \
+    --logging_steps 25 \
+    --use_peft \
+    --use_adalora \
+    --init_r 12 \
+    --target_r 8 \
+    --tinit 100 \
+    --tfinal 800 \
+    --delta_t 10 \
+    --lora_alpha 32 \
+    --lora_dropout 0.1 \
+    --orth_reg_weight 0.5
