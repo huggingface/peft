@@ -232,7 +232,7 @@ def main():
                         **batch, synced_gpus=is_ds_zero_3
                     )  # synced_gpus=True for DS-stage 3
                 outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
-                preds = accelerator.gather(outputs).detach().cpu().numpy()
+                preds = accelerator.gather_for_metrics(outputs).detach().cpu().numpy()
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
