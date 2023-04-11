@@ -1,6 +1,6 @@
 # P-tuning for sequence classification
 
-It is challenging to finetune large language models for downstream tasks because they have so many parameters. To work around this, you can use *prompts* to steer the model toward a particular downstream task without fully finetuning a model. Typically, these prompts are handcrafted, which is impractical because it relies on large validation sets. *P-tuning* is a method for automatically searching for prompts in a continuous space, and it is optimizable so you can find better prompts.
+It is challenging to finetune large language models for downstream tasks because they have so many parameters. To work around this, you can use *prompts* to steer the model toward a particular downstream task without fully finetuning a model. Typically, these prompts are handcrafted, which may be impractical because you need very large validation sets to find the best prompts. *P-tuning* is a method for automatically searching for prompts in a continuous space, and it is optimizable so you can find better prompts.
 
 <Tip>
 
@@ -8,7 +8,7 @@ It is challenging to finetune large language models for downstream tasks because
 
 </Tip>
 
-This guide will show you how to train a [`roberta-large`](https://huggingface.co/roberta-large) model with p-tuning on the `mrpc` configuration of the [GLUE](https://huggingface.co/datasets/glue) benchmark.
+This guide will show you how to train a [`roberta-large`](https://huggingface.co/roberta-large) model (but you can also use any of the GPT, OPT, or BLOOM models) with p-tuning on the `mrpc` configuration of the [GLUE](https://huggingface.co/datasets/glue) benchmark.
 
 Before you begin, make sure you have all the necessary libraries installed:
 
@@ -18,7 +18,9 @@ Before you begin, make sure you have all the necessary libraries installed:
 
 ## Setup
 
-To get started, define the model, dataset, and some basic training hyperparameters:
+To get started, import 🤗 Transformers to create the base model, 🤗 Datasets to load a dataset, and 🤗 Peft to create a [`PeftModel`] and to configure the configuration for p-tuning.
+
+Define the model, dataset, and some basic training hyperparameters:
 
 ```py
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
@@ -28,7 +30,6 @@ from peft import (
     get_peft_model_state_dict,
     set_peft_model_state_dict,
     PeftType,
-    PrefixTuningConfig,
     PromptEncoderConfig,
 )
 from datasets import load_dataset
@@ -54,7 +55,7 @@ Next, load the `mrpc` configuration - a corpus of sentenced pairs labeled accord
 
 ```py
 dataset = load_dataset("glue", task)
-datasets["train"][0]
+dataset["train"][0]
 {
     "sentence1": 'Amrozi accused his brother , whom he called " the witness " , of deliberately distorting his evidence .',
     "sentence2": 'Referring to him as only " the witness " , Amrozi accused his brother of deliberately distorting his evidence .',
@@ -93,7 +94,7 @@ def tokenize_function(examples):
 Use [`~datasets.Dataset.map`] to apply the `tokenize_function` to the dataset, and remove the unprocessed columns because the model won't need those. You should also rename the `label` column to `labels` because that is the expected name for the labels by models in the 🤗 Transformers library.
 
 ```py
-tokenized_datasets = datasets.map(
+tokenized_datasets = dataset.map(
     tokenize_function,
     batched=True,
     remove_columns=["idx", "sentence1", "sentence2"],
@@ -117,7 +118,11 @@ eval_dataloader = DataLoader(
 
 ## Train
 
-Let's create the [`PeftModel`] now. P-tuning uses a prompt encoder to optimize the prompt parameters, so you'll need to initialize the [`PromptEncoderConfig`] and define the task type:
+Let's create the [`PeftModel`] now. P-tuning uses a prompt encoder to optimize the prompt parameters, so you'll need to initialize the [`PromptEncoderConfig`] with:
+
+- `task_type`: the type of task you're training on, in this case it is sequence classification or `SEQ_CLS`
+- `num_virtual_tokens`: the number of virtual tokens to use, or in other words, the prompt
+- `encoder_hidden_size`: the hidden size of the encoder used to optimize the prompt parameters
 
 ```py
 peft_config = PromptEncoderConfig(task_type="SEQ_CLS", num_virtual_tokens=20, encoder_hidden_size=128)
@@ -177,7 +182,7 @@ for epoch in range(num_epochs):
 
 ## Share model
 
-You can store and share your model on the Hub if you'd like. Login to your Hugging Face account and enter your token when prompted:
+You can store and share your model on the Hub if you'd like. Log in to your Hugging Face account and enter your token when prompted:
 
 ```py
 from huggingface_hub import notebook_login
