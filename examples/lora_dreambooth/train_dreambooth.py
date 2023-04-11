@@ -2,7 +2,6 @@ import argparse
 import gc
 import hashlib
 import itertools
-import json
 import logging
 import math
 import os
@@ -39,7 +38,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
-from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
+from peft import LoraConfig, get_peft_model
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.

@@ -1,50 +1,47 @@
 import argparse
-from datetime import datetime
 import gc
 import json
+import logging
 import math
 import os
-import logging
-from itertools import chain
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from random import randint
-import numpy as np
-import wandb
-
-import torch
-from torch.utils.data import DataLoader
-
-from dataclasses import dataclass
 from typing import Any, Dict, List, Union
-
-# hf imports
-from huggingface_hub import Repository
-from tqdm import tqdm
-import transformers
-from transformers import (
-    WhisperProcessor,
-    WhisperForConditionalGeneration,
-    get_linear_schedule_with_warmup,
-    set_seed,
-    SchedulerType,
-    get_scheduler,
-)
-from transformers.utils import get_full_repo_name
-from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 
 # datasets imports
 import datasets
-from datasets import load_dataset, DatasetDict, interleave_datasets, IterableDatasetDict, Audio
 
 # metric imports
 import evaluate
-
-# peft imports
-from peft import get_peft_model, LoraConfig, AdaLoraConfig, prepare_model_for_int8_training, PeftModel
+import numpy as np
+import torch
+import transformers
+import wandb
 
 # accelerate imports
 from accelerate import Accelerator, dispatch_model
 from accelerate.logging import get_logger
+from datasets import Audio, DatasetDict, IterableDatasetDict, interleave_datasets, load_dataset
+
+# hf imports
+from huggingface_hub import Repository
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers import (
+    SchedulerType,
+    WhisperForConditionalGeneration,
+    WhisperProcessor,
+    get_scheduler,
+    set_seed,
+)
+from transformers.models.whisper.english_normalizer import BasicTextNormalizer
+from transformers.utils import get_full_repo_name
+
+# peft imports
+from peft import AdaLoraConfig, LoraConfig, PeftModel, get_peft_model
+
 
 logger = get_logger(__name__, log_level="INFO")
 
@@ -565,6 +562,7 @@ def main():
         from peft import prepare_model_for_int8_training
 
         model = prepare_model_for_int8_training(model, output_embedding_layer_name="proj_out")
+
         # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
         # to avoid this, make the inputs trainable
         def make_inputs_require_grad(module, input, output):
@@ -655,7 +653,6 @@ def main():
     global_step = 0
     starting_epoch = 0
     best_metric = None
-    best_metric_checkpoint = None
     resume_step = 0
     forced_decoder_ids = processor.get_decoder_prompt_ids(language=args.language, task=args.task)
 
@@ -718,7 +715,6 @@ def main():
                     accelerator.log(eval_metrics, step=global_step)
                 if best_metric is None or eval_metrics["eval/wer"] < best_metric:
                     best_metric = eval_metrics["eval/wer"]
-                    best_metric_checkpoint = global_step
                     accelerator.save_state(os.path.join(args.output_dir, "best_checkpoint"))
                 model.train()
 
@@ -743,7 +739,6 @@ def main():
                 accelerator.log(eval_metrics, step=global_step)
             if best_metric is None or eval_metrics["eval/wer"] < best_metric:
                 best_metric = eval_metrics["eval/wer"]
-                best_metric_checkpoint = global_step
                 accelerator.save_state(os.path.join(args.output_dir, "best_checkpoint"))
 
             if accelerator.is_main_process:
