@@ -319,6 +319,28 @@ class LoraModel(torch.nn.Module):
                 self._replace_module(parent, target_name, new_module, target)
         return self.model
 
+    def add_weighted_adapter(self, adapters, weights, adapter_name):
+        if len({self.peft_config[adapter].r for adapter in adapters}) != 1:
+            raise ValueError("All adapters must have the same r value")
+        self.peft_config[adapter_name] = self.peft_config[adapters[0]]
+        self.peft_config[adapter_name].lora_alpha = self.peft_config[adapters[0]].r
+        self._find_and_replace(adapter_name)
+        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
+        _freeze_adapter(self.model, adapter_name)
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, LoraLayer):
+                target.lora_A[adapter_name].weight.data = target.lora_A[adapter_name].weight.data * 0.0
+                target.lora_B[adapter_name].weight.data = target.lora_B[adapter_name].weight.data * 0.0
+                for adapter, weight in zip(adapters, weights):
+                    if adapter not in target.lora_A:
+                        continue
+                    target.lora_A[adapter_name].weight.data += (
+                        target.lora_A[adapter].weight.data * weight * target.scaling[adapter]
+                    )
+                    target.lora_B[adapter_name].weight.data += target.lora_B[adapter].weight.data * weight
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
