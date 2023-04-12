@@ -132,7 +132,8 @@ class LoraModel(torch.nn.Module):
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
-            config = self._prepare_lora_config(config, self.model.config.to_dict())
+            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
+            config = self._prepare_lora_config(config, model_config)
             self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
@@ -302,7 +303,7 @@ class LoraModel(torch.nn.Module):
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
         """
-        if self.config.model_type == "gpt2":
+        if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging LORA layers")
 
         if getattr(self.model, "is_loaded_in_8bit", False):
@@ -317,6 +318,28 @@ class LoraModel(torch.nn.Module):
                 target.merge()
                 self._replace_module(parent, target_name, new_module, target)
         return self.model
+
+    def add_weighted_adapter(self, adapters, weights, adapter_name):
+        if len({self.peft_config[adapter].r for adapter in adapters}) != 1:
+            raise ValueError("All adapters must have the same r value")
+        self.peft_config[adapter_name] = self.peft_config[adapters[0]]
+        self.peft_config[adapter_name].lora_alpha = self.peft_config[adapters[0]].r
+        self._find_and_replace(adapter_name)
+        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
+        _freeze_adapter(self.model, adapter_name)
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, LoraLayer):
+                target.lora_A[adapter_name].weight.data = target.lora_A[adapter_name].weight.data * 0.0
+                target.lora_B[adapter_name].weight.data = target.lora_B[adapter_name].weight.data * 0.0
+                for adapter, weight in zip(adapters, weights):
+                    if adapter not in target.lora_A:
+                        continue
+                    target.lora_A[adapter_name].weight.data += (
+                        target.lora_A[adapter].weight.data * weight * target.scaling[adapter]
+                    )
+                    target.lora_B[adapter_name].weight.data += target.lora_B[adapter].weight.data * weight
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
