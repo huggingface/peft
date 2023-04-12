@@ -180,7 +180,8 @@ class LoraModel(torch.nn.Module):
                     )
                 else:
                     if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
-                        kwargs.update(
+                        eightbit_kwargs = kwargs.copy()
+                        eightbit_kwargs.update(
                             {
                                 "has_fp16_weights": target.state.has_fp16_weights,
                                 "memory_efficient_backward": target.state.memory_efficient_backward,
@@ -189,7 +190,7 @@ class LoraModel(torch.nn.Module):
                             }
                         )
                         new_module = Linear8bitLt(
-                            adapter_name, target.in_features, target.out_features, bias=bias, **kwargs
+                            adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
                         )
                     else:
                         if isinstance(target, torch.nn.Linear):
