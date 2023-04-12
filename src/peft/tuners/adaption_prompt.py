@@ -23,7 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.utils.config import PeftConfig, PeftType
-from peft.utils.other import _freeze_adapter
+from peft.utils.other import _freeze_adapter, _get_submodules
 
 
 def is_llama_available() -> bool:
@@ -38,23 +38,24 @@ if is_llama_available():
     # We guard the import statement so that this won't get in the way of using peft with earlier versions of
     # transformers that don't have Llama.
     from transformers.models.llama.modeling_llama import (
-        LlamaAttention,
         LlamaForCausalLM,
         LlamaModel,
         apply_rotary_pos_emb,
     )
 
 
-def is_adaption_prompt_trainable(module: str) -> bool:
+def is_adaption_prompt_trainable(params: str) -> bool:
     """Return True if module is trainable under adaption prompt fine-tuning."""
-    return module.split(".")[-1].startswith("adaption_")
+    return params.split(".")[-1].startswith("adaption_")
 
 
 @dataclass
 class AdaptionPromptConfig(PeftConfig):
     """Stores the configuration of an [`AdaptionPromptModel`]."""
 
-    target_layers: str = field(default=None, metadata={"help": "Name of the submodule containing the decoder layers."})
+    target_modules: str = field(
+        default=None, metadata={"help": "Name of the attention submodules to insert adaption prompts into."}
+    )
     adapter_len: int = field(default=None, metadata={"help": "Number of adapter tokens to insert"})
     adapter_layers: int = field(default=None, metadata={"help": "Number of adapter layers (from the top)"})
 
@@ -67,16 +68,15 @@ def prepare_config(
     model,
 ) -> AdaptionPromptConfig:
     """Prepare the config based on the llama model type."""
-    if peft_config.target_layers is not None:
+    if peft_config.target_modules is not None:
         # Assume user knows what they are doing.
         return peft_config
 
-    if isinstance(model, LlamaModel):
-        peft_config.target_layers = "layers"
-    elif isinstance(model, LlamaForCausalLM):
-        peft_config.target_layers = "model.layers"
+    if isinstance(model, (LlamaModel, LlamaForCausalLM)):
+        peft_config.target_modules = "self_attn"
     else:
         raise ValueError(f"Unsupported model type for adaption prompt: '{type(model)}'")
+
     return peft_config
 
 
@@ -102,7 +102,9 @@ class AdaptionPromptModel(nn.Module):
         super().__init__()
         self.model = model
         # Store adapter configs by name.
-        self._configs = {}
+        self._configs: Dict[str, AdaptionPromptConfig] = {}
+        # Store lists of the parents of the attention modules by adapter name.
+        self._parents: Dict[str, List[nn.Module]] = {}
         # Store lists of cached AdaptedAttention modules by name.
         self._cached_adapters: Dict[str, List] = {}
         # The name of the currently active adapter.
@@ -118,12 +120,23 @@ class AdaptionPromptModel(nn.Module):
         config = prepare_config(config, self.model)
         if adapter_name in self._configs:
             raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
-        layers = self.model.get_submodule(config.target_layers)
-        if len(layers) < config.adapter_layers:
+
+        parents = []
+        for name, _ in self.model.named_modules():
+            if name.endswith(config.target_modules):
+                parent, _, _ = _get_submodules(self.model, name)
+                parents.append(parent)
+        if len(parents) < config.adapter_layers:
             raise ValueError(
                 f"Config specifies more adapter layers '{config.adapter_layers}'"
-                f" than the model has '{len(layers)}'."
+                f" than the model has '{len(parents)}'."
             )
+        # Note that if the target modules are not in Sequential, ModuleList, or
+        # some other PyTorch ordered container, the behavior is undefined as we
+        # assume here that the order of the modules is the same as the order of
+        # the transformer decoder layers.
+        parents = parents[-config.adapter_layers :]
+        self._parents[adapter_name] = parents
 
         # It is only None during initialization.
         # If it is disabled, we don't have to remove the modules.
@@ -131,7 +144,7 @@ class AdaptionPromptModel(nn.Module):
             self._remove_adapted_attentions(self._active_adapter)
         self._active_adapter = adapter_name
         self._configs[adapter_name] = config
-        self._create_adapted_attentions(config)
+        self._create_adapted_attentions(config, parents)
         if not self._enabled:
             self._remove_adapted_attentions(self._active_adapter)
 
@@ -161,34 +174,29 @@ class AdaptionPromptModel(nn.Module):
         self._enabled = False
         self._remove_adapted_attentions(self._active_adapter)
 
-    def _create_adapted_attentions(self, config: AdaptionPromptConfig) -> None:
+    def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: List[nn.Module]) -> None:
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
-        layers = self.model.get_submodule(config.target_layers)
-        assert config.adapter_layers <= len(layers)
-        for layer in layers[-config.adapter_layers :]:
-            layer.self_attn = AdaptedAttention(config.adapter_len, layer.self_attn)
+        for par in parents:
+            setattr(
+                par, config.target_modules, AdaptedAttention(config.adapter_len, getattr(par, config.target_modules))
+            )
 
     def _set_adapted_attentions(self, adapter_name: str) -> None:
         """Replace LlamaAttention modules with cached AdaptedAttention modules."""
         cached = self._cached_adapters[adapter_name]
         del self._cached_adapters[adapter_name]
-
-        layers = self.model.get_submodule(self._configs[adapter_name].target_layers)
-        for i in range(len(cached)):
-            layers[-len(cached) + i].self_attn = cached[i]
+        config = self._configs[adapter_name]
+        for i, par in enumerate(self._parents[adapter_name]):
+            setattr(par, config.target_modules, cached[i])
 
     def _remove_adapted_attentions(self, adapter_name: str) -> None:
         """Remove AdaptedAttention modules from the model and store them in the cache."""
         config = self._configs[adapter_name]
-        layers = self.model.get_submodule(config.target_layers)
-
         adapted_attentions = []
-        for layer in layers:
-            if isinstance(layer.self_attn, AdaptedAttention):
-                adapted_attentions.append(layer.self_attn)
-                layer.self_attn = layer.self_attn.model
-        assert len(adapted_attentions) == config.adapter_layers
-
+        for par in self._parents[adapter_name]:
+            attn = getattr(par, config.target_modules)
+            adapted_attentions.append(attn)
+            setattr(par, config.target_modules, attn.model)
         self._cached_adapters[adapter_name] = adapted_attentions
 
     def _mark_only_adaption_prompts_as_trainable(self) -> None:
@@ -211,9 +219,7 @@ class AdaptedAttention(nn.Module):
     """This module wraps a LLamaAttention module and injects adaption prompts."""
 
     def __init__(self, adapter_len: int, model):
-        if not isinstance(model, LlamaAttention):
-            raise ValueError("Only LlamaAttention modules are supported at the moment.")
-
+        assert not isinstance(model, AdaptedAttention)
         super().__init__()
         self.model = model
         self.adapter_len = adapter_len
