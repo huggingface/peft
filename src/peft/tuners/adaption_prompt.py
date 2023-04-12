@@ -13,10 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import importlib
 import math
+from collections import namedtuple
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
@@ -26,22 +26,60 @@ from peft.utils.config import PeftConfig, PeftType
 from peft.utils.other import _freeze_adapter, _get_submodules
 
 
-def is_llama_available() -> bool:
-    """Check if Llama is available in the transformers library (it's not in earlier versions)."""
-    try:
-        return importlib.util.find_spec("transformers.models.llama.modeling_llama") is not None
-    except ModuleNotFoundError:
-        return False
+def llama_rotate_half(x: torch.Tensor) -> torch.Tensor:
+    """
+    Rotate half the hidden dims of the input.
+
+    This function was duplicated verbatim from:
+    https://github.com/huggingface/transformers/blob/1de8ce9ee1191ba761a593ac15d9ccbf5851bfc5/src/transformers/models/llama/modeling_llama.py#L126
+
+    This was done to eliminate the Llama transformers implementation as a dependency of this file. Note that some other
+    functions were also adapted from the transformers implementation but were modified.
+    """
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
 
 
-if is_llama_available():
-    # We guard the import statement so that this won't get in the way of using peft with earlier versions of
-    # transformers that don't have Llama.
-    from transformers.models.llama.modeling_llama import (
-        LlamaForCausalLM,
-        LlamaModel,
-        apply_rotary_pos_emb,
-    )
+def llama_apply_rotary_pos_emb(q, cos, sin, position_ids):
+    """
+    Apply rotary position embedding to query states in the Llama model.
+
+    This function was adapted from:
+    https://github.com/huggingface/transformers/blob/1de8ce9ee1191ba761a593ac15d9ccbf5851bfc5/src/transformers/models/llama/modeling_llama.py#L133
+
+    It was modified to remove unnecessary processing of key states.
+    """
+    gather_indices = position_ids[:, None, :, None]  # [bs, 1, seq_len, 1]
+    gather_indices = gather_indices.repeat(1, cos.shape[1], 1, cos.shape[3])
+    cos = torch.gather(cos.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+    sin = torch.gather(sin.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+    q_embed = (q * cos) + (llama_rotate_half(q) * sin)
+    return q_embed
+
+
+def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
+    """
+    Compute query states for Llama models specifically.
+
+    They need to be recomputed as the forward() method of the original LlamaModel in the transformers library does not
+    return them. See the related discussion in the PR: https://github.com/huggingface/peft/pull/268
+    """
+    hidden_states = kwargs.get("hidden_states")
+    position_ids = kwargs.get("position_ids")
+    bsz, q_len, _ = hidden_states.size()
+    query_states = model.q_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
+    value_states = model.v_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
+    cos, sin = model.rotary_emb(value_states, seq_len=q_len)
+    return llama_apply_rotary_pos_emb(query_states, cos, sin, position_ids)
+
+
+# Contains the config that is specific to a transformers model type.
+ModelTypeConfig = namedtuple("ModelTypeConfig", ["compute_query_states", "target_modules"])
+# Mapping of transformers model types to their specific configuration.
+TRANSFORMERS_MODEL_CONFIG = {
+    "llama": ModelTypeConfig(compute_query_states=llama_compute_query_states, target_modules="self_attn"),
+}
 
 
 def is_adaption_prompt_trainable(params: str) -> bool:
@@ -68,14 +106,13 @@ def prepare_config(
     model,
 ) -> AdaptionPromptConfig:
     """Prepare the config based on the llama model type."""
-    if peft_config.target_modules is not None:
-        # Assume user knows what they are doing.
-        return peft_config
+    if model.config.model_type not in TRANSFORMERS_MODEL_CONFIG:
+        raise ValueError("Unsupported model type for adaption prompt: '{model.config.model_type}'.")
 
-    if isinstance(model, (LlamaModel, LlamaForCausalLM)):
-        peft_config.target_modules = "self_attn"
-    else:
-        raise ValueError(f"Unsupported model type for adaption prompt: '{type(model)}'")
+    model_config = TRANSFORMERS_MODEL_CONFIG[model.config.model_type]
+
+    if peft_config.target_modules is None:
+        peft_config.target_modules = model_config.target_modules
 
     return peft_config
 
@@ -84,18 +121,17 @@ class AdaptionPromptModel(nn.Module):
     """
     Implements adaption prompts as described in https://arxiv.org/pdf/2303.16199.pdf.
 
-    This implementation only supports Llama models at the moment, but it can be extended to other models. It is
-    implemented by replacing some of the LlamaAttention modules with AdaptedAttention modules that wrap the original
-    ones, but bypass the original forward() so that we can inject trainable tokens and a gate.
+    The top L attention modules are replaced with AdaptedAttention modules that wrap the original ones, but insert
+    trainable prompts with gates (for zero init).
 
     Notes on the multi-adapter pattern:
-    - We store the states for different adapters by keeping a dictionary of AdaptedAttention modules indexed by adapter
+    - We store the states of different adapters by keeping a dictionary of AdaptedAttention modules indexed by adapter
       name.
-    - Every time we switch adapters, we remove the modules of the currently active adapter from the LlamaModel layers,
-      store them in the dictionary, and replace them with the modules of the new adapter.
+    - Every time we switch adapters, we remove the modules of the currently active adapter from the model, store them
+      in the dictionary, and replace them with the modules of the new adapter.
     - To avoid duplicated and potentially inconsistent state, the currently active adapter is always removed from the
       dictionary.
-    - Disabling the adapter would also result in the modules being removed from the LlamaModel layers.
+    - Disabling the adapter would also result in the modules being removed from the model.
     """
 
     def __init__(self, model, configs: Dict, adapter_name: str):
@@ -103,7 +139,8 @@ class AdaptionPromptModel(nn.Module):
         self.model = model
         # Store adapter configs by name.
         self._configs: Dict[str, AdaptionPromptConfig] = {}
-        # Store lists of the parents of the attention modules by adapter name.
+        # Store lists of the parents of the affected attention modules by adapter name.
+        # We keep references to the parents so we can swap the adapters in-and-out of the model.
         self._parents: Dict[str, List[nn.Module]] = {}
         # Store lists of cached AdaptedAttention modules by name.
         self._cached_adapters: Dict[str, List] = {}
@@ -124,8 +161,8 @@ class AdaptionPromptModel(nn.Module):
         parents = []
         for name, _ in self.model.named_modules():
             if name.endswith(config.target_modules):
-                parent, _, _ = _get_submodules(self.model, name)
-                parents.append(parent)
+                par, _, _ = _get_submodules(self.model, name)
+                parents.append(par)
         if len(parents) < config.adapter_layers:
             raise ValueError(
                 f"Config specifies more adapter layers '{config.adapter_layers}'"
@@ -177,9 +214,12 @@ class AdaptionPromptModel(nn.Module):
     def _create_adapted_attentions(self, config: AdaptionPromptConfig, parents: List[nn.Module]) -> None:
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
         for par in parents:
-            setattr(
-                par, config.target_modules, AdaptedAttention(config.adapter_len, getattr(par, config.target_modules))
+            attn = AdaptedAttention(
+                model_type=self.model.config.model_type,
+                adapter_len=config.adapter_len,
+                model=getattr(par, config.target_modules),
             )
+            setattr(par, config.target_modules, attn)
 
     def _set_adapted_attentions(self, adapter_name: str) -> None:
         """Replace LlamaAttention modules with cached AdaptedAttention modules."""
@@ -218,9 +258,19 @@ class AdaptionPromptModel(nn.Module):
 class AdaptedAttention(nn.Module):
     """This module wraps a LLamaAttention module and injects adaption prompts."""
 
-    def __init__(self, adapter_len: int, model):
+    def __init__(self, model_type: str, adapter_len: int, model):
+        """
+        Initialize object.
+
+        Args:
+            model_type: The transformer model type. This is used to retrieve the right method to
+                compute query states.
+            adapter_len: The length of the adaption prompt to insert.
+            model: The original transformer attention module that is being wrapped.
+        """
         assert not isinstance(model, AdaptedAttention)
         super().__init__()
+        self.model_type = model_type
         self.model = model
         self.adapter_len = adapter_len
         # Don't think this was specified in the paper, but we follow the official repo which used an Embedding
@@ -230,96 +280,6 @@ class AdaptedAttention(nn.Module):
         self.adaption_prompt = nn.Parameter(torch.empty(1, adapter_len, self.model.hidden_size).normal_())
         # Initialize the gate to 0 as this is "zero-init".
         self.adaption_gate = nn.Parameter(torch.zeros(1))
-
-    def _modified_forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor]] = None,
-        output_attentions: bool = False,
-        use_cache: bool = False,
-    ):
-        """
-        Modified from:
-        https://github.com/huggingface/transformers/blob/d143087d189a183b153090c8b37daa6c7c031039/src/transformers/models/llama/modeling_llama.py#L185
-
-        The original forward function is bypassed in favor of this one, which was modified to:
-        1. Return query_states.
-        2. Not apply o_proj yet.
-
-        The alternatives are:
-        1. to refactor the LlamaAttention module in the transformers package,
-        2. or to use the original forward() and recompute some of the intermediate local variables.
-        """
-        bsz, q_len, _ = hidden_states.size()
-
-        # (bsz, num_heads, q_len, head_dim)
-        query_states = (
-            self.model.q_proj(hidden_states)
-            .view(bsz, q_len, self.model.num_heads, self.model.head_dim)
-            .transpose(1, 2)
-        )
-        # (bsz, num_heads, q_len, head_dim)
-        key_states = (
-            self.model.k_proj(hidden_states)
-            .view(bsz, q_len, self.model.num_heads, self.model.head_dim)
-            .transpose(1, 2)
-        )
-        # (bsz, num_heads, q_len, head_dim)
-        value_states = (
-            self.model.v_proj(hidden_states)
-            .view(bsz, q_len, self.model.num_heads, self.model.head_dim)
-            .transpose(1, 2)
-        )
-
-        kv_seq_len = key_states.shape[-2]
-        if past_key_value is not None:
-            kv_seq_len += past_key_value[0].shape[-2]
-        cos, sin = self.model.rotary_emb(value_states, seq_len=kv_seq_len)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
-        # [bsz, nh, t, hd]
-
-        if past_key_value is not None:
-            # reuse k, v, self_attention
-            key_states = torch.cat([past_key_value[0], key_states], dim=2)
-            value_states = torch.cat([past_key_value[1], value_states], dim=2)
-
-        past_key_value = (key_states, value_states) if use_cache else None
-
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.model.head_dim)
-
-        if attn_weights.size() != (bsz, self.model.num_heads, q_len, kv_seq_len):
-            raise ValueError(
-                f"Attention weights should be of size {(bsz * self.model.num_heads, q_len, kv_seq_len)}, but is"
-                f" {attn_weights.size()}"
-            )
-
-        if attention_mask is not None:
-            if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
-                raise ValueError(
-                    f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
-                )
-            attn_weights = attn_weights + attention_mask
-            attn_weights = torch.max(attn_weights, torch.tensor(torch.finfo(attn_weights.dtype).min))
-
-        # upcast attention to fp32
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_output = torch.matmul(attn_weights, value_states)
-
-        if attn_output.size() != (bsz, self.model.num_heads, q_len, self.model.head_dim):
-            raise ValueError(
-                f"`attn_output` should be of size {(bsz, self.model.num_heads, q_len, self.model.head_dim)}, but is"
-                f" {attn_output.size()}"
-            )
-
-        attn_output = attn_output.transpose(1, 2)
-        attn_output = attn_output.reshape(bsz, q_len, self.model.hidden_size)
-
-        if not output_attentions:
-            attn_weights = None
-
-        return query_states, attn_output, attn_weights, past_key_value
 
     def forward(self, **kwargs):
         """
@@ -336,12 +296,10 @@ class AdaptedAttention(nn.Module):
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        # The original forward() was modified to return query_states and not to apply
-        # `self.model.o_proj` to output yet.
-        # query_states: (bsz, num_heads, q_len, head_dim)
-        query_states, output, _, _ = self._modified_forward(**kwargs)
+        output, _, _ = self.model(**kwargs)
         bsz = output.shape[0]
         q_len = output.shape[1]
+
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_k = (
             self.model.k_proj(self.adaption_prompt)
@@ -356,6 +314,12 @@ class AdaptedAttention(nn.Module):
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
+
+        # Recompute query states.
+        compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
+        # (bsz, num_heads, q_len, head_dim)
+        query_states = compute_query_states(model=self.model, **kwargs)
+
         # (bsz, num_heads, q_len, adapter_len)
         scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(self.model.head_dim)
         # Upcast attention to fp32
@@ -363,8 +327,9 @@ class AdaptedAttention(nn.Module):
         scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
-        output = output + adapter_output
         # (bsz, q_len, hidden_size)
-        output = self.model.o_proj(output)
+        adapter_output = self.model.o_proj(adapter_output)
 
+        # Add adaption prompt output to original output.
+        output = output + adapter_output
         return output, None, None

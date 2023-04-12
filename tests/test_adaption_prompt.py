@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 import os
 import tempfile
 from unittest import TestCase
@@ -22,10 +23,18 @@ from torch.testing import assert_close
 
 from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
-from peft.tuners.adaption_prompt import AdaptionPromptConfig, is_llama_available
+from peft.tuners.adaption_prompt import AdaptionPromptConfig
 from peft.utils.other import prepare_model_for_int8_training
 from peft.utils.save_and_load import get_peft_model_state_dict
 from tests.testing_common import PeftCommonTester
+
+
+def is_llama_available() -> bool:
+    """Check if Llama is available in the transformers library (it's not in earlier versions)."""
+    try:
+        return importlib.util.find_spec("transformers.models.llama.modeling_llama") is not None
+    except ModuleNotFoundError:
+        return False
 
 
 if is_llama_available():
@@ -38,8 +47,8 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
     """
     Tests for the AdaptionPrompt model.
 
-    These tests were mostly adapted from `test_peft_model.py`, but since we haven't checked in the test checkpoints for
-    Llama into `hf-internal-testing`, we separate them for now.
+    Some of these tests were adapted from `test_peft_model.py` (which has been refactored since), but since we haven't
+    checked in the test checkpoints for Llama into `hf-internal-testing`, we separate them for now.
     """
 
     def setUp(self):
