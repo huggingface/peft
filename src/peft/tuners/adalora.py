@@ -99,7 +99,8 @@ class AdaLoraModel(LoraModel):
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
-            config = self._prepare_adalora_config(config, self.model.config.to_dict())
+            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
+            config = self._prepare_adalora_config(config, model_config)
             self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
