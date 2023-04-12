@@ -273,13 +273,17 @@ class AdaptedAttention(nn.Module):
         self.model_type = model_type
         self.model = model
         self.adapter_len = adapter_len
+        # Assume all parameters of the attention model we are wrapping are on the same device.
+        device = next(model.parameters()).device
         # Don't think this was specified in the paper, but we follow the official repo which used an Embedding
         # which initializes the tokens with standard normal values.
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
-        self.adaption_prompt = nn.Parameter(torch.empty(1, adapter_len, self.model.hidden_size).normal_())
+        self.adaption_prompt = nn.Parameter(
+            torch.empty(1, adapter_len, self.model.hidden_size, device=device).normal_()
+        )
         # Initialize the gate to 0 as this is "zero-init".
-        self.adaption_gate = nn.Parameter(torch.zeros(1))
+        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device))
 
     def forward(self, **kwargs):
         """

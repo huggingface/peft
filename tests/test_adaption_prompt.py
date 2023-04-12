@@ -81,6 +81,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         model = LlamaForCausalLM(self._create_test_llama_config())
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
         model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
 
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
@@ -90,6 +91,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
     def test_prepare_for_int8_training(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
         model = prepare_model_for_int8_training(model)
+        model = model.to(self.torch_device)
 
         for param in model.parameters():
             self.assertTrue(not param.requires_grad)
