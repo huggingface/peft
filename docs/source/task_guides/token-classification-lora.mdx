@@ -8,7 +8,7 @@ Low-Rank Adaptation (LoRA) is a reparametrization method that aims to reduce the
 
 </Tip>
 
-This guide will show you how to train a [`bloom-560m`](https://huggingface.co/bigscience/bloom-560m) with LoRA on the [BioNLP2004](https://huggingface.co/datasets/tner/bionlp2004) dataset for token classification.
+This guide will show you how to train a [`roberta-large`](https://huggingface.co/roberta-large) model with LoRA on the [BioNLP2004](https://huggingface.co/datasets/tner/bionlp2004) dataset for token classification.
 
 Before you begin, make sure you have all the necessary libraries installed:
 
@@ -20,20 +20,26 @@ Before you begin, make sure you have all the necessary libraries installed:
 
 Let's start by importing all the necessary libraries you'll need:
 
-- 🤗 Transformers for loading the base `bloom-560m` model and tokenizer
+- 🤗 Transformers for loading the base `roberta-large` model and tokenizer
 - 🤗 Datasets for loading and prearing the `bionlp2004` dataset for training
 - 🤗 Evaluate for evaluating the model's performance
-- 🤗 PEFT for configuring the base model for token classification with LoRA and creating the PEFT model
+- 🤗 PEFT for setting up the LoRA configuration and creating the PEFT model
 
 ```py
-from datasets import load_dataset, ClassLabel, Features, Value
-from transformers import AutoModelForTokenClassification, AutoTokenizer, DataCollatorForTokenClassification
+from datasets import load_dataset
+from transformers import (
+    AutoModelForTokenClassification,
+    AutoTokenizer,
+    DataCollatorForTokenClassification,
+    TrainingArguments,
+    Trainer,
+)
 from peft import get_peft_config, PeftModel, PeftConfig, get_peft_model, LoraConfig, TaskType
 import evaluate
 import torch
 import numpy as np
 
-model_checkpoint = "bigscience/bloom-560m"
+model_checkpoint = "roberta-large"
 lr = 1e-3
 batch_size = 16
 num_epochs = 10
@@ -76,7 +82,7 @@ bionlp["train"][0]
 }
 ```
 
-You can see the `tags` values in the label ids [dictionary](https://huggingface.co/datasets/tner/bionlp2004#label-id). The letter that prefixes each lablel indicates the token position: `B` is for the first token of an entity, `I` is for a token inside the entity, and `0` is for a token that is not part of an entity.
+The `tags` values are defined in the label ids [dictionary](https://huggingface.co/datasets/tner/bionlp2004#label-id). The letter that prefixes each label indicates the token position: `B` is for the first token of an entity, `I` is for a token inside the entity, and `0` is for a token that is not part of an entity.
 
 ```py
 {
@@ -100,54 +106,7 @@ Then load the [`seqeval`](https://huggingface.co/spaces/evaluate-metric/seqeval)
 seqeval = evaluate.load("seqeval")
 ```
 
-## Preprocess dataset
-
-Initialize a tokenizer and make sure you set `is_split_into_words=True` because the text sequence has already been split into words. However, this doesn't mean it is tokenized yet (even though it may look like it!), and you'll further tokenize the text into subwords.
-
-You'll also need to write a function to:
-
-1. Map each token to their respective word with the [`~transformers.BatchEncoding.word_ids`] method.
-2. Ignore the special tokens by setting them to `-100`.
-3. Label the first token of a given entity.
-
-```py
-def tokenize_and_align_labels(examples):
-    tokenized_inputs = tokenizer(examples["tokens"], truncation=True, is_split_into_words=True)
-
-    labels = []
-    for i, label in enumerate(examples[f"tags"]):
-        word_ids = tokenized_inputs.word_ids(batch_index=i)
-        previous_word_idx = None
-        label_ids = []
-        for word_idx in word_ids:
-            if word_idx is None:
-                label_ids.append(-100)
-            elif word_idx != previous_word_idx:
-                label_ids.append(label[word_idx])
-            else:
-                label_ids.append(-100)
-            previous_word_idx = word_idx
-        labels.append(label_ids)
-
-    tokenized_inputs["labels"] = labels
-    return tokenized_inputs
-```
-
-Use [`~datasets.Dataset.map`] to apply the `tokenize_and_align_labels` function to the dataset:
-
-```py
-tokenized_bionlp = bionlp.map(tokenize_and_align_labels, batched=True)
-```
-
-Finally, create a data collator to pad the examples in the batches:
-
-```py
-data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
-```
-
-## Evaluation
-
-Next, setup a function `seqeval` to evaluate the model's performance on the predictions and labels. You can get the `true_labels` by placing the text in the label ids [dictionary](https://huggingface.co/datasets/tner/bionlp2004#label-id) in a list:
+Now you can write an evaluation function to compute the metrics from the model predictions and labels, and return the precision, recall, F1, and accuracy scores:
 
 ```py
 label_list = [
@@ -189,6 +148,51 @@ def compute_metrics(p):
     }
 ```
 
+## Preprocess dataset
+
+Initialize a tokenizer and make sure you set `is_split_into_words=True` because the text sequence has already been split into words. However, this doesn't mean it is tokenized yet (even though it may look like it!), and you'll need to further tokenize the words into subwords.
+
+You'll also need to write a function to:
+
+1. Map each token to their respective word with the [`~transformers.BatchEncoding.word_ids`] method.
+2. Ignore the special tokens by setting them to `-100`.
+3. Label the first token of a given entity.
+
+```py
+def tokenize_and_align_labels(examples):
+    tokenized_inputs = tokenizer(examples["tokens"], truncation=True, is_split_into_words=True)
+
+    labels = []
+    for i, label in enumerate(examples[f"tags"]):
+        word_ids = tokenized_inputs.word_ids(batch_index=i)
+        previous_word_idx = None
+        label_ids = []
+        for word_idx in word_ids:
+            if word_idx is None:
+                label_ids.append(-100)
+            elif word_idx != previous_word_idx:
+                label_ids.append(label[word_idx])
+            else:
+                label_ids.append(-100)
+            previous_word_idx = word_idx
+        labels.append(label_ids)
+
+    tokenized_inputs["labels"] = labels
+    return tokenized_inputs
+```
+
+Use [`~datasets.Dataset.map`] to apply the `tokenize_and_align_labels` function to the dataset:
+
+```py
+tokenized_bionlp = bionlp.map(tokenize_and_align_labels, batched=True)
+```
+
+Finally, create a data collator to pad the examples to longest length in a batch:
+
+```py
+data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
+```
+
 ## Train
 
 Now you can create a [`PeftModel`]. Start by loading the base `bloom-560m` model, the number of expected labels, and the `id2label` and `label2id` dictionaries:
@@ -222,7 +226,7 @@ label2id = {
 }
 
 model = AutoModelForTokenClassification.from_pretrained(
-    "bigscience/bloom-560m", num_labels=11, id2label=id2label, label2id=label2id
+    "roberta-large", num_labels=11, id2label=id2label, label2id=label2id
 )
 ```
 
@@ -254,6 +258,38 @@ model.print_trainable_parameters()
 "trainable params: 1856523 || all params: 560798731 || trainable%: 0.3310497862021731"
 ```
 
+From the 🤗 Transformers library, create a [`~transformers.TrainingArguments`] class and specify where you want to save the model to, the training hyperparameters, how to evaluate the model, and when to save the checkpoints:
+
+```py
+training_args = TrainingArguments(
+    output_dir="roberta-large-lora-token-classification",
+    learning_rate=lr,
+    per_device_train_batch_size=batch_size,
+    per_device_eval_batch_size=batch_size,
+    num_train_epochs=num_epochs,
+    weight_decay=0.01,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    load_best_model_at_end=True,
+)
+```
+
+Pass the model, `TrainingArguments`, datasets, tokenizer, data collator and evaluation function to the [`~transformers.Trainer`] class. The `Trainer` handles the training loop for you, and when you're ready, call [`~transformers.Trainer.train`] to begin!
+
+```py
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_bionlp["train"],
+    eval_dataset=tokenized_bionlp["validation"],
+    tokenizer=tokenizer,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+)
+
+trainer.train()
+```
+
 ## Share model
 
 Once training is complete, you can store and share your model on the Hub if you'd like. Log in to your Hugging Face account and enter your token when prompted:
@@ -267,7 +303,7 @@ notebook_login()
 Upload the model to a specific model repository on the Hub with the [`~transformers.PreTrainedModel.push_to_hub`] method:
 
 ```py
-model.push_to_hub("your-name/bloom-560-lora-token-classification")
+model.push_to_hub("your-name/roberta-large-lora-token-classification")
 ```
 
 ## Inference
@@ -275,7 +311,7 @@ model.push_to_hub("your-name/bloom-560-lora-token-classification")
 To use your model for inference, load the configuration and model:
 
 ```py
-peft_model_id = "stevhliu/bloom-560-lora-token-classification"
+peft_model_id = "stevhliu/roberta-large-lora-token-classification"
 config = PeftConfig.from_pretrained(peft_model_id)
 inference_model = AutoModelForTokenClassification.from_pretrained(
     config.base_model_name_or_path, num_labels=11, id2label=id2label, label2id=label2id
@@ -302,22 +338,19 @@ predictions = torch.argmax(logits, dim=2)
 
 for token, prediction in zip(tokens, predictions[0].numpy()):
     print((token, model.config.id2label[prediction]))
-
-tokens = inputs.tokens()
-predictions = torch.argmax(logits, dim=2)
-
-for token, prediction in zip(tokens, predictions[0].numpy()):
-    print((token, model.config.id2label[prediction]))
+("<s>", "O")
 ("The", "O")
 ("Ġactivation", "O")
 ("Ġof", "O")
-("ĠIL", "B-protein")
-("-2", "I-protein")
-("Ġgene", "I-DNA")
+("ĠIL", "B-DNA")
+("-", "O")
+("2", "I-DNA")
+("Ġgene", "O")
 ("Ġexpression", "O")
 ("Ġand", "O")
 ("ĠNF", "B-protein")
-("-k", "I-protein")
+("-", "O")
+("k", "I-protein")
 ("appa", "I-protein")
 ("ĠB", "I-protein")
 ("Ġthrough", "O")
@@ -328,11 +361,12 @@ for token, prediction in zip(tokens, predictions[0].numpy()):
 ("Ġoxygen", "O")
 ("Ġproduction", "O")
 ("Ġby", "O")
-("Ġ5", "O")
-("-l", "O")
-("ipo", "O")
-("xy", "O")
-("gen", "O")
+("Ġ5", "B-protein")
+("-", "O")
+("lip", "I-protein")
+("oxy", "I-protein")
+("gen", "I-protein")
 ("ase", "I-protein")
 (".", "O")
+("</s>", "O")
 ```
