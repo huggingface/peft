@@ -65,12 +65,12 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
         to_return["prompt_embeddings"] = prompt_embeddings
     else:
         raise NotImplementedError
+    to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}    
     if model.modules_to_save is not None:
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
-        to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return
 
 
