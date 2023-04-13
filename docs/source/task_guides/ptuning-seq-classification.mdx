@@ -1,6 +1,6 @@
 # P-tuning for sequence classification
 
-It is challenging to finetune large language models for downstream tasks because they have so many parameters. To work around this, you can use *prompts* to steer the model toward a particular downstream task without fully finetuning a model. Typically, these prompts are handcrafted, which may be impractical because you need very large validation sets to find the best prompts. *P-tuning* is a method for automatically searching for prompts in a continuous space, and it is optimizable so you can find better prompts.
+It is challenging to finetune large language models for downstream tasks because they have so many parameters. To work around this, you can use *prompts* to steer the model toward a particular downstream task without fully finetuning a model. Typically, these prompts are handcrafted, which may be impractical because you need very large validation sets to find the best prompts. *P-tuning* is a method for automatically searching and optimizing for better prompts in a continuous space.
 
 <Tip>
 
@@ -18,12 +18,18 @@ Before you begin, make sure you have all the necessary libraries installed:
 
 ## Setup
 
-To get started, import 🤗 Transformers to create the base model, 🤗 Datasets to load a dataset, and 🤗 Peft to create a [`PeftModel`] and to configure the configuration for p-tuning.
+To get started, import 🤗 Transformers to create the base model, 🤗 Datasets to load a dataset, 🤗 Evaluate to load an evaluation metric, and 🤗 PEFT to create a [`PeftModel`] and setup the configuration for p-tuning.
 
 Define the model, dataset, and some basic training hyperparameters:
 
 ```py
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
+from transformers import (
+    AutoModelForSequenceClassification,
+    AutoTokenizer,
+    DataCollatorWithPadding,
+    TrainingArguments,
+    Trainer,
+)
 from peft import (
     get_peft_config,
     get_peft_model,
@@ -33,17 +39,11 @@ from peft import (
     PromptEncoderConfig,
 )
 from datasets import load_dataset
-from torch.optim import AdamW
-from torch.utils.data import DataLoader
-from tqdm import tqdm
 import evaluate
-import argparse
 import torch
-import os
 
 model_name_or_path = "roberta-large"
 task = "mrpc"
-device = "cuda"
 num_epochs = 20
 lr = 1e-3
 batch_size = 32
@@ -51,7 +51,7 @@ batch_size = 32
 
 ## Load dataset and metric
 
-Next, load the `mrpc` configuration - a corpus of sentenced pairs labeled according to whether they're semantically equivalent or not - of the [GLUE](https://huggingface.co/datasets/glue) benchmark:
+Next, load the `mrpc` configuration - a corpus of sentence pairs labeled according to whether they're semantically equivalent or not - from the [GLUE](https://huggingface.co/datasets/glue) benchmark:
 
 ```py
 dataset = load_dataset("glue", task)
@@ -64,10 +64,22 @@ dataset["train"][0]
 }
 ```
 
-Then, load the metric for evaluating the model's performance. The evaluation module returns the accuracy and F1 scores for this specific task.
+From 🤗 Evaluate, load a metric for evaluating the model's performance. The evaluation module returns the accuracy and F1 scores associated with this specific task.
 
 ```py
 metric = evaluate.load("glue", task)
+```
+
+Now you can use the `metric` to write a function that computes the accuracy and F1 scores. The `compute_metric` function calculates the scores from the model predictions and labels:
+
+```py
+import numpy as np
+
+
+def compute_metrics(eval_pred):
+    predictions, labels = eval_pred
+    predictions = np.argmax(predictions, axis=1)
+    return metric.compute(predictions=predictions, references=labels)
 ```
 
 ## Preprocess dataset
@@ -103,22 +115,15 @@ tokenized_datasets = dataset.map(
 tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
 ```
 
-Create a collator function to pad the examples in the batches to the `longest` sequence in the batch, and create a [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader) from the `train` and `validation` splits:
+Create a collator function with [`~transformers.DataCollatorWithPadding`] to pad the examples in the batches to the `longest` sequence in the batch:
 
 ```py
-def collate_fn(examples):
-    return tokenizer.pad(examples, padding="longest", return_tensors="pt")
-
-
-train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size)
-eval_dataloader = DataLoader(
-    tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
-)
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest")
 ```
 
 ## Train
 
-Let's create the [`PeftModel`] now. P-tuning uses a prompt encoder to optimize the prompt parameters, so you'll need to initialize the [`PromptEncoderConfig`] with:
+P-tuning uses a prompt encoder to optimize the prompt parameters, so you'll need to initialize the [`PromptEncoderConfig`] with several arguments:
 
 - `task_type`: the type of task you're training on, in this case it is sequence classification or `SEQ_CLS`
 - `num_virtual_tokens`: the number of virtual tokens to use, or in other words, the prompt
@@ -128,7 +133,7 @@ Let's create the [`PeftModel`] now. P-tuning uses a prompt encoder to optimize t
 peft_config = PromptEncoderConfig(task_type="SEQ_CLS", num_virtual_tokens=20, encoder_hidden_size=128)
 ```
 
-Create the base `roberta-large` model from [`~transformers.AutoModelForSequenceClassification`], and then wrap the base model and `peft_config` with [`get_peft_model`] to create a [`PeftModel`]. If you're curious to see how many parameters you're actually training, you can print it out with [`~peft.PeftModel.print_trainable_parameters`]:
+Create the base `roberta-large` model from [`~transformers.AutoModelForSequenceClassification`], and then wrap the base model and `peft_config` with [`get_peft_model`] to create a [`PeftModel`]. If you're curious to see how many parameters you're actually training compared to training on all the model parameters, you can print it out with [`~peft.PeftModel.print_trainable_parameters`]:
 
 ```py
 model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
@@ -137,47 +142,36 @@ model.print_trainable_parameters()
 "trainable params: 1351938 || all params: 355662082 || trainable%: 0.38011867680626127"
 ```
 
-Setup an optimizer and learning rate scheduler:
+From the 🤗 Transformers library, set up the [`~transformers.TrainingArguments`] class with where you want to save the model to, the training hyperparameters, how to evaluate the model, and when to save the checkpoints:
 
 ```py
-optimizer = AdamW(params=model.parameters(), lr=lr)
-
-lr_scheduler = get_linear_schedule_with_warmup(
-    optimizer=optimizer,
-    num_warmup_steps=0,
-    num_training_steps=(len(train_dataloader) * num_epochs),
+training_args = TrainingArguments(
+    output_dir="your-name/roberta-large-peft-p-tuning",
+    learning_rate=1e-3,
+    per_device_train_batch_size=32,
+    per_device_eval_batch_size=32,
+    num_train_epochs=2,
+    weight_decay=0.01,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    load_best_model_at_end=True,
 )
 ```
 
-Move the model to the GPU, and then write a training loop that includes the `metric` you loaded earlier to evaluate the model at each epoch:
+Then pass the model, `TrainingArguments`, datasets, tokenizer, data collator, and evaluation function to the [`~transformers.Trainer`] class, which'll handle the entire training loop for you. Once you're ready, call [`~transformers.Trainer.train`] to start training!
 
 ```py
-model.to(device)
-for epoch in range(num_epochs):
-    model.train()
-    for step, batch in enumerate(tqdm(train_dataloader)):
-        batch.to(device)
-        outputs = model(**batch)
-        loss = outputs.loss
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=tokenized_datasets["train"],
+    eval_dataset=tokenized_datasets["test"],
+    tokenizer=tokenizer,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+)
 
-    model.eval()
-    for step, batch in enumerate(tqdm(eval_dataloader)):
-        batch.to(device)
-        with torch.no_grad():
-            outputs = model(**batch)
-        predictions = outputs.logits.argmax(dim=-1)
-        predictions, references = predictions, batch["labels"]
-        metric.add_batch(
-            predictions=predictions,
-            references=references,
-        )
-
-    eval_metric = metric.compute()
-    print(f"epoch {epoch}:", eval_metric)
+trainer.train()
 ```
 
 ## Share model
@@ -193,7 +187,6 @@ notebook_login()
 Upload the model to a specifc model repository on the Hub with the [`~transformers.PreTrainedModel.push_to_hub`] function:
 
 ```py
-peft_model_id = "your-name/roberta-large-peft-p-tuning"
 model.push_to_hub("your-name/roberta-large-peft-p-tuning", use_auth_token=True)
 ```
 
@@ -224,12 +217,9 @@ sentence2 = "The coast redwood trees, which can attain a height of over 300 feet
 inputs = tokenizer(sentence1, sentence2, truncation=True, padding="longest", return_tensors="pt")
 ```
 
-Place the model and inputs on a GPU and classify the sentences:
+Pass the inputs to the model to classify the sentences:
 
 ```py
-model.to(device)
-inputs.to(device)
-
 with torch.no_grad():
     outputs = model(**inputs).logits
     print(outputs)
