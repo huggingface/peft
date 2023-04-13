@@ -18,3 +18,19 @@ style:
 
 test:
 	pytest -n 3 tests/
+
+tests_examples_multi_gpu:
+	pytest -m multi_gpu_tests tests/test_gpu_examples.py
+
+tests_examples_single_gpu:
+	pytest -m single_gpu_tests tests/test_gpu_examples.py
+
+tests_core_multi_gpu:
+	pytest -m multi_gpu_tests tests/test_common_gpu.py
+
+tests_core_single_gpu:
+	pytest -m single_gpu_tests tests/test_common_gpu.py
+
+tests_common_gpu:
+	pytest tests/test_decoder_models.py 
+	pytest tests/test_encoder_decoder_models.py 
