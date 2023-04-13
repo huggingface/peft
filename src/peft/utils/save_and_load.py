@@ -70,7 +70,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
-    to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
+        to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return
 
 
