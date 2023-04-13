@@ -13,7 +13,7 @@ specific language governing permissions and limitations under the License.
 # Semantic segmentation using LoRA
 
 This guide demonstrates how to use LoRA, a low-rank approximation technique, to finetune a SegFormer model variant for semantic segmentation.
-By using LoRA from 🤗 PEFT, we can reduce the number of trainable parameters in the model to only 14% of the original trainable parameters.
+By using LoRA from 🤗 PEFT, we can reduce the number of trainable parameters in the SegFormer model to only 14% of the original trainable parameters.
 
 LoRA achieves this reduction by adding low-rank "update matrices" to specific blocks of the model, such as the attention
 blocks. During fine-tuning, only these matrices are trained, while the original model parameters are left unchanged.
@@ -43,7 +43,7 @@ notebook_login()
 ## Load a dataset
 
 To ensure that this example runs within a reasonable time frame, here we are limiting the number of instances from the training 
-set of the [SceneParse150 dataset](https://huggingface.co/datasets/scene_parse_150) to 150.
+set of the [SceneParse150 dataset](https://huggingface.co/datasets/scene_parse_150) to 150. 
 
 ```python
 from datasets import load_dataset
@@ -118,7 +118,7 @@ def handle_grayscale_image(image):
         return Image.fromarray(np_image)
 ```
 
-Finally, combine everything in the two functions that you'll use to transform training and validation data. The two functions 
+Finally, combine everything in two functions that you'll use to transform training and validation data. The two functions 
 are similar except data augmentation is applied only to the training data.  
 
 ```python
@@ -148,8 +148,8 @@ test_ds.set_transform(val_transforms)
 
 ## Create evaluation function
 
-Including a metric during training is helpful for evaluating your model's performance. You can quickly load a evaluation 
-method with the [🤗 Evaluate](https://huggingface.co/docs/evaluate/index) library. For this task, load 
+Including a metric during training is helpful for evaluating your model's performance. You can load an evaluation 
+method with the [🤗 Evaluate](https://huggingface.co/docs/evaluate/index) library. For this task, use 
 the [mean Intersection over Union (IoU)](https://huggingface.co/spaces/evaluate-metric/accuracy) metric (see the 🤗 Evaluate 
 [quick tour](https://huggingface.co/docs/evaluate/a_quick_tour) to learn more about how to load and compute a metric):
 
@@ -213,10 +213,9 @@ def print_trainable_parameters(model):
     )
 ```
 
-Choose the base model checkpoint. For this example, we use the [SegFormer B0 variant](https://huggingface.co/nvidia/mit-b0). 
-We pass the `label2id` and `id2label` dictionaries to let the `AutoModelForSemanticSegmentation` class know that we're 
-interested in a custom base model where the decoder head should be randomly initialized with regards to our custom dataset. 
-Note, however, that the rest of the model parameters are pre-trained and will be finetuned in a regular transfer learning setup.
+Choose a base model checkpoint. For this example, we use the [SegFormer B0 variant](https://huggingface.co/nvidia/mit-b0). 
+In addition to the checkpoint, pass the `label2id` and `id2label` dictionaries to let the `AutoModelForSemanticSegmentation` class know that we're 
+interested in a custom base model where the decoder head should be randomly initialized using the classes from the custom dataset.
 
 ```python
 from transformers import AutoModelForSemanticSegmentation, TrainingArguments, Trainer
@@ -226,14 +225,16 @@ model = AutoModelForSemanticSegmentation.from_pretrained(
 )
 print_trainable_parameters(model)
 ```
-At this point you can notice that in the base model (aka `model`) all 100% parameters are trainable.
+
+At this point you can check with the `print_trainable_parameters` helper function that all 100% parameters in the base 
+model (aka `model`) are trainable.
 
 ## Wrap the base model as a PeftModel for LoRA training
 
-To leverage LoRa technique, you need to wrap the base model as a `PeftModel`.  This involves two steps:
+To leverage the LoRa method, you need to wrap the base model as a `PeftModel`.  This involves two steps:
 
-1. Define LoRa configuration with `LoraConfig`
-2. Wrap the original `model` with `get_peft_model()` using the config defined in the step above.
+1. Defining LoRa configuration with `LoraConfig`
+2. Wrapping the original `model` with `get_peft_model()` using the config defined in the step above.
 
 ```python
 from peft import LoraConfig, get_peft_model
@@ -280,10 +281,10 @@ to balance a trade-off between end performance and compute efficiency.
 
 When all is configured, and the base model is wrapped, the `print_trainable_parameters` helper function lets us explore 
 the number of trainable parameters. Since we're interested in performing **parameter-efficient fine-tuning**, 
-we should expect to notice a lower number of trainable parameters from the `lora_model` in comparison to the original `model` 
+we should expect to see a lower number of trainable parameters from the `lora_model` in comparison to the original `model` 
 which is indeed the case here.
 
-You can also manually verify what modules are actually trainable in the `lora_model`.
+You can also manually verify what modules are trainable in the `lora_model`.
 
 ```python
 for name, param in lora_model.named_parameters():
@@ -291,17 +292,17 @@ for name, param in lora_model.named_parameters():
         print(name, param.shape)
 ```
 
-We can confirm that only the LoRA parameters appended to the attention blocks and the `decode_head` parameters are trainable.
+This confirms that only the LoRA parameters appended to the attention blocks and the `decode_head` parameters are trainable.
 
 ## Train the model
 
-Start by defining your training hyperparameters in `TrainingArguments`. You can change the values however you prefer. 
-This example is meant to walk you through the workflow when using PEFT for semantic segmentation. We didn't 
-perform extensive hyperparameter tuning to achieve optimal results.
-
-Make sure to set `remove_unused_columns=False`, otherwise the image column will be dropped, and it's required here.
+Start by defining your training hyperparameters in `TrainingArguments`. You can change the values of most parameters however 
+you prefer. Make sure to set `remove_unused_columns=False`, otherwise the image column will be dropped, and it's required here.
 The only other required parameter is `output_dir` which specifies where to save your model. 
 At the end of each epoch, the `Trainer` will evaluate the IoU metric and save the training checkpoint.
+
+Note that this example is meant to walk you through the workflow when using PEFT for semantic segmentation. We didn't 
+perform extensive hyperparameter tuning to achieve optimal results.
 
 ```python
 model_name = checkpoint.split("/")[-1]
@@ -357,7 +358,7 @@ total 2.2M
 -rw-r--r-- 1 root root 2.2M Feb  8 03:09 adapter_model.bin
 ```
 
-Let's now prepare our `inference_model` and run inference.
+Let's now prepare an `inference_model` and run inference.
 
 ```python
 from peft import PeftConfig
@@ -366,11 +367,11 @@ config = PeftConfig.from_pretrained(model_id)
 model = AutoModelForSemanticSegmentation.from_pretrained(
     checkpoint, id2label=id2label, label2id=label2id, ignore_mismatched_sizes=True
 )
-# Load the Lora model
+
 inference_model = PeftModel.from_pretrained(model, model_id)
 ```
 
-Get an image.
+Get an image:
 
 ```python
 import requests
