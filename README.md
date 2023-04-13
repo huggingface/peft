@@ -28,7 +28,8 @@ Supported methods:
 1. LoRA: [LORA: LOW-RANK ADAPTATION OF LARGE LANGUAGE MODELS](https://arxiv.org/abs/2106.09685)
 2. Prefix Tuning: [Prefix-Tuning: Optimizing Continuous Prompts for Generation](https://aclanthology.org/2021.acl-long.353/), [P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks](https://arxiv.org/pdf/2110.07602.pdf)
 3. P-Tuning: [GPT Understands, Too](https://arxiv.org/abs/2103.10385)
-4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/abs/2104.08691) 
+4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/abs/2104.08691)
+5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://arxiv.org/abs/2303.10512)  
 
 ## Getting started
 
@@ -74,6 +75,8 @@ So, we are already seeing comparable performance to SoTA with parameter efficien
 | lora-t0-3b | 0.863 |
 
 **Therefore, we can see that performance comparable to SoTA is achievable by PEFT methods with consumer hardware such as 16GB and 24GB GPUs.**
+
+A insightful blogpost explaining the advantages of using PEFT for fine-tuning FlanT5-XXL: [https://www.philschmid.de/fine-tune-flan-t5-peft](https://www.philschmid.de/fine-tune-flan-t5-peft)
 
 ### Parameter Efficient Tuning of Diffusion Models
 
@@ -125,9 +128,12 @@ Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 
 ![peft lora dreambooth gradio space](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_lora_dreambooth_gradio_space.png)
 
+**NEW** ✨ Multi Adapter support and combining multiple LoRA adapters in a weighted combination 
+![peft lora dreambooth weighted adapter](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/weighted_adapter_dreambooth_lora.png)
+
 ### Parameter Efficient Tuning of LLMs for RLHF components such as Ranker and Policy
-- Here is an example in [trl](https://github.com/lvwerra/trl) library using PEFT+INT8 for tuning policy model: [gpt2-sentiment_peft.py](https://github.com/lvwerra/trl/blob/main/examples/sentiment/scripts/gpt2-sentiment_peft.py) 
-- Example using PEFT for both reward model and policy [ToDo]
+- Here is an example in [trl](https://github.com/lvwerra/trl) library using PEFT+INT8 for tuning policy model: [gpt2-sentiment_peft.py](https://github.com/lvwerra/trl/blob/main/examples/sentiment/scripts/gpt2-sentiment_peft.py) and corresponding [Blog](https://huggingface.co/blog/trl-peft)
+- Example using PEFT for Instrction finetuning, reward model and policy : [stack_llama](https://github.com/lvwerra/trl/tree/main/examples/stack_llama/scripts) and corresponding [Blog](https://huggingface.co/blog/stackllama) 
 
 ### INT8 training of large models in Colab using PEFT LoRA and bits_and_bytes
 
@@ -274,6 +280,12 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 | ViT           | ✅  |   |   |   | 
 | Swin           | ✅  |   |   |   | 
 
+### Image to text (Multi-modal models)
+
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
+| --------- | ---- | ---- | ---- | ----  |
+| Blip-2           | ✅  |   |   |   | 
+
 ___Note that we have tested LoRA for [ViT](https://huggingface.co/docs/transformers/model_doc/vit) and [Swin](https://huggingface.co/docs/transformers/model_doc/swin) for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
 examples to learn more. If you run into problems, please open an issue.___
 
@@ -347,10 +359,12 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 new `input_embeds` to be given to the model. Therefore, `generate` doesn't support this yet.
 
 4. When using ZeRO3 with zero3_init_flag=True, if you find the gpu memory increase with training steps. we might need to set zero3_init_flag=false in accelerate config.yaml. The related issue is [[BUG] memory leak under zero.Init](https://github.com/microsoft/DeepSpeed/issues/2637)
+
 ## Backlog:
-1. Explore and possibly integrate `(IA)^3`
-2. Add tests
-3. Add more use cases and examples
+- [x] Add tests
+- [x] Multi Adapter training and inference support
+- [x] Add more use cases and examples
+- [ ] Explore and possibly integrate `Bottleneck Adapters`, `(IA)^3`, `AdaptionPrompt` ...
 
 ## Citing 🤗 PEFT
 

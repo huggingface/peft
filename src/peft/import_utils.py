@@ -12,7 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-WEIGHTS_NAME = "adapter_model.bin"
-CONFIG_NAME = "adapter_config.json"
+import importlib
 
-# TODO: add automapping and superclass here?
+
+def is_bnb_available():
+    return importlib.util.find_spec("bitsandbytes") is not None
