@@ -48,4 +48,4 @@ if os.environ.get("TEST_TYPE", "") != "":
     message = f'*Nightly {os.environ.get("TEST_TYPE")} test results for {date.today()}:*\n{message}'
 
     client = WebClient(token=os.environ['SLACK_API_TOKEN'])
-    client.chat_postMessage(channel='#accelerate-ci-daily', text=message)
+    client.chat_postMessage(channel='#peft-ci-daily', text=message)
