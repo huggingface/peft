@@ -1,4 +1,4 @@
-{/* <!--Copyright 2023 The HuggingFace Team. All rights reserved.
+<!--Copyright 2023 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -8,7 +8,7 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
---> */}
+-->
 
 # Prompt tuning for causal language modeling
 
@@ -32,7 +32,7 @@ Before you begin, make sure you have all the necessary libraries installed:
 
 ## Setup
 
-Start by defining the model and tokenizer, the dataset and the dataset columns to train on, some hyperparameters, and the [`PromptTuningConfig`]. The [`PromptTuningConfig`] contains information about the task type, the text to initialize the prompt embedding, and the tokenizer to use:
+Start by defining the model and tokenizer, the dataset and the dataset columns to train on, some training hyperparameters, and the [`PromptTuningConfig`]. The [`PromptTuningConfig`] contains information about the task type, the text to initialize the prompt embedding, the number of virtual tokens, and the tokenizer to use:
 
 ```py
 from transformers import AutoModelForCausalLM, AutoTokenizer, default_data_collator, get_linear_schedule_with_warmup
@@ -171,7 +171,7 @@ eval_dataloader = DataLoader(eval_dataset, collate_fn=default_data_collator, bat
 
 You're almost ready to setup your model and start training!
 
-Initialize a base model from [`~transformers.AutoModelForCausalLM`], and pass that model and `peft_config` to the [`get_peft_model`] function to create a [`PeftModel`]. You can print the new [`PeftModel`]'s trainable parameters to see how much more efficient it is than training the full parameters of the original model!
+Initialize a base model from [`~transformers.AutoModelForCausalLM`], and pass it and `peft_config` to the [`get_peft_model`] function to create a [`PeftModel`]. You can print the new [`PeftModel`]'s trainable parameters to see how much more efficient it is than training the full parameters of the original model!
 
 ```py
 model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
@@ -201,8 +201,6 @@ for epoch in range(num_epochs):
     total_loss = 0
     for step, batch in enumerate(tqdm(train_dataloader)):
         batch = {k: v.to(device) for k, v in batch.items()}
-        #         print(batch)
-        #         print(batch["input_ids"].shape)
         outputs = model(**batch)
         loss = outputs.loss
         total_loss += loss.detach().float()
@@ -233,7 +231,7 @@ for epoch in range(num_epochs):
 
 ## Share model
 
-You can store and share your model on the Hub if you'd like. Login to your Hugging Face account and enter your token when prompted:
+You can store and share your model on the Hub if you'd like. Log in to your Hugging Face account and enter your token when prompted:
 
 ```py
 from huggingface_hub import notebook_login
@@ -252,7 +250,7 @@ Once the model is uploaded, you'll see the model file size is only 33.5kB! 🤏
 
 ## Inference
 
-Let's try the model on a sample input for inference. Load the configuration and model from the Hub:
+Let's try the model on a sample input for inference. If you look at the repository you uploaded the model to, you'll see a `adapter_config.json` file. Load this file into [`PeftConfig`] to specify the `peft_type` and `task_type`. Then you can load the prompt tuned model weights, and the configuration into [`~PeftModel.from_pretrained`] to create the [`PeftModel`]:
 
 ```py
 from peft import PeftModel, PeftConfig
