@@ -15,6 +15,8 @@
     title: Prefix tuning for conditional generation
   - local: task_guides/clm-prompt-tuning
     title: Prompt tuning for causal language modeling
+  - local: task_guides/semantic_segmentation_lora
+    title: Semantic segmentation using LoRA
 
 - title: Reference
   sections:
@@ -24,4 +26,3 @@
     title: Configuration
   - local: package_reference/tuners
     title: Tuners
-
