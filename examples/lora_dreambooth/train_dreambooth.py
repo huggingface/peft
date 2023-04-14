@@ -2,7 +2,6 @@ import argparse
 import gc
 import hashlib
 import itertools
-import json
 import logging
 import math
 import os
@@ -39,7 +38,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
-from peft import LoraConfig, LoraModel, get_peft_model_state_dict
+from peft import LoraConfig, get_peft_model
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -433,21 +432,6 @@ class TorchTracemalloc:
         # print(f"delta used/peak {self.used:4d}/{self.peaked:4d}")
 
 
-def print_trainable_parameters(model):
-    """
-    Prints the number of trainable parameters in the model.
-    """
-    trainable_params = 0
-    all_param = 0
-    for _, param in model.named_parameters():
-        all_param += param.numel()
-        if param.requires_grad:
-            trainable_params += param.numel()
-    print(
-        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
-    )
-
-
 class DreamBoothDataset(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
@@ -717,8 +701,8 @@ def main(args):
             lora_dropout=args.lora_dropout,
             bias=args.lora_bias,
         )
-        unet = LoraModel(config, unet)
-        print_trainable_parameters(unet)
+        unet = get_peft_model(unet, config)
+        unet.print_trainable_parameters()
         print(unet)
 
     vae.requires_grad_(False)
@@ -732,8 +716,8 @@ def main(args):
             lora_dropout=args.lora_text_encoder_dropout,
             bias=args.lora_text_encoder_bias,
         )
-        text_encoder = LoraModel(config, text_encoder)
-        print_trainable_parameters(text_encoder)
+        text_encoder = get_peft_model(text_encoder, config)
+        text_encoder.print_trainable_parameters()
         print(text_encoder)
 
     if args.enable_xformers_memory_efficient_attention:
@@ -1052,25 +1036,16 @@ def main(args):
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
         if args.use_lora:
-            lora_config = {}
             unwarpped_unet = accelerator.unwrap_model(unet)
-            state_dict = get_peft_model_state_dict(unwarpped_unet, state_dict=accelerator.get_state_dict(unet))
-            lora_config["peft_config"] = unwarpped_unet.get_peft_config_as_dict(inference=True)
+            unwarpped_unet.save_pretrained(
+                os.path.join(args.output_dir, "unet"), state_dict=accelerator.get_state_dict(unet)
+            )
             if args.train_text_encoder:
                 unwarpped_text_encoder = accelerator.unwrap_model(text_encoder)
-                text_encoder_state_dict = get_peft_model_state_dict(
-                    unwarpped_text_encoder, state_dict=accelerator.get_state_dict(text_encoder)
+                unwarpped_text_encoder.save_pretrained(
+                    os.path.join(args.output_dir, "text_encoder"),
+                    state_dict=accelerator.get_state_dict(text_encoder),
                 )
-                text_encoder_state_dict = {f"text_encoder_{k}": v for k, v in text_encoder_state_dict.items()}
-                state_dict.update(text_encoder_state_dict)
-                lora_config["text_encoder_peft_config"] = unwarpped_text_encoder.get_peft_config_as_dict(
-                    inference=True
-                )
-
-            accelerator.print(state_dict)
-            accelerator.save(state_dict, os.path.join(args.output_dir, f"{args.instance_prompt}_lora.pt"))
-            with open(os.path.join(args.output_dir, f"{args.instance_prompt}_lora_config.json"), "w") as f:
-                json.dump(lora_config, f)
         else:
             pipeline = DiffusionPipeline.from_pretrained(
                 args.pretrained_model_name_or_path,
@@ -1079,6 +1054,9 @@ def main(args):
                 revision=args.revision,
             )
             pipeline.save_pretrained(args.output_dir)
+
+        if args.push_to_hub:
+            repo.push_to_hub(commit_message="End of training", blocking=False, auto_lfs_prune=True)
 
     accelerator.end_training()
 

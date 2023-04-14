@@ -1,0 +1,288 @@
+<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+-->
+
+# Prompt tuning for causal language modeling
+
+[[open-in-colab]]
+
+Prompting helps guide language model behavior by adding some input text specific to a task. Prompt tuning is an additive method for only training and updating the newly added prompt tokens to a pretrained model. This way, you can use one pretrained model whose weights are frozen, and train and update a smaller set of prompt parameters for each downstream task instead of fully finetuning a separate model. As models grow larger and larger, prompt tuning can be more efficient, and results are even better as model parameters scale.
+
+<Tip>
+
+💡 Read [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/abs/2104.08691) to learn more about prompt tuning.
+
+</Tip>
+
+This guide will show you how to apply prompt tuning to train a [`bloomz-560m`](https://huggingface.co/bigscience/bloomz-560m) model on the `twitter_complaints` subset of the [RAFT](https://huggingface.co/datasets/ought/raft) dataset.
+
+Before you begin, make sure you have all the necessary libraries installed:
+
+```bash
+!pip install -q peft transformers datasets
+```
+
+## Setup
+
+Start by defining the model and tokenizer, the dataset and the dataset columns to train on, some training hyperparameters, and the [`PromptTuningConfig`]. The [`PromptTuningConfig`] contains information about the task type, the text to initialize the prompt embedding, the number of virtual tokens, and the tokenizer to use:
+
+```py
+from transformers import AutoModelForCausalLM, AutoTokenizer, default_data_collator, get_linear_schedule_with_warmup
+from peft import get_peft_config, get_peft_model, PromptTuningInit, PromptTuningConfig, TaskType, PeftType
+import torch
+from datasets import load_dataset
+import os
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+device = "cuda"
+model_name_or_path = "bigscience/bloomz-560m"
+tokenizer_name_or_path = "bigscience/bloomz-560m"
+peft_config = PromptTuningConfig(
+    task_type=TaskType.CAUSAL_LM,
+    prompt_tuning_init=PromptTuningInit.TEXT,
+    num_virtual_tokens=8,
+    prompt_tuning_init_text="Classify if the tweet is a complaint or not:",
+    tokenizer_name_or_path=model_name_or_path,
+)
+
+dataset_name = "twitter_complaints"
+checkpoint_name = f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}_v1.pt".replace(
+    "/", "_"
+)
+text_column = "Tweet text"
+label_column = "text_label"
+max_length = 64
+lr = 3e-2
+num_epochs = 50
+batch_size = 8
+```
+
+## Load dataset
+
+For this guide, you'll load the `twitter_complaints` subset of the [RAFT](https://huggingface.co/datasets/ought/raft) dataset. This subset contains tweets that are labeled either `complaint` or `no complaint`:
+
+```py
+dataset = load_dataset("ought/raft", dataset_name)
+dataset["train"][0]
+{"Tweet text": "@HMRCcustomers No this is my first job", "ID": 0, "Label": 2}
+```
+
+To make the `Label` column more readable, replace the `Label` value with the corresponding label text and store them in a `text_label` column. You can use the [`~datasets.Dataset.map`] function to apply this change over the entire dataset in one step:
+
+```py
+classes = [k.replace("_", " ") for k in dataset["train"].features["Label"].names]
+dataset = dataset.map(
+    lambda x: {"text_label": [classes[label] for label in x["Label"]]},
+    batched=True,
+    num_proc=1,
+)
+{"Tweet text": "@HMRCcustomers No this is my first job", "ID": 0, "Label": 2, "text_label": "no complaint"}
+```
+
+## Preprocess dataset
+
+Next, you'll setup a tokenizer; configure the appropriate padding token to use for padding sequences, and determine the maximum length of the tokenized labels:
+
+```py
+tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+if tokenizer.pad_token_id is None:
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in classes])
+print(target_max_length)
+3
+```
+
+Create a `preprocess_function` to:
+
+1. Tokenize the input text and labels.
+2. For each example in a batch, pad the labels with the tokenizers `pad_token_id`.
+3. Concatenate the input text and labels into the `model_inputs`.
+4. Create a separate attention mask for `labels` and `model_inputs`.
+5. Loop through each example in the batch again to pad the input ids, labels, and attention mask to the `max_length` and convert them to PyTorch tensors.
+
+```py
+def preprocess_function(examples):
+    batch_size = len(examples[text_column])
+    inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
+    targets = [str(x) for x in examples[label_column]]
+    model_inputs = tokenizer(inputs)
+    labels = tokenizer(targets)
+    for i in range(batch_size):
+        sample_input_ids = model_inputs["input_ids"][i]
+        label_input_ids = labels["input_ids"][i] + [tokenizer.pad_token_id]
+        # print(i, sample_input_ids, label_input_ids)
+        model_inputs["input_ids"][i] = sample_input_ids + label_input_ids
+        labels["input_ids"][i] = [-100] * len(sample_input_ids) + label_input_ids
+        model_inputs["attention_mask"][i] = [1] * len(model_inputs["input_ids"][i])
+    # print(model_inputs)
+    for i in range(batch_size):
+        sample_input_ids = model_inputs["input_ids"][i]
+        label_input_ids = labels["input_ids"][i]
+        model_inputs["input_ids"][i] = [tokenizer.pad_token_id] * (
+            max_length - len(sample_input_ids)
+        ) + sample_input_ids
+        model_inputs["attention_mask"][i] = [0] * (max_length - len(sample_input_ids)) + model_inputs[
+            "attention_mask"
+        ][i]
+        labels["input_ids"][i] = [-100] * (max_length - len(sample_input_ids)) + label_input_ids
+        model_inputs["input_ids"][i] = torch.tensor(model_inputs["input_ids"][i][:max_length])
+        model_inputs["attention_mask"][i] = torch.tensor(model_inputs["attention_mask"][i][:max_length])
+        labels["input_ids"][i] = torch.tensor(labels["input_ids"][i][:max_length])
+    model_inputs["labels"] = labels["input_ids"]
+    return model_inputs
+```
+
+Use the [`~datasets.Dataset.map`] function to apply the `preprocess_function` to the entire dataset. You can remove the unprocessed columns since the model won't need them:
+
+```py
+processed_datasets = dataset.map(
+    preprocess_function,
+    batched=True,
+    num_proc=1,
+    remove_columns=dataset["train"].column_names,
+    load_from_cache_file=False,
+    desc="Running tokenizer on dataset",
+)
+```
+
+Create a [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader) from the `train` and `eval` datasets. Set `pin_memory=True` to speed up the data transfer to the GPU during training if the samples in your dataset are on a CPU.
+
+```py
+train_dataset = processed_datasets["train"]
+eval_dataset = processed_datasets["train"]
+
+
+train_dataloader = DataLoader(
+    train_dataset, shuffle=True, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True
+)
+eval_dataloader = DataLoader(eval_dataset, collate_fn=default_data_collator, batch_size=batch_size, pin_memory=True)
+```
+
+## Train
+
+You're almost ready to setup your model and start training!
+
+Initialize a base model from [`~transformers.AutoModelForCausalLM`], and pass it and `peft_config` to the [`get_peft_model`] function to create a [`PeftModel`]. You can print the new [`PeftModel`]'s trainable parameters to see how much more efficient it is than training the full parameters of the original model!
+
+```py
+model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
+model = get_peft_model(model, peft_config)
+print(model.print_trainable_parameters())
+"trainable params: 8192 || all params: 559222784 || trainable%: 0.0014648902430985358"
+```
+
+Setup an optimizer and learning rate scheduler:
+
+```py
+optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+lr_scheduler = get_linear_schedule_with_warmup(
+    optimizer=optimizer,
+    num_warmup_steps=0,
+    num_training_steps=(len(train_dataloader) * num_epochs),
+)
+```
+
+Move the model to the GPU, then write a training loop to start training!
+
+```py
+model = model.to(device)
+
+for epoch in range(num_epochs):
+    model.train()
+    total_loss = 0
+    for step, batch in enumerate(tqdm(train_dataloader)):
+        batch = {k: v.to(device) for k, v in batch.items()}
+        outputs = model(**batch)
+        loss = outputs.loss
+        total_loss += loss.detach().float()
+        loss.backward()
+        optimizer.step()
+        lr_scheduler.step()
+        optimizer.zero_grad()
+
+    model.eval()
+    eval_loss = 0
+    eval_preds = []
+    for step, batch in enumerate(tqdm(eval_dataloader)):
+        batch = {k: v.to(device) for k, v in batch.items()}
+        with torch.no_grad():
+            outputs = model(**batch)
+        loss = outputs.loss
+        eval_loss += loss.detach().float()
+        eval_preds.extend(
+            tokenizer.batch_decode(torch.argmax(outputs.logits, -1).detach().cpu().numpy(), skip_special_tokens=True)
+        )
+
+    eval_epoch_loss = eval_loss / len(eval_dataloader)
+    eval_ppl = torch.exp(eval_epoch_loss)
+    train_epoch_loss = total_loss / len(train_dataloader)
+    train_ppl = torch.exp(train_epoch_loss)
+    print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
+```
+
+## Share model
+
+You can store and share your model on the Hub if you'd like. Log in to your Hugging Face account and enter your token when prompted:
+
+```py
+from huggingface_hub import notebook_login
+
+notebook_login()
+```
+
+Use the [`~transformers.PreTrainedModel.push_to_hub`] function to upload your model to a model repository on the Hub:
+
+```py
+peft_model_id = "your-name/bloomz-560m_PROMPT_TUNING_CAUSAL_LM"
+model.push_to_hub("your-name/bloomz-560m_PROMPT_TUNING_CAUSAL_LM", use_auth_token=True)
+```
+
+Once the model is uploaded, you'll see the model file size is only 33.5kB! 🤏
+
+## Inference
+
+Let's try the model on a sample input for inference. If you look at the repository you uploaded the model to, you'll see a `adapter_config.json` file. Load this file into [`PeftConfig`] to specify the `peft_type` and `task_type`. Then you can load the prompt tuned model weights, and the configuration into [`~PeftModel.from_pretrained`] to create the [`PeftModel`]:
+
+```py
+from peft import PeftModel, PeftConfig
+
+peft_model_id = "stevhliu/bloomz-560m_PROMPT_TUNING_CAUSAL_LM"
+
+config = PeftConfig.from_pretrained(peft_model_id)
+model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
+model = PeftModel.from_pretrained(model, peft_model_id)
+```
+
+Grab a tweet and tokenize it:
+
+```py
+inputs = tokenizer(
+    f'{text_column} : {"@nationalgridus I have no water and the bill is current and paid. Can you do something about this?"} Label : ',
+    return_tensors="pt",
+)
+```
+
+Put the model on a GPU and *generate* the predicted label:
+
+```py
+model.to(device)
+
+with torch.no_grad():
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    outputs = model.generate(
+        input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], max_new_tokens=10, eos_token_id=3
+    )
+    print(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True))
+[
+    "Tweet text : @nationalgridus I have no water and the bill is current and paid. Can you do something about this? Label : complaint"
+]
+```
