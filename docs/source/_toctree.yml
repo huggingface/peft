@@ -17,6 +17,8 @@
     title: Prompt tuning for causal language modeling
   - local: task_guides/semantic_segmentation_lora
     title: Semantic segmentation using LoRA
+  - local: task_guides/ptuning-seq-classification
+    title: P-tuning for sequence classification
 
 - title: Reference
   sections:
