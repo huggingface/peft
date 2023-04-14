@@ -75,10 +75,18 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
 
 
 # Contains the config that is specific to a transformers model type.
-ModelTypeConfig = namedtuple("ModelTypeConfig", ["compute_query_states", "target_modules", "k_proj_layer", "v_proj_layer", "o_proj_layer"])
+ModelTypeConfig = namedtuple(
+    "ModelTypeConfig", ["compute_query_states", "target_modules", "k_proj_layer", "v_proj_layer", "o_proj_layer"]
+)
 # Mapping of transformers model types to their specific configuration.
 TRANSFORMERS_MODEL_CONFIG = {
-    "llama": ModelTypeConfig(compute_query_states=llama_compute_query_states, target_modules="self_attn", k_proj_layer="k_proj", v_proj_layer="v_proj", o_proj_layer="o_proj"),
+    "llama": ModelTypeConfig(
+        compute_query_states=llama_compute_query_states,
+        target_modules="self_attn",
+        k_proj_layer="k_proj",
+        v_proj_layer="v_proj",
+        o_proj_layer="o_proj",
+    ),
 }
 
 
@@ -311,19 +319,17 @@ class AdaptedAttention(nn.Module):
         if k_proj_layer == v_proj_layer:
             _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(embed_dim, dim=2)
         else:
-            key =  getattr(self.model, k_proj_layer)(self.adaption_prompt)
-            value =  getattr(self.model, v_proj_layer)(self.adaption_prompt)
+            key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
+            value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_k = (
-            key
-            .view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            key.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
-            value
-            .view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            value.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
