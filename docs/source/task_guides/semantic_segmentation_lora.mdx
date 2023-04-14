@@ -276,8 +276,6 @@ Let's review the rest of the parameters:
 - `alpha`: Scaling factor.
 - `bias`: Specifies if the `bias` parameters should be trained. `None` denotes none of the `bias` parameters will be trained.
 
-to balance a trade-off between end performance and compute efficiency.
-
 When all is configured, and the base model is wrapped, the `print_trainable_parameters` helper function lets us explore 
 the number of trainable parameters. Since we're interested in performing **parameter-efficient fine-tuning**, 
 we should expect to see a lower number of trainable parameters from the `lora_model` in comparison to the original `model` 
