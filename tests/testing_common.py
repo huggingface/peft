@@ -319,3 +319,28 @@ class PeftCommonTester:
         with self.assertRaises(TypeError):
             # check if `generate` raises an error if no positional arguments are passed
             _ = model.generate(input_ids, attention_mask=attention_mask)
+
+    def _test_training(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        # check if `training` works
+        output = model(**inputs)[0]
+        loss = output.sum()
+        loss.backward()
+
+        for n, param in model.named_parameters():
+            if "lora" in n:
+                self.assertIsNotNone(param.grad)
+            else:
+                self.assertIsNone(param.grad)
