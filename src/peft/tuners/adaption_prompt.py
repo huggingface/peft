@@ -67,10 +67,16 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     """
     hidden_states = kwargs.get("hidden_states")
     position_ids = kwargs.get("position_ids")
+    past_key_value = kwargs.get("past_key_value")
     bsz, q_len, _ = hidden_states.size()
     query_states = model.q_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
     value_states = model.v_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
-    cos, sin = model.rotary_emb(value_states, seq_len=q_len)
+
+    seq_len = q_len
+    if past_key_value is not None:
+        seq_len += past_key_value[0].shape[-2]
+    cos, sin = model.rotary_emb(value_states, seq_len=seq_len)
+
     return llama_apply_rotary_pos_emb(query_states, cos, sin, position_ids)
 
 
@@ -303,12 +309,10 @@ class AdaptedAttention(nn.Module):
         Args:
             kwargs: See the original LlamaAttention module.
         """
-        if kwargs.get("use_cache", False):
-            raise NotImplementedError("use_cache is not currently supported.")
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        output, _, _ = self.model(**kwargs)
+        output, _, past_key_value = self.model(**kwargs)
         bsz = output.shape[0]
         q_len = output.shape[1]
         embed_dim = output.shape[2]
@@ -352,4 +356,4 @@ class AdaptedAttention(nn.Module):
 
         # Add adaption prompt output to original output.
         output = output + adapter_output
-        return output, None, None
+        return output, None, past_key_value

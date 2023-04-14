@@ -288,3 +288,27 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         # Test that adapter 1 is active again.
         adapter_1_after_set = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
         assert_close(adapter_1_after.logits, adapter_1_after_set.logits, rtol=0, atol=0)
+
+    def test_use_cache(self) -> None:
+        """Test that AdaptionPrompt works when Llama config use_cache=True."""
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        original = LlamaForCausalLM(
+            LlamaConfig(
+                vocab_size=16,
+                hidden_size=8,
+                intermediate_size=8,
+                num_hidden_layers=8,
+                num_attention_heads=4,
+                use_cache=False,
+            )
+        )
+        adapted = get_peft_model(
+            original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted = adapted.to(self.torch_device)
+        expected = adapted.generate(input_ids=input_ids, max_length=8)
+
+        # Set use_cache = True and generate output again.
+        adapted.base_model.config.use_cache = True
+        actual = adapted.generate(input_ids=input_ids, max_length=8)
+        assert_close(expected, actual, rtol=0, atol=0)
