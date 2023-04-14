@@ -1,6 +1,6 @@
 # LoRA for token classification
 
-Low-Rank Adaptation (LoRA) is a reparametrization method that aims to reduce the number of trainable parameters with low-rank representations. The weight matrix is broken down into low-rank matrices and these are trained and updated. All the pretrained model parameters remain frozen. After training, the low-rank matrices are added back to the original weights. This makes it more efficient to store a LoRA model because there are significantly less parameters, and it is more memory-efficient.
+Low-Rank Adaptation (LoRA) is a reparametrization method that aims to reduce the number of trainable parameters with low-rank representations. The weight matrix is broken down into low-rank matrices that are trained and updated. All the pretrained model parameters remain frozen. After training, the low-rank matrices are added back to the original weights. This makes it more efficient to store and train a LoRA model because there are significantly fewer parameters.
 
 <Tip>
 
@@ -13,15 +13,15 @@ This guide will show you how to train a [`roberta-large`](https://huggingface.co
 Before you begin, make sure you have all the necessary libraries installed:
 
 ```bash
-!pip install -q peft transformers datasets evaluate
+!pip install -q peft transformers datasets evaluate seqeval
 ```
 
 ## Setup
 
 Let's start by importing all the necessary libraries you'll need:
 
-- 🤗 Transformers for loading the base `roberta-large` model and tokenizer
-- 🤗 Datasets for loading and prearing the `bionlp2004` dataset for training
+- 🤗 Transformers for loading the base `roberta-large` model and tokenizer, and handling the training loop
+- 🤗 Datasets for loading and preparing the `bionlp2004` dataset for training
 - 🤗 Evaluate for evaluating the model's performance
 - 🤗 PEFT for setting up the LoRA configuration and creating the PEFT model
 
@@ -100,7 +100,7 @@ The `tags` values are defined in the label ids [dictionary](https://huggingface.
 }
 ```
 
-Then load the [`seqeval`](https://huggingface.co/spaces/evaluate-metric/seqeval) framework which includes several metrics - like accuracy, F1, and recall - for evaluating sequence labeling tasks.
+Then load the [`seqeval`](https://huggingface.co/spaces/evaluate-metric/seqeval) framework which includes several metrics - precision, accuracy, F1, and recall - for evaluating sequence labeling tasks.
 
 ```py
 seqeval = evaluate.load("seqeval")
@@ -122,8 +122,6 @@ label_list = [
     "B-RNA",
     "I-RNA",
 ]
-
-labels = [label_list[i] for i in example[f"tags"]]
 
 
 def compute_metrics(p):
@@ -151,6 +149,10 @@ def compute_metrics(p):
 ## Preprocess dataset
 
 Initialize a tokenizer and make sure you set `is_split_into_words=True` because the text sequence has already been split into words. However, this doesn't mean it is tokenized yet (even though it may look like it!), and you'll need to further tokenize the words into subwords.
+
+```py
+tokenizer = AutoTokenizer.from_pretrained(model_checkpoint, add_prefix_space=True)
+```
 
 You'll also need to write a function to:
 
@@ -187,7 +189,7 @@ Use [`~datasets.Dataset.map`] to apply the `tokenize_and_align_labels` function 
 tokenized_bionlp = bionlp.map(tokenize_and_align_labels, batched=True)
 ```
 
-Finally, create a data collator to pad the examples to longest length in a batch:
+Finally, create a data collator to pad the examples to the longest length in a batch:
 
 ```py
 data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
@@ -195,7 +197,7 @@ data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
 
 ## Train
 
-Now you can create a [`PeftModel`]. Start by loading the base `bloom-560m` model, the number of expected labels, and the `id2label` and `label2id` dictionaries:
+Now you're ready to create a [`PeftModel`]. Start by loading the base `roberta-large` model, the number of expected labels, and the `id2label` and `label2id` dictionaries:
 
 ```py
 id2label = {
@@ -226,13 +228,13 @@ label2id = {
 }
 
 model = AutoModelForTokenClassification.from_pretrained(
-    "roberta-large", num_labels=11, id2label=id2label, label2id=label2id
+    model_checkpoint, num_labels=11, id2label=id2label, label2id=label2id
 )
 ```
 
 Define the [`LoraConfig`] with:
 
-- `task_type`, token classification
+- `task_type`, token classification (`TaskType.TOKEN_CLS`)
 - `r`, the dimension of the low-rank matrices
 - `lora_alpha`, scaling factor for the weight matrices
 - `lora_dropout`, dropout probability of the LoRA layers
@@ -240,7 +242,7 @@ Define the [`LoraConfig`] with:
 
 <Tip>
 
-💡 The weight matrix is scaled by `lora_alpha/r` so changing one or the other will affect the number of trainable parameters. In the paper, the authors set `lora_alpha` equal to `r` to reduce the need to tune the hyperparameters when changing the value of `r`.
+💡 The weight matrix is scaled by `lora_alpha/r`, and a higher `lora_alpha` value assigns more weight to the LoRA activations. For performance, we recommend setting `bias` to `None` first, and then `lora_only`, before trying `all`.
 
 </Tip>
 
@@ -250,12 +252,12 @@ peft_config = LoraConfig(
 )
 ```
 
-Then pass the base model and `peft_config` to the [`get_peft_model`] function to create a [`PeftModel`]. You can check out how much more efficient the [`PeftModel`] is compared to fully training the base model by printing out the trainable parameters:
+Pass the base model and `peft_config` to the [`get_peft_model`] function to create a [`PeftModel`]. You can check out how much more efficient training the [`PeftModel`] is compared to fully training the base model by printing out the trainable parameters:
 
 ```py
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
-"trainable params: 1856523 || all params: 560798731 || trainable%: 0.3310497862021731"
+"trainable params: 1855499 || all params: 355894283 || trainable%: 0.5213624069370061"
 ```
 
 From the 🤗 Transformers library, create a [`~transformers.TrainingArguments`] class and specify where you want to save the model to, the training hyperparameters, how to evaluate the model, and when to save the checkpoints:
@@ -327,7 +329,7 @@ text = "The activation of IL-2 gene expression and NF-kappa B through CD28 requi
 inputs = tokenizer(text, return_tensors="pt")
 ```
 
-Pass the inputs to the model, and then you can print out the model prediction for each token:
+Pass the inputs to the model, and print out the model prediction for each token:
 
 ```py
 with torch.no_grad():
