@@ -75,10 +75,10 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
 
 
 # Contains the config that is specific to a transformers model type.
-ModelTypeConfig = namedtuple("ModelTypeConfig", ["compute_query_states", "target_modules"])
+ModelTypeConfig = namedtuple("ModelTypeConfig", ["compute_query_states", "target_modules", "k_proj_layer", "v_proj_layer", "o_proj_layer"])
 # Mapping of transformers model types to their specific configuration.
 TRANSFORMERS_MODEL_CONFIG = {
-    "llama": ModelTypeConfig(compute_query_states=llama_compute_query_states, target_modules="self_attn"),
+    "llama": ModelTypeConfig(compute_query_states=llama_compute_query_states, target_modules="self_attn", k_proj_layer="k_proj", v_proj_layer="v_proj", o_proj_layer="o_proj"),
 }
 
 
@@ -303,17 +303,26 @@ class AdaptedAttention(nn.Module):
         output, _, _ = self.model(**kwargs)
         bsz = output.shape[0]
         q_len = output.shape[1]
+        embed_dim = output.shape[2]
+        k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
+        v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
+        o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
 
+        if k_proj_layer == v_proj_layer:
+            _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(embed_dim, dim=2)
+        else:
+            key =  getattr(self.model, k_proj_layer)(self.adaption_prompt)
+            value =  getattr(self.model, v_proj_layer)(self.adaption_prompt)
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_k = (
-            self.model.k_proj(self.adaption_prompt)
+            key
             .view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
-            self.model.v_proj(self.adaption_prompt)
+            value
             .view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
@@ -332,7 +341,8 @@ class AdaptedAttention(nn.Module):
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
         # (bsz, q_len, hidden_size)
-        adapter_output = self.model.o_proj(adapter_output)
+        if o_proj_layer is not None:
+            adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
 
         # Add adaption prompt output to original output.
         output = output + adapter_output
