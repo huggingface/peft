@@ -32,5 +32,6 @@ from .other import (
     _get_submodules,
     _set_adapter,
     _freeze_adapter,
+    ModulesToSaveWrapper,
 )
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
