@@ -1,0 +1,100 @@
+<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+-->
+
+# Dreambooth training with LoRA
+
+This guide demonstrates how to use LoRA, a low-rank approximation technique, to finetune DreamBooth with the 
+`CompVis/stable-diffusion-v1-4` model. 
+
+Even though initially, LoRA was introduced as a technique for reducing the number of trainable parameters designed for 
+large-language models, the technique can also be applied to diffusion models. Performing a complete model fine-tuning 
+of diffusion models is a time-consuming task, which is why lighter-weight techniques like Dreambooth or Textual Inversion 
+gained popularity. With the introduction of LoRA, customizing and fine-tuning a model on a specific dataset has become 
+even faster.
+
+In this guide we'll be using a Dreambooth finetuning script that is available in 
+[PEFT's GitHub repo](https://github.com/huggingface/peft/tree/main/examples/lora_dreambooth). Feel free to explore it and 
+learn how things work.
+
+## Set up your environment 
+
+Start by cloning the PEFT repository:
+
+```bash
+git clone https://github.com/huggingface/peft
+```
+
+Navigate to the directory containing the training scripts for finetuning Dreambooth with LoRA:
+
+```bash
+cd peft/examples/lora_dreambooth
+```
+
+Set up your environment: install peft, and all the required libraries. 
+
+```bash
+pip install -r requirements.txt
+pip install peft
+```
+
+## Finetunine Dreambooth
+
+Prepare the images that you will use for finetuning the model. Set up a few environment variables: 
+
+```bash
+export MODEL_NAME="CompVis/stable-diffusion-v1-4" 
+export INSTANCE_DIR="path-to-instance-images"
+export CLASS_DIR="path-to-class-images"
+export OUTPUT_DIR="path-to-save-model"
+```
+
+Here: 
+- `INSTANCE_DIR`: The directory containing the images that you intend to use for training your model.
+- `CLASS_DIR`: The directory containing class-specific images. In this example, we use prior preservation to avoid overfitting and language-drift. For prior preservation, you need other images of the same class as part of the training process. However, these images can be generated and the training script will save them to a local path you specify here.
+- `OUTPUT_DIR`: The destination folder for storing the trained model's weights.
+
+To learn more about Dreambooth finetuning with prior-preserving loss, check out [Diffusers documentation](https://huggingface.co/docs/diffusers/training/dreambooth#finetuning-with-priorpreserving-loss)
+
+Launch the training script with `accelerate` and pass hyperparameters, as well as LoRa-specific arguments to it, for example:
+- `use_lora`: Enables LoRa in the training script. 
+- `lora_r`:  The dimension used by the LoRA update matrices.
+- `lora_alpha`: Scaling factor.
+- `lora_text_encoder_r`: LoRA rank for text encoder.
+- `lora_text_encoder_alpha`: LoRA alpha for text encoder
+
+Here's what the full set of script arguments may look like:
+
+```bash
+accelerate launch train_dreambooth.py \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --instance_data_dir=$INSTANCE_DIR \
+  --class_data_dir=$CLASS_DIR \
+  --output_dir=$OUTPUT_DIR \
+  --train_text_encoder \
+  --with_prior_preservation --prior_loss_weight=1.0 \
+  --instance_prompt="a  photo of sks dog" \
+  --class_prompt="a photo of dog" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --lr_scheduler="constant" \
+  --lr_warmup_steps=0 \
+  --num_class_images=200 \
+  --use_lora \
+  --lora_r 16 \
+  --lora_alpha 27 \
+  --lora_text_encoder_r 16 \
+  --lora_text_encoder_alpha 17 \
+  --learning_rate=1e-4 \
+  --gradient_accumulation_steps=1 \
+  --gradient_checkpointing \
+  --max_train_steps=800
+```

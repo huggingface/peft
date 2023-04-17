@@ -19,6 +19,13 @@
     title: Semantic segmentation using LoRA
   - local: task_guides/ptuning-seq-classification
     title: P-tuning for sequence classification
+  - local: task_guides/dreambooth_lora
+    title: Dreambooth training with LoRA
+
+- title: Conceptual guides
+  sections:
+  - local: conceptual_guides/lora
+    title: LoRA
 
 - title: Reference
   sections:
