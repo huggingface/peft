@@ -27,6 +27,7 @@ from transformers.pytorch_utils import Conv1D
 from ..import_utils import is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    ModulesToSaveWrapper,
     PeftConfig,
     PeftType,
     _freeze_adapter,
@@ -247,10 +248,6 @@ class LoraModel(torch.nn.Module):
         except AttributeError:
             return getattr(self.model, name)
 
-    @property
-    def modules_to_save(self):
-        return None
-
     def get_peft_config_as_dict(self, inference: bool = False):
         config_dict = {}
         for key, value in self.peft_config.items():
@@ -312,12 +309,20 @@ class LoraModel(torch.nn.Module):
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
-            parent, target, target_name = _get_submodules(self.model, key)
+            try:
+                parent, target, target_name = _get_submodules(self.model, key)
+            except AttributeError:
+                continue
             if isinstance(target, LoraLayer):
                 bias = target.bias is not None
                 new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 target.merge()
                 self._replace_module(parent, target_name, new_module, target)
+
+            # save any additional trainable modules part of `modules_to_save`
+            if isinstance(target, ModulesToSaveWrapper):
+                setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+
         return self.model
 
     def add_weighted_adapter(self, adapters, weights, adapter_name):
