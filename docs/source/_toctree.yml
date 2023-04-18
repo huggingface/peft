@@ -21,11 +21,8 @@
     title: P-tuning for sequence classification
   - local: task_guides/dreambooth_lora
     title: Dreambooth fine-tuning with LoRA
-
-- title: Conceptual guides
-  sections:
-  - local: conceptual_guides/lora
-    title: LoRA
+  - local: task_guides/token-classification-lora
+    title: LoRA for token classification
 
 - title: Reference
   sections:
