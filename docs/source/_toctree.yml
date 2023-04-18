@@ -21,6 +21,8 @@
     title: P-tuning for sequence classification
   - local: task_guides/token-classification-lora
     title: LoRA for token classification
+  - local: task_guides/int8-asr
+    title: int8 training for automatic speech recognition
 
 - title: Reference
   sections:
