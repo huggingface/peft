@@ -20,6 +20,11 @@
   - local: task_guides/ptuning-seq-classification
     title: P-tuning for sequence classification
 
+- title: Conceptual guides
+  sections:
+  - local: conceptual_guides/lora
+    title: LoRA
+
 - title: Reference
   sections:
   - local: package_reference/peft_model
