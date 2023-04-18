@@ -12,7 +12,7 @@ specific language governing permissions and limitations under the License.
 
 # Dreambooth training with LoRA
 
-This guide demonstrates how to use LoRA, a low-rank approximation technique, to finetune DreamBooth with the 
+This guide demonstrates how to use LoRA, a low-rank approximation technique, to fine-tune DreamBooth with the 
 `CompVis/stable-diffusion-v1-4` model. 
 
 Even though initially, LoRA was introduced as a technique for reducing the number of trainable parameters designed for 
@@ -21,7 +21,7 @@ of diffusion models is a time-consuming task, which is why lighter-weight techni
 gained popularity. With the introduction of LoRA, customizing and fine-tuning a model on a specific dataset has become 
 even faster.
 
-In this guide we'll be using a Dreambooth finetuning script that is available in 
+In this guide we'll be using a Dreambooth fine-tuning script that is available in 
 [PEFT's GitHub repo](https://github.com/huggingface/peft/tree/main/examples/lora_dreambooth). Feel free to explore it and 
 learn how things work.
 
@@ -33,22 +33,23 @@ Start by cloning the PEFT repository:
 git clone https://github.com/huggingface/peft
 ```
 
-Navigate to the directory containing the training scripts for finetuning Dreambooth with LoRA:
+Navigate to the directory containing the training scripts for fine-tuning Dreambooth with LoRA:
 
 ```bash
 cd peft/examples/lora_dreambooth
 ```
 
-Set up your environment: install peft, and all the required libraries. 
+Set up your environment: install PEFT, and all the required libraries. At the time of writing this guide we recommend 
+installing PEFT from source.  
 
 ```bash
 pip install -r requirements.txt
-pip install peft
+pip install git+https://github.com/huggingface/peft
 ```
 
-## Finetunine Dreambooth
+## Fine-tunine Dreambooth
 
-Prepare the images that you will use for finetuning the model. Set up a few environment variables: 
+Prepare the images that you will use for fine-tuning the model. Set up a few environment variables: 
 
 ```bash
 export MODEL_NAME="CompVis/stable-diffusion-v1-4" 
@@ -62,14 +63,15 @@ Here:
 - `CLASS_DIR`: The directory containing class-specific images. In this example, we use prior preservation to avoid overfitting and language-drift. For prior preservation, you need other images of the same class as part of the training process. However, these images can be generated and the training script will save them to a local path you specify here.
 - `OUTPUT_DIR`: The destination folder for storing the trained model's weights.
 
-To learn more about Dreambooth finetuning with prior-preserving loss, check out [Diffusers documentation](https://huggingface.co/docs/diffusers/training/dreambooth#finetuning-with-priorpreserving-loss)
+To learn more about Dreambooth fine-tuning with prior-preserving loss, check out [Diffusers documentation](https://huggingface.co/docs/diffusers/training/dreambooth#finetuning-with-priorpreserving-loss)
 
-Launch the training script with `accelerate` and pass hyperparameters, as well as LoRa-specific arguments to it, for example:
+Launch the training script with `accelerate` and pass hyperparameters, as well as LoRa-specific arguments to it such as:
+
 - `use_lora`: Enables LoRa in the training script. 
 - `lora_r`:  The dimension used by the LoRA update matrices.
 - `lora_alpha`: Scaling factor.
 - `lora_text_encoder_r`: LoRA rank for text encoder.
-- `lora_text_encoder_alpha`: LoRA alpha for text encoder
+- `lora_text_encoder_alpha`: LoRA alpha (scaling factor) for text encoder.
 
 Here's what the full set of script arguments may look like:
 
@@ -97,4 +99,68 @@ accelerate launch train_dreambooth.py \
   --gradient_accumulation_steps=1 \
   --gradient_checkpointing \
   --max_train_steps=800
+```
+
+## Inference
+
+To run inference with the fine-tuned model, first specify the base model with which the fine-tuned LoRA weights will be combined:
+
+```python
+import os
+import torch
+
+from diffusers import StableDiffusionPipeline
+from peft import PeftModel, LoraConfig
+
+MODEL_NAME = "CompVis/stable-diffusion-v1-4"
+```
+
+Next, add a function that will create a Stable Diffusion pipeline for image generation. It will combine the weights of 
+the base model with the fine-tuned LoRA weights using `LoraConfig`.
+
+```python
+def get_lora_sd_pipeline(
+    ckpt_dir, base_model_name_or_path=None, dtype=torch.float16, device="cuda", adapter_name="default"
+):
+    unet_sub_dir = os.path.join(ckpt_dir, "unet")
+    text_encoder_sub_dir = os.path.join(ckpt_dir, "text_encoder")
+    if os.path.exists(text_encoder_sub_dir) and base_model_name_or_path is None:
+        config = LoraConfig.from_pretrained(text_encoder_sub_dir)
+        base_model_name_or_path = config.base_model_name_or_path
+
+    if base_model_name_or_path is None:
+        raise ValueError("Please specify the base model name or path")
+
+    pipe = StableDiffusionPipeline.from_pretrained(
+        base_model_name_or_path, torch_dtype=dtype, requires_safety_checker=False
+    ).to(device)
+    pipe.unet = PeftModel.from_pretrained(pipe.unet, unet_sub_dir, adapter_name=adapter_name)
+
+    if os.path.exists(text_encoder_sub_dir):
+        pipe.text_encoder = PeftModel.from_pretrained(
+            pipe.text_encoder, text_encoder_sub_dir, adapter_name=adapter_name
+        )
+
+    if dtype in (torch.float16, torch.bfloat16):
+        pipe.unet.half()
+        pipe.text_encoder.half()
+
+    pipe.to(device)
+    return pipe
+```
+
+Now you can use the function above to create a Stable Diffusion pipeline using the LoRA weights that you have created during the fine-tuning step.  
+Note, if you're running inference on the same machine, the path you specify here will be the same as `OUTPUT_DIR`.  
+
+```python
+pipe = get_lora_sd_pipeline(Path("path-to-saved-model"), adapter_name="dog")
+```
+
+Once you have the pipeline with your fine-tuned model, you can use it to generate images: 
+
+```python
+prompt = "sks dog playing fetch in the park"
+negative_prompt = "low quality, blurry, unfinished"
+image = pipe(prompt, num_inference_steps=50, guidance_scale=7, negative_prompt=negative_prompt).images[0]
+image.save("DESTINATION_PATH_FOR_THE_IMAGE")
 ```
