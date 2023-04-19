@@ -43,7 +43,7 @@ As with other methods supported by PEFT, to fine-tune a model using LoRA, you ne
 `LoraConfig` allows you to control how LoRA is applied to the base model through the following parameters: 
 
 - `r`: the rank of the update matrices, expressed in `int`. Lower rank results in smaller update matrices with fewer trainable parameters.
-- `target_modules`: The modules to use as the base build LoRA update matrices. E.g. attention blocks. 
+- `target_modules`: The modules (for example, attention blocks) to apply the LoRA update matrices.
 - `alpha`: LoRA scaling factor.
 - `bias`: Specifies if the `bias` parameters should be trained. Can be `'none'`, `'all'` or `'lora_only'`.
 - `modules_to_save`: List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
