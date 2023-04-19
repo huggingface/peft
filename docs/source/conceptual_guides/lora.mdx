@@ -15,7 +15,7 @@ specific language governing permissions and limitations under the License.
 This conceptual guide gives a brief overview of [LoRA](https://arxiv.org/abs/2106.09685), a technique that accelerates 
 the fine-tuning of large models while consuming less memory. 
 
-To make fine-tuning more efficient, LoRA's approach is to represent the original model's weight matrix with two smaller 
+To make fine-tuning more efficient, LoRA's approach is to represent the weight updates with two smaller 
 matrices (called **update matrices**) through low-rank decomposition. These new matrices can be trained to adapt to the 
 new data while keeping the overall number of changes low. The original weight matrix remains frozen and doesn't receive 
 any further adjustments. To produce the final results, both the original and the adapted weights are combined.
@@ -25,6 +25,8 @@ This approach has a number of advantages:
 * LoRA makes fine-tuning more efficient by drastically reducing the number of trainable parameters.
 * The original pre-trained weights are kept frozen, which means you can have multiple lightweight and portable LoRA models for various downstream tasks built on top of them.
 * LoRA is orthogonal to many other parameter-efficient methods and can be combined with many of them.
+* Performance of models fine-tuned using LoRA is comparable to the performance of fully fine-tuned models.
+* LoRA does not add any inference latency because adapter weights can be merged with the base model.
 
 In principle, LoRA can be applied to any subset of weight matrices in a neural network to reduce the number of trainable 
 parameters. However, for simplicity and further parameter efficiency, in Transformer models LoRA is typically applied to 
