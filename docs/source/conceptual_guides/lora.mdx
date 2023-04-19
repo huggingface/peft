@@ -15,7 +15,7 @@ specific language governing permissions and limitations under the License.
 This conceptual guide gives a brief overview of [LoRA](https://arxiv.org/abs/2106.09685), a technique that accelerates 
 the fine-tuning of large models while consuming less memory. 
 
-To make the fine-tuning more efficient, LoRA's approach is to represent the original model's weight matrix with two smaller 
+To make fine-tuning more efficient, LoRA's approach is to represent the original model's weight matrix with two smaller 
 matrices (called **update matrices**) through low-rank decomposition. These new matrices can be trained to adapt to the 
 new data while keeping the overall number of changes low. The original weight matrix remains frozen and doesn't receive 
 any further adjustments. To produce the final results, both the original and the adapted weights are combined.
