@@ -7,18 +7,14 @@ There are two categories of prompting methods:
 - hard prompts are manually handcrafted text prompts with discrete input tokens; the downside is that it requires a lot of effort to create a good prompt
 - soft prompts are learnable tensors concatenated with the input embeddings that can be optimized to a dataset; the downside is that they aren't human readable because you aren't matching these "virtual tokens" to the embeddings of a real word
 
-This conceptual guide provides a brief overview of the soft prompt methods included in 🤗 PEFT:
-
-- prompt tuning
-- prefix tuning
-- P-tuning
+This conceptual guide provides a brief overview of the soft prompt methods included in 🤗 PEFT: prompt tuning, prefix tuning, and P-tuning.
 
 ## Prompt tuning
 
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/prompt-tuning.png"/>
 </div>
-<small>Only train and store a significantly smaller set of task-specific prompt parameters<a href="https://arxiv.org/abs/2104.08691">(image source)</a>.</small>
+<small>Only train and store a significantly smaller set of task-specific prompt parameters <a href="https://arxiv.org/abs/2104.08691">(image source)</a>.</small>
 
 Prompt tuning was developed for text classification tasks on T5 models, and all downstream tasks are cast as a text generation task. For example, sequence classification usually assigns a single class label to a sequence of text. By casting it as a text generation task, the class label is actually *generated* as a series of tokens. The prompts are added to the input as a series of tokens. Typically, the model parameters are fixed which means the prompt tokens are also fixed by the model parameters.
 
@@ -31,7 +27,7 @@ Take a look at the Prompt tuning for causal language modeling [guide](./task_gui
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/prefix-tuning.png"/>
 </div>
-<small>Optimize the prefix parameters for each task.<a href="https://arxiv.org/abs/2101.00190">(image source)</a>.</small>
+<small>Optimize the prefix parameters for each task <a href="https://arxiv.org/abs/2101.00190">(image source)</a>.</small>
 
 Prefix tuning was designed for natural language generation (NLG) tasks on GPT models. It is very similar to prompt tuning; prefix tuning also prepends a sequence of task-specific vectors to the input that can be trained and updated while keeping the rest of the pretrained model's parameters frozen. 
 
@@ -46,7 +42,7 @@ Take a look at the Prefix tuning for conditional generation [guide](./task_guide
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/p-tuning.png"/>
 </div>
-<small>Prompt tokens can be inserted anywhere in the input sequence, and they are optimized by a prompt encoder.<a href="https://arxiv.org/abs/2103.10385">(image source)</a>.</small>
+<small>Prompt tokens can be inserted anywhere in the input sequence, and they are optimized by a prompt encoder <a href="https://arxiv.org/abs/2103.10385">(image source)</a>.</small>
 
 P-tuning is designed for natural language understanding (NLU) tasks and all language models. 
 It is another variation of a soft prompt method; p-tuning also adds a trainable embedding tensor that can be optimized to find better prompts, and it uses a prompt encoder (a bidirectional long-short term memory network or LSTM) to optimize the prompt parameters. Unlike prefix tuning, for p-tuning:
