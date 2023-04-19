@@ -47,7 +47,7 @@ pip install -r requirements.txt
 pip install git+https://github.com/huggingface/peft
 ```
 
-## Fine-tunine Dreambooth
+## Fine-tune Dreambooth
 
 Prepare the images that you will use for fine-tuning the model. Set up a few environment variables: 
 
@@ -59,8 +59,8 @@ export OUTPUT_DIR="path-to-save-model"
 ```
 
 Here: 
-- `INSTANCE_DIR`: The directory containing the images that you intend to use for training your model.
-- `CLASS_DIR`: The directory containing class-specific images. In this example, we use prior preservation to avoid overfitting and language-drift. For prior preservation, you need other images of the same class as part of the training process. However, these images can be generated and the training script will save them to a local path you specify here.
+- `INSTANCE_DIR`: The directory containing the images that you intend to use for training your model. Here we are using a [few dog images](few images of a dog) .
+- `CLASS_DIR`: The directory that will contain class-specific images. In this example, we use prior preservation to avoid overfitting and language-drift. For prior preservation, you need other images of the same class as part of the training process. However, these images can be generated and the training script will save them to a local path you specify here.
 - `OUTPUT_DIR`: The destination folder for storing the trained model's weights.
 
 To learn more about Dreambooth fine-tuning with prior-preserving loss, check out [Diffusers documentation](https://huggingface.co/docs/diffusers/training/dreambooth#finetuning-with-priorpreserving-loss)
@@ -83,7 +83,7 @@ accelerate launch train_dreambooth.py \
   --output_dir=$OUTPUT_DIR \
   --train_text_encoder \
   --with_prior_preservation --prior_loss_weight=1.0 \
-  --instance_prompt="a  photo of sks dog" \
+  --instance_prompt="a photo of sks dog" \
   --class_prompt="a photo of dog" \
   --resolution=512 \
   --train_batch_size=1 \
@@ -101,7 +101,7 @@ accelerate launch train_dreambooth.py \
   --max_train_steps=800
 ```
 
-## Inference
+## Inference with a single adapter
 
 To run inference with the fine-tuned model, first specify the base model with which the fine-tuned LoRA weights will be combined:
 
@@ -164,3 +164,109 @@ negative_prompt = "low quality, blurry, unfinished"
 image = pipe(prompt, num_inference_steps=50, guidance_scale=7, negative_prompt=negative_prompt).images[0]
 image.save("DESTINATION_PATH_FOR_THE_IMAGE")
 ```
+
+<div class="flex justify-center">
+     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_dreambooth_dog_park.png" alt="Generated image of a dog in a park"/>
+ </div>
+
+
+## Multi-adapter inference
+
+With PEFT you can combine multiple adapters for inference. In the previous example you have fine-tuned Stable Diffusion on 
+some dog images. The pipeline created based on these weights got a name - `adapter_name="dog`. Now, suppose you also fine-tuned 
+this base model on images of a crochet toy. Let's see how we can use both adapters. 
+
+First, you'll need to perform all the steps as in the single adapter inference example:
+
+1. Specify the base model.
+2. Add a function that creates a Stable Diffusion pipeline for image generation uses LoRA weights.
+3. Create a `pipe` with `adapter_name="dog"` based on the model fine-tuned on dog images.
+
+Next, you're going to need a few more helper functions.
+To load another adapter, create a `load_adapter()` function that leverages `load_adapter()` method of `PeftModel` (e.g. `pipe.unet.load_adapter(peft_model_path, adapter_name)`):
+
+```python
+def load_adapter(pipe, ckpt_dir, adapter_name):
+    unet_sub_dir = os.path.join(ckpt_dir, "unet")
+    text_encoder_sub_dir = os.path.join(ckpt_dir, "text_encoder")
+    pipe.unet.load_adapter(unet_sub_dir, adapter_name=adapter_name)
+    if os.path.exists(text_encoder_sub_dir):
+        pipe.text_encoder.load_adapter(text_encoder_sub_dir, adapter_name=adapter_name)
+```
+
+To switch between adapters, write a function that uses `set_adapter()` method of `PeftModel` (see `pipe.unet.set_adapter(adapter_name)`)
+
+```python
+def set_adapter(pipe, adapter_name):
+    pipe.unet.set_adapter(adapter_name)
+    if isinstance(pipe.text_encoder, PeftModel):
+        pipe.text_encoder.set_adapter(adapter_name)
+```
+
+Finally, add a function to create weighted LoRA adapter. 
+
+```python
+def create_weighted_lora_adapter(pipe, adapters, weights, adapter_name="default"):
+    pipe.unet.add_weighted_adapter(adapters, weights, adapter_name)
+    if isinstance(pipe.text_encoder, PeftModel):
+        pipe.text_encoder.add_weighted_adapter(adapters, weights, adapter_name)
+
+    return pipe
+```
+
+Let's load the second adapter from the model fine-tuned on images of a crochet toy, and give it a unique name:
+
+```python
+load_adapter(pipe, Path("path-to-the-second-saved-model"), adapter_name="crochet")
+```
+
+Create a pipeline using weighted adapters:
+
+```python
+pipe = create_weighted_lora_adapter(pipe, ["crochet", "dog"], [1.0, 1.05], adapter_name="crochet_dog")
+```
+
+Now you can switch between adapters. If you'd like to generate more dog images, set the adapter to `"dog"`:
+
+```python
+set_adapter(pipe, adapter_name="dog")
+prompt = "sks dog in a supermarket isle"
+negative_prompt = "low quality, blurry, unfinished"
+image = pipe(prompt, num_inference_steps=50, guidance_scale=7, negative_prompt=negative_prompt).images[0]
+image
+```
+
+<div class="flex justify-center">
+     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_dreambooth_dog_supermarket.png" alt="Generated image of a dog in a supermarket"/>
+</div>
+
+In the same way, you can switch to the second adapter: 
+
+```python
+set_adapter(pipe, adapter_name="crochet")
+prompt = "a fish rendered in the style of <1>"
+negative_prompt = "low quality, blurry, unfinished"
+image = pipe(prompt, num_inference_steps=50, guidance_scale=7, negative_prompt=negative_prompt).images[0]
+image
+```
+
+<div class="flex justify-center">
+     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_dreambooth_fish.png" alt="Generated image of a crochet fish"/>
+</div>
+
+Finally, you can use combined weighted adapters: 
+
+```python
+set_adapter(pipe, adapter_name="crochet_dog")
+prompt = "sks dog rendered in the style of <1>, close up portrait, 4K HD"
+negative_prompt = "low quality, blurry, unfinished"
+image = pipe(prompt, num_inference_steps=50, guidance_scale=7, negative_prompt=negative_prompt).images[0]
+image
+```
+
+<div class="flex justify-center">
+     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_dreambooth_crochet_dog.png" alt="Generated image of a crochet dog"/>
+</div>
+
+
+
