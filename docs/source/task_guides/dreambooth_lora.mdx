@@ -131,9 +131,7 @@ def get_lora_sd_pipeline(
     if base_model_name_or_path is None:
         raise ValueError("Please specify the base model name or path")
 
-    pipe = StableDiffusionPipeline.from_pretrained(
-        base_model_name_or_path, torch_dtype=dtype
-    ).to(device)
+    pipe = StableDiffusionPipeline.from_pretrained(base_model_name_or_path, torch_dtype=dtype).to(device)
     pipe.unet = PeftModel.from_pretrained(pipe.unet, unet_sub_dir, adapter_name=adapter_name)
 
     if os.path.exists(text_encoder_sub_dir):
