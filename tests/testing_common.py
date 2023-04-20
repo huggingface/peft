@@ -68,7 +68,7 @@ CLASSES_MAPPING = {
 class ClassInstantier(OrderedDict):
     def __getitem__(self, key, *args, **kwargs):
         # check if any of the kwargs is inside the config class kwargs
-        if any([kwarg in self[key][1] for kwarg in kwargs]):
+        if any(kwarg in self[key][1] for kwarg in kwargs):
             new_config_kwargs = self[key][1].copy()
             new_config_kwargs.update(kwargs)
             return (self[key][0], new_config_kwargs)

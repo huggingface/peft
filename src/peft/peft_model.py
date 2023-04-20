@@ -91,6 +91,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
                 self.base_model, self.peft_config, adapter_name
             )
+            self.set_additional_trainable_modules(peft_config, adapter_name)
         else:
             self.add_adapter(adapter_name, peft_config)
 
@@ -319,11 +320,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self._setup_prompt_encoder(adapter_name)
         else:
             self.base_model.add_adapter(adapter_name, peft_config)
+
+        self.set_additional_trainable_modules(peft_config, adapter_name)
+
+    def set_additional_trainable_modules(self, peft_config, adapter_name):
         if getattr(peft_config, "modules_to_save", None) is not None:
             if self.modules_to_save is None:
                 self.modules_to_save = set(peft_config.modules_to_save)
             else:
-                self.modules_to_save = self.modules_to_save.update(peft_config.modules_to_save)
+                self.modules_to_save.update(peft_config.modules_to_save)
             _set_trainable(self, adapter_name)
 
     def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
