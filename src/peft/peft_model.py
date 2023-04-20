@@ -29,11 +29,8 @@ from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassif
 from transformers.utils import PushToHubMixin
 
 from .tuners import (
-    AdaLoraConfig,
     AdaLoraModel,
-    AdaptionPromptConfig,
     AdaptionPromptModel,
-    LoraConfig,
     LoraModel,
     PrefixEncoder,
     PromptEmbedding,
@@ -60,6 +57,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.P_TUNING: PromptEncoder,
     PeftType.PREFIX_TUNING: PrefixEncoder,
     PeftType.ADALORA: AdaLoraModel,
+    PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
 }
 
 
@@ -102,12 +100,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model, self.peft_config, adapter_name
             )
             self.set_additional_trainable_modules(peft_config, adapter_name)
-        elif isinstance(peft_config, (LoraConfig, AdaLoraConfig)):
-            self.add_adapter(adapter_name, peft_config)
-        elif isinstance(peft_config, AdaptionPromptConfig):
-            self.base_model = AdaptionPromptModel(peft_config, model)
         else:
-            raise ValueError(f"Unsupported config type '{type(peft_config)}'")
+            self.add_adapter(adapter_name, peft_config)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
