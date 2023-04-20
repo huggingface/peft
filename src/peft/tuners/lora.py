@@ -120,24 +120,22 @@ class LoraModel(torch.nn.Module):
         ```
 
         ```py
+        >>> import transformers
         >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
-        >>> target_modules = [ 'q_proj', 'k_proj', 'v_proj', 'out_proj', 'fc_in', 'fc_out','wte']
+
+        >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
         >>> config = LoraConfig(
-        ...     r=4,
-        ...     lora_alpha=16,
-        ...     target_modules=target_modules,
-        ...     lora_dropout=0.1,
-        ...     bias="none",
-        ...     task_type="CAUSAL_LM"
+        ...     r=4, lora_alpha=16, target_modules=target_modules, lora_dropout=0.1, bias="none", task_type="CAUSAL_LM"
         ... )
 
         >>> model = transformers.GPTJForCausalLM.from_pretrained(
-        ...     'kakaobrain/kogpt', revision='KoGPT6B-ryan1.5b-float16',  # or float32 version: revision=KoGPT6B-ryan1.5b
+        ...     "kakaobrain/kogpt",
+        ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
         ...     pad_token_id=tokenizer.eos_token_id,
         ...     use_cache=False,
-        ...     device_map={'':rank},
+        ...     device_map={"": rank},
         ...     torch_dtype=torch.float16,
-        ...     load_in_8bit=True
+        ...     load_in_8bit=True,
         ... )
         >>> model = prepare_model_for_int8_training(model)
         >>> lora_model = get_peft_model(model, config)
@@ -222,7 +220,7 @@ class LoraModel(torch.nn.Module):
                             adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
                         )
                     elif isinstance(target, torch.nn.Embedding):
-                        in_features , out_features = target.num_embeddings, target.embedding_dim
+                        in_features, out_features = target.num_embeddings, target.embedding_dim
                         new_module = Embedding(adapter_name, in_features, out_features, **kwargs)
                     else:
                         if isinstance(target, torch.nn.Linear):
@@ -452,7 +450,7 @@ class LoraLayer:
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
-    
+
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -464,8 +462,12 @@ class LoraLayer:
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         if r > 0:
-            self.lora_embedding_A.update(nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((r,self.in_features)))}))
-            self.lora_embedding_B.update(nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((self.out_features, r)))}))
+            self.lora_embedding_A.update(
+                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((r, self.in_features)))})
+            )
+            self.lora_embedding_B.update(
+                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((self.out_features, r)))})
+            )
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
@@ -480,6 +482,7 @@ class LoraLayer:
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+
 
 class Linear(nn.Linear, LoraLayer):
     # Lora implemented in a dense layer
@@ -568,6 +571,7 @@ class Linear(nn.Linear, LoraLayer):
 
         return result
 
+
 class Embedding(nn.Embedding, LoraLayer):
     # LoRA implemented in a dense layer
     def __init__(
@@ -578,11 +582,10 @@ class Embedding(nn.Embedding, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        #merge_weights: bool = True,
+        # merge_weights: bool = True,
         fan_in_fan_out: bool = False,
-        **kwargs
+        **kwargs,
     ):
-        #TODO:
         init_lora_weights = kwargs.pop("init_lora_weights", True)
 
         nn.Embedding.__init__(self, num_embeddings, embedding_dim, **kwargs)
@@ -596,26 +599,35 @@ class Embedding(nn.Embedding, LoraLayer):
         self.active_adapter = adapter_name
 
     def unmerge(self, mode: bool = True):
-        #nn.Embedding.train(self, mode)
+        # nn.Embedding.train(self, mode)
         if self.merge_weights and self.merged:
             # Make sure that the weights are not merged
             if self.r[self.active_adapter] > 0:
-                self.weight.data -= (self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter]).T * self.scaling[self.active_adapter]
+                self.weight.data -= (
+                    self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter]
+                ).T * self.scaling[self.active_adapter]
             self.merged = False
 
     def merge(self):
-        #nn.Embedding.eval(self)
+        # nn.Embedding.eval(self)
         if self.merge_weights and not self.merged:
             # Merge the weights and mark it
             if self.r[self.active_adapter] > 0:
-                self.weight.data += (self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter]) * self.scaling[self.active_adapter]
+                self.weight.data += (
+                    self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter]
+                ) * self.scaling[self.active_adapter]
             self.merged = True
 
     def forward(self, x: torch.Tensor):
         if self.disable_adapters:
             if self.r[self.active.adapter] > 0 and self.merged:
                 self.weight.data -= (
-                    transpose(self.lora_embedding_B[self.active_adapter].weight @ self.lora_embedding_A[self.active_adapter].weight, self.fan_in_fan_out) * self.scaling[self.active_adapter]
+                    transpose(
+                        self.lora_embedding_B[self.active_adapter].weight
+                        @ self.lora_embedding_A[self.active_adapter].weight,
+                        self.fan_in_fan_out,
+                    )
+                    * self.scaling[self.active_adapter]
                 )
                 self.merged = False
             return nn.Embedding.forward(self, x)
@@ -624,13 +636,19 @@ class Embedding(nn.Embedding, LoraLayer):
             result = nn.Embedding.forward(self, x)
             if self.r[self.active_adapter] > 0:
                 after_A = F.embedding(
-                    x, self.lora_embedding_A[self.active_adapter].T, self.padding_idx, self.max_norm,
-                    self.norm_type, self.scale_grad_by_freq, self.sparse
+                    x,
+                    self.lora_embedding_A[self.active_adapter].T,
+                    self.padding_idx,
+                    self.max_norm,
+                    self.norm_type,
+                    self.scale_grad_by_freq,
+                    self.sparse,
                 )
                 result += (after_A @ self.lora_embedding_B[self.active_adapter].T) * self.scaling[self.active_adapter]
             return result
         else:
             return nn.Embedding.forward(self, x)
+
 
 if is_bnb_available():
 
