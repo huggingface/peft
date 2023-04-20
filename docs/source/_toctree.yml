@@ -19,6 +19,8 @@
     title: Semantic segmentation using LoRA
   - local: task_guides/ptuning-seq-classification
     title: P-tuning for sequence classification
+  - local: task_guides/dreambooth_lora
+    title: Dreambooth fine-tuning with LoRA
   - local: task_guides/token-classification-lora
     title: LoRA for token classification
   - local: task_guides/int8-asr
