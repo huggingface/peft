@@ -26,6 +26,11 @@
   - local: task_guides/int8-asr
     title: int8 training for automatic speech recognition
 
+- title: Conceptual guides
+  sections:
+  - local: conceptual_guides/lora
+    title: LoRA
+
 - title: Reference
   sections:
   - local: package_reference/peft_model
