@@ -1,4 +1,4 @@
-<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+{/* <!--Copyright 2023 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -8,13 +8,13 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
--->
+--> */}
 
 # Quicktour
 
-🤗 PEFT contains parameter-efficient fine-tuning methods for training large pretrained models. The enormous number of parameters in models today make it exceedingly costly and impractical to fully tune them for each downstream task, which has been the traditional paradigm. Instead, it is more efficient to train a smaller number of prompt parameters or use a reparametrization method like low-rank adaptation (LoRA) to reduce the number of trainable parameters. 
+🤗 PEFT contains parameter-efficient fine-tuning methods for training large pretrained models. The traditional paradigm is to fully train a model for each downstream task, but this is becoming exceedingly costly and impractical because of the enormous number of parameters in models today. Instead, it is more efficient to train a smaller number of prompt parameters or use a reparametrization method like low-rank adaptation (LoRA) to reduce the number of trainable parameters. 
 
-This quicktour will show you 🤗 PEFT's main features and help you train large pretrained models that would typically be inaccessible to consumer devices. You'll see how to train the 1.2B parameter [`bigscience/mt0-large`](https://huggingface.co/bigscience/mt0-large) model with LoRA to generate a classification label and use it for inference, and also how to train a 🤗 PEFT model with 🤗 Accelerate's DeepSpeed integration.
+This quicktour will show you 🤗 PEFT's main features and help you train large pretrained models that would typically be inaccessible on consumer devices. You'll see how to train the 1.2B parameter [`bigscience/mt0-large`](https://huggingface.co/bigscience/mt0-large) model with LoRA to generate a classification label and use it for inference, and also how to train a 🤗 PEFT model with 🤗 Accelerate's DeepSpeed integration on distributed setups.
 
 ## PeftConfig
 
@@ -42,9 +42,9 @@ peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, 
 
 ## PeftModel
 
-A [`PeftModel`] is created by the [`get_peft_model`] function. It takes a base model and the [`PeftConfig`] containing the instructions for how to configure a model for a specific 🤗 PEFT method, and it returns a [`PeftModel`]. 
+A [`PeftModel`] is created by the [`get_peft_model`] function. It takes a base model - which you can load from the 🤗 Transformers library - and the [`PeftConfig`] containing the instructions for how to configure a model for a specific 🤗 PEFT method, and it returns a [`PeftModel`]. 
 
-Start by loading the base model you want to fine-tune.
+Start by loading the base model you want to finetune.
 
 ```python
 from transformers import AutoModelForSeq2SeqLM
@@ -92,9 +92,9 @@ notebook_login()
 model.push_to_hub("my_awesome_peft_model")
 ```
 
-This only saves the incremental 🤗 PEFT weights that were trained, meaning it is super efficient to store, transfer and load. For example, this [`bigscience/T0_3B`](https://huggingface.co/smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM) trained with LoRA on the [`twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints/train) subset of the RAFT [dataset](https://huggingface.co/datasets/ought/raft) only contains two files: ``adapter_config.json` and `adapter_model.bin`. The latter file is just 19MB! 🤏
+This only saves the incremental 🤗 PEFT weights that were trained, meaning it is super efficient to store, transfer, and load. For example, this [`bigscience/T0_3B`](https://huggingface.co/smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM) model trained with LoRA on the [`twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints/train) subset of the RAFT [dataset](https://huggingface.co/datasets/ought/raft) only contains two files: ``adapter_config.json` and `adapter_model.bin`. The latter file is just 19MB! 🤏
 
-Easily load your model using the [`~transformers.PreTrainedModel.from_pretrained`] function:
+Easily load your model for inference using the [`~transformers.PreTrainedModel.from_pretrained`] function:
 
 ```diff
   from transformers import AutoModelForSeq2SeqLM
@@ -187,3 +187,9 @@ The contents of the config file are shown below:
   eval_preds[:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
   dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
   ```
+
+  ## Next steps
+
+  Now that you've seen how to train a model with one of the 🤗 PEFT methods, we encourage you to try out some of the other methods like prompt tuning. The steps are very similar to the ones shown in this quickstart; prepare a [`PeftConfig`] for a 🤗 PEFT method, and use the `get_peft_model` to create a [`PeftModel`] from the configuration and base model. Then you can train it however you like!
+
+  Feel free to also take a look at the task guides if you're interested in training a model with a 🤗 PEFT method for a specific task such as semantic segmentation, multilingual automatic speech recognition, DreamBooth, and token classification.
