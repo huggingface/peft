@@ -30,9 +30,6 @@
   sections:
   - local: conceptual_guides/lora
     title: LoRA
-
-- title: Conceptual guides
-  sections:
   - local: conceptual_guides/prompting
     title: Prompting
 
