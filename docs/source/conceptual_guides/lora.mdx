@@ -1,0 +1,61 @@
+<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+the License. You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+-->
+
+# LoRA 
+
+This conceptual guide gives a brief overview of [LoRA](https://arxiv.org/abs/2106.09685), a technique that accelerates 
+the fine-tuning of large models while consuming less memory. 
+
+To make fine-tuning more efficient, LoRA's approach is to represent the weight updates with two smaller 
+matrices (called **update matrices**) through low-rank decomposition. These new matrices can be trained to adapt to the 
+new data while keeping the overall number of changes low. The original weight matrix remains frozen and doesn't receive 
+any further adjustments. To produce the final results, both the original and the adapted weights are combined.
+
+This approach has a number of advantages: 
+
+* LoRA makes fine-tuning more efficient by drastically reducing the number of trainable parameters.
+* The original pre-trained weights are kept frozen, which means you can have multiple lightweight and portable LoRA models for various downstream tasks built on top of them.
+* LoRA is orthogonal to many other parameter-efficient methods and can be combined with many of them.
+* Performance of models fine-tuned using LoRA is comparable to the performance of fully fine-tuned models.
+* LoRA does not add any inference latency because adapter weights can be merged with the base model.
+
+In principle, LoRA can be applied to any subset of weight matrices in a neural network to reduce the number of trainable 
+parameters. However, for simplicity and further parameter efficiency, in Transformer models LoRA is typically applied to 
+attention blocks only. The resulting number of trainable parameters in a LoRA model depends on the size of the low-rank 
+update matrices, which is determined mainly by the rank `r` and the shape of the original weight matrix.
+
+## Common LoRA parameters in PEFT
+
+As with other methods supported by PEFT, to fine-tune a model using LoRA, you need to:
+
+1. Instantiate a base model.
+2. Create a configuration (`LoraConfig`) where you define LoRA-specific parameters.
+3. Wrap the base model with `get_peft_model()` to get a trainable `PeftModel`.
+4. Train the `PeftModel` as you normally would train the base model.
+
+`LoraConfig` allows you to control how LoRA is applied to the base model through the following parameters: 
+
+- `r`: the rank of the update matrices, expressed in `int`. Lower rank results in smaller update matrices with fewer trainable parameters.
+- `target_modules`: The modules (for example, attention blocks) to apply the LoRA update matrices.
+- `alpha`: LoRA scaling factor.
+- `bias`: Specifies if the `bias` parameters should be trained. Can be `'none'`, `'all'` or `'lora_only'`.
+- `modules_to_save`: List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
+
+## LoRA examples
+
+For an example of LoRA method application to various downstream tasks, please refer to the following guides:
+
+* [Image classification using LoRA](../task_guides/image_classification_lora)
+* [Semantic segmentation](../task_guides/semantic_segmentation_lora)
+
+While the original paper focuses on language models, the technique can be applied to any dense layers in deep learning 
+models. As such, you can leverage this technique with diffusion models. See [Dreambooth fine-tuning with LoRA](../task_guides/task_guides/dreambooth_lora) task guide for an example.
