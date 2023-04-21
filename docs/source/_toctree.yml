@@ -26,6 +26,11 @@
   - local: task_guides/int8-asr
     title: int8 training for automatic speech recognition
 
+- title: 🤗 Accelerate integrations
+  sections:
+  - local: accelerate/deepspeed-zero3-offload
+    title: DeepSpeed
+
 - title: Conceptual guides
   sections:
   - local: conceptual_guides/lora
