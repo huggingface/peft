@@ -186,6 +186,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if transformer_backbone is None:
                     transformer_backbone = module
                     self.transformer_backbone_name = name
+        if transformer_backbone is None and isinstance(self.base_model, PreTrainedModel):
+            for param in self.base_model.parameters():
+                param.requires_grad = False
+            transformer_backbone = self.base_model
+            self.transformer_backbone_name = None
 
         if config.num_transformer_submodules is None:
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
@@ -1138,8 +1143,10 @@ class PeftModelForTokenClassification(PeftModel):
                 "past_key_values": past_key_values,
             }
         )
+        if labels is not None:
+            kwargs["labels"] = labels
         if "past_key_values" in fwd_params:
-            return self.base_model(labels=labels, **kwargs)
+            return self.base_model(**kwargs)
         else:
             transformer_backbone_name = self.base_model.get_submodule(self.transformer_backbone_name)
             fwd_params = list(inspect.signature(transformer_backbone_name.forward).parameters.keys())
