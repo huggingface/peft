@@ -30,6 +30,8 @@
   sections:
   - local: accelerate/deepspeed-zero3-offload
     title: DeepSpeed
+  - local: accelerate/fsdp
+    title: Fully Sharded Data Parallel
 
 - title: Conceptual guides
   sections:
