@@ -490,7 +490,10 @@ class Linear(nn.Linear, LoraLayer):
                 self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         elif self.r[self.active_adapter] > 0 and not self.merged:
-            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) + self.bias
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
+            
+            if self.bias:
+                result += self.bias
 
             x = x.to(self.lora_A[self.active_adapter].weight.dtype)
 
