@@ -25,7 +25,25 @@ for log in Path().glob("*.log"):
                         passed.append([test, duration, log.name.split('_')[0]])
     group_info.append([str(log), section_num_failed, failed])
     failed = []
+no_error_payload = {
+    "type": "section",
+    "text": {
+        "type": "plain_text",
+        "text": "🌞 There were no failures!",
+        "emoji": True
+    }
+}
+
 message = ""
+payload = [
+    {
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": "🤗 Results of the PEFT scheduled tests."
+        }
+    },
+]
 if total_num_failed > 0:
     for name, num_failed, failed_tests in group_info:
         if num_failed > 0:
@@ -40,12 +58,12 @@ if total_num_failed > 0:
             message += failed_table
     print(f'### {message}')
 else:
-    message = "No failed tests! 🤗"
-    print(f'## {message}')
+    payload.append(no_error_payload)
+    
 
 if os.environ.get("TEST_TYPE", "") != "":
     from slack_sdk import WebClient
     message = f'*Nightly {os.environ.get("TEST_TYPE")} test results for {date.today()}:*\n{message}'
 
-    client = WebClient(token=os.environ['SLACK_API_TOKEN'])
-    client.chat_postMessage(channel='#peft-ci-daily', text=message)
+    client = WebClient(token=os.environ.get("SLACK_API_TOKEN"))
+    client.chat_postMessage(channel=os.environ.get("SLACK_CHANNEL_ID"), text=message, blocks=payload)
