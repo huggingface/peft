@@ -64,17 +64,6 @@ else:
 if os.environ.get("TEST_TYPE", "") != "":
     from slack_sdk import WebClient
 
-    date_report = {
-        "type": "context",
-        "elements": [
-            {
-                "type": "mrkdwn",
-                "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}"
-            }
-        ]
-    }
-    payload.append(date_report)
-
     if len(message) != 0:
         md_report = {
             "type": "section",
@@ -85,6 +74,16 @@ if os.environ.get("TEST_TYPE", "") != "":
         }
         payload.append(md_report)
 
+    date_report = {
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}"
+            }
+        ]
+    }
+    payload.append(date_report)
 
 
     client = WebClient(token=os.environ.get("SLACK_API_TOKEN"))
