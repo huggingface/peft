@@ -28,6 +28,8 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .tuners import (
+    AdaptionPromptConfig,
+    AdaptionPromptModel,
     LoraConfig,
     LoraModel,
     AdaLoraConfig,
