@@ -40,7 +40,7 @@ payload = [
         "type": "header",
         "text": {
             "type": "plain_text",
-            "text": "🤗 Results of the PEFT scheduled tests."
+            "text": "🤗 Results of the {} PEFT scheduled tests.".format(os.environ.get("TEST_TYPE", "")),
         }
     },
 ]
@@ -63,7 +63,29 @@ else:
 
 if os.environ.get("TEST_TYPE", "") != "":
     from slack_sdk import WebClient
-    message = f'*Nightly {os.environ.get("TEST_TYPE")} test results for {date.today()}:*\n{message}'
+
+    date_report = {
+        "type": "context",
+        "elements": [
+            {
+                "type": "mrkdwn",
+                "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}"
+            }
+        ]
+    }
+    payload.append(date_report)
+
+    if len(message) != 0:
+        md_report = {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": message
+            }
+        }
+        payload.append(md_report)
+
+
 
     client = WebClient(token=os.environ.get("SLACK_API_TOKEN"))
     client.chat_postMessage(channel=os.environ.get("SLACK_CHANNEL_ID"), text=message, blocks=payload)
