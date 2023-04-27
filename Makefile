@@ -32,5 +32,5 @@ tests_core_single_gpu:
 	python -m pytest -m single_gpu_tests tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_core_single_gpu.log",)
 
 tests_common_gpu:
-	python -m pytest tests/test_decoder_models.py "$(PYTORCH_VERSION)_common_decoder_models.log",)
-	python -m pytest tests/test_encoder_decoder_models.py "$(PYTORCH_VERSION)_common_encoder_decoder.log",)
+	python -m pytest tests/test_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_common_decoder.log",)
+	python -m pytest tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_common_encoder_decoder.log",)
