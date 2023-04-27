@@ -87,4 +87,4 @@ if os.environ.get("TEST_TYPE", "") != "":
 
 
     client = WebClient(token=os.environ.get("SLACK_API_TOKEN"))
-    client.chat_postMessage(channel=os.environ.get("SLACK_CHANNEL_ID"), text=message, blocks=payload)
+    client.chat_postMessage(channel="#peft-ci-daily", text=message, blocks=payload)
