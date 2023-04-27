@@ -195,8 +195,7 @@ class LoraModel(torch.nn.Module):
                 parent, target, target_name = _get_submodules(self.model, key)
                 if hasattr(target, "bias"):
                     bias = target.bias is not None
-                else:
-                    warnings.warn(f"{target} is not have bias.")
+
                 if isinstance(target, LoraLayer):
                     target.update_layer(
                         adapter_name,
@@ -261,8 +260,6 @@ class LoraModel(torch.nn.Module):
         if hasattr(old_module, "bias"):
             if old_module.bias is not None:
                 new_module.bias = old_module.bias
-        else:
-            warnings.warn(f"{old_module} is not have bias.")
 
         if getattr(old_module, "state", None) is not None:
             new_module.state = old_module.state
@@ -379,8 +376,17 @@ class LoraModel(torch.nn.Module):
                             target.lora_A[adapter].weight.data * weight * target.scaling[adapter]
                         )
                         target.lora_B[adapter_name].weight.data += target.lora_B[adapter].weight.data * weight
-                else:
-                    raise ValueError("Cannot implement this function in Embedding Layer")
+
+                elif adapter_name in target.lora_embedding_A:
+                    target.lora_embedding_A[adapter_name].data = target.lora_embedding_A[adapter_name].data * 0.0
+                    target.lora_embedding_B[adapter_name].data = target.lora_embedding_B[adapter_name].data * 0.0
+                    for adapter, weight in zip(adapters, weights):
+                        if adapter not in target.lora_embedding_A:
+                            continue
+                        target.lora_embedding_A[adapter_name].data += (
+                            target.lora_embedding_A[adapter].data * weight * target.scaling[adapter]
+                        )
+                        target.lora_embedding_B[adapter_name].data += target.lora_embedding_B[adapter].data * weight
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
@@ -573,7 +579,7 @@ class Linear(nn.Linear, LoraLayer):
 
 
 class Embedding(nn.Embedding, LoraLayer):
-    # LoRA implemented in a dense layer
+    # LoRA implemented in a Embedding layer
     def __init__(
         self,
         adapter_name: str,
