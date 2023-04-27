@@ -17,20 +17,20 @@ style:
 	doc-builder style src/peft tests docs/source --max_len 119
 
 test:
-	pytest -n 3 tests/
+	python -m pytest -n 3 tests/ $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_ci_tests.log",)
 
 tests_examples_multi_gpu:
-	pytest -m multi_gpu_tests tests/test_gpu_examples.py
+	python -m pytest -m multi_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_multi_gpu_examples.log",)
 
 tests_examples_single_gpu:
-	pytest -m single_gpu_tests tests/test_gpu_examples.py
+	python -m pytest -m single_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_single_gpu_examples.log",)
 
 tests_core_multi_gpu:
-	pytest -m multi_gpu_tests tests/test_common_gpu.py
+	python -m pytest -m multi_gpu_tests tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_core_multi_gpu.log",)
 
 tests_core_single_gpu:
-	pytest -m single_gpu_tests tests/test_common_gpu.py
+	python -m pytest -m single_gpu_tests tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "$(PYTORCH_VERSION)_core_single_gpu.log",)
 
 tests_common_gpu:
-	pytest tests/test_decoder_models.py 
-	pytest tests/test_encoder_decoder_models.py 
+	python -m pytest tests/test_decoder_models.py "$(PYTORCH_VERSION)_common_decoder_models.log",)
+	python -m pytest tests/test_encoder_decoder_models.py "$(PYTORCH_VERSION)_common_encoder_decoder.log",)
