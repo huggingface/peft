@@ -90,7 +90,8 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 
 
 **Training**
-An example of using LoRA for parameter efficient dreambooth training is given in `~examples/lora_dreambooth/train_dreambooth.py`
+An 
+of using LoRA for parameter efficient dreambooth training is given in [`examples/lora_dreambooth/train_dreambooth.py`](examples/lora_dreambooth/train_dreambooth.py)
 
 ```bash
 export MODEL_NAME= "CompVis/stable-diffusion-v1-4" #"stabilityai/stable-diffusion-2-1"
