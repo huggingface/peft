@@ -425,7 +425,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
 
     def forward(self, x: torch.Tensor):
         if self.active_adapter not in self.lora_A.keys():
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias
@@ -434,7 +434,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias
@@ -454,7 +454,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
                 / (self.ranknum[self.active_adapter] + 1e-5)
             )
         else:
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias

@@ -484,7 +484,7 @@ class Linear(nn.Linear, LoraLayer):
         previous_dtype = x.dtype
 
         if self.active_adapter not in self.lora_A.keys():
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias
@@ -493,12 +493,12 @@ class Linear(nn.Linear, LoraLayer):
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias
         elif self.r[self.active_adapter] > 0 and not self.merged:
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias
@@ -512,7 +512,7 @@ class Linear(nn.Linear, LoraLayer):
                 * self.scaling[self.active_adapter]
             )
         else:
-            result = torch.matmul(x, transpose(self.weight, self.fan_in_fan_out)) 
+            result = torch.matmul(x, transpose(self.weight, not self.fan_in_fan_out)) 
             
             if self.bias:
                 result += self.bias
