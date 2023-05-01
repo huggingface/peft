@@ -219,8 +219,10 @@ class LoraModel(torch.nn.Module):
                             adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
                         )
                     elif isinstance(target, torch.nn.Embedding):
+                        embedding_kwargs = kwargs.copy()
+                        embedding_kwargs.pop("fan_in_fan_out", None)
                         in_features, out_features = target.num_embeddings, target.embedding_dim
-                        new_module = Embedding(adapter_name, in_features, out_features, **kwargs)
+                        new_module = Embedding(adapter_name, in_features, out_features, **embedding_kwargs)
                     else:
                         if isinstance(target, torch.nn.Linear):
                             in_features, out_features = target.in_features, target.out_features
@@ -588,8 +590,6 @@ class Embedding(nn.Embedding, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        # merge_weights: bool = True,
-        fan_in_fan_out: bool = False,
         **kwargs,
     ):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
@@ -598,30 +598,35 @@ class Embedding(nn.Embedding, LoraLayer):
         LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
 
         self.weight.requires_grad = False
-        self.fan_in_fan_out = fan_in_fan_out
 
         nn.Embedding.reset_parameters(self)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
     def unmerge(self, mode: bool = True):
-        # nn.Embedding.train(self, mode)
-        if self.merge_weights and self.merged:
-            # Make sure that the weights are not merged
-            if self.r[self.active_adapter] > 0:
-                self.weight.data -= (
-                    self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter]
-                ).T * self.scaling[self.active_adapter]
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        if self.r[self.active_adapter] > 0:
+            self.weight.data -= (
+                transpose(
+                    self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter], True
+                )
+                * self.scaling[self.active_adapter]
+            )
             self.merged = False
 
     def merge(self):
-        # nn.Embedding.eval(self)
-        if self.merge_weights and not self.merged:
-            # Merge the weights and mark it
-            if self.r[self.active_adapter] > 0:
-                self.weight.data += (
-                    self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter]
-                ) * self.scaling[self.active_adapter]
+        if self.merged:
+            warnings.warn("Already merged. Nothing to do.")
+            return
+        if self.r[self.active_adapter] > 0:
+            self.weight.data += (
+                transpose(
+                    self.lora_embedding_B[self.active_adapter] @ self.lora_embedding_A[self.active_adapter], True
+                )
+                * self.scaling[self.active_adapter]
+            )
             self.merged = True
 
     def forward(self, x: torch.Tensor):
@@ -631,7 +636,7 @@ class Embedding(nn.Embedding, LoraLayer):
                     transpose(
                         self.lora_embedding_B[self.active_adapter].weight
                         @ self.lora_embedding_A[self.active_adapter].weight,
-                        self.fan_in_fan_out,
+                        True,
                     )
                     * self.scaling[self.active_adapter]
                 )
