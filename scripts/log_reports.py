@@ -1,6 +1,7 @@
 import json, os
 from pathlib import Path
 from datetime import date
+from tabulate import tabulate
 
 failed = []
 passed = []
@@ -24,6 +25,7 @@ for log in Path().glob("*.log"):
                     else:
                         passed.append([test, duration, log.name.split('_')[0]])
     group_info.append([str(log), section_num_failed, failed])
+    os.remove(log)
     failed = []
 no_error_payload = {
     "type": "section",
@@ -51,11 +53,11 @@ if total_num_failed > 0:
                 message += f"*{name}: {num_failed} failed test*\n"
             else:
                 message += f"*{name}: {num_failed} failed tests*\n"
-            failed_table = '| Test Location | Test Class | Test Name | PyTorch Version |\n|---|---|---|---|\n| '
+            failed_table = []
             for test in failed_tests:
-                failed_table += ' | '.join(test[0].split("::"))
-            failed_table += f" | {test[2]} |"
-            message += failed_table
+                failed_table.append(test[0].split("::"))
+            failed_table = tabulate(failed_table, headers=["Test Location", "Test Case", "Test Name"], showindex="always", tablefmt="grid", maxcolwidths=[12, 12, 12])
+            message += '\n```\n' +failed_table + '\n```'
     print(f'### {message}')
 else:
     payload.append(no_error_payload)
@@ -70,21 +72,34 @@ if os.environ.get("TEST_TYPE", "") != "":
             "text": {
                 "type": "mrkdwn",
                 "text": message
-            }
+            },
         }
         payload.append(md_report)
+        action_button = {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*For more details:*"
+            },
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Check Action results", "emoji": True},
+                "url": f"https://github.com/huggingface/peft/actions/runs/{os.environ['GITHUB_RUN_ID']}",
+            },
+        }
+        payload.append(action_button)
 
     date_report = {
         "type": "context",
         "elements": [
             {
-                "type": "mrkdwn",
-                "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}"
-            }
-        ]
+                "type": "plain_text",
+                "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}",
+            },  
+        ],
     }
     payload.append(date_report)
 
 
     client = WebClient(token=os.environ.get("SLACK_API_TOKEN"))
-    client.chat_postMessage(channel=os.environ.get("SLACK_CHANNEL_ID"), text=message, blocks=payload)
+    client.chat_postMessage(channel="#peft-ci-daily", text=message, blocks=payload)
