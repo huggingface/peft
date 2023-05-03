@@ -178,15 +178,14 @@ model.config.suppress_tokens = []
 
 To get the model ready for `int8` quantization, use the utility function [`prepare_model_for_int8_training`](https://github.com/huggingface/peft/blob/34027fe813756897767b9a6f19ae7f1c4c7b418c/src/peft/utils/other.py#L35) to handle the following:
 
-- casts the `LayerNorm` to full precision (`fp32`) for stability
+- casts all the non `int8` modules to full precision (`fp32`) for stability
 - adds a forward hook to the input embedding layer to calculate the gradients of the input hidden states
 - enables gradient checkpointing for more memory-efficient training
-- casts the output logits to `fp32` for smoother sampling
 
 ```py
 from peft import prepare_model_for_int8_training
 
-model = prepare_model_for_int8_training(model, output_embedding_layer_name="proj_out")
+model = prepare_model_for_int8_training(model)
 ```
 
 Let's also apply LoRA to the training to make it even more efficient. Load a [`~peft.LoraConfig`] and configure the following parameters:
