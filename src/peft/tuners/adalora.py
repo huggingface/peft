@@ -311,8 +311,6 @@ class AdaLoraModel(LoraModel):
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
                 model_config["model_type"]
             ]
-        if peft_config.inference_mode:
-            peft_config.merge_weights = True
         return peft_config
 
 
