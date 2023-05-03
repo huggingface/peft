@@ -65,8 +65,8 @@ class LoraConfig(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
-    lora_alpha: int = field(default=None, metadata={"help": "Lora alpha"})
-    lora_dropout: float = field(default=None, metadata={"help": "Lora dropout"})
+    lora_alpha: int = field(default=1, metadata={"help": "Lora alpha"})
+    lora_dropout: float = field(default=0.0, metadata={"help": "Lora dropout"})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
