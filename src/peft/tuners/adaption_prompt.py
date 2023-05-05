@@ -255,7 +255,7 @@ class AdaptionPromptModel(nn.Module):
             setattr(par, config.target_modules, attn)
 
     def _set_adapted_attentions(self, adapter_name: str) -> None:
-        """Replace LlamaAttention modules with cached AdaptedAttention modules."""
+        """Replace original model's attention modules with cached AdaptedAttention modules."""
         cached = self._cached_adapters[adapter_name]
         del self._cached_adapters[adapter_name]
         config = self._configs[adapter_name]
@@ -289,7 +289,7 @@ class AdaptionPromptModel(nn.Module):
 
 
 class AdaptedAttention(nn.Module):
-    """This module wraps a LLamaAttention module and injects adaption prompts."""
+    """This module wraps the original model's attention module and injects adaption prompts."""
 
     def __init__(self, model_type: str, adapter_len: int, model):
         """
@@ -320,13 +320,13 @@ class AdaptedAttention(nn.Module):
 
     def forward(self, **kwargs):
         """
-        Forward pass for the adapter which wraps the original LlamaAttention module.
+        Forward pass for the adapter which wraps the original model's attention module.
 
         "Official" paper implementation:
         https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L141
 
         Args:
-            kwargs: See the original LlamaAttention module.
+            kwargs: See the original model's attention module.
         """
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
