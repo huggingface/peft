@@ -397,7 +397,7 @@ class AdaptedAttention(nn.Module):
         # Initialize the gate to 0 as this is "zero-init".
         self.adaption_gate = nn.Parameter(torch.zeros(1, device=device))
 
-    def forward(self, **kwargs):
+    def forward(self, hidden_states=None, **kwargs):
         """
         Forward pass for the adapter which wraps the original model's attention module.
 
@@ -405,12 +405,13 @@ class AdaptedAttention(nn.Module):
         https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L141
 
         Args:
+            hidden_states: See the original model's attention module.
             kwargs: See the original model's attention module.
         """
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(**kwargs))
+        output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(hidden_states, **kwargs))
         bsz = output.shape[0]
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
@@ -435,6 +436,9 @@ class AdaptedAttention(nn.Module):
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
+
+        if "hidden_states" not in kwargs:
+            kwargs["hidden_states"] = hidden_states
 
         # Recompute query states.
         compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
