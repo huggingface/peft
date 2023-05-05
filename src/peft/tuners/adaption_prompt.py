@@ -80,6 +80,22 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     return llama_apply_rotary_pos_emb(query_states, cos, sin, position_ids)
 
 
+def llama_compute_adapter_output(model, query_states, adapter_k, adapter_v, adaption_gate, **kwargs):
+    bsz, num_heads, q_len, head_dim = query_states.shape
+
+    # (bsz, num_heads, q_len, adapter_len)
+    scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(head_dim)
+    # Upcast attention to fp32
+    # (bsz, num_heads, q_len, adapter_len)
+    scores = adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
+    # (bsz, q_len, num_heads * head_dim)
+    adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
+    # (bsz, q_len, hidden_size)
+    adapter_output = model.o_proj(adapter_output)
+
+    return adapter_output
+
+
 def gpt_neox_rotate_half(x: torch.Tensor):
     return llama_rotate_half(x)
 
@@ -113,15 +129,33 @@ def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
     return query
 
 
+def gpt_neox_compute_adapter_output(model, query_states, adapter_k, adapter_v, adaption_gate, **kwargs):
+    bsz, num_heads, q_len, head_dim = query_states.shape
+
+    attention_mask = kwargs.get("attention_mask")
+    head_mask = kwargs.get("head_mask")
+    _, scores = model._attn(query_states, adapter_k, adapter_v, attention_mask, head_mask)
+
+    # (bsz, num_heads, q_len, adapter_len)
+    scores = adaption_gate * scores.to(query_states.dtype)
+    # (bsz, q_len, num_heads * head_dim)
+    adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
+    # (bsz, q_len, hidden_size)
+    adapter_output = model._merge_heads(adapter_output, model.num_attention_heads, model.head_size)
+    adapter_output = model.dense(adapter_output)
+
+    return adapter_output
+
+
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
     "ModelTypeConfig",
     [
         "compute_query_states",
+        "compute_adapter_output",
         "target_modules",
         "k_proj_layer",
         "v_proj_layer",
-        "o_proj_layer",
         "num_head_attr",
         "head_size_attr"
     ]
@@ -130,19 +164,19 @@ ModelTypeConfig = namedtuple(
 TRANSFORMERS_MODEL_CONFIG = {
     "llama": ModelTypeConfig(
         compute_query_states=llama_compute_query_states,
+        compute_adapter_output=llama_compute_adapter_output,
         target_modules="self_attn",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
-        o_proj_layer="o_proj",
         num_head_attr="num_heads",
         head_size_attr="head_dim"
     ),
     "gpt_neox": ModelTypeConfig(
         compute_query_states=gpt_neox_compute_query_states,
+        compute_adapter_output=llama_compute_adapter_output,
         target_modules="attention",
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
-        o_proj_layer="dense",
         num_head_attr="num_attention_heads",
         head_size_attr="head_size"
     )
@@ -378,11 +412,8 @@ class AdaptedAttention(nn.Module):
 
         output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(**kwargs))
         bsz = output.shape[0]
-        q_len = output.shape[1]
-        embed_dim = output.shape[2]
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
-        o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
         num_head = TRANSFORMERS_MODEL_CONFIG[self.model_type].num_head_attr
         head_size = TRANSFORMERS_MODEL_CONFIG[self.model_type].head_size_attr
 
@@ -410,16 +441,12 @@ class AdaptedAttention(nn.Module):
         # (bsz, num_heads, q_len, head_dim)
         query_states = compute_query_states(model=self.model, **kwargs)
 
-        # (bsz, num_heads, q_len, adapter_len)
-        scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(getattr(self.model, head_size))
-        # Upcast attention to fp32
-        # (bsz, num_heads, q_len, adapter_len)
-        scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        # (bsz, q_len, num_heads * head_dim)
-        adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
+        # Compute adapter output
+        compute_adapter_output = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_adapter_output
         # (bsz, q_len, hidden_size)
-        if o_proj_layer is not None:
-            adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
+        adapter_output = compute_adapter_output(
+            self.model, query_states, adapter_k, adapter_v, self.adaption_gate, **kwargs
+        )
 
         # Add adaption prompt output to original output.
         output = output + adapter_output
