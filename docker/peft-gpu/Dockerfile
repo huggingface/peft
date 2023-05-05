@@ -15,6 +15,7 @@ RUN apt-get update && \
 RUN apt-get update && \
     apt install -y ffmpeg
 
+RUN apt install -y libsndfile1-dev
 RUN git lfs install
 
 # Create our conda env - copied from https://github.com/huggingface/accelerate/blob/main/docker/accelerate-gpu/Dockerfile
