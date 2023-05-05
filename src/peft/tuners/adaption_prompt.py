@@ -80,6 +80,18 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     return llama_apply_rotary_pos_emb(query_states, cos, sin, position_ids)
 
 
+def gpt_neox_rotate_half(x: torch.Tensor):
+    return llama_rotate_half(x)
+
+
+def gpt_neox_apply_rotary_pos_emb(q, cos, sin, position_ids):
+    return llama_apply_rotary_pos_emb(q, cos, sin, position_ids)
+
+
+def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
+    return llama_compute_query_states(model, **kwargs)
+
+
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
     "ModelTypeConfig", ["compute_query_states", "target_modules", "k_proj_layer", "v_proj_layer", "o_proj_layer"]
@@ -93,6 +105,13 @@ TRANSFORMERS_MODEL_CONFIG = {
         v_proj_layer="v_proj",
         o_proj_layer="o_proj",
     ),
+    "gpt_neox": ModelTypeConfig(
+        compute_query_states=gpt_neox_compute_query_states,
+        target_modules="attention",
+        k_proj_layer="query_key_value",
+        v_proj_layer="query_key_value",
+        o_proj_layer="dense",
+    )
 }
 
 
