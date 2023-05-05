@@ -94,7 +94,16 @@ def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
 
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
-    "ModelTypeConfig", ["compute_query_states", "target_modules", "k_proj_layer", "v_proj_layer", "o_proj_layer"]
+    "ModelTypeConfig",
+    [
+        "compute_query_states",
+        "target_modules",
+        "k_proj_layer",
+        "v_proj_layer",
+        "o_proj_layer",
+        "num_head_attr",
+        "head_size_attr"
+    ]
 )
 # Mapping of transformers model types to their specific configuration.
 TRANSFORMERS_MODEL_CONFIG = {
@@ -104,6 +113,8 @@ TRANSFORMERS_MODEL_CONFIG = {
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
         o_proj_layer="o_proj",
+        num_head_attr="num_heads",
+        head_size_attr="head_dim"
     ),
     "gpt_neox": ModelTypeConfig(
         compute_query_states=gpt_neox_compute_query_states,
@@ -111,6 +122,8 @@ TRANSFORMERS_MODEL_CONFIG = {
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
         o_proj_layer="dense",
+        num_head_attr="num_attention_heads",
+        head_size_attr="head_size"
     )
 }
 
@@ -349,6 +362,8 @@ class AdaptedAttention(nn.Module):
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
         o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
+        num_head = TRANSFORMERS_MODEL_CONFIG[self.model_type].num_head_attr
+        head_size = TRANSFORMERS_MODEL_CONFIG[self.model_type].head_size_attr
 
         if k_proj_layer == v_proj_layer:
             _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(embed_dim, dim=2)
@@ -357,13 +372,13 @@ class AdaptedAttention(nn.Module):
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_k = (
-            key.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            key.view(1, self.adapter_len, getattr(self.model, num_head), getattr(self.model, head_size))
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
-            value.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            value.view(1, self.adapter_len, getattr(self.model, num_head), getattr(self.model, head_size))
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
