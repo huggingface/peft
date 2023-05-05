@@ -61,7 +61,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
-        if model.peft_config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
+        if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
             to_return["prefix_task_cols"] = model.prompt_encoder[adapter_name].prefix_task_cols
             to_return["prefix_task_rows"] = model.prompt_encoder[adapter_name].prefix_task_rows
             prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
