@@ -120,6 +120,17 @@ def is_adaption_prompt_trainable(params: str) -> bool:
     return params.split(".")[-1].startswith("adaption_")
 
 
+def handle_origin_attention_module_outputs(model_type: str, outputs: tuple):
+    if model_type == "llama":
+        output, _, past_key_value = outputs
+    elif model_type == "gpt_neox":
+        output, past_key_value = outputs[0], outputs[1]
+    else:
+        raise ValueError(f"Unsupported model type: '{model_type}'.")
+
+    return output, past_key_value
+
+
 @dataclass
 class AdaptionPromptConfig(PeftConfig):
     """Stores the configuration of an [`AdaptionPromptModel`]."""
@@ -140,7 +151,7 @@ def prepare_config(
 ) -> AdaptionPromptConfig:
     """Prepare the config based on the llama model type."""
     if model.config.model_type not in TRANSFORMERS_MODEL_CONFIG:
-        raise ValueError("Unsupported model type for adaption prompt: '{model.config.model_type}'.")
+        raise ValueError(f"Unsupported model type for adaption prompt: '{model.config.model_type}'.")
 
     model_config = TRANSFORMERS_MODEL_CONFIG[model.config.model_type]
 
@@ -331,7 +342,7 @@ class AdaptedAttention(nn.Module):
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        output, _, past_key_value = self.model(**kwargs)
+        output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(**kwargs))
         bsz = output.shape[0]
         q_len = output.shape[1]
         embed_dim = output.shape[2]
