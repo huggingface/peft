@@ -402,7 +402,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
             model.config.forced_decoder_ids = None
             model.config.suppress_tokens = []
 
-            model = prepare_model_for_int8_training(model, output_embedding_layer_name="proj_out")
+            model = prepare_model_for_int8_training(model)
 
             config = LoraConfig(
                 r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none"

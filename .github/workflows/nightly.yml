@@ -51,7 +51,7 @@ jobs:
       - name: Generate Report
         if: always()
         run: |
-          pip install slack_sdk
+          pip install slack_sdk tabulate
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
@@ -97,5 +97,5 @@ jobs:
       - name: Generate Report
         if: always()
         run: |
-          pip install slack_sdk
+          pip install slack_sdk tabulate
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY

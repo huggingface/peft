@@ -313,16 +313,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Disables the adapter module.
         """
-        if isinstance(self.active_peft_config, PromptLearningConfig):
-            old_forward = self.forward
-            self.forward = self.base_model.forward
-        else:
-            self.base_model.disable_adapter_layers()
-        yield
-        if isinstance(self.active_peft_config, PromptLearningConfig):
-            self.forward = old_forward
-        else:
-            self.base_model.enable_adapter_layers()
+        try:
+            if isinstance(self.peft_config, PromptLearningConfig):
+                old_forward = self.forward
+                self.forward = self.base_model.forward
+            else:
+                self.base_model.disable_adapter_layers()
+            yield
+        finally:
+            if isinstance(self.peft_config, PromptLearningConfig):
+                self.forward = old_forward
+            else:
+                self.base_model.enable_adapter_layers()
 
     def get_base_model(self):
         """
