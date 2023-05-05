@@ -387,15 +387,16 @@ class AdaptedAttention(nn.Module):
         self.adapter_len = adapter_len
         # Assume all parameters of the attention model we are wrapping are on the same device.
         device = next(model.parameters()).device
+        dtype = next(model.parameters()).dtype
         # Don't think this was specified in the paper, but we follow the official repo which used an Embedding
         # which initializes the tokens with standard normal values.
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
         self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, self.model.hidden_size, device=device).normal_()
+            torch.empty(1, adapter_len, self.model.hidden_size, device=device, dtype=dtype).normal_()
         )
         # Initialize the gate to 0 as this is "zero-init".
-        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device))
+        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=dtype))
 
     def forward(self, hidden_states=None, **kwargs):
         """
@@ -429,12 +430,16 @@ class AdaptedAttention(nn.Module):
             key.view(1, self.adapter_len, getattr(self.model, num_head), getattr(self.model, head_size))
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
+            .contiguous()
+            .float()
         )
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
             value.view(1, self.adapter_len, getattr(self.model, num_head), getattr(self.model, head_size))
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
+            .contiguous()
+            .float()
         )
 
         if "hidden_states" not in kwargs:
@@ -443,14 +448,14 @@ class AdaptedAttention(nn.Module):
         # Recompute query states.
         compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
         # (bsz, num_heads, q_len, head_dim)
-        query_states = compute_query_states(model=self.model, **kwargs)
+        query_states = compute_query_states(model=self.model, **kwargs).contiguous().float()
 
         # Compute adapter output
         compute_adapter_output = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_adapter_output
         # (bsz, q_len, hidden_size)
         adapter_output = compute_adapter_output(
             self.model, query_states, adapter_k, adapter_v, self.adaption_gate, **kwargs
-        )
+        ).type_as(output)
 
         # Add adaption prompt output to original output.
         output = output + adapter_output
