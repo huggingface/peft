@@ -89,7 +89,28 @@ def gpt_neox_apply_rotary_pos_emb(q, cos, sin, position_ids):
 
 
 def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
-    return llama_compute_query_states(model, **kwargs)
+    hidden_states = kwargs.get("hidden_states")
+    position_ids = kwargs.get("position_ids")
+    past_key_value = kwargs.get("layer_past")
+    bsz, q_len, _ = hidden_states.size()
+
+    qkv = model.query_key_value(hidden_states)
+    query_states, _, value_states = qkv.split(qkv.shape[2] // 3, dim=2)
+    query_states = query_states.view(bsz, q_len, model.num_attention_heads, model.head_size).transpose(1, 2)
+    value_states = value_states.view(bsz, q_len, model.num_attention_heads, model.head_size).transpose(1, 2)
+
+    query_rot = query_states[..., : model.rotary_ndims]
+    query_pass = query_states[..., model.rotary_ndims:]
+
+    seq_len = q_len
+    if past_key_value is not None:
+        seq_len += past_key_value[0].shape[-2]
+    cos, sin = model.rotary_emb(value_states, seq_len=seq_len)
+
+    query = gpt_neox_apply_rotary_pos_emb(query_rot, cos, sin, position_ids)
+    query = torch.cat((query, query_pass), dim=-1)
+
+    return query
 
 
 # Contains the config that is specific to a transformers model type.
@@ -366,7 +387,8 @@ class AdaptedAttention(nn.Module):
         head_size = TRANSFORMERS_MODEL_CONFIG[self.model_type].head_size_attr
 
         if k_proj_layer == v_proj_layer:
-            _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(embed_dim, dim=2)
+            qkv = getattr(self.model, k_proj_layer)(self.adaption_prompt)
+            _, key, value = qkv.split(qkv.shape[2] // 3, dim=2)
         else:
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
