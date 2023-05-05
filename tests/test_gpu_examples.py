@@ -23,7 +23,9 @@ import pytest
 import torch
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
+    AutoImageProcessor,
     AutoModelForCausalLM,
+    AutoModelForImageClassification,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
@@ -443,3 +445,80 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+@require_torch_gpu
+class PeftGPUExampleTests(unittest.TestCase):
+    r"""
+    Test the GPU common examples of Peft.
+    """
+
+    def setUp(self):
+        self.vision_model_checkpoint = "google/vit-base-patch16-224-in21k"
+
+    def test_vision_training(self):
+        dataset = load_dataset("ybelkada/food101-tiny", split="train")
+
+        labels = dataset.features["label"].names
+        label2id, id2label = {}, {}
+        for i, label in enumerate(labels):
+            label2id[label] = i
+            id2label[i] = label
+
+        model = AutoModelForImageClassification.from_pretrained(
+            self.vision_model_checkpoint,
+            label2id=label2id,
+            id2label=id2label,
+            ignore_mismatched_sizes=True,
+        )
+        image_processor = AutoImageProcessor.from_pretrained(self.vision_model_checkpoint)
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=16,
+            target_modules=["query", "value"],
+            lora_dropout=0.1,
+            bias="none",
+            modules_to_save=["classifier"],
+        )
+        lora_model = get_peft_model(model, config)
+
+        model_name = self.vision_model_checkpoint.split("/")[-1]
+        batch_size = 4
+
+        def collate_fn(examples):
+            pixel_values = torch.stack([example["pixel_values"] for example in examples])
+            labels = torch.tensor([example["label"] for example in examples])
+            return {"pixel_values": pixel_values, "labels": labels}
+
+        def preprocess_train(example_batch):
+            """Apply train_transforms across a batch."""
+            example_batch["pixel_values"] = image_processor(example_batch["images"], return_tensors="pt").pixel_values
+            return example_batch
+
+        dataset.set_transform(preprocess_train)
+
+        args = TrainingArguments(
+            f"{model_name}-finetuned-lora-food101",
+            remove_unused_columns=False,
+            save_strategy="epoch",
+            learning_rate=5e-3,
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=4,
+            fp16=True,
+            num_train_epochs=1,
+            label_names=["labels"],
+        )
+
+        trainer = Trainer(
+            lora_model,
+            args,
+            train_dataset=dataset,
+            tokenizer=image_processor,
+            data_collator=collate_fn,
+        )
+
+        trainer.train()
+
+        # assert loss is not None
+        self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
