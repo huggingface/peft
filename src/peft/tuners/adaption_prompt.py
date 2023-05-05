@@ -389,7 +389,7 @@ class AdaptedAttention(nn.Module):
         query_states = compute_query_states(model=self.model, **kwargs)
 
         # (bsz, num_heads, q_len, adapter_len)
-        scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(self.model.head_dim)
+        scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(getattr(self.model, head_size))
         # Upcast attention to fp32
         # (bsz, num_heads, q_len, adapter_len)
         scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
