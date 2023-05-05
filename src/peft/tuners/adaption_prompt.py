@@ -173,7 +173,7 @@ TRANSFORMERS_MODEL_CONFIG = {
     ),
     "gpt_neox": ModelTypeConfig(
         compute_query_states=gpt_neox_compute_query_states,
-        compute_adapter_output=gpt_neox_compute_query_states,
+        compute_adapter_output=gpt_neox_compute_adapter_output,
         target_modules="attention",
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
