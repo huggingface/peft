@@ -103,6 +103,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             self.add_adapter(adapter_name, peft_config)
 
+        if model.is_gradient_checkpointing:
+            model = self._prepare_model_for_gradient_checkpointing(model)
+
     def save_pretrained(self, save_directory, **kwargs):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
@@ -215,6 +218,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
         ).long()
+
+    def _prepare_model_for_gradient_checkpointing(self, model):
+        r"""
+        Prepares the model for gradient checkpointing if necessary
+        """
+        if not getattr(model, "is_loaded_in_8bit", False):
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            else:
+
+                def make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
+
+                model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+        return model
 
     def get_prompt_embedding_to_save(self, adapter_name):
         """
