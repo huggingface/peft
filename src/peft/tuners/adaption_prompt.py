@@ -289,7 +289,6 @@ class AdaptionPromptModel(nn.Module):
             attn = AdaptedAttention(
                 config=self.model.config,
                 model=getattr(par, config.target_modules),
-                model_type=self.model.config.model_type,
                 adapter_len=config.adapter_len,
             )
             setattr(par, config.target_modules, attn)
@@ -336,10 +335,9 @@ class AdaptedAttention(nn.Module):
         Initialize object.
 
         Args:
-            model_type: The transformer model type. This is used to retrieve the right method to
-                compute query states.
-            adapter_len: The length of the adaption prompt to insert.
+            config: Base model's cnfig.
             model: The original transformer attention module that is being wrapped.
+            adapter_len: The length of the adaption prompt to insert.
         """
         assert not isinstance(model, AdaptedAttention)
         super().__init__()
