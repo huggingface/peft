@@ -121,9 +121,7 @@ ModelTypeConfig = namedtuple(
         "target_modules",
         "k_proj_layer",
         "v_proj_layer",
-        "o_proj_layer",
-        "num_head_attr",
-        "head_size_attr"
+        "o_proj_layer"
     ]
 )
 # Mapping of transformers model types to their specific configuration.
@@ -133,18 +131,14 @@ TRANSFORMERS_MODEL_CONFIG = {
         target_modules="self_attn",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
-        o_proj_layer="o_proj",
-        num_head_attr="num_heads",
-        head_size_attr="head_dim"
+        o_proj_layer="o_proj"
     ),
     "gpt_neox": ModelTypeConfig(
         compute_query_states=gpt_neox_compute_query_states,
         target_modules="attention",
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
-        o_proj_layer="dense",
-        num_head_attr="num_attention_heads",
-        head_size_attr="head_size"
+        o_proj_layer="dense"
     )
 }
 
@@ -293,9 +287,10 @@ class AdaptionPromptModel(nn.Module):
         """Wrap LlamaAttention modules with newly created AdaptedAttention modules."""
         for par in parents:
             attn = AdaptedAttention(
+                config=self.model.config,
+                model=getattr(par, config.target_modules),
                 model_type=self.model.config.model_type,
                 adapter_len=config.adapter_len,
-                model=getattr(par, config.target_modules),
             )
             setattr(par, config.target_modules, attn)
 
@@ -336,7 +331,7 @@ class AdaptionPromptModel(nn.Module):
 class AdaptedAttention(nn.Module):
     """This module wraps the original model's attention module and injects adaption prompts."""
 
-    def __init__(self, model_type: str, adapter_len: int, model):
+    def __init__(self, config, model, adapter_len: int):
         """
         Initialize object.
 
@@ -348,8 +343,11 @@ class AdaptedAttention(nn.Module):
         """
         assert not isinstance(model, AdaptedAttention)
         super().__init__()
-        self.model_type = model_type
         self.model = model
+        self.model_type = config.model_type
+        self.hidden_size = config.hidden_size
+        self.num_head = config.num_attention_heads
+        self.head_size = self.hidden_size // self.num_head
         self.adapter_len = adapter_len
         # Assume all parameters of the attention model we are wrapping are on the same device.
         device = next(model.parameters()).device
@@ -382,24 +380,21 @@ class AdaptedAttention(nn.Module):
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
         o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
-        num_head = TRANSFORMERS_MODEL_CONFIG[self.model_type].num_head_attr
-        head_size = TRANSFORMERS_MODEL_CONFIG[self.model_type].head_size_attr
 
         if k_proj_layer == v_proj_layer:
-            qkv = getattr(self.model, k_proj_layer)(self.adaption_prompt)
-            _, key, value = qkv.split(qkv.shape[2] // 3, dim=2)
+            _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(self.hidden_size, dim=2)
         else:
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_k = (
-            key.view(1, self.adapter_len, getattr(self.model, num_head), getattr(self.model, head_size))
+            key.view(1, self.adapter_len, self.num_head, self.head_size)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
-            value.view(1, self.adapter_len, getattr(self.model, num_head), getattr(self.model, head_size))
+            value.view(1, self.adapter_len, self.num_head, self.head_size)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
