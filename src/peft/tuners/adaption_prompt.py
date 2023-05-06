@@ -422,9 +422,9 @@ class AdaptedAttention(nn.Module):
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
         # (bsz, q_len, hidden_size)
-        adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
+        if o_proj_layer is not None:
+            adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
 
         # Add adaption prompt output to original output.
-        if o_proj_layer is not None:
-            output = output + adapter_output
+        output = output + adapter_output
         return output, None, past_key_value
