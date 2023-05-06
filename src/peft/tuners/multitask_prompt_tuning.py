@@ -12,8 +12,11 @@ from .prompt_tuning import PromptTuningConfig, PromptEmbedding
 class MultitaskPromptTuningInit(str, enum.Enum):
     TEXT = "TEXT"
     RANDOM = "RANDOM"
+    # average the prefix and column matrices obtained during source training
     AVERAGE_SOURCE_TASKS = "AVERAGE_SOURCE_TASKS"
+    # pick prefix and column matrices for a particular task obtained during source training
     EXACT_SOURCE_TASK = "EXACT_SOURCE_TASK"
+    # only use the prompt embeddings trained during source training
     ONLY_SOURCE_SHARED = "ONLY_SOURCE_SHARED"
 
 
