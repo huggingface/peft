@@ -381,6 +381,7 @@ class AdaptedAttention(nn.Module):
         bsz = output.shape[0]
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
+        o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
         num_head = TRANSFORMERS_MODEL_CONFIG[self.model_type].num_head_attr
         head_size = TRANSFORMERS_MODEL_CONFIG[self.model_type].head_size_attr
 
@@ -421,8 +422,9 @@ class AdaptedAttention(nn.Module):
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
         # (bsz, q_len, hidden_size)
-        adapter_output = getattr(self.model, TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer)(adapter_output)
+        adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
 
         # Add adaption prompt output to original output.
-        output = output + adapter_output
+        if o_proj_layer is not None:
+            output = output + adapter_output
         return output, None, past_key_value
