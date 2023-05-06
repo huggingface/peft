@@ -130,3 +130,6 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
+
+    if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
+        model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)

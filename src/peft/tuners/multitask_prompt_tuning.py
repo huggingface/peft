@@ -10,7 +10,7 @@ from .prompt_tuning import PromptTuningConfig, PromptEmbedding
 class MultitaskPromptTuningInit(str, enum.Enum):
     TEXT = "TEXT"
     RANDOM = "RANDOM"
-    AVERAGE_SOURCE_TASKS = "AVERAGE_SOURCE"
+    AVERAGE_SOURCE_TASKS = "AVERAGE_SOURCE_TASKS"
     EXACT_SOURCE_TASK = "EXACT_SOURCE_TASK"
     ONLY_SOURCE_SHARED = "ONLY_SOURCE_SHARED"
 
@@ -26,7 +26,7 @@ class MultitaskPromptTuningConfig(PromptTuningConfig):
         metadata={"help": "The path of source state dict"},
     )
     prompt_tuning_init_task: Optional[int] = field(
-        default=None, metadata={"help": "source task id for initialization"}
+        default=0, metadata={"help": "source task id for initialization"}
     )
     num_ranks: Optional[int] = field(default=1, metadata={"help": "ranks"})
     num_tasks: Optional[int] = field(default=1, metadata={"help": "number of tasks"})
