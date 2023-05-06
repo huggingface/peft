@@ -18,6 +18,7 @@
 # limitations under the License.
 
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+from .adaption_prompt_v2 import AdaptionPromptV2Config, AdaptionPromptV2Model
 from .lora import LoraConfig, LoraModel
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType

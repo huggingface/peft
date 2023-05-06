@@ -23,6 +23,7 @@ from .peft_model import (
 from .tuners import (
     AdaLoraConfig,
     AdaptionPromptConfig,
+    AdaptionPromptV2Config,
     LoraConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -40,6 +41,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
     "ADAPTION_PROMPT": AdaptionPromptConfig,
+    "ADAPTION_PROMPT_V2": AdaptionPromptV2Config,
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
     "P_TUNING": PromptEncoderConfig,

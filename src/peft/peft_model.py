@@ -31,6 +31,7 @@ from transformers.utils import PushToHubMixin
 from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
+    AdaptionPromptV2Model,
     LoraModel,
     PrefixEncoder,
     PromptEmbedding,
@@ -58,6 +59,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.PREFIX_TUNING: PrefixEncoder,
     PeftType.ADALORA: AdaLoraModel,
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
+    PeftType.ADAPTION_PROMPT_V2: AdaptionPromptV2Model,
 }
 
 

@@ -57,7 +57,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
 
-    elif config.peft_type == PeftType.ADAPTION_PROMPT:
+    elif config.peft_type in (PeftType.ADAPTION_PROMPT, PeftType.ADAPTION_PROMPT_V2):
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
     elif isinstance(config, PromptLearningConfig):
         to_return = {}
