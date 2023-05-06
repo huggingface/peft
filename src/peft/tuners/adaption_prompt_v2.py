@@ -193,6 +193,8 @@ def prepare_config(
 
     if peft_config.attention_module is None:
         peft_config.attention_module = model_config.attention_module
+    if peft_config.mlp_module is None:
+        peft_config.mlp_module = model_config.mlp_module
 
     return peft_config
 
