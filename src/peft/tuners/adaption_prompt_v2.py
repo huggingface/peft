@@ -176,6 +176,7 @@ class AdaptionPromptV2Config(PeftConfig):
     adapter_layers: int = field(default=None, metadata={"help": "Number of adapter layers (from the top)"})
     add_bias: bool = field(default=True, metadata={"help": "Whether to add bias"})
     add_scale: bool = field(default=True, metadata={"help": "Whether to add scale"})
+    multi_modal: bool = field(default=False, metadata={"help": "Whether used for multi modal training or inference"})
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAPTION_PROMPT_V2
@@ -253,7 +254,10 @@ class AdaptionPromptV2Model(nn.Module):
         # some other PyTorch ordered container, the behavior is undefined as we
         # assume here that the order of the modules is the same as the order of
         # the transformer decoder layers.
+        first_parent = parents[0]
         parents = parents[-config.adapter_layers :]
+        if config.multi_modal and first_parent not in parents:
+            parents = [first_parent] + parents
         self._parents[adapter_name] = parents
 
         # It is only None during initialization.
@@ -294,22 +298,32 @@ class AdaptionPromptV2Model(nn.Module):
 
     def _create_adapted_modules(self, config: AdaptionPromptV2Config, parents: List[nn.Module]) -> None:
         """Wrap original modules with newly created Adapted* modules."""
-        for par in parents:
-            attn = AdaptedAttention(
-                config=self.model.config,
-                model=getattr(par, config.attention_module),
-                adapter_len=config.adapter_len,
-                add_bias=config.add_bias,
-                add_scale=config.add_scale,
-            )
-            mlp = AdaptedMLP(
-                config=self.model.config,
-                model=getattr(par, config.mlp_module),
-                add_bias=config.add_bias,
-                add_scale=config.add_scale
-            )
-            setattr(par, config.attention_module, attn)
-            setattr(par, config.mlp_module, mlp)
+        for i, par in enumerate(parents):
+            if config.multi_modal and i == 0:
+                attn = AdaptedAttention(
+                    config=self.model.config,
+                    model=getattr(par, config.attention_module),
+                    adapter_len=config.adapter_len,
+                    add_bias=False,
+                    add_scale=False
+                )
+                setattr(par, config.attention_module, attn)
+            else:
+                attn = AdaptedAttention(
+                    config=self.model.config,
+                    model=getattr(par, config.attention_module),
+                    adapter_len=config.adapter_len,
+                    add_bias=config.add_bias,
+                    add_scale=config.add_scale,
+                )
+                mlp = AdaptedMLP(
+                    config=self.model.config,
+                    model=getattr(par, config.mlp_module),
+                    add_bias=config.add_bias,
+                    add_scale=config.add_scale
+                )
+                setattr(par, config.attention_module, attn)
+                setattr(par, config.mlp_module, mlp)
 
     def _set_adapted_modules(self, adapter_name: str) -> None:
         """Replace original model's submodules with cached Adapted* modules."""
