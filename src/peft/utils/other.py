@@ -32,7 +32,7 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_int8_training(model, fp32=True, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -41,6 +41,8 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
     Args:
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
+        fp32, ('bool'):
+            Determines whether to typecast to float32. The default value is True.
     """
     loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
 
@@ -48,9 +50,9 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         # freeze base model's layers
         param.requires_grad = False
 
-    # cast all non INT8 parameters to fp32
+    # cast all non INT8 parameters to fp32 if fp32 is True
     for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+        if (fp32 is True) and (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
             param.data = param.data.to(torch.float32)
 
     if loaded_in_8bit and use_gradient_checkpointing:
