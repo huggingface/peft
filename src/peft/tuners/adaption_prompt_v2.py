@@ -286,6 +286,42 @@ class AdaptionPromptV2Model(nn.Module):
 
         self._active_adapter = adapter_name
 
+    def freeze_adaption_params(self, is_vision_params: bool = False, mode: bool = True):
+        """Freeze adaption params, this function is useful at multi-modal training"""
+        if not self._enabled:
+            return
+
+        config = self._configs[self._active_adapter]
+
+        if not config.multi_modal and is_vision_params:
+            return
+
+        parents = []
+        for name, _ in self.model.named_modules():
+            if name.endswith(config.attention_module):
+                par, _, _ = _get_submodules(self.model, name)
+                parents.append(par)
+
+        if is_vision_params:
+            par = parents[0]
+            for n, p in getattr(par, config.attention_module).named_parameters():
+                if is_adaption_param(n):
+                    p.requires_grad = not mode
+        else:
+            num_adapter_layers = config.adapter_layers
+            if config.multi_modal and num_adapter_layers == len(parents):
+                num_adapter_layers -= 1
+            if num_adapter_layers <= 0:
+                return
+            for par in parents[-num_adapter_layers:]:
+                for n, p in getattr(par, config.attention_module).named_parameters():
+                    if is_adaption_param(n):
+                        p.requires_grad = not mode
+
+    def unfreeze_adaption_params(self, is_vision_params: bool = False):
+        """Unfreeze adaption params, this function is useful at multi-modal training"""
+        self.freeze_adaption_params(is_vision_params, False)
+
     def enable_adapter_layers(self):
         """Enable adapter layers by swapping in cached Adapted* modules."""
         self._enabled = True
