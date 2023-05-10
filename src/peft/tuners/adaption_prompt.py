@@ -21,6 +21,7 @@ from typing import Dict, List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.utils.import_utils import is_torch_fx_proxy
 
 from peft.utils.config import PeftConfig, PeftType
 from peft.utils.other import _freeze_adapter, _get_submodules
@@ -113,6 +114,64 @@ def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
     return query
 
 
+def gptj_create_sinusoidal_positions(num_pos: int, dim: int) -> torch.Tensor:
+    inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2) / dim))
+    sinusoid_inp = torch.einsum("i , j -> i j", torch.arange(num_pos, dtype=torch.float), inv_freq).float()
+    return torch.cat((torch.sin(sinusoid_inp), torch.cos(sinusoid_inp)), dim=1)
+
+
+@torch.fx.wrap
+def gptj_get_embed_positions(embed_positions, position_ids):
+    return embed_positions.to(position_ids.device).repeat(position_ids.shape[0], 1, 1)
+
+
+def gptj_rotate_every_two(x: torch.Tensor) -> torch.Tensor:
+    x1 = x[:, :, :, ::2]
+    x2 = x[:, :, :, 1::2]
+    x = torch.stack((-x2, x1), dim=-1)
+    return x.flatten(-2)  # in einsum notation: rearrange(x, '... d j -> ... (d j)')
+
+
+def gptj_apply_rotary_pos_emb(tensor: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
+    sin = torch.repeat_interleave(sin[:, :, None, :], 2, 3)
+    cos = torch.repeat_interleave(cos[:, :, None, :], 2, 3)
+    return (tensor * cos) + (gptj_rotate_every_two(tensor) * sin)
+
+
+def gptj_compute_query_states(model: nn.Module, **kwargs):
+    hidden_states = kwargs.get("hidden_states")
+    position_ids = kwargs.get("position_ids")
+    bsz, q_len, _ = hidden_states.size()
+
+    query = model.q_proj(hidden_states)
+    query = model._split_heads(query, model.num_attention_heads, model.head_dim, True)
+
+    if is_torch_fx_proxy(position_ids):
+        # The logic to conditionally copy to GPU could not be traced, so we do this
+        # every time in the torch.fx case
+        embed_positions = gptj_get_embed_positions(model.embed_positions, position_ids)
+    else:
+        embed_positions = model._get_embed_positions(position_ids)
+
+    repeated_position_ids = position_ids.unsqueeze(-1).repeat(1, 1, embed_positions.shape[-1])
+    sincos = torch.gather(embed_positions, 1, repeated_position_ids)
+    sin, cos = torch.split(sincos, sincos.shape[-1] // 2, dim=-1)
+
+    if model.rotary_dim is not None:
+        q_rot = query[:, :, :, : model.rotary_dim]
+        q_pass = query[:, :, :, model.rotary_dim:]
+
+        q_rot = gptj_apply_rotary_pos_emb(q_rot, sin, cos)
+
+        query = torch.cat([q_rot, q_pass], dim=-1)
+    else:
+        query = gptj_apply_rotary_pos_emb(query, sin, cos)
+
+    query = query.permute(0, 2, 1, 3)
+
+    return query
+
+
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
     "ModelTypeConfig",
@@ -139,6 +198,13 @@ TRANSFORMERS_MODEL_CONFIG = {
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
         o_proj_layer="dense"
+    ),
+    "gptj": ModelTypeConfig(
+        compute_query_states=gptj_compute_query_states,
+        target_modules="attn",
+        k_proj_layer="k_proj",
+        v_proj_layer="v_proj",
+        o_proj_layer="out_proj"
     )
 }
 
@@ -151,7 +217,7 @@ def is_adaption_prompt_trainable(params: str) -> bool:
 def handle_origin_attention_module_outputs(model_type: str, outputs: tuple):
     if model_type == "llama":
         output, _, past_key_value = outputs
-    elif model_type == "gpt_neox":
+    elif model_type in ["gpt_neox", "gptj"]:
         output, past_key_value = outputs[0], outputs[1]
     else:
         raise ValueError(f"Unsupported model type: '{model_type}'.")
@@ -354,7 +420,7 @@ class AdaptedAttention(nn.Module):
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
         self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, self.model.hidden_size, device=device).normal_()
+            torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
         )
         # Initialize the gate to 0 as this is "zero-init".
         self.adaption_gate = nn.Parameter(torch.zeros(1, device=device))
