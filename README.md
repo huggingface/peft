@@ -357,7 +357,6 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 3. For encoder-decoder models, `P_TUNING` or `PROMPT_TUNING` doesn't support `generate` functionality of transformers because `generate` strictly requires `decoder_input_ids` but 
 `P_TUNING`/`PROMPT_TUNING` appends soft prompt embeddings to `input_embeds` to create
 new `input_embeds` to be given to the model. Therefore, `generate` doesn't support this yet.
-
 ## Backlog:
 - [x] Add tests
 - [x] Multi Adapter training and inference support
