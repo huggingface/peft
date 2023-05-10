@@ -162,19 +162,24 @@ def fsdp_auto_wrap_policy(model, transformer_cls_to_wrap=None):
         return False
 
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
-    transformer_cls_to_wrap = transformer_cls_to_wrap or tuple()
-    if not isinstance(transformer_cls_to_wrap, tuple):
-        transformer_cls_to_wrap = (transformer_cls_to_wrap,)
+    transformer_layer_classes = (
+        PrefixEncoder,
+        PromptEncoder,
+        PromptEmbedding,
+    )
+    if "FSDP_TRANSFORMER_CLS_TO_WRAP" in os.environ:
+        module_class = FullyShardedDataParallelPlugin.get_module_class_from_name(
+            model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
+        )
+        if module_class is not None:
+            transformer_layer_classes += (module_class,)
+    if transformer_cls_to_wrap is not None:
+        if not isinstance(transformer_cls_to_wrap, tuple):
+            transformer_cls_to_wrap = tuple(transformer_cls_to_wrap)
+        transformer_layer_classes += transformer_cls_to_wrap
     transformer_wrap_policy = functools.partial(
         transformer_auto_wrap_policy,
-        transformer_layer_cls=(
-            PrefixEncoder,
-            PromptEncoder,
-            PromptEmbedding,
-            FullyShardedDataParallelPlugin.get_module_class_from_name(
-                model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
-            ),
-        ) + transformer_cls_to_wrap,
+        transformer_layer_cls=transformer_layer_classes,
     )
 
     auto_wrap_policy = functools.partial(_or_policy, policies=[lambda_policy, transformer_wrap_policy])
