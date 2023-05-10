@@ -115,7 +115,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
-    elif isinstance(config, PromptLearningConfig) or config.peft_type == PeftType.ADAPTION_PROMPT:
+    elif isinstance(config, PromptLearningConfig) or config.peft_type in (PeftType.ADAPTION_PROMPT or PeftType.ADAPTION_PROMPT_V2):
         peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
