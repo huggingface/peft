@@ -16,7 +16,7 @@ import os
 import tempfile
 import unittest
 
-from peft import LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from peft import AdaptionPromptConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 
 
 class PeftConfigTestMixin:
@@ -25,6 +25,7 @@ class PeftConfigTestMixin:
         PromptEncoderConfig,
         PrefixTuningConfig,
         PromptTuningConfig,
+        AdaptionPromptConfig,
     )
 
 

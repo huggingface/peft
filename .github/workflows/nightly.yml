@@ -1,0 +1,101 @@
+name: Self-hosted runner with slow tests (scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+env:
+  RUN_SLOW: "yes"
+  IS_GITHUB_CI: "1"
+  SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
+
+
+jobs:
+  run_all_tests_single_gpu:
+    runs-on: [self-hosted, docker-gpu, multi-gpu]
+    env:
+      CUDA_VISIBLE_DEVICES: "0"
+      TEST_TYPE: "single_gpu"
+    container:
+      image: huggingface/peft-gpu:latest
+      options: --gpus all --shm-size "16gb"
+    defaults:
+      run:
+        working-directory: peft/
+        shell: bash
+    steps:
+      - name: Update clone & pip install
+        run: |
+          source activate peft
+          git config --global --add safe.directory '*'
+          git fetch && git checkout ${{ github.sha }} 
+          pip install -e . --no-deps
+          pip install pytest-reportlog
+      
+      - name: Run common tests on single GPU
+        run: |
+          source activate peft
+          make tests_common_gpu
+
+      - name: Run examples on single GPU
+        run: |
+          source activate peft
+          make tests_examples_single_gpu
+      
+      - name: Run core tests on single GPU
+        run: |
+          source activate peft
+          make tests_core_single_gpu
+          
+      - name: Generate Report
+        if: always()
+        run: |
+          pip install slack_sdk tabulate
+          python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
+
+  run_all_tests_multi_gpu:
+    runs-on: [self-hosted, docker-gpu, multi-gpu]
+    env:
+      CUDA_VISIBLE_DEVICES: "0,1"
+      TEST_TYPE: "multi_gpu"
+    container:
+      image: huggingface/peft-gpu:latest
+      options: --gpus all --shm-size "16gb"
+    defaults:
+      run:
+        working-directory: peft/
+        shell: bash
+    steps:
+      - name: Update clone
+        run: |
+          source activate peft
+          git config --global --add safe.directory '*'
+          git fetch && git checkout ${{ github.sha }}
+          pip install -e . --no-deps
+          pip install pytest-reportlog
+
+      - name: Run core GPU tests on multi-gpu
+        run: |
+          source activate peft
+          
+      - name: Run common tests on multi GPU
+        run: |
+          source activate peft
+          make tests_common_gpu
+        
+      - name: Run examples on multi GPU
+        run: |
+          source activate peft
+          make tests_examples_multi_gpu
+      
+      - name: Run core tests on multi GPU
+        run: |
+          source activate peft
+          make tests_core_multi_gpu
+          
+      - name: Generate Report
+        if: always()
+        run: |
+          pip install slack_sdk tabulate
+          python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY

@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.3.0.dev0"
+__version__ = "0.4.0.dev0"
 
 from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING, get_peft_config, get_peft_model
 from .peft_model import (
@@ -28,6 +28,8 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .tuners import (
+    AdaptionPromptConfig,
+    AdaptionPromptModel,
     LoraConfig,
     LoraModel,
     AdaLoraConfig,
