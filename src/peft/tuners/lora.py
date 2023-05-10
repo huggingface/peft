@@ -21,6 +21,7 @@ from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from ..import_utils import is_bnb_available
