@@ -103,7 +103,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             self.add_adapter(adapter_name, peft_config)
 
-        if model.is_gradient_checkpointing:
+        if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
     def save_pretrained(self, save_directory, **kwargs):
