@@ -173,8 +173,8 @@ def fsdp_auto_wrap_policy(model, transformer_cls_to_wrap=None):
             PromptEmbedding,
             FullyShardedDataParallelPlugin.get_module_class_from_name(
                 model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
-            ) + transformer_cls_to_wrap,
-        ),
+            ),
+        ) + transformer_cls_to_wrap,
     )
 
     auto_wrap_policy = functools.partial(_or_policy, policies=[lambda_policy, transformer_wrap_policy])
