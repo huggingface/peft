@@ -344,3 +344,46 @@ class PeftCommonTester:
                 self.assertIsNotNone(param.grad)
             else:
                 self.assertIsNone(param.grad)
+
+    def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            layers_to_transform=[0],
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        # check if `training` works
+        output = model(**inputs)[0]
+        loss = output.sum()
+        loss.backward()
+
+        nb_trainable = 0
+
+        for n, param in model.named_parameters():
+            if "lora" in n:
+                self.assertIsNotNone(param.grad)
+                nb_trainable += 1
+            else:
+                self.assertIsNone(param.grad)
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        nb_trainable_all = 0
+
+        for n, param in model.named_parameters():
+            if "lora" in n:
+                nb_trainable_all += 1
+
+        self.assertLess(nb_trainable, nb_trainable_all)

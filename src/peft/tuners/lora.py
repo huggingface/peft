@@ -26,6 +26,7 @@ from transformers.pytorch_utils import Conv1D
 
 from ..import_utils import is_bnb_available
 from ..utils import (
+    COMMON_LAYERS_PATTERN,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     PeftConfig,
@@ -83,6 +84,18 @@ class LoraConfig(PeftConfig):
     init_lora_weights: bool = field(
         default=True,
         metadata={"help": "Whether to initialize the weights of the Lora layers."},
+    )
+    layers_to_transform: Optional[Union[List, int]] = field(
+        default=None,
+        metadata={
+            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
+        },
+    )
+    layers_pattern: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+        },
     )
 
     def __post_init__(self):
@@ -162,11 +175,32 @@ class LoraModel(torch.nn.Module):
             "init_lora_weights": lora_config.init_lora_weights,
         }
         key_list = [key for key, _ in self.model.named_modules()]
+        is_using_layer_indexes = getattr(lora_config, "layers_to_transform", None) is not None
+        layer_indexing_pattern = getattr(lora_config, "layers_pattern", None)
+
         for key in key_list:
             if isinstance(lora_config.target_modules, str):
                 target_module_found = re.fullmatch(lora_config.target_modules, key)
             else:
                 target_module_found = any(key.endswith(target_key) for target_key in lora_config.target_modules)
+
+            if is_using_layer_indexes and target_module_found:
+                layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
+                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+
+                for pattern in layers_pattern:
+                    layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
+                    if layer_index is not None:
+                        layer_index = int(layer_index.group(1))
+                        if isinstance(lora_config.layers_to_transform, int):
+                            target_module_found = layer_index == lora_config.layers_to_transform
+                        else:
+                            target_module_found = layer_index in lora_config.layers_to_transform
+
+                        break
+                    else:
+                        target_module_found = False
+
             if target_module_found:
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
