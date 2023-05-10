@@ -362,6 +362,8 @@ class PeftCommonTester:
 
         # check if `training` works
         output = model(**inputs)[0]
+        logits = output[0]
+
         loss = output.sum()
         loss.backward()
 
@@ -373,6 +375,15 @@ class PeftCommonTester:
                 nb_trainable += 1
             else:
                 self.assertIsNone(param.grad)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
+            self.assertTrue(torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4))
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
