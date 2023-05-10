@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import copy
+import typing
 
 import torch
 
@@ -142,7 +143,7 @@ def _set_adapter(model, adapter_name):
             module.active_adapter = adapter_name
 
 
-def fsdp_auto_wrap_policy(model):
+def fsdp_auto_wrap_policy(model, transformer_cls_to_wrap=None):
     import functools
     import os
 
@@ -161,6 +162,9 @@ def fsdp_auto_wrap_policy(model):
         return False
 
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
+    transformer_cls_to_wrap = transformer_cls_to_wrap or tuple()
+    if not isinstance(transformer_cls_to_wrap, tuple):
+        transformer_cls_to_wrap = (transformer_cls_to_wrap,)
     transformer_wrap_policy = functools.partial(
         transformer_auto_wrap_policy,
         transformer_layer_cls=(
@@ -169,7 +173,7 @@ def fsdp_auto_wrap_policy(model):
             PromptEmbedding,
             FullyShardedDataParallelPlugin.get_module_class_from_name(
                 model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
-            ),
+            ) + transformer_cls_to_wrap,
         ),
     )
 
