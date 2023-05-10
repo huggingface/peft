@@ -172,6 +172,54 @@ def gptj_compute_query_states(model: nn.Module, **kwargs):
     return query
 
 
+def moss_create_sinusoidal_positions(num_pos: int, dim: int) -> torch.Tensor:
+    return gptj_create_sinusoidal_positions(num_pos, dim)
+
+
+def moss_rotate_every_two(x: torch.Tensor) -> torch.Tensor:
+    return gptj_rotate_every_two(x)
+
+
+def moss_apply_rotary_pos_emb(tensor: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor) -> torch.Tensor:
+    return gptj_apply_rotary_pos_emb(tensor, sin, cos)
+
+
+def moss_compute_query_states(model: nn.Module, **kwargs):
+    hidden_states = kwargs.get("hidden_states")
+    position_ids = kwargs.get("position_ids")
+    bsz, q_len, _ = hidden_states.size()
+
+    qkv = model.qkv_proj(hidden_states)
+    mp_num = 4
+    qkv_split = qkv.reshape(qkv.shape[:-1] + (mp_num, -1))
+
+    local_dim = model.head_dim * model.num_attention_heads // mp_num
+    query, value, key = torch.split(qkv_split, local_dim, dim=-1)
+    query = model._split_heads(query, model.num_attention_heads, model.head_dim, mp_num=mp_num)
+
+    embed_positions = model.embed_positions
+    if embed_positions.device != position_ids.device:
+        embed_positions = embed_positions.to(position_ids.device)
+        model.embed_positions = embed_positions
+
+    sincos = embed_positions[position_ids]
+    sin, cos = torch.split(sincos, sincos.shape[-1] // 2, dim=-1)
+
+    if model.rotary_dim is not None:
+        q_rot = query[:, :, :, : model.rotary_dim]
+        q_pass = query[:, :, :, model.rotary_dim:]
+
+        q_rot = moss_apply_rotary_pos_emb(q_rot, sin, cos)
+
+        query = torch.cat([q_rot, q_pass], dim=-1)
+    else:
+        query = moss_apply_rotary_pos_emb(query, sin, cos)
+
+    query = query.permute(0, 2, 1, 3)
+
+    return query
+
+
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
     "ModelTypeConfig",
@@ -208,6 +256,14 @@ TRANSFORMERS_MODEL_CONFIG = {
         mlp_module="mlp",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
+        o_proj_layer="out_proj"
+    ),
+    "moss": ModelTypeConfig(
+        compute_query_states=moss_compute_query_states,
+        attention_module="attn",
+        mlp_module="mlp",
+        k_proj_layer="qkv_proj",
+        v_proj_layer="qkv_proj",
         o_proj_layer="out_proj"
     )
 }
