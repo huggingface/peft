@@ -19,7 +19,7 @@ import unittest
 from peft import AdaptionPromptConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 
 
-PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "3cedab206cbe8e22fc764a96481e994e6868fe7c")]
+PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
 
 class PeftConfigTestMixin:

@@ -161,8 +161,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         config = PEFT_TYPE_TO_CONFIG_MAPPING[
-            PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None)).peft_type
-        ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None))
+            PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs).peft_type
+        ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
 
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
