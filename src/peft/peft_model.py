@@ -370,7 +370,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             filename = os.path.join(path, WEIGHTS_NAME)
         else:
             try:
-                filename = hf_hub_download(model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None))
+                filename = hf_hub_download(model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs)
             except:  # noqa
                 raise ValueError(
                     f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
