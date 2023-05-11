@@ -219,8 +219,8 @@ class LoraModel(torch.nn.Module):
                         new_module = Linear8bitLt(
                             adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
                         )
-                    elif loaded_in_4bit and isinstance(target, bnb.nn.LinearFP4):
-                        new_module = LinearFP4(target.in_features, target.out_features, bias=bias, **kwargs)
+                    elif loaded_in_4bit and isinstance(target, bnb.nn.Linear4bit):
+                        new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **kwargs)
                     elif isinstance(target, torch.nn.Embedding):
                         embedding_kwargs = kwargs.copy()
                         embedding_kwargs.pop("fan_in_fan_out", None)
@@ -557,7 +557,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
-
         if self.active_adapter not in self.lora_A.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if self.disable_adapters:
@@ -724,7 +723,7 @@ if is_bnb_available():
                 result += output
             return result
 
-    class LinearFP4(bnb.nn.LinearFP4, LoraLayer):
+    class Linear4bit(bnb.nn.Linear4bit, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
             self,
@@ -736,11 +735,14 @@ if is_bnb_available():
             lora_dropout: float = 0.0,
             **kwargs,
         ):
-            bnb.nn.LinearFP4.__init__(
+            bnb.nn.Linear4bit.__init__(
                 self,
                 in_features,
                 out_features,
                 bias=kwargs.get("bias", True),
+                compute_dtype=kwargs.get("compute_dtype", torch.float32), 
+                compress_statistics=kwargs.get("compress_statistics", True), 
+                quant_type=kwargs.get("quant_type", "nf4")
             )
             LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
 
@@ -757,12 +759,10 @@ if is_bnb_available():
             if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
                 return result
             elif self.r[self.active_adapter] > 0:
-                result = result.clone() #TODO: Arti: verify if needed.
+                result = result.clone()
                 if not torch.is_autocast_enabled():
                     expected_dtype = result.dtype
 
-                    if x.dtype != torch.float32:
-                        x = x.float()
                     output = (
                         self.lora_B[self.active_adapter](
                             self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
