@@ -57,11 +57,11 @@ class LoraConfig(PeftConfig):
         modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
             and saved in the final checkpoint.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, is this argument is specified, it will apply the LoRA transformations on
+            The layer indexes to transform, if this argument is specified, it will apply the LoRA transformations on
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoRA
             transformations on the layer at this index.
         layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is
+            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer pattern is
             not in the common layers pattern.
     """
 
