@@ -734,6 +734,7 @@ class PeftModelForCausalLM(PeftModel):
     def generate(self, **kwargs):
         peft_config = self.active_peft_config
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
+        self.base_model.model.generation_config = self.generation_config
         try:
             if not isinstance(peft_config, PromptLearningConfig):
                 outputs = self.base_model.generate(**kwargs)
