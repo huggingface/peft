@@ -228,7 +228,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if self.peft_config[adapter_name].peft_type == PeftType.PREFIX_TUNING:
             prompt_tokens = prompt_tokens[:, : self.peft_config[adapter_name].num_virtual_tokens]
 
-        if self.peft_config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
+        if self.peft_config[adapter_name].peft_type == PeftType.MULTITASK_PROMPT_TUNING:
             prompt_embeddings = super(MultitaskPromptEmbedding, self.prompt_encoder[adapter_name]).forward(
                 prompt_tokens
             )
