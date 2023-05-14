@@ -277,12 +277,21 @@ def is_adaption_param(params: str) -> bool:
 def handle_origin_attention_module_outputs(model_type: str, outputs: tuple):
     if model_type == "llama":
         output, _, past_key_value = outputs
-    elif model_type in ["gpt_neox", "gptj"]:
+    elif model_type in ["gpt_neox", "gptj", "moss"]:
         output, past_key_value = outputs[0], outputs[1]
     else:
         raise ValueError(f"Unsupported model type: '{model_type}'.")
 
     return output, past_key_value
+
+
+def organize_adapted_attention_model_outputs(model_type: str, attn_output, attn_weights, past_key_value):
+    if model_type == "llama":
+        return attn_output, attn_weights, past_key_value
+    elif model_type in ["gpt_neox", "gptj", "moss"]:
+        return attn_output, past_key_value, attn_weights
+    else:
+        raise ValueError(f"Unsupported model type: '{model_type}'.")
 
 
 @dataclass
@@ -677,7 +686,7 @@ class AdaptedAttention(nn.Module):
         output = output + adapter_output
 
         self._remove_adapted_linears()
-        return output, None, past_key_value
+        return organize_adapted_attention_model_outputs(self.model_type, output, None, past_key_value)
 
 
 class AdaptedMLP(nn.Module):
