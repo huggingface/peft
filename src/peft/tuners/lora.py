@@ -61,8 +61,8 @@ class LoraConfig(PeftConfig):
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoRA
             transformations on the layer at this index.
         layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer pattern is
-            not in the common layers pattern.
+            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
+            pattern is not in the common layers pattern.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
