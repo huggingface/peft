@@ -16,7 +16,7 @@
 import math
 from collections import namedtuple
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -269,11 +269,6 @@ TRANSFORMERS_MODEL_CONFIG = {
 }
 
 
-def is_adaption_param(params: str) -> bool:
-    """Return True if module is trainable under adaption prompt fine-tuning."""
-    return params.split(".")[-1].startswith("adaption_")
-
-
 def handle_origin_attention_module_outputs(model_type: str, outputs: tuple):
     if model_type == "llama":
         output, _, past_key_value = outputs
@@ -309,9 +304,18 @@ class AdaptionPromptV2Config(PeftConfig):
     add_bias: bool = field(default=True, metadata={"help": "Whether to add bias"})
     add_scale: bool = field(default=True, metadata={"help": "Whether to add scale"})
     multi_modal: bool = field(default=False, metadata={"help": "Whether used for multi modal training or inference"})
+    supported_modals: Optional[List[str]] = field(default=None, metadata={"help": "Names of modals that are supported"})
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAPTION_PROMPT_V2
+        if self.multi_modal and not self.supported_modals:
+            raise ValueError("name of supported modal has to be specified when is multi_modal mode.")
+        if self.supported_modals:
+            num_modals = len(self.supported_modals)
+            if num_modals != len(set(self.supported_modals)):
+                raise ValueError("duplicate modal name found in supported_modals, please make sure each name is unique.")
+            if num_modals != [modal for modal in self.supported_modals if modal]:
+                raise ValueError("modal name can't be empty string.")
 
 
 def prepare_config(
@@ -418,14 +422,16 @@ class AdaptionPromptV2Model(nn.Module):
 
         self._active_adapter = adapter_name
 
-    def freeze_adaption_params(self, is_vision_params: bool = False, mode: bool = True):
+    def freeze_adaption_params(self, modal: Optional[str] = None, mode: bool = True):
         """Freeze adaption params, this function is useful at multi-modal training"""
         if not self._enabled:
             return
 
         config = self._configs[self._active_adapter]
 
-        if not config.multi_modal and is_vision_params:
+        if modal and not config.multi_modal:
+            return
+        if modal and modal not in config.supported_modals:
             return
 
         parents = []
@@ -433,26 +439,26 @@ class AdaptionPromptV2Model(nn.Module):
             if name.endswith(config.attention_module):
                 par, _, _ = _get_submodules(self.model, name)
                 parents.append(par)
-
-        if is_vision_params:
-            par = parents[0]
-            for n, p in getattr(par, config.attention_module).named_parameters():
-                if is_adaption_param(n):
-                    p.requires_grad = not mode
+        if modal:
+            parents = [parents[0]]
         else:
-            num_adapter_layers = config.adapter_layers
-            if config.multi_modal and num_adapter_layers == len(parents):
-                num_adapter_layers -= 1
-            if num_adapter_layers <= 0:
+            adapter_layers = config.adapter_layers
+            if config.multi_modal and adapter_layers == len(parents):
+                adapter_layers -= 1
+            if adapter_layers <= 0:
                 return
-            for par in parents[-num_adapter_layers:]:
-                for n, p in getattr(par, config.attention_module).named_parameters():
-                    if is_adaption_param(n):
-                        p.requires_grad = not mode
+            parents = parents[-adapter_layers:]
+        if not modal:
+            modal = "text"
 
-    def unfreeze_adaption_params(self, is_vision_params: bool = False):
+        for par in parents:
+            for n, m in getattr(par, config.attention_module).named_modules():
+                if n.split(".")[-1].startswith("adaption_"):
+                    m[modal].requires_grad = not mode
+
+    def unfreeze_adaption_params(self, modal: Optional[str] = None):
         """Unfreeze adaption params, this function is useful at multi-modal training"""
-        self.freeze_adaption_params(is_vision_params, False)
+        self.freeze_adaption_params(modal, False)
 
     def enable_adapter_layers(self):
         """Enable adapter layers by swapping in cached Adapted* modules."""
@@ -473,7 +479,8 @@ class AdaptionPromptV2Model(nn.Module):
                     model=getattr(par, config.attention_module),
                     adapter_len=config.adapter_len,
                     add_bias=False,
-                    add_scale=False
+                    add_scale=False,
+                    supported_modals=config.supported_modals
                 )
                 setattr(par, config.attention_module, attn)
             else:
@@ -517,7 +524,7 @@ class AdaptionPromptV2Model(nn.Module):
     def _mark_only_adaption_prompts_as_trainable(self) -> None:
         """Freeze all parameters of the model except the adaption prompts."""
         for n, p in self.model.named_parameters():
-            if not is_adaption_param(n):
+            if "adaption_" not in n:
                 p.requires_grad = False
 
     def __getattr__(self, name: str):
@@ -577,6 +584,7 @@ class AdaptedAttention(nn.Module):
         adapter_len: int,
         add_bias: bool,
         add_scale: bool,
+        supported_modals: Optional[List[str]] = None
     ):
         """
         Initialize object.
@@ -598,15 +606,28 @@ class AdaptedAttention(nn.Module):
         self.adapter_len = adapter_len
         # Assume all parameters of the attention model we are wrapping are on the same device.
         device = next(model.parameters()).device
-        # Don't think this was specified in the paper, but we follow the official repo which used an Embedding
-        # which initializes the tokens with standard normal values.
-        # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
-        # (bsz, adapter_len, hidden_size)
-        self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
-        )
-        # Initialize the gate to 0 as this is "zero-init".
-        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device))
+        if supported_modals:
+            self.adaption_prompts = nn.ParameterDict(
+                {
+                    modal: nn.Parameter(
+                        torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
+                    ) for modal in supported_modals
+                }
+            )
+            self.adaption_gates = nn.ParameterDict(
+                {
+                    modal: nn.Parameter(torch.zeros(1, device=device)) for modal in supported_modals
+                }
+            )
+        else:
+            self.adaption_prompts = nn.ParameterDict(
+                {
+                    "text": nn.Parameter(
+                        torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
+                    )
+                }
+            )
+            self.adaption_gates = nn.ParameterDict({"text": nn.Parameter(torch.zeros(1, device=device))})
         # Initialize adapted linear
         linear_name_modules = []
         for name, module in self.model.named_children():
@@ -638,52 +659,57 @@ class AdaptedAttention(nn.Module):
         self._set_adapted_linears()
 
         output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(hidden_states, **kwargs))
+        # Recompute query states.
+        compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
+        # (bsz, num_heads, q_len, head_dim)
+        query_states = compute_query_states(model=self.model, **kwargs)
+
         bsz = output.shape[0]
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
         o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
 
-        if k_proj_layer == v_proj_layer:
-            _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(self.hidden_size, dim=2)
-        else:
-            key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
-            value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
-        # (bsz, num_heads, adapter_len, head_dim)
-        adapter_k = (
-            key.view(1, self.adapter_len, self.num_head, self.head_size)
-            .repeat(bsz, 1, 1, 1)
-            .transpose(1, 2)
-        )
-        # (bsz, num_heads, adapter_len, head_dim)
-        adapter_v = (
-            value.view(1, self.adapter_len, self.num_head, self.head_size)
-            .repeat(bsz, 1, 1, 1)
-            .transpose(1, 2)
-        )
+        modal2adapter_kv = dict()
+        for modal in self.adaption_prompts:
+            adaption_prompt = self.adaption_prompts[modal]
+            if k_proj_layer == v_proj_layer:
+                _, key, value = getattr(self.model, k_proj_layer)(adaption_prompt).split(self.hidden_size, dim=2)
+            else:
+                key = getattr(self.model, k_proj_layer)(adaption_prompt)
+                value = getattr(self.model, v_proj_layer)(adaption_prompt)
+            # (bsz, num_heads, adapter_len, head_dim)
+            adapter_k = (
+                key.view(1, self.adapter_len, self.num_head, self.head_size)
+                .repeat(bsz, 1, 1, 1)
+                .transpose(1, 2)
+            )
+            # (bsz, num_heads, adapter_len, head_dim)
+            adapter_v = (
+                value.view(1, self.adapter_len, self.num_head, self.head_size)
+                .repeat(bsz, 1, 1, 1)
+                .transpose(1, 2)
+            )
+            modal2adapter_kv[modal] = (adapter_k, adapter_v)
 
         if "hidden_states" not in kwargs:
             kwargs["hidden_states"] = hidden_states
 
-        # Recompute query states.
-        compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
-        # (bsz, num_heads, q_len, head_dim)
-        query_states = compute_query_states(model=self.model, **kwargs).type_as(adapter_k)
-
         # Compute adapter output
         bsz, num_heads, q_len, head_dim = query_states.shape
-        # (bsz, num_heads, q_len, adapter_len)
-        scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(head_dim)
-        # Upcast attention to fp32
-        # (bsz, num_heads, q_len, adapter_len)
-        scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        # (bsz, q_len, num_heads * head_dim)
-        adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
-        # (bsz, q_len, hidden_size)
-        if o_proj_layer is not None:
-            adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
+        for modal, (adapter_k, adapter_v) in modal2adapter_kv.items():
+            # (bsz, num_heads, q_len, adapter_len)
+            scores = torch.matmul(query_states.type_as(adapter_k), adapter_k.transpose(2, 3)) / math.sqrt(head_dim)
+            # Upcast attention to fp32
+            # (bsz, num_heads, q_len, adapter_len)
+            scores = self.adaption_gates[modal] * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            # (bsz, q_len, num_heads * head_dim)
+            adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
+            # (bsz, q_len, hidden_size)
+            if o_proj_layer is not None:
+                adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
 
-        # Add adaption prompt output to original output.
-        output = output + adapter_output
+            # Add adaption prompt output to original output.
+            output = output + adapter_output
 
         self._remove_adapted_linears()
         return organize_adapted_attention_model_outputs(self.model_type, output, None, past_key_value)
