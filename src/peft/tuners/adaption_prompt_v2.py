@@ -662,6 +662,8 @@ class AdaptedAttention(nn.Module):
         # Recompute query states.
         compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
         # (bsz, num_heads, q_len, head_dim)
+        if "hidden_states" not in kwargs:
+            kwargs["hidden_states"] = hidden_states
         query_states = compute_query_states(model=self.model, **kwargs)
 
         bsz = output.shape[0]
@@ -690,9 +692,6 @@ class AdaptedAttention(nn.Module):
                 .transpose(1, 2)
             )
             modal2adapter_kv[modal] = (adapter_k, adapter_v)
-
-        if "hidden_states" not in kwargs:
-            kwargs["hidden_states"] = hidden_states
 
         # Compute adapter output
         bsz, num_heads, q_len, head_dim = query_states.shape
