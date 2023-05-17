@@ -17,7 +17,7 @@ import re
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -196,8 +196,16 @@ class LoraModel(torch.nn.Module):
                 if hasattr(target, "bias"):
                     bias = target.bias is not None
 
-                if isinstance(target, LoraLayer):
+                if isinstance(target, LoraLayer) and isinstance(target, (torch.nn.Linear, torch.nn.Embedding, Conv1D)):
                     target.update_layer(
+                        adapter_name,
+                        lora_config.r,
+                        lora_config.lora_alpha,
+                        lora_config.lora_dropout,
+                        lora_config.init_lora_weights,
+                    )
+                elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
+                    target.update_layer_conv2d(
                         adapter_name,
                         lora_config.r,
                         lora_config.lora_alpha,
@@ -232,6 +240,8 @@ class LoraModel(torch.nn.Module):
                                     "Setting fan_in_fan_out to False."
                                 )
                                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+
+                            new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
                         elif isinstance(target, Conv1D):
                             in_features, out_features = (
                                 target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
@@ -242,12 +252,28 @@ class LoraModel(torch.nn.Module):
                                     "Setting fan_in_fan_out to True."
                                 )
                                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+
+                            new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+                        elif isinstance(target, torch.nn.Conv2d):
+                            out_channels, in_channels = target.weight.size()[:2]
+                            kernel_size = target.weight.size()[2:]
+                            stride = target.stride
+                            padding = target.padding
+
+                            new_module = Conv2d(
+                                adapter_name,
+                                in_channels,
+                                out_channels,
+                                kernel_size,
+                                stride,
+                                padding,
+                                **kwargs
+                            )
                         else:
                             raise ValueError(
                                 f"Target module {target} is not supported. "
-                                f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
+                                f"Currently, only `torch.nn.Linear`, `Conv1D` and `Conv2D` are supported."
                             )
-                        new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
 
                     self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
@@ -425,6 +451,7 @@ class LoraLayer:
         self,
         in_features: int,
         out_features: int,
+        **kwargs
     ):
         self.r = {}
         self.lora_alpha = {}
@@ -440,6 +467,7 @@ class LoraLayer:
         self.disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
+        self.kwargs = kwargs
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -454,6 +482,27 @@ class LoraLayer:
         if r > 0:
             self.lora_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)}))
             self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
+            self.scaling[adapter_name] = lora_alpha / r
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        if r > 0:
+            kernel_size = self.kwargs['kernel_size']
+            stride = self.kwargs['stride']
+            padding = self.kwargs['padding']
+            self.lora_A.update(nn.ModuleDict({adapter_name: nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)}))
+            self.lora_B.update(nn.ModuleDict({adapter_name: nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)}))
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
@@ -659,6 +708,103 @@ class Embedding(nn.Embedding, LoraLayer):
             return result
         else:
             return nn.Embedding.forward(self, x)
+
+
+class Conv2d(nn.Conv2d, LoraLayer):
+    # Lora implemented in a conv2d layer
+    def __init__(
+        self,
+        adapter_name: str,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int]],
+        stride: Union[int, Tuple[int]] = 1,
+        padding: Union[int, Tuple[int]] = 0,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        **kwargs,
+    ):
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+
+        nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding)
+        LoraLayer.__init__(self, in_features=in_channels, out_features=out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
+        # Freezing the pre-trained weight matrix
+        self.weight.requires_grad = False
+
+        nn.Conv2d.reset_parameters(self)
+        self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.active_adapter = adapter_name
+
+    def merge(self):
+        if self.active_adapter not in self.lora_A.keys():
+            return
+        if self.merged:
+            warnings.warn("Already merged. Nothing to do.")
+            return
+        if self.r[self.active_adapter] > 0:
+            # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
+            if self.weight.size()[2:4] == (1, 1):
+                # conv2d 1x1
+                self.weight.data += (
+                    (self.lora_B[self.active_adapter].weight.squeeze(3).squeeze(2) @ self.lora_A[self.active_adapter].weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
+                    * self.scaling[self.active_adapter]
+                )
+            else:
+                # conv2d 3x3
+                self.weight.data += (
+                    F.conv2d(self.lora_A[self.active_adapter].weight.permute(1, 0, 2, 3), self.lora_B[self.active_adapter].weight).permute(1, 0, 2, 3)
+                    * self.scaling[self.active_adapter]
+                )
+            self.merged = True
+
+    def unmerge(self):
+        if self.active_adapter not in self.lora_A.keys():
+            return
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        if self.r[self.active_adapter] > 0:
+            if self.weight.size()[2:4] == (1, 1):
+                # conv2d 1x1
+                self.weight.data -= (
+                    (self.lora_B[self.active_adapter].weight.squeeze(3).squeeze(2) @ self.lora_A[self.active_adapter].weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
+                    * self.scaling[self.active_adapter]
+                )
+            else:
+                # conv2d 3x3
+                self.weight.data += (
+                    F.conv2d(self.lora_A[self.active_adapter].weight.permute(1, 0, 2, 3), self.lora_B[self.active_adapter].weight).permute(1, 0, 2, 3)
+                    * self.scaling[self.active_adapter]
+                )
+            self.merged = False
+
+    def forward(self, x: torch.Tensor):
+        previous_dtype = x.dtype
+
+        if self.active_adapter not in self.lora_A.keys():
+            return F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        if self.disable_adapters:
+            if self.r[self.active_adapter] > 0 and self.merged:
+                self.unmerge()
+            result = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        elif self.r[self.active_adapter] > 0 and not self.merged:
+            result = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+
+            x = x.to(self.lora_A[self.active_adapter].weight.dtype)
+
+            result += (
+                self.lora_B[self.active_adapter](
+                    self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                )
+                * self.scaling[self.active_adapter]
+            )
+        else:
+            result = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+
+        result = result.to(previous_dtype)
+
+        return result
 
 
 if is_bnb_available():
