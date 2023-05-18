@@ -1208,24 +1208,22 @@ class PeftModelForQuestionAnswering(PeftModel):
         >>> from peft import PeftModelForQuestionAnswering, get_peft_config
 
         >>> config = {
-        ...     "peft_type": "PREFIX_TUNING",
-        ...     "task_type": "LORA",
+        ...     "peft_type": "LORA",
+        ...     "task_type": "QUESTION_ANS",
         ...     "inference_mode": False,
-        ...     "num_virtual_tokens": 20,
-        ...     "token_dim": 768,
-        ...     "num_transformer_submodules": 1,
-        ...     "num_attention_heads": 12,
-        ...     "num_layers": 12,
-        ...     "encoder_hidden_size": 768,
-        ...     "prefix_projection": False,
-        ...     "postprocess_past_key_value_function": None,
+        ...     "r": 16,
+        ...     "target_modules": ["query", "value"],
+        ...     "lora_alpha": 32,
+        ...     "lora_dropout": 0.05,
+        ...     "fan_in_fan_out": False,
+        ...     "bias": "none",
         ... }
 
         >>> peft_config = get_peft_config(config)
         >>> model = AutoModelForQuestionAnswering.from_pretrained("bert-base-cased")
         >>> peft_model = PeftModelForQuestionAnswering(model, peft_config)
         >>> peft_model.print_trainable_parameters()
-        trainable params: 370178 || all params: 108680450 || trainable%: 0.3406113979101117
+        trainable params: 592900 || all params: 108312580 || trainable%: 0.5473971721475013
         ```
     """
 
