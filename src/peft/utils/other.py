@@ -42,7 +42,10 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
     """
-    loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
+    loaded_in_kbit = (
+        getattr(model, "is_loaded_in_8bit", False) or 
+        getattr(model, "is_loaded_in_4bit", False)
+    )
 
     for name, param in model.named_parameters():
         # freeze base model's layers
@@ -53,7 +56,7 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
             param.data = param.data.to(torch.float32)
 
-    if loaded_in_8bit and use_gradient_checkpointing:
+    if loaded_in_kbit and use_gradient_checkpointing:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
