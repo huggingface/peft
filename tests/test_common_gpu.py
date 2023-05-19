@@ -26,7 +26,7 @@ from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torc
 
 
 if is_bnb_available():
-    from peft.tuners.lora import Linear8bitLt, LinearFP4
+    from peft.tuners.lora import Linear8bitLt, Linear4bit
 
 
 @require_torch_gpu
@@ -138,14 +138,14 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
 
         flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
-        self.assertTrue(isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LinearFP4))
+        self.assertTrue(isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, Linear4bit))
 
         opt_4bit = get_peft_model(opt_4bit, opt_lora_config)
-        self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LinearFP4))
+        self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit))
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
         self.assertTrue(
-            isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LinearFP4)
+            isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit)
         )
 
     @pytest.mark.multi_gpu_tests
