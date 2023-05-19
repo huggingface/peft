@@ -236,12 +236,6 @@ class LoraModel(torch.nn.Module):
                         embedding_kwargs.pop("fan_in_fan_out", None)
                         in_features, out_features = target.num_embeddings, target.embedding_dim
                         new_module = Embedding(adapter_name, in_features, out_features, **embedding_kwargs)
-                elif isinstance(target, torch.nn.Linear) and self.peft_config.enable_lora is None:
-                    new_module = Linear(target.in_features, target.out_features, bias=bias, **kwargs)
-                elif self.peft_config.enable_lora is not None:
-                    kwargs.update({"enable_lora": self.peft_config.enable_lora})
-                    if isinstance(target, Conv1D):
-                        in_features, out_features = target.weight.shape
                     else:
                         if isinstance(target, torch.nn.Linear):
                             in_features, out_features = target.in_features, target.out_features
@@ -755,9 +749,9 @@ if is_bnb_available():
                 in_features,
                 out_features,
                 bias=kwargs.get("bias", True),
-                compute_dtype=kwargs.get("compute_dtype", torch.float32), 
-                compress_statistics=kwargs.get("compress_statistics", True), 
-                quant_type=kwargs.get("quant_type", "nf4")
+                compute_dtype=kwargs.get("compute_dtype", torch.float32),
+                compress_statistics=kwargs.get("compress_statistics", True),
+                quant_type=kwargs.get("quant_type", "nf4"),
             )
             LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
 
