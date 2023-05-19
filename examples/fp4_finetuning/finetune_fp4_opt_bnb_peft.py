@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 # -*- coding: utf-8 -*-
 """Finetune-opt-bnb-peft.ipynb
 
