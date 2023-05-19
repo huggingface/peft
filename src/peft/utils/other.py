@@ -42,10 +42,7 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
     """
-    loaded_in_kbit = (
-        getattr(model, "is_loaded_in_8bit", False) or 
-        getattr(model, "is_loaded_in_4bit", False)
-    )
+    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
 
     for name, param in model.named_parameters():
         # freeze base model's layers

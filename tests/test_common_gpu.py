@@ -26,7 +26,7 @@ from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torc
 
 
 if is_bnb_available():
-    from peft.tuners.lora import Linear8bitLt, Linear4bit
+    from peft.tuners.lora import Linear4bit, Linear8bitLt
 
 
 @require_torch_gpu
@@ -144,9 +144,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit))
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
-        self.assertTrue(
-            isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit)
-        )
+        self.assertTrue(isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit))
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
