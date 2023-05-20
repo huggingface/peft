@@ -1,3 +1,16 @@
+import os
+
+import torch
+import torch.nn as nn
+import transformers
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+from peft import LoraConfig, get_peft_model
+
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
 # -*- coding: utf-8 -*-
 """Finetune-opt-bnb-peft.ipynb
 
@@ -22,18 +35,6 @@ First, run the cells below to install the requirements:
 
 Here let's load the `opt-6.7b` model, its weights in half-precision (float16) are about 13GB on the Hub! If we load them in 8-bit we would require around 7GB of memory instead.
 """
-
-import os
-
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-import torch
-import torch.nn as nn
-import transformers
-from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-from peft import LoraConfig, get_peft_model
 
 
 free_in_GB = int(torch.cuda.mem_get_info()[0] / 1024**3)
