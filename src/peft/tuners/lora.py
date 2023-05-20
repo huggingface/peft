@@ -169,10 +169,11 @@ class LoraModel(torch.nn.Module):
 
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]
+        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if loaded_in_8bit and not is_bnb_available():
+        if (loaded_in_4bit or loaded_in_8bit) and not is_bnb_available():
             raise ImportError(
-                "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
+                "To use Lora with 8-bit or 4-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
         is_target_modules_in_base_model = False
@@ -217,6 +218,18 @@ class LoraModel(torch.nn.Module):
                         )
                         new_module = Linear8bitLt(
                             adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
+                        )
+                    elif loaded_in_4bit and isinstance(target, bnb.nn.Linear4bit):
+                        fourbit_kwargs = kwargs.copy()
+                        fourbit_kwargs.update(
+                            {
+                                "compute_dtype": target.compute_dtype,
+                                "compress_statistics": target.weight.compress_statistics,
+                                "quant_type": target.weight.quant_type,
+                            }
+                        )
+                        new_module = Linear4bit(
+                            adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
                         )
                     elif isinstance(target, torch.nn.Embedding):
                         embedding_kwargs = kwargs.copy()
@@ -335,7 +348,7 @@ class LoraModel(torch.nn.Module):
         if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging LORA layers")
 
-        if getattr(self.model, "is_loaded_in_8bit", False):
+        if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
@@ -554,7 +567,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
-
         if self.active_adapter not in self.lora_A.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if self.disable_adapters:
@@ -689,7 +701,6 @@ if is_bnb_available():
 
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
-
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
@@ -705,6 +716,62 @@ if is_bnb_available():
 
                     if x.dtype != torch.float32:
                         x = x.float()
+                    output = (
+                        self.lora_B[self.active_adapter](
+                            self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                        ).to(expected_dtype)
+                        * self.scaling[self.active_adapter]
+                    )
+                else:
+                    output = (
+                        self.lora_B[self.active_adapter](
+                            self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                        )
+                        * self.scaling[self.active_adapter]
+                    )
+                result += output
+            return result
+
+    class Linear4bit(bnb.nn.Linear4bit, LoraLayer):
+        # Lora implemented in a dense layer
+        def __init__(
+            self,
+            adapter_name,
+            in_features,
+            out_features,
+            r: int = 0,
+            lora_alpha: int = 1,
+            lora_dropout: float = 0.0,
+            **kwargs,
+        ):
+            bnb.nn.Linear4bit.__init__(
+                self,
+                in_features,
+                out_features,
+                bias=kwargs.get("bias", True),
+                compute_dtype=kwargs.get("compute_dtype", torch.float32),
+                compress_statistics=kwargs.get("compress_statistics", True),
+                quant_type=kwargs.get("quant_type", "nf4"),
+            )
+            LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+
+            # Freezing the pre-trained weight matrix
+            self.weight.requires_grad = False
+
+            init_lora_weights = kwargs.pop("init_lora_weights", True)
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self.active_adapter = adapter_name
+
+        def forward(self, x: torch.Tensor):
+            result = super().forward(x)
+
+            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+                return result
+            elif self.r[self.active_adapter] > 0:
+                result = result.clone()
+                if not torch.is_autocast_enabled():
+                    expected_dtype = result.dtype
+                    x = x.to(self.lora_A[self.active_adapter].weight.dtype)
                     output = (
                         self.lora_B[self.active_adapter](
                             self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
