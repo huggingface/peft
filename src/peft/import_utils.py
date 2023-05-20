@@ -14,6 +14,13 @@
 # limitations under the License.
 import importlib
 
+import importlib_metadata
+from packaging import version
+
 
 def is_bnb_available():
     return importlib.util.find_spec("bitsandbytes") is not None
+
+
+def is_bnb_4bit_available():
+    return version.parse(importlib_metadata.version("bitsandbytes")) >= version.parse("0.39.0")
