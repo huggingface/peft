@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
-
-import importlib_metadata
-from packaging import version
+from importlib.metadata import version
 
 
 def is_bnb_available():
@@ -23,4 +21,4 @@ def is_bnb_available():
 
 
 def is_bnb_4bit_available():
-    return version.parse(importlib_metadata.version("bitsandbytes")) >= version.parse("0.39.0")
+    return version("bitsandbytes") >= "0.39.0"
