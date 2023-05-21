@@ -52,6 +52,7 @@ from .utils import (
     bloom_model_postprocess_past_key_value,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
