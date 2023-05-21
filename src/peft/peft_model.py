@@ -381,7 +381,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
         # load the weights into the model
-        set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
+        load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)
@@ -424,6 +424,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         self.eval()
+        return load_result
 
     def set_adapter(self, adapter_name):
         """
