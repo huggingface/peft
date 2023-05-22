@@ -27,6 +27,7 @@ from .other import (
     _set_trainable,
     bloom_model_postprocess_past_key_value,
     prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     shift_tokens_right,
     transpose,
     _get_submodules,
