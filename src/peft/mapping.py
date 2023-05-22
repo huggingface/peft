@@ -27,6 +27,7 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    IA3Config,
 )
 from .utils import PromptLearningConfig
 
@@ -45,6 +46,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
     "ADALORA": AdaLoraConfig,
+    "IA3": IA3Config,
 }
 
 
