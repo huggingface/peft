@@ -75,7 +75,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 def prepare_model_for_int8_training(*args, **kwargs):
     warnings.warn(
         "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
-        FutureWarning
+        FutureWarning,
     )
     return prepare_model_for_kbit_training(*args, **kwargs)
 
