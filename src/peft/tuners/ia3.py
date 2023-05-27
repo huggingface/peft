@@ -47,7 +47,6 @@ class IA3Config(PeftConfig):
 
     Args:
         target_modules (`Union[List[str],str]`): The names of the modules to apply ia3 to.
-        ia3_dropout (`float`): The dropout probability for ia3 layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
         bias (`str`): Bias type for ia3. Can be 'none', 'all' or 'ia3_only'
@@ -62,11 +61,17 @@ class IA3Config(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
+    feedforward_modules: Optional[Union[List[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of module names or a regex expression of module names which are feedforward"
+            "For example, ['output.dense']"
+        },
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    ia3_dropout:  float = field(default=None, metadata={"help": "Lora dropout"})
     # bias: str = field(default="none", metadata={"help": "Bias type for ia3. Can be 'none', 'all' or 'ia3_only'"})
     modules_to_save: Optional[List[str]] = field(
         default=None,
@@ -106,7 +111,6 @@ class IA3Model(torch.nn.Module):
         ...     peft_type="iA3",
         ...     task_type="SEQ_2_SEQ_LM",
         ...     target_modules=["k", "v"],
-        ...     ia3_dropout=0.01,
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
@@ -148,8 +152,8 @@ class IA3Model(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
         is_target_modules_in_base_model = False
+
         kwargs = {
-            "ia3_dropout": ia3_config.ia3_dropout,
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
             "init_ia3_weights": ia3_config.init_ia3_weights,
         }
@@ -158,16 +162,20 @@ class IA3Model(torch.nn.Module):
             if isinstance(ia3_config.target_modules, str):
                 target_module_found = re.fullmatch(ia3_config.target_modules, key)
             else:
-                target_module_found = any(key.endswith(target_key) for target_key in ia3_config.target_modules)
+                target_module_found = any(self._is_valid_match(key, target_key) for target_key in ia3_config.target_modules)
             if target_module_found:
+                if isinstance(ia3_config.feedforward_modules, str):
+                    is_feedforward = re.fullmatch(ia3_config.feedforward_modules, key)
+                else:
+                    is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
+                # import pdb; pdb.set_trace()
                 parent, target, target_name = _get_submodules(self.model, key)
                 bias = target.bias is not None
                 if isinstance(target, IA3Layer):
                     target.update_layer(
                         adapter_name,
-                        ia3_config.ia3_dropout,
                         ia3_config.init_ia3_weights,
                     )
                 else:
@@ -182,7 +190,12 @@ class IA3Model(torch.nn.Module):
                             }
                         )
                         new_module = Linear8bitLt(
-                            adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
+                            adapter_name,
+                            target.in_features,
+                            target.out_features,
+                            is_feedforward,
+                            bias=bias,
+                            **eightbit_kwargs,
                         )
                     else:
                         if isinstance(target, torch.nn.Linear):
@@ -198,7 +211,9 @@ class IA3Model(torch.nn.Module):
                                 f"Target module {target} is not supported. "
                                 f"Currently, only `torch.nn.Linear` are supported."
                             )
-                        new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+                        new_module = Linear(
+                            adapter_name, in_features, out_features, is_feedforward=is_feedforward, bias=bias, **kwargs
+                        )
 
                     self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
@@ -206,6 +221,17 @@ class IA3Model(torch.nn.Module):
                 f"Target modules {ia3_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
+    @staticmethod
+    def _is_valid_match(key: str, target_key: str):
+        """
+        Helper function to match module names target_key and key. Makes sure that either the key is exactly 
+        the target_key or the target_key is a submodule of key
+        """
+        if key.endswith(target_key):
+            if len(key) > len(target_key):
+                return key.endswith("."+target_key) # must be a sub module
+            return True
+        return False
 
     def _replace_module(self, parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
@@ -363,33 +389,32 @@ class IA3Layer:
         self,
         in_features: int,
         out_features: int,
+        is_feedforward: bool,
     ):
         self.scaling = {}
-        self.ia3_dropout = nn.ModuleDict({})
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
         self.merged = False
         self.disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
+        self.is_feedforward = is_feedforward
 
-    def update_layer(self, adapter_name, ia3_dropout, init_ia3_weights):
-        if ia3_dropout > 0.0:
-            ia3_dropout_layer = nn.Dropout(p=ia3_dropout)
-        else:
-            ia3_dropout_layer = nn.Identity()
-
-        self.ia3_dropout.update(nn.ModuleDict({adapter_name: ia3_dropout_layer}))
+    def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
-        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(self.out_features, 1))}))
+        if self.is_feedforward:
+            self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(1, self.in_features))}))
+        else:
+            self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(self.out_features, 1))}))
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
-            # initialize l with torch.ones
+            # initialize learned vector with torch.ones
             nn.init.constant_(self.ia3_l[adapter_name], 1.0)
+
 
 class Linear(nn.Linear, IA3Layer):
     # IA3 implemented in a dense layer
@@ -398,14 +423,14 @@ class Linear(nn.Linear, IA3Layer):
         adapter_name: str,
         in_features: int,
         out_features: int,
-        ia3_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        is_feedforward: bool = False,  # Set to True if the layer is a feedforward layer
         **kwargs,
     ):
         init_ia3_weights = kwargs.pop("init_ia3_weights", True)
 
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        IA3Layer.__init__(self, in_features=in_features, out_features=out_features)
+        IA3Layer.__init__(self, in_features=in_features, out_features=out_features, is_feedforward=is_feedforward)
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
 
@@ -414,8 +439,10 @@ class Linear(nn.Linear, IA3Layer):
             self.weight.data = self.weight.data.T
 
         nn.Linear.reset_parameters(self)
-        self.update_layer(adapter_name, ia3_dropout, init_ia3_weights)
+        self.update_layer(adapter_name, init_ia3_weights)
         self.active_adapter = adapter_name
+
+        self.is_feedforward = is_feedforward
 
     def merge(self):
         raise NotImplementedError("Merge not implemented for IA3")
@@ -462,8 +489,15 @@ class Linear(nn.Linear, IA3Layer):
             #     self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         else:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-            result = result * self.ia3_l[self.active_adapter].flatten()
+            if self.is_feedforward:
+                result = F.linear(
+                    x * self.ia3_l[self.active_adapter].flatten(),
+                    transpose(self.weight, self.fan_in_fan_out),
+                    bias=self.bias,
+                )
+            else:
+                result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+                result = result * self.ia3_l[self.active_adapter].flatten()
 
         result = result.to(previous_dtype)
 
@@ -479,8 +513,7 @@ if is_bnb_available():
             adapter_name,
             in_features,
             out_features,
-            r: int = 0,
-            ia3_dropout: float = 0.0,
+            is_feedforward,
             **kwargs,
         ):
             bnb.nn.Linear8bitLt.__init__(
@@ -493,27 +526,34 @@ if is_bnb_available():
                 threshold=kwargs.get("threshold", 0.0),
                 index=kwargs.get("index", None),
             )
-            IA3Layer.__init__(self, in_features=in_features, out_features=out_features)
+            IA3Layer.__init__(self, in_features=in_features, out_features=out_features, is_feedforward=is_feedforward)
 
             # Freezing the pre-trained weight matrix
             self.weight.requires_grad = False
 
             init_ia3_weights = kwargs.pop("init_ia3_weights", True)
-            self.update_layer(adapter_name, ia3_dropout, init_ia3_weights)
+            self.update_layer(adapter_name, init_ia3_weights)
             self.active_adapter = adapter_name
+            self.is_feedforward = is_feedforward
 
         def forward(self, x: torch.Tensor):
-            result = super().forward(x)
-
             if self.disable_adapters or self.active_adapter not in self.ia3_l.keys():
-                return result
+                return super().forward(x)
             else:
                 if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
 
-                    if result.dtype != torch.float32:
-                        result = result.float()
-                    result =  (result * self.ia3_l[self.active_adapter].flatten()).to(expected_dtype)
+                    if x.dtype != torch.float32:
+                        x = x.float()
+                    if self.is_feedforward: 
+                        result = super().forward(x* self.ia3_l[self.active_adapter].flatten())
+                    else:
+                        result = super().forward(x)
+                        expected_dtype = result.dtype
+                        result = (result * self.ia3_l[self.active_adapter].flatten()).to(expected_dtype)
                 else:
-                    result = result * self.ia3_l[self.active_adapter].flatten()
+                    if self.is_feedforward:
+                        result = super().forward(x*self.ia3_l[self.active_adapter].flatten())
+                    else:
+                        result = result * self.ia3_l[self.active_adapter].flatten()
             return result
+
