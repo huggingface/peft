@@ -222,8 +222,8 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
-    "t5": ["k", "v"],
-    "mt5": ["k", "v"],
+    "t5": ["k", "v", "wo"],
+    "mt5": ["k", "v", "wi_1"],
     "bart": ["k_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "bloom": ["query_key_value"],
