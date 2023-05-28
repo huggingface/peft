@@ -33,7 +33,7 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, freeze_base_model=True, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -42,19 +42,22 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     Args:
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
+        freeze_base_model (bool): Whether to freeze the base model or not.
+        use_gradient_checkpointing (bool): Whether to enable gradient checkpointing or not.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
 
-    for name, param in model.named_parameters():
-        # freeze base model's layers
-        param.requires_grad = False
+    if freeze_base_model:
+        for name, param in model.named_parameters():
+            # freeze base model's layers
+            param.requires_grad = False
 
     # cast all non INT8 parameters to fp32
     for param in model.parameters():
         if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
             param.data = param.data.to(torch.float32)
 
-    if loaded_in_kbit and use_gradient_checkpointing:
+    if loaded_in_kbit:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
@@ -65,6 +68,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
+    if use_gradient_checkpointing:
         # enable gradient checkpointing for memory efficiency
         model.gradient_checkpointing_enable()
 
