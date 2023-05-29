@@ -1177,7 +1177,6 @@ class PeftModelForTokenClassification(PeftModel):
             logits = self.base_model.get_submodule(self.cls_layer_name)(sequence_output)
 
             loss = None
-            loss = None
             if labels is not None:
                 loss_fct = CrossEntropyLoss()
                 loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
