@@ -951,7 +951,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 )
                 kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
             # concat prompt labels
-            if labels is not None and peft_config.peft_type:
+            if labels is not None:
                 if peft_config.num_transformer_submodules == 1:
                     kwargs["labels"] = labels
                 elif peft_config.num_transformer_submodules == 2:
