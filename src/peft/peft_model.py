@@ -1012,7 +1012,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     prompts = prompts.to(inputs_embeds.dtype)
 
                     inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
-                    encoder_outputs = self.base_model.encoder(inputs_embeds=inputs_embeds)
+                    encoder_outputs = self.base_model.get_encoder()(inputs_embeds=inputs_embeds)
                     kwargs['encoder_outputs'] = encoder_outputs
 
                     if 'attention_mask' in kwargs:
