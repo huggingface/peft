@@ -841,7 +841,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
         ...     "target_modules": ["q", "v"],
         ...     "lora_alpha": 32,
         ...     "lora_dropout": 0.1,
-        ...     "merge_weights": False,
         ...     "fan_in_fan_out": False,
         ...     "enable_lora": None,
         ...     "bias": "none",
