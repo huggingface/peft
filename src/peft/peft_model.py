@@ -223,7 +223,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         r"""
         Prepares the model for gradient checkpointing if necessary
         """
-        if not getattr(model, "is_loaded_in_8bit", False):
+        if not (getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)):
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
             else:
