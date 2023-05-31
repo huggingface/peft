@@ -20,13 +20,16 @@ import torch
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, WhisperForConditionalGeneration
 
 from peft import LoraConfig, PeftModel, get_peft_model
-from peft.import_utils import is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
 
 if is_bnb_available():
     from peft.tuners.lora import Linear8bitLt
+
+    if is_bnb_4bit_available():
+        from peft.tuners.lora import Linear4bit
 
 
 @require_torch_gpu
@@ -51,7 +54,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         gc.collect()
 
     @require_bitsandbytes
-    def test_lora_bnb_quantization(self):
+    def test_lora_bnb_8bit_quantization(self):
         r"""
         Test that tests if the 8bit quantization using LoRA works as expected
         """
@@ -98,6 +101,53 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.assertTrue(
             isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear8bitLt)
         )
+
+    @require_bitsandbytes
+    def test_lora_bnb_4bit_quantization(self):
+        r"""
+        Test that tests if the 4bit quantization using LoRA works as expected
+        """
+        whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
+            self.audio_model_id,
+            device_map="auto",
+            load_in_4bit=True,
+        )
+
+        opt_4bit = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            load_in_4bit=True,
+        )
+
+        flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id,
+            device_map="auto",
+            load_in_4bit=True,
+        )
+
+        flan_lora_config = LoraConfig(
+            r=16, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+        )
+
+        opt_lora_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
+
+        flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
+        self.assertTrue(isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, Linear4bit))
+
+        opt_4bit = get_peft_model(opt_4bit, opt_lora_config)
+        self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit))
+
+        whisper_4bit = get_peft_model(whisper_4bit, config)
+        self.assertTrue(isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, Linear4bit))
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu

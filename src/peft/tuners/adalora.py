@@ -311,8 +311,6 @@ class AdaLoraModel(LoraModel):
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
                 model_config["model_type"]
             ]
-        if peft_config.inference_mode:
-            peft_config.merge_weights = True
         return peft_config
 
 
@@ -399,7 +397,8 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             self.weight.data += (
                 transpose(
                     self.lora_B[self.active_adapter]
-                    @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter])
+                    @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]),
+                    self.fan_in_fan_out,
                 )
                 * self.scaling[self.active_adapter]
                 / (self.ranknum[self.active_adapter] + 1e-5)
