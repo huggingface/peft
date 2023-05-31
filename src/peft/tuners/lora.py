@@ -336,8 +336,6 @@ class LoraModel(torch.nn.Module):
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
-        if peft_config.inference_mode:
-            peft_config.merge_weights = True
         return peft_config
 
     def merge_and_unload(self):
