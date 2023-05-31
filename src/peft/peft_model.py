@@ -17,6 +17,7 @@ import inspect
 import os
 import warnings
 from contextlib import contextmanager
+from typing import Optional
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -439,6 +440,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @property
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
+
+    def resize_token_embeddings(self, new_num_tokens: Optional[int] = None) -> torch.nn.Embedding:
+        if new_num_tokens is not None and new_num_tokens != self.base_model.config.vocab_size:
+            self.base_model.resize_token_embeddings(new_num_tokens)
+            if isinstance(self.active_peft_config, PromptLearningConfig):
+                self._setup_prompt_encoder(self.active_adapter)
 
 
 class PeftModelForSequenceClassification(PeftModel):
