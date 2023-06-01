@@ -17,7 +17,7 @@ import re
 import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -261,13 +261,7 @@ class LoraModel(torch.nn.Module):
                             padding = target.padding
 
                             new_module = Conv2d(
-                                adapter_name,
-                                in_channels,
-                                out_channels,
-                                kernel_size,
-                                stride,
-                                padding,
-                                **kwargs
+                                adapter_name, in_channels, out_channels, kernel_size, stride, padding, **kwargs
                             )
                         else:
                             raise ValueError(
@@ -447,12 +441,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
 
 
 class LoraLayer:
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        **kwargs
-    ):
+    def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
         self.lora_alpha = {}
         self.scaling = {}
@@ -498,11 +487,15 @@ class LoraLayer:
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         if r > 0:
-            kernel_size = self.kwargs['kernel_size']
-            stride = self.kwargs['stride']
-            padding = self.kwargs['padding']
-            self.lora_A.update(nn.ModuleDict({adapter_name: nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)}))
-            self.lora_B.update(nn.ModuleDict({adapter_name: nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)}))
+            kernel_size = self.kwargs["kernel_size"]
+            stride = self.kwargs["stride"]
+            padding = self.kwargs["padding"]
+            self.lora_A.update(
+                nn.ModuleDict({adapter_name: nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)})
+            )
+            self.lora_B.update(
+                nn.ModuleDict({adapter_name: nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)})
+            )
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
@@ -728,7 +721,14 @@ class Conv2d(nn.Conv2d, LoraLayer):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
 
         nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding)
-        LoraLayer.__init__(self, in_features=in_channels, out_features=out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
+        LoraLayer.__init__(
+            self,
+            in_features=in_channels,
+            out_features=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
 
@@ -747,13 +747,16 @@ class Conv2d(nn.Conv2d, LoraLayer):
             if self.weight.size()[2:4] == (1, 1):
                 # conv2d 1x1
                 self.weight.data += (
-                    (self.lora_B[self.active_adapter].weight.squeeze(3).squeeze(2) @ self.lora_A[self.active_adapter].weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
-                    * self.scaling[self.active_adapter]
-                )
+                    self.lora_B[self.active_adapter].weight.squeeze(3).squeeze(2)
+                    @ self.lora_A[self.active_adapter].weight.squeeze(3).squeeze(2)
+                ).unsqueeze(2).unsqueeze(3) * self.scaling[self.active_adapter]
             else:
                 # conv2d 3x3
                 self.weight.data += (
-                    F.conv2d(self.lora_A[self.active_adapter].weight.permute(1, 0, 2, 3), self.lora_B[self.active_adapter].weight).permute(1, 0, 2, 3)
+                    F.conv2d(
+                        self.lora_A[self.active_adapter].weight.permute(1, 0, 2, 3),
+                        self.lora_B[self.active_adapter].weight,
+                    ).permute(1, 0, 2, 3)
                     * self.scaling[self.active_adapter]
                 )
             self.merged = True
@@ -768,13 +771,16 @@ class Conv2d(nn.Conv2d, LoraLayer):
             if self.weight.size()[2:4] == (1, 1):
                 # conv2d 1x1
                 self.weight.data -= (
-                    (self.lora_B[self.active_adapter].weight.squeeze(3).squeeze(2) @ self.lora_A[self.active_adapter].weight.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(3)
-                    * self.scaling[self.active_adapter]
-                )
+                    self.lora_B[self.active_adapter].weight.squeeze(3).squeeze(2)
+                    @ self.lora_A[self.active_adapter].weight.squeeze(3).squeeze(2)
+                ).unsqueeze(2).unsqueeze(3) * self.scaling[self.active_adapter]
             else:
                 # conv2d 3x3
                 self.weight.data += (
-                    F.conv2d(self.lora_A[self.active_adapter].weight.permute(1, 0, 2, 3), self.lora_B[self.active_adapter].weight).permute(1, 0, 2, 3)
+                    F.conv2d(
+                        self.lora_A[self.active_adapter].weight.permute(1, 0, 2, 3),
+                        self.lora_B[self.active_adapter].weight,
+                    ).permute(1, 0, 2, 3)
                     * self.scaling[self.active_adapter]
                 )
             self.merged = False
@@ -783,13 +789,37 @@ class Conv2d(nn.Conv2d, LoraLayer):
         previous_dtype = x.dtype
 
         if self.active_adapter not in self.lora_A.keys():
-            return F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+            return F.conv2d(
+                x,
+                self.weight,
+                bias=self.bias,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
-            result = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+            result = F.conv2d(
+                x,
+                self.weight,
+                bias=self.bias,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
         elif self.r[self.active_adapter] > 0 and not self.merged:
-            result = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+            result = F.conv2d(
+                x,
+                self.weight,
+                bias=self.bias,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
 
             x = x.to(self.lora_A[self.active_adapter].weight.dtype)
 
@@ -800,7 +830,15 @@ class Conv2d(nn.Conv2d, LoraLayer):
                 * self.scaling[self.active_adapter]
             )
         else:
-            result = F.conv2d(x, self.weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+            result = F.conv2d(
+                x,
+                self.weight,
+                bias=self.bias,
+                stride=self.stride,
+                padding=self.padding,
+                dilation=self.dilation,
+                groups=self.groups,
+            )
 
         result = result.to(previous_dtype)
 
