@@ -103,7 +103,9 @@ class PeftConfigMixin(PushToHubMixin):
             config_file = os.path.join(path, CONFIG_NAME)
         else:
             try:
-                config_file = hf_hub_download(pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder)
+                config_file = hf_hub_download(
+                    pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder, **kwargs
+                )
             except Exception:
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'")
 
@@ -144,6 +146,7 @@ class PeftConfig(PeftConfigMixin):
     """
 
     base_model_name_or_path: str = field(default=None, metadata={"help": "The name of the base model to use."})
+    revision: str = field(default=None, metadata={"help": "The specific model version to use."})
     peft_type: Union[str, PeftType] = field(default=None, metadata={"help": "Peft type"})
     task_type: Union[str, TaskType] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})
