@@ -48,7 +48,7 @@ class LoraConfig(PeftConfig):
     Args:
         r (`int`): Lora attention dimension.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
-        lora_alpha (`float`): The alpha parameter for Lora scaling.
+        lora_alpha (`int`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
