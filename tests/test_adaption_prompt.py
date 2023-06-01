@@ -312,3 +312,15 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         adapted.base_model.config.use_cache = True
         actual = adapted.generate(input_ids=input_ids, max_length=8)
         assert_close(expected, actual, rtol=0, atol=0)
+
+    def test_bf16_inference(self) -> None:
+        """Test that AdaptionPrompt works when Llama using a half-precision model."""
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        original = LlamaForCausalLM.from_pretrained(
+            "trl-internal-testing/tiny-random-LlamaForCausalLM", torch_dtype=torch.bfloat16
+        )
+        adapted = get_peft_model(
+            original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted = adapted.to(self.torch_device)
+        _ = adapted.generate(input_ids=input_ids)
