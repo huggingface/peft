@@ -539,7 +539,7 @@ def main():
 
     # model
     model = WhisperForConditionalGeneration.from_pretrained(
-        args.model_name_or_path, load_in_8bit=True, device_map="auto"
+        args.model_name_or_path, load_in_8bit=True
     )
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
