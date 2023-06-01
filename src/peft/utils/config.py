@@ -84,13 +84,15 @@ class PeftConfigMixin(PushToHubMixin):
             writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, subfolder=None, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path, subfolder=None, revision=None, **kwargs):
         r"""
         This method loads the configuration of your adapter model from a directory.
 
         Args:
             pretrained_model_name_or_path (`str`):
                 The directory or the Hub repository id where the configuration is saved.
+            revision (`str`, *optional*):
+                option for choosing revision
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the child class initialization.
         """
@@ -104,7 +106,7 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             try:
                 config_file = hf_hub_download(
-                    pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder, **kwargs
+                    pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder, revision=revision
                 )
             except Exception:
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'")

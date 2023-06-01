@@ -62,7 +62,7 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
         for config_class in self.all_config_classes:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 # Test we can load config from delta
-                _ = config_class.from_pretrained(model_name, revision=revision)
+                _ = config_class.from_pretrained(model_name, revision=revision, device_map="auto")
 
     def test_save_pretrained(self):
         r"""
