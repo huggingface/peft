@@ -45,7 +45,6 @@ max_memory = {i: max_memory for i in range(n_gpus)}
 
 model = AutoModelForCausalLM.from_pretrained(
     "facebook/opt-350m",
-    device_map="auto",
     max_memory=max_memory,
     quantization_config=BitsAndBytesConfig(
         load_in_4bit=True,
