@@ -15,14 +15,14 @@
 from setuptools import find_packages, setup
 
 extras = {}
-extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241"]
+extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
-extras["test"] = extras["dev"] + ["pytest", "pytest-xdist", "parameterized", "datasets", "slack_sdk"]
+extras["test"] = extras["dev"] + ["pytest", "pytest-xdist", "parameterized", "datasets"]
 
 setup(
     name="peft",
-    version="0.3.0.dev0",
+    version="0.4.0.dev0",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),

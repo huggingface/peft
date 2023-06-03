@@ -94,3 +94,11 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_training_encoder_decoders(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_training_encoder_decoders_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_training_encoder_decoders_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)

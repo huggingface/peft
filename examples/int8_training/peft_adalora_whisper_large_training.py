@@ -538,9 +538,7 @@ def main():
     metric = evaluate.load("wer")
 
     # model
-    model = WhisperForConditionalGeneration.from_pretrained(
-        args.model_name_or_path, load_in_8bit=True, device_map="auto"
-    )
+    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, load_in_8bit=True)
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
     if len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:
@@ -561,7 +559,7 @@ def main():
     if args.use_peft:
         from peft import prepare_model_for_int8_training
 
-        model = prepare_model_for_int8_training(model, output_embedding_layer_name="proj_out")
+        model = prepare_model_for_int8_training(model)
 
         # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
         # to avoid this, make the inputs trainable

@@ -22,12 +22,17 @@ from .other import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+<<<<<<< HEAD
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+=======
+    COMMON_LAYERS_PATTERN,
+>>>>>>> fcff23f005fc7bfb816ad1f55360442c170cd5f5
     CONFIG_NAME,
     WEIGHTS_NAME,
     _set_trainable,
     bloom_model_postprocess_past_key_value,
     prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     shift_tokens_right,
     transpose,
     _get_submodules,
