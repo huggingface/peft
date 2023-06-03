@@ -214,7 +214,6 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "starcoder": ["c_attn"],
 }
 
-<<<<<<< HEAD
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "t5": ["k", "v", "wo"],
     "mt5": ["k", "v", "wi_1"],
@@ -236,9 +235,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "llama": ["k_proj", "v_proj"],
     "chatglm": ["query_key_value"],
 }
-=======
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
->>>>>>> fcff23f005fc7bfb816ad1f55360442c170cd5f5
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
