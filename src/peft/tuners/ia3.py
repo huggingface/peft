@@ -365,7 +365,6 @@ class IA3Model(torch.nn.Module):
 #  ------------------------------------------------------------------------------------------
 
 
-# had to adapt it for `ia3_only` to work
 def mark_only_ia3_as_trainable(model: nn.Module, bias: str = "none") -> None:
     for n, p in model.named_parameters():
         if "ia3_" not in n:
@@ -376,10 +375,6 @@ def mark_only_ia3_as_trainable(model: nn.Module, bias: str = "none") -> None:
         for n, p in model.named_parameters():
             if "bias" in n:
                 p.requires_grad = True
-    # elif bias == "ia3_only":
-    #     for m in model.modules():
-    #         if isinstance(m, IA3Layer) and hasattr(m, "bias") and m.bias is not None:
-    #             m.bias.requires_grad = True
     else:
         raise NotImplementedError
 
