@@ -260,7 +260,6 @@ class LoraModel(torch.nn.Module):
                         new_module = Linear8bitLt(
                             adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
                         )
-<<<<<<< HEAD
                     elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
                         fourbit_kwargs = kwargs.copy()
                         fourbit_kwargs.update(
@@ -273,8 +272,6 @@ class LoraModel(torch.nn.Module):
                         new_module = Linear4bit(
                             adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
                         )
-=======
->>>>>>> upstream/main
                     elif isinstance(target, torch.nn.Embedding):
                         embedding_kwargs = kwargs.copy()
                         embedding_kwargs.pop("fan_in_fan_out", None)
