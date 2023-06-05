@@ -145,6 +145,8 @@ class IA3Model(torch.nn.Module):
 
     def _find_and_replace(self, adapter_name):
         ia3_config = self.peft_config[adapter_name]
+        if not ia3_config.feedforward_modules:
+            ia3_config.feedforward_modules = []
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and not is_bnb_available():
             raise ImportError(

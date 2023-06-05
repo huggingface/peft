@@ -219,7 +219,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "mt5": ["k", "v", "wi_1"],
     "bart": ["k_proj", "v_proj"],
     "gpt2": ["c_attn"],
-    "bloom": ["query_key_value"],
+    "bloom": ["query_key_value", "mlp.dense_4h_to_h"],
     "blip-2": ["k", "v", "k_proj", "v_proj"],
     "opt": ["k_proj", "v_proj"],
     "gptj": ["k_proj", "v_proj"],
