@@ -45,6 +45,7 @@ from .utils import (
     TaskType,
     _set_adapter,
     _set_trainable,
+    add_or_edit_model_card,
     get_peft_model_state_dict,
     set_peft_model_state_dict,
     shift_tokens_right,
@@ -122,6 +123,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
         os.makedirs(save_directory, exist_ok=True)
+        add_or_edit_model_card(save_directory)
 
         for adapter_name, peft_config in self.peft_config.items():
             # save only the trainable weights
