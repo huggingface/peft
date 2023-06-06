@@ -156,9 +156,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config.inference_mode = inference_mode
 
     @classmethod
-    def from_pretrained(
-        cls, model, model_id, adapter_name="default", is_trainable=False, load_safetensors=False, **kwargs
-    ):
+    def from_pretrained(cls, model, model_id, adapter_name="default", is_trainable=False, **kwargs):
         r"""
         Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
 
@@ -194,7 +192,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = cls(model, config, adapter_name)
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
-        model.load_adapter(model_id, adapter_name, load_safetensors=load_safetensors, **kwargs)
+        model.load_adapter(model_id, adapter_name, **kwargs)
         return model
 
     def _setup_prompt_encoder(self, adapter_name):
@@ -380,7 +378,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save.update(peft_config.modules_to_save)
             _set_trainable(self, adapter_name)
 
-    def load_adapter(self, model_id, adapter_name, is_trainable=False, load_safetensors=False, **kwargs):
+    def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         if adapter_name not in self.peft_config:
@@ -397,10 +395,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load weights if any
         path = os.path.join(model_id, kwargs["subfolder"]) if kwargs.get("subfolder", None) is not None else model_id
 
-        # load_safetensors is only used for remote weights
-        remote_weights_name = SAFETENSORS_WEIGHTS_NAME if load_safetensors else WEIGHTS_NAME
-        use_safetensors = "safetensors" in remote_weights_name
-
         if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
             filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
             use_safetensors = True
@@ -409,14 +403,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             use_safetensors = False
         else:
             try:
+                # Priority 1: load safetensors weights
                 filename = hf_hub_download(
-                    model_id, remote_weights_name, subfolder=kwargs.get("subfolder", None), **kwargs
+                    model_id, SAFETENSORS_WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
                 )
             except:  # noqa
-                raise ValueError(
-                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
-                    f"Please check that the file {remote_weights_name} is present at {model_id}."
-                )
+                try:
+                    filename = hf_hub_download(
+                        model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
+                    )
+                except:  # noqa
+                    raise ValueError(
+                        f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
+                        f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
+                    )
 
         if use_safetensors:
             adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
