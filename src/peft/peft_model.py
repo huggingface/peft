@@ -399,9 +399,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"Please check that the file {WEIGHTS_NAME} is present at {model_id}."
                 )
 
-        # adapters_weights = torch.load(
-        #     filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # )
         adapters_weights = safe_load_file(filename)
 
         # load the weights into the model
