@@ -25,6 +25,7 @@ from .other import (
     COMMON_LAYERS_PATTERN,
     CONFIG_NAME,
     WEIGHTS_NAME,
+    SAFETENSORS_WEIGHTS_NAME,
     _set_trainable,
     add_or_edit_model_card,
     bloom_model_postprocess_past_key_value,

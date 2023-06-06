@@ -266,4 +266,5 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
+SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
