@@ -23,6 +23,8 @@ from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file as safe_load_file
+from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
@@ -132,7 +134,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
-            torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+            safe_save_file(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME), metadata={"format": "pt"})
 
             # save the config and change the inference mode to `True`
             if peft_config.base_model_name_or_path is None:
@@ -397,9 +399,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"Please check that the file {WEIGHTS_NAME} is present at {model_id}."
                 )
 
-        adapters_weights = torch.load(
-            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        # adapters_weights = torch.load(
+        #     filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # )
+        adapters_weights = safe_load_file(filename)
+
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
         if (
