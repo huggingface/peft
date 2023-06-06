@@ -23,6 +23,7 @@ from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
@@ -407,12 +408,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 filename = hf_hub_download(
                     model_id, SAFETENSORS_WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
                 )
-            except:  # noqa
+            except EntryNotFoundError:
                 try:
                     filename = hf_hub_download(
                         model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
                     )
-                except:  # noqa
+                except EntryNotFoundError:
                     raise ValueError(
                         f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
                         f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
