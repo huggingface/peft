@@ -51,6 +51,7 @@ from .utils import (
     _set_trainable,
     add_or_edit_model_card,
     get_peft_model_state_dict,
+    hub_file_exists,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -403,12 +404,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             filename = os.path.join(path, WEIGHTS_NAME)
             use_safetensors = False
         else:
-            try:
+            has_remote_safetensors_file = hub_file_exists(
+                model_id, SAFETENSORS_WEIGHTS_NAME, revision=kwargs.get("revision", None)
+            )
+
+            if has_remote_safetensors_file:
                 # Priority 1: load safetensors weights
                 filename = hf_hub_download(
                     model_id, SAFETENSORS_WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
                 )
-            except EntryNotFoundError:
+            else:
                 try:
                     filename = hf_hub_download(
                         model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
