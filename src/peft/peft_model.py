@@ -369,7 +369,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save.update(peft_config.modules_to_save)
             _set_trainable(self, adapter_name)
 
-    def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
+    def load_adapter(self, model_id, adapter_name, is_trainable=False, revision=None, **kwargs):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         if adapter_name not in self.peft_config:
@@ -390,7 +390,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             filename = os.path.join(path, WEIGHTS_NAME)
         else:
             try:
-                filename = hf_hub_download(model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs)
+                filename = hf_hub_download(model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), revision=revision)
             except:  # noqa
                 raise ValueError(
                     f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
