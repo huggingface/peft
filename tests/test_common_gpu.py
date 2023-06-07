@@ -103,6 +103,21 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
     @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    def test_lora_bnb_4bit_quantization_from_pretrained_safetensors(self):
+        r"""
+        Test that tests if the 4bit quantization using LoRA works as expected with safetensors
+        weights.
+        """
+        model_id = "facebook/opt-350m"
+        peft_model_id = "ybelkada/test-st-lora"
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", load_in_4bit=True)
+        model = PeftModel.from_pretrained(model, peft_model_id)
+
+        _ = model.generate(torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+    @require_bitsandbytes
     def test_lora_bnb_4bit_quantization(self):
         r"""
         Test that tests if the 4bit quantization using LoRA works as expected
