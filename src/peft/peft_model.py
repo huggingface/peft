@@ -530,20 +530,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 by a unit (like `"5MB"`).
             create_pr (`bool`, *optional*, defaults to `False`):
                 Whether or not to create a PR with the uploaded files or directly commit.
-
-        Examples:
-
-        ```python
-        from transformers import {object_class}
-
-        {object} = {object_class}.from_pretrained("bert-base-cased")
-
-        # Push the {object} to your namespace with the name "my-finetuned-bert".
-        {object}.push_to_hub("my-finetuned-bert")
-
-        # Push the {object} to an organization with the name "my-finetuned-bert".
-        {object}.push_to_hub("huggingface/my-finetuned-bert")
-        ```
         """
         if "repo_path_or_name" in deprecated_kwargs:
             warnings.warn(

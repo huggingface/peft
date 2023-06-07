@@ -106,8 +106,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @pytest.mark.multi_gpu_tests
     def test_lora_bnb_4bit_quantization_from_pretrained_safetensors(self):
         r"""
-        Test that tests if the 4bit quantization using LoRA works as expected with safetensors
-        weights.
+        Test that tests if the 4bit quantization using LoRA works as expected with safetensors weights.
         """
         model_id = "facebook/opt-350m"
         peft_model_id = "ybelkada/test-st-lora"
