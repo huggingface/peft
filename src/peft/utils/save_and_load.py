@@ -122,6 +122,19 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
     elif isinstance(config, PromptLearningConfig) or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
+    elif config.peft_type == PeftType.IA3:
+        peft_model_state_dict = {}
+        for k, v in state_dict.items():
+            if "ia3_" in k:
+                suffix = k.split("ia3_")[1]
+                if "." in suffix:
+                    suffix_to_replace = ".".join(suffix.split(".")[1:])
+                    k = k.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
+                else:
+                    k = f"{k}.{adapter_name}"
+                peft_model_state_dict[k] = v
+            else:
+                peft_model_state_dict[k] = v
     else:
         raise NotImplementedError
 
