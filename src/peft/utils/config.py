@@ -136,7 +136,6 @@ class PeftConfigMixin(PushToHubMixin):
 
         return json_object
 
-
     @classmethod
     def _split_kwargs(cls, kwargs):
         hf_hub_download_kwargs = {}
@@ -147,7 +146,7 @@ class PeftConfigMixin(PushToHubMixin):
                 hf_hub_download_kwargs[key] = value
             else:
                 class_kwargs[key] = value
-                
+
         return hf_hub_download_kwargs, class_kwargs
 
 
