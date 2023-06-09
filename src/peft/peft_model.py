@@ -23,6 +23,9 @@ from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError
+from safetensors.torch import load_file as safe_load_file
+from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
@@ -37,6 +40,7 @@ from .tuners import (
     PromptEncoder,
 )
 from .utils import (
+    SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
     PeftConfig,
@@ -47,6 +51,7 @@ from .utils import (
     _set_trainable,
     add_or_edit_model_card,
     get_peft_model_state_dict,
+    hub_file_exists,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -107,7 +112,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
-    def save_pretrained(self, save_directory, **kwargs):
+    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
         reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
@@ -132,7 +137,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
-            torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+
+            if safe_serialization:
+                safe_save_file(
+                    output_state_dict, os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME), metadata={"format": "pt"}
+                )
+            else:
+                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
             if peft_config.base_model_name_or_path is None:
@@ -386,20 +397,41 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load weights if any
         path = os.path.join(model_id, kwargs["subfolder"]) if kwargs.get("subfolder", None) is not None else model_id
 
-        if os.path.exists(os.path.join(path, WEIGHTS_NAME)):
+        if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
+            filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
+            use_safetensors = True
+        elif os.path.exists(os.path.join(path, WEIGHTS_NAME)):
             filename = os.path.join(path, WEIGHTS_NAME)
+            use_safetensors = False
         else:
-            try:
-                filename = hf_hub_download(model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs)
-            except:  # noqa
-                raise ValueError(
-                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
-                    f"Please check that the file {WEIGHTS_NAME} is present at {model_id}."
-                )
+            has_remote_safetensors_file = hub_file_exists(
+                model_id, SAFETENSORS_WEIGHTS_NAME, revision=kwargs.get("revision", None)
+            )
+            use_safetensors = has_remote_safetensors_file
 
-        adapters_weights = torch.load(
-            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
+            if has_remote_safetensors_file:
+                # Priority 1: load safetensors weights
+                filename = hf_hub_download(
+                    model_id, SAFETENSORS_WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
+                )
+            else:
+                try:
+                    filename = hf_hub_download(
+                        model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
+                    )
+                except EntryNotFoundError:
+                    raise ValueError(
+                        f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
+                        f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
+                    )
+
+        if use_safetensors:
+            adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            adapters_weights = torch.load(
+                filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            )
+
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
         if (
