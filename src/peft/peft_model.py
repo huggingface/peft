@@ -28,7 +28,7 @@ from safetensors.torch import load_file as safe_load_file
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
-from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput, QuestionAnsweringModelOutput
+from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
 from .tuners import (

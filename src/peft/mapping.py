@@ -16,10 +16,10 @@
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
+    PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
-    PeftModelForQuestionAnswering,
 )
 from .tuners import (
     AdaLoraConfig,
