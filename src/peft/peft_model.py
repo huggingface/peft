@@ -30,7 +30,6 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
-from transformers.utils.generic import working_or_temp_dir
 
 from .tuners import (
     AdaLoraModel,
@@ -493,81 +492,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @property
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
-
-    def push_to_hub(
-        self,
-        repo_id: str,
-        use_temp_dir: bool = None,
-        commit_message: str = None,
-        private: bool = None,
-        use_auth_token: bool = None,
-        max_shard_size: str = "10GB",
-        create_pr: bool = False,
-        safe_serialization: bool = False,
-        **deprecated_kwargs,
-    ) -> str:
-        """
-        Copy of the `push_to_hub` method that adds the `safe_serialization` argument for pushing safetensors weights.
-
-        Parameters:
-            repo_id (`str`):
-                The name of the repository you want to push your {object} to. It should contain your organization name
-                when pushing to a given organization.
-            use_temp_dir (`bool`, *optional*):
-                Whether or not to use a temporary directory to store the files saved before they are pushed to the Hub.
-                Will default to `True` if there is no directory named like `repo_id`, `False` otherwise.
-            commit_message (`str`, *optional*):
-                Message to commit while pushing. Will default to `"Upload {object}"`.
-            private (`bool`, *optional*):
-                Whether or not the repository created should be private.
-            use_auth_token (`bool` or `str`, *optional*):
-                The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
-                when running `huggingface-cli login` (stored in `~/.huggingface`). Will default to `True` if `repo_url`
-                is not specified.
-            max_shard_size (`int` or `str`, *optional*, defaults to `"10GB"`):
-                Only applicable for models. The maximum size for a checkpoint before being sharded. Checkpoints shard
-                will then be each of size lower than this size. If expressed as a string, needs to be digits followed
-                by a unit (like `"5MB"`).
-            create_pr (`bool`, *optional*, defaults to `False`):
-                Whether or not to create a PR with the uploaded files or directly commit.
-        """
-        if "repo_path_or_name" in deprecated_kwargs:
-            warnings.warn(
-                "The `repo_path_or_name` argument is deprecated and will be removed in v5 of Transformers. Use "
-                "`repo_id` instead."
-            )
-            repo_id = deprecated_kwargs.pop("repo_path_or_name")
-        # Deprecation warning will be sent after for repo_url and organization
-        repo_url = deprecated_kwargs.pop("repo_url", None)
-        organization = deprecated_kwargs.pop("organization", None)
-
-        if os.path.isdir(repo_id):
-            working_dir = repo_id
-            repo_id = repo_id.split(os.path.sep)[-1]
-        else:
-            working_dir = repo_id.split("/")[-1]
-
-        repo_id = self._create_repo(
-            repo_id, private=private, use_auth_token=use_auth_token, repo_url=repo_url, organization=organization
-        )
-
-        if use_temp_dir is None:
-            use_temp_dir = not os.path.isdir(working_dir)
-
-        with working_or_temp_dir(working_dir=working_dir, use_temp_dir=use_temp_dir) as work_dir:
-            files_timestamps = self._get_files_timestamps(work_dir)
-
-            # Save all files.
-            self.save_pretrained(work_dir, max_shard_size=max_shard_size, safe_serialization=safe_serialization)
-
-            return self._upload_modified_files(
-                work_dir,
-                repo_id,
-                files_timestamps,
-                commit_message=commit_message,
-                token=use_auth_token,
-                create_pr=create_pr,
-            )
 
 
 class PeftModelForSequenceClassification(PeftModel):
