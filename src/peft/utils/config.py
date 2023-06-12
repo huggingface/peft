@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import enum
+import inspect
 import json
 import os
 from dataclasses import asdict, dataclass, field
@@ -100,7 +101,7 @@ class PeftConfigMixin(PushToHubMixin):
             else pretrained_model_name_or_path
         )
 
-        class_kwargs, hf_hub_download_kwargs = cls._split_kwargs(kwargs)
+        hf_hub_download_kwargs, class_kwargs = cls._split_kwargs(kwargs)
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)
@@ -142,7 +143,7 @@ class PeftConfigMixin(PushToHubMixin):
         class_kwargs = {}
 
         for key, value in kwargs.items():
-            if key in hf_hub_download.__code__.co_varnames:
+            if key in inspect.signature(hf_hub_download).parameters:
                 hf_hub_download_kwargs[key] = value
             else:
                 class_kwargs[key] = value
