@@ -27,6 +27,7 @@ from transformers.pytorch_utils import Conv1D
 from ..import_utils import is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     ModulesToSaveWrapper,
     PeftConfig,
     PeftType,
@@ -300,6 +301,10 @@ class IA3Model(torch.nn.Module):
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING[model_config["model_type"]]
+        if peft_config.feedforward_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING:
+                raise ValueError("Please specify `feedforward_modules` in `peft_config`")
+            peft_config.feedforward_modules = TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[model_config["model_type"]]        
         if peft_config.inference_mode:
             peft_config.merge_weights = True
         return peft_config
@@ -332,30 +337,6 @@ class IA3Model(torch.nn.Module):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
-
-    def add_weighted_adapter(self, adapters, weights, adapter_name):
-        raise NotImplementedError
-        if len({self.peft_config[adapter].r for adapter in adapters}) != 1:
-            raise ValueError("All adapters must have the same r value")
-        self.peft_config[adapter_name] = self.peft_config[adapters[0]]
-        self.peft_config[adapter_name].ia3_alpha = self.peft_config[adapters[0]].r
-        self._find_and_replace(adapter_name)
-        mark_only_ia3_as_trainable(self.model, self.peft_config[adapter_name].bias)
-        _freeze_adapter(self.model, adapter_name)
-        key_list = [key for key, _ in self.model.named_modules() if "ia3" not in key]
-        for key in key_list:
-            _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, IA3Layer):
-                target.ia3_A[adapter_name].weight.data = target.ia3_A[adapter_name].weight.data * 0.0
-                target.ia3_B[adapter_name].weight.data = target.ia3_B[adapter_name].weight.data * 0.0
-                for adapter, weight in zip(adapters, weights):
-                    if adapter not in target.ia3_A:
-                        continue
-                    target.ia3_A[adapter_name].weight.data += (
-                        target.ia3_A[adapter].weight.data * weight * target.scaling[adapter]
-                    )
-                    target.ia3_B[adapter_name].weight.data += target.ia3_B[adapter].weight.data * weight
-
 
 # Below code is based on https://github.com/microsoft/lora/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP

@@ -217,24 +217,19 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "t5": ["k", "v", "wo"],
     "mt5": ["k", "v", "wi_1"],
-    "bart": ["k_proj", "v_proj"],
     "gpt2": ["c_attn"],
     "bloom": ["query_key_value", "mlp.dense_4h_to_h"],
-    "blip-2": ["k", "v", "k_proj", "v_proj"],
-    "opt": ["k_proj", "v_proj"],
-    "gptj": ["k_proj", "v_proj"],
-    "gpt_neox": ["query_key_value"],
-    "gpt_neo": ["k_proj", "v_proj"],
-    "bert": ["key", "value"],
     "roberta": ["key", "value", "output.dense"],
-    "xlm-roberta": ["key", "value"],
-    "electra": ["key", "value"],
-    "deberta-v2": ["key_proj", "value_proj"],
-    "deberta": ["in_proj"],
-    "layoutlm": ["key", "value"],
-    "llama": ["k_proj", "v_proj"],
-    "chatglm": ["query_key_value"],
 }
+
+TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
+    "t5": ["wo"],
+    "mt5": [],
+    "gpt2": [],
+    "bloom": ["mlp.dense_4h_to_h"],
+    "roberta": ["output.dense"],
+}
+
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
