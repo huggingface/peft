@@ -19,6 +19,9 @@ import unittest
 from peft import AdaptionPromptConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
 
 
+PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
+
+
 class PeftConfigTestMixin:
     all_config_classes = (
         LoraConfig,
@@ -50,6 +53,16 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
         for config_class in self.all_config_classes:
             # assert this will not fail
             _ = config_class(task_type="test")
+
+    def test_from_pretrained(self):
+        r"""
+        Test if the config is correctly loaded using:
+        - from_pretrained
+        """
+        for config_class in self.all_config_classes:
+            for model_name, revision in PEFT_MODELS_TO_TEST:
+                # Test we can load config from delta
+                _ = config_class.from_pretrained(model_name, revision=revision)
 
     def test_save_pretrained(self):
         r"""

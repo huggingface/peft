@@ -120,8 +120,9 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         raise NotImplementedError
 
-    model.load_state_dict(peft_model_state_dict, strict=False)
+    load_result = model.load_state_dict(peft_model_state_dict, strict=False)
     if isinstance(config, PromptLearningConfig):
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
+    return load_result
