@@ -101,7 +101,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     return peft_config
 
 
-def get_peft_model(model, peft_config):
+def get_peft_model(model, peft_config) -> PeftModel:
     """
     Returns a Peft model object from a model and a config.
 
