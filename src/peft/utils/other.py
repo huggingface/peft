@@ -212,6 +212,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
     "starcoder": ["c_attn"],
+    "mpt": ["Wqkv"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
