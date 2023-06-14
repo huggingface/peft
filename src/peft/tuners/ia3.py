@@ -431,7 +431,10 @@ class Linear(nn.Linear, IA3Layer):
             return
 
         self.weight = transpose(self.weight, self.fan_in_fan_out)
+        print(self.weight)
+        print(self.ia3_l)
         self.weight.data = torch.mul(self.weight.data, self.ia3_l[self.active_adapter].data)
+        print(self.weight)
         self.weight = transpose(self.weight, self.fan_in_fan_out)
 
         self.merged = True
