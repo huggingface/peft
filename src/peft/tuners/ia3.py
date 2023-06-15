@@ -423,38 +423,34 @@ class Linear(nn.Linear, IA3Layer):
         self.is_feedforward = is_feedforward
 
     def merge(self):
-        raise NotImplementedError("Merge not implemented for IA3")
-        if self.active_adapter not in self.ia3_A.keys():
+
+        if self.active_adapter not in self.ia3_l.keys():
             return
         if self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data += (
-                transpose(
-                    self.ia3_B[self.active_adapter].weight @ self.ia3_A[self.active_adapter].weight,
-                    self.fan_in_fan_out,
-                )
-                * self.scaling[self.active_adapter]
-            )
-            self.merged = True
+
+        self.weight = transpose(self.weight, self.fan_in_fan_out)
+        self.weight.data = torch.mul(self.weight.data, self.ia3_l[self.active_adapter].data)
+        self.weight = transpose(self.weight, self.fan_in_fan_out)
+
+        self.merged = True
 
     def unmerge(self):
-        raise NotImplementedError("Unmerge not implemented for IA3")
+
         if self.active_adapter not in self.ia3_l.keys():
             return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data -= (
-                transpose(
-                    self.ia3_B[self.active_adapter].weight @ self.ia3_A[self.active_adapter].weight,
-                    self.fan_in_fan_out,
-                )
-                * self.scaling[self.active_adapter]
-            )
-            self.merged = False
+        
+        warnings.warn("Unmerge result can be inaccurate for IA3.")
+        self.weight = transpose(self.weight, self.fan_in_fan_out)
+        self.weight.data = torch.div(self.weight.data, self.ia3_l[self.active_adapter].data)
+        self.weight = transpose(self.weight, self.fan_in_fan_out)
+
+        self.merged = False
+            
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
@@ -462,11 +458,11 @@ class Linear(nn.Linear, IA3Layer):
         if self.active_adapter not in self.ia3_l.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
         if self.disable_adapters:
-            raise NotImplementedError("Disable adapters not supported")
-            # if self.r[self.active_adapter] > 0 and self.merged:
-            #     self.unmerge()
+            if self.merged:
+                self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-        else:
+        
+        if not self.merged:
             if self.is_feedforward:
                 result = F.linear(
                     x * self.ia3_l[self.active_adapter].flatten(),
@@ -476,6 +472,9 @@ class Linear(nn.Linear, IA3Layer):
             else:
                 result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
                 result = result * self.ia3_l[self.active_adapter].flatten()
+
+        else:
+            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
         result = result.to(previous_dtype)
 
