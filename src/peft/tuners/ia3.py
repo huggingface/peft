@@ -44,14 +44,13 @@ if is_bnb_available():
 @dataclass
 class IA3Config(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`ia3Model`].
+    This is the configuration class to store the configuration of a [`IA3Model`].
 
     Args:
-        target_modules (`Union[List[str],str]`): The names of the modules to apply ia3 to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply IA3 to.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
-        bias (`str`): Bias type for ia3. Can be 'none', 'all' or 'ia3_only'
-        modules_to_save (`List[str]`):List of modules apart from ia3 layers to be set as trainable
+        modules_to_save (`List[str]`):List of modules apart from IA3 layers to be set as trainable
             and saved in the final checkpoint.
     """
 
@@ -97,7 +96,7 @@ class IA3Model(torch.nn.Module):
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`ia3Config`]): The configuration of the ia3 model.
+        config ([`IA3Config`]): The configuration of the ia3 model.
 
     Returns:
         `torch.nn.Module`: The ia3 model.
@@ -109,7 +108,7 @@ class IA3Model(torch.nn.Module):
         >>> from peft import IA3Model, IA3Config
 
         >>> config = IA3Config(
-        ...     peft_type="iA3",
+        ...     peft_type="IA3",
         ...     task_type="SEQ_2_SEQ_LM",
         ...     target_modules=["k", "v"],
         ... )
