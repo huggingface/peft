@@ -74,6 +74,9 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
                 f"The model must be a path to a checkpoint or a PeftModel instance, got {self.model.__class__}"
             )
 
+        if self.processor.pad_token is None:
+            self.processor.pad_token = self.processor.eos_token
+
         if hasattr(self, "adapter_name") and self.adapter_name is not None:
             self.model.set_adapter(self.adapter_name)
 
@@ -84,6 +87,7 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         set at the pipeline creation.
         """
         adapter_name = kwargs.pop("adapter_name", None)
+        skip_special_tokens = kwargs.pop("skip_special_tokens", True)
         if adapter_name is not None:
             if self.adapter_name is not None:
                 warnings.warn(
@@ -95,6 +99,6 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         encoded_text = self.processor(text, return_tensors="pt", padding=True).to(self.device)
 
         generate_output = self.model.generate(**encoded_text, **kwargs)
-        batched_output = self.processor.batch_decode(generate_output, skip_special_tokens=True)
+        batched_output = self.processor.batch_decode(generate_output, skip_special_tokens=skip_special_tokens)
 
         return [{"generated_text": output} for output in batched_output]
