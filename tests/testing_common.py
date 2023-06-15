@@ -463,3 +463,25 @@ class PeftCommonTester:
                 self.assertIsNotNone(param.grad)
             else:
                 self.assertIsNone(param.grad)
+
+    def _test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            return
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model = self.transformers_class.from_pretrained(model_id)
+
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            _ = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname, device_map={"": "cpu"}).to(
+                self.torch_device
+            )
