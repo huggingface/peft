@@ -177,7 +177,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         config = PEFT_TYPE_TO_CONFIG_MAPPING[
-            PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs).peft_type
+            PeftConfig._get_peft_type(
+                model_id,
+                subfolder=kwargs.get("subfolder", None),
+                revision=kwargs.get("revision", None),
+                cache_dir=kwargs.get("cache_dir", None),
+            )
         ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
 
         if (getattr(model, "hf_device_map", None) is not None) and len(
@@ -380,14 +385,39 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save.update(peft_config.modules_to_save)
             _set_trainable(self, adapter_name)
 
+    @classmethod
+    def _split_kwargs(cls, kwargs):
+        hf_hub_download_kwargs = {}
+        other_kwargs = {}
+
+        for key, value in kwargs.items():
+            if key in inspect.signature(hf_hub_download).parameters:
+                hf_hub_download_kwargs[key] = value
+            else:
+                other_kwargs[key] = value
+
+        return hf_hub_download_kwargs, other_kwargs
+
     def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
 
         if adapter_name not in self.peft_config:
             # load the config
             peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None)).peft_type
-            ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None))
+                PeftConfig._get_peft_type(
+                    model_id,
+                    subfolder=kwargs.get("subfolder", None),
+                    revision=kwargs.get("revision", None),
+                    cache_dir=kwargs.get("cache_dir", None),
+                )
+            ].from_pretrained(
+                model_id,
+                subfolder=kwargs.get("subfolder", None),
+                revision=kwargs.get("revision", None),
+                cache_dir=kwargs.get("cache_dir", None),
+            )
             if isinstance(peft_config, PromptLearningConfig) and is_trainable:
                 raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
             else:
@@ -412,12 +442,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if has_remote_safetensors_file:
                 # Priority 1: load safetensors weights
                 filename = hf_hub_download(
-                    model_id, SAFETENSORS_WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
+                    model_id,
+                    SAFETENSORS_WEIGHTS_NAME,
+                    subfolder=kwargs.get("subfolder", None),
+                    **hf_hub_download_kwargs,
                 )
             else:
                 try:
                     filename = hf_hub_download(
-                        model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **kwargs
+                        model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **hf_hub_download_kwargs
                     )
                 except EntryNotFoundError:
                     raise ValueError(

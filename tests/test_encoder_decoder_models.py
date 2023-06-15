@@ -106,3 +106,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
