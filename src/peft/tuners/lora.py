@@ -336,6 +336,8 @@ class LoraModel(torch.nn.Module):
         for name, module in new_module.named_modules():
             if "lora_" in name:
                 module.to(old_module.weight.device)
+            if "ranknum" in name:
+                module.to(old_module.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
