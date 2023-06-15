@@ -345,6 +345,39 @@ class PeftCommonTester:
             else:
                 self.assertIsNone(param.grad)
 
+    def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            return
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            layers_to_transform=[0],
+            **config_kwargs,
+        )
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        # check if `training` works
+        output = model(**inputs)[0]
+        logits = output[0]
+
+        loss = output.sum()
+        loss.backward()
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname, safe_serialization=True)
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dirname))
+            self.assertTrue("adapter_model.bin" not in os.listdir(tmp_dirname))
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
+
+            logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
+            self.assertTrue(torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4))
+
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
             return
@@ -380,7 +413,7 @@ class PeftCommonTester:
             model.save_pretrained(tmp_dirname)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
-            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
 
             logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
             self.assertTrue(torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4))
