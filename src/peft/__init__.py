@@ -26,6 +26,7 @@ from .peft_model import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftModelForQuestionAnswering,
 )
 from .tuners import (
     AdaptionPromptConfig,
