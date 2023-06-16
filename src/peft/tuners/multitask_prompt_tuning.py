@@ -1,4 +1,5 @@
-"""This code is adapted for the paper: https://arxiv.org/abs/2303.02861 and constitutes the work done at MIT-IBM Watson Research Lab."""
+"""This code is adapted for the paper: https://arxiv.org/abs/2303.02861 and constitutes the work done at MIT-IBM Watson
+Research Lab."""
 
 import enum
 from dataclasses import dataclass, field
