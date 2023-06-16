@@ -237,7 +237,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
-    "starcoder": ["c_attn"],
+    "gpt_bigcode": ["c_attn"],
     "mpt": ["Wqkv"],
 }
 
