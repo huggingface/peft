@@ -16,6 +16,7 @@
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
+    PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
@@ -36,6 +37,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
+    "QUESTION_ANS": PeftModelForQuestionAnswering,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
