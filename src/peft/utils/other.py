@@ -14,8 +14,35 @@
 # limitations under the License.
 
 import copy
+import os
+import warnings
 
 import torch
+
+
+# Add or edit model card to have `library_name: peft`
+def add_or_edit_model_card(output_dir):
+    if os.path.exists(os.path.join(output_dir, "README.md")):
+        with open(os.path.join(output_dir, "README.md"), "r") as f:
+            lines = f.readlines()
+        # check if the first line is `---`
+        if len(lines) > 0 and lines[0].startswith("---"):
+            for i, line in enumerate(lines[1:]):
+                # check if line starts with `library_name`, if yes, update it
+                if line.startswith("library_name"):
+                    lines[i + 1] = "library_name: peft\n"
+                    break
+                elif line.startswith("---"):
+                    # insert `library_name: peft` before the last `---`
+                    lines.insert(i + 1, "library_name: peft\n")
+                    break
+        else:
+            lines = ["---\n", "library_name: peft\n", "---\n"] + lines
+    else:
+        lines = ["---\n", "library_name: peft\n", "---\n"]
+    # write the lines back to README.md
+    with open(os.path.join(output_dir, "README.md"), "w") as f:
+        f.writelines(lines)
 
 
 # needed for prefix-tuning of bloom model
@@ -32,7 +59,7 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -42,7 +69,7 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
     """
-    loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
+    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
 
     for name, param in model.named_parameters():
         # freeze base model's layers
@@ -53,7 +80,7 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
             param.data = param.data.to(torch.float32)
 
-    if loaded_in_8bit and use_gradient_checkpointing:
+    if loaded_in_kbit and use_gradient_checkpointing:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
@@ -68,6 +95,15 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         model.gradient_checkpointing_enable()
 
     return model
+
+
+# For backward compatibility
+def prepare_model_for_int8_training(*args, **kwargs):
+    warnings.warn(
+        "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
+        FutureWarning,
+    )
+    return prepare_model_for_kbit_training(*args, **kwargs)
 
 
 # copied from transformers.models.bart.modeling_bart
@@ -201,7 +237,11 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
+    "starcoder": ["c_attn"],
+    "mpt": ["Wqkv"],
 }
+
+COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
@@ -227,4 +267,5 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
+SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"

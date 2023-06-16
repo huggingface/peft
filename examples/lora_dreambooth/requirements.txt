@@ -8,3 +8,4 @@ diffusers
 Pillow
 torchvision
 huggingface_hub
+safetensors

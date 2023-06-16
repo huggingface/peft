@@ -23,6 +23,9 @@ from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError
+from safetensors.torch import load_file as safe_load_file
+from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
@@ -38,6 +41,7 @@ from .tuners import (
     MultitaskPromptEmbedding,
 )
 from .utils import (
+    SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
     PeftConfig,
@@ -46,7 +50,9 @@ from .utils import (
     TaskType,
     _set_adapter,
     _set_trainable,
+    add_or_edit_model_card,
     get_peft_model_state_dict,
+    hub_file_exists,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -104,7 +110,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             self.add_adapter(adapter_name, peft_config)
 
-    def save_pretrained(self, save_directory, **kwargs):
+        if getattr(model, "is_gradient_checkpointing", True):
+            model = self._prepare_model_for_gradient_checkpointing(model)
+
+    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
         reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
@@ -120,6 +129,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
         os.makedirs(save_directory, exist_ok=True)
+        add_or_edit_model_card(save_directory)
 
         for adapter_name, peft_config in self.peft_config.items():
             # save only the trainable weights
@@ -128,7 +138,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
-            torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+
+            if safe_serialization:
+                safe_save_file(
+                    output_state_dict, os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME), metadata={"format": "pt"}
+                )
+            else:
+                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
             if peft_config.base_model_name_or_path is None:
@@ -162,8 +178,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # load the config
         config = PEFT_TYPE_TO_CONFIG_MAPPING[
-            PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None)).peft_type
-        ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None))
+            PeftConfig._get_peft_type(
+                model_id,
+                subfolder=kwargs.get("subfolder", None),
+                revision=kwargs.get("revision", None),
+                cache_dir=kwargs.get("cache_dir", None),
+            )
+        ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
 
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
@@ -218,6 +239,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
         ).long()
+
+    def _prepare_model_for_gradient_checkpointing(self, model):
+        r"""
+        Prepares the model for gradient checkpointing if necessary
+        """
+        if not (getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)):
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            else:
+
+                def make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
+
+                model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+        return model
 
     def get_prompt_embedding_to_save(self, adapter_name):
         """
@@ -300,7 +336,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if param.requires_grad:
                 trainable_params += num_params
         print(
-            f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}"
+            f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param}"
         )
 
     def __getattr__(self, name: str):
@@ -362,14 +398,39 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save.update(peft_config.modules_to_save)
             _set_trainable(self, adapter_name)
 
+    @classmethod
+    def _split_kwargs(cls, kwargs):
+        hf_hub_download_kwargs = {}
+        other_kwargs = {}
+
+        for key, value in kwargs.items():
+            if key in inspect.signature(hf_hub_download).parameters:
+                hf_hub_download_kwargs[key] = value
+            else:
+                other_kwargs[key] = value
+
+        return hf_hub_download_kwargs, other_kwargs
+
     def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
 
         if adapter_name not in self.peft_config:
             # load the config
             peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
-                PeftConfig.from_pretrained(model_id, subfolder=kwargs.get("subfolder", None)).peft_type
-            ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None))
+                PeftConfig._get_peft_type(
+                    model_id,
+                    subfolder=kwargs.get("subfolder", None),
+                    revision=kwargs.get("revision", None),
+                    cache_dir=kwargs.get("cache_dir", None),
+                )
+            ].from_pretrained(
+                model_id,
+                subfolder=kwargs.get("subfolder", None),
+                revision=kwargs.get("revision", None),
+                cache_dir=kwargs.get("cache_dir", None),
+            )
             if isinstance(peft_config, PromptLearningConfig) and is_trainable:
                 raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
             else:
@@ -379,22 +440,46 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # load weights if any
         path = os.path.join(model_id, kwargs["subfolder"]) if kwargs.get("subfolder", None) is not None else model_id
 
-        if os.path.exists(os.path.join(path, WEIGHTS_NAME)):
+        if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
+            filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
+            use_safetensors = True
+        elif os.path.exists(os.path.join(path, WEIGHTS_NAME)):
             filename = os.path.join(path, WEIGHTS_NAME)
+            use_safetensors = False
         else:
-            try:
-                filename = hf_hub_download(model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None))
-            except:  # noqa
-                raise ValueError(
-                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
-                    f"Please check that the file {WEIGHTS_NAME} is present at {model_id}."
-                )
+            has_remote_safetensors_file = hub_file_exists(
+                model_id, SAFETENSORS_WEIGHTS_NAME, revision=kwargs.get("revision", None)
+            )
+            use_safetensors = has_remote_safetensors_file
 
-        adapters_weights = torch.load(
-            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
+            if has_remote_safetensors_file:
+                # Priority 1: load safetensors weights
+                filename = hf_hub_download(
+                    model_id,
+                    SAFETENSORS_WEIGHTS_NAME,
+                    subfolder=kwargs.get("subfolder", None),
+                    **hf_hub_download_kwargs,
+                )
+            else:
+                try:
+                    filename = hf_hub_download(
+                        model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **hf_hub_download_kwargs
+                    )
+                except EntryNotFoundError:
+                    raise ValueError(
+                        f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
+                        f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
+                    )
+
+        if use_safetensors:
+            adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            adapters_weights = torch.load(
+                filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            )
+
         # load the weights into the model
-        set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
+        load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)
@@ -437,6 +522,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         self.eval()
+        return load_result
 
     def set_adapter(self, adapter_name):
         """
@@ -698,6 +784,19 @@ class PeftModelForCausalLM(PeftModel):
     ):
         peft_config = self.active_peft_config
         if not isinstance(peft_config, PromptLearningConfig):
+            if self.base_model.config.model_type == "mpt":
+                if inputs_embeds is not None:
+                    raise AssertionError("forward in MPTForCausalLM does not support imputs_embeds")
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
+
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -749,6 +848,10 @@ class PeftModelForCausalLM(PeftModel):
     def generate(self, **kwargs):
         peft_config = self.active_peft_config
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
+        if hasattr(self.base_model, "model"):
+            self.base_model.model.generation_config = self.generation_config
+        else:
+            self.base_model.generation_config = self.generation_config
         try:
             if not isinstance(peft_config, PromptLearningConfig):
                 outputs = self.base_model.generate(**kwargs)
@@ -854,7 +957,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
         ...     "target_modules": ["q", "v"],
         ...     "lora_alpha": 32,
         ...     "lora_dropout": 0.1,
-        ...     "merge_weights": False,
         ...     "fan_in_fan_out": False,
         ...     "enable_lora": None,
         ...     "bias": "none",
@@ -1191,7 +1293,6 @@ class PeftModelForTokenClassification(PeftModel):
                 sequence_output = self.base_model.dropout(sequence_output)
             logits = self.base_model.get_submodule(self.cls_layer_name)(sequence_output)
 
-            loss = None
             loss = None
             if labels is not None:
                 loss_fct = CrossEntropyLoss()

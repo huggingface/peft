@@ -16,3 +16,4 @@ jobs:
       notebook_folder: peft_docs
     secrets:
       token: ${{ secrets.HUGGINGFACE_PUSH }}
+      hf_token: ${{ secrets.HF_DOC_BUILD_PUSH }}

@@ -44,6 +44,7 @@ setup(
         "torch>=1.13.0",
         "transformers",
         "accelerate",
+        "safetensors",
     ],
     extras_require=extras,
     classifiers=[
