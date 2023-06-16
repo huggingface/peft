@@ -104,11 +104,16 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
                 base_model_path, **self.base_model_kwargs
             )
 
-            try:
-                self.processor = self.transformers_processor_class.from_pretrained(base_model_path)
-            except EntryNotFoundError:
+            if self.processor is None:
+                try:
+                    self.processor = self.transformers_processor_class.from_pretrained(base_model_path)
+                except EntryNotFoundError:
+                    raise ValueError(
+                        f"We couldn't find a `transformers` tokenizer in {base_model_path} - make sure this is a correct path or url to a model checkpoint."
+                    )
+            elif not isinstance(self.processor, self.transformers_processor_class):
                 raise ValueError(
-                    f"We couldn't find a `transformers` tokenizer in {base_model_path} - make sure this is a correct path or url to a model checkpoint."
+                    f"The provided `tokenizer` does not match the associated model - got {self.processor.__class__} whereas it should be {self.transformers_processor_class}"
                 )
 
             self.model = PeftModel.from_pretrained(
