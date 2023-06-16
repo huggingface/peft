@@ -19,7 +19,7 @@ import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, WhisperForConditionalGeneration
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftModel, get_peft_model, pipeline
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
@@ -217,3 +217,29 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
+
+    @require_torch_multi_gpu
+    @pytest.mark.multi_gpu_tests
+    @require_bitsandbytes
+    def test_lora_pipeline_4bit(self):
+        r"""
+        Test if pipeline + 4bit works as expected
+        """
+        peft_model_id = "ybelkada/test-st-lora"
+        pipe = pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_4bit": True})
+
+        self.assertTrue(pipe.model.base_model.is_loaded_in_4bit)
+        _ = pipe("hello")
+
+    @require_torch_multi_gpu
+    @pytest.mark.multi_gpu_tests
+    @require_bitsandbytes
+    def test_lora_pipeline_8bit(self):
+        r"""
+        Test if pipeline + 8bit works as expected
+        """
+        peft_model_id = "ybelkada/test-st-lora"
+        pipe = pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_8bit": True})
+
+        self.assertTrue(pipe.model.base_model.is_loaded_in_8bit)
+        _ = pipe("hello")
