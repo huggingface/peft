@@ -1,12 +1,13 @@
 """This code is adapted for the paper: https://arxiv.org/abs/2303.02861 and constitutes the work done at MIT-IBM Watson Research Lab."""
 
-from dataclasses import dataclass, field
 import enum
+from dataclasses import dataclass, field
 from typing import Optional, Union
+
 import torch
 
 from ..utils import PeftType
-from .prompt_tuning import PromptTuningConfig, PromptEmbedding
+from .prompt_tuning import PromptEmbedding, PromptTuningConfig
 
 
 class MultitaskPromptTuningInit(str, enum.Enum):

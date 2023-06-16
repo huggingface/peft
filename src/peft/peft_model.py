@@ -35,10 +35,10 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     LoraModel,
+    MultitaskPromptEmbedding,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
-    MultitaskPromptEmbedding,
 )
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
