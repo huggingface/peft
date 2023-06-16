@@ -23,9 +23,66 @@ from .base import BasePeftPipeline
 
 
 class PeftTextGenerationPipeline(BasePeftPipeline):
-    r"""
-    Causal language model text generation should support LoRA, AdaLoRA, PrompTuning and all other PEFT architectures.
     """
+    Peft text generation pipeline, can be used to perform text generation out of the box. Works for all supported PEFT
+    methods as long as the finetuned adapter weights are available either locally or pushed on the Hub. This pipeline
+    supports also switching between different adapters if using LoRA by specifying the adapter name when creating the
+    pipeline or at forward pass.
+
+    ```py
+    >>> from peft import pipeline
+
+    >>> pipe = pipeline("text-generation", "ybelkada/opt-350m-lora", adapter_name="default")
+    >>> pipe("Hello world")
+    [{"generated_text": "Hello world, how are you?"}]
+
+    >>> pipe("Bonjour à tous", adapter_name="french_adapter")
+    [{"generated_text": "Bonjour à tous, comment allez-vous?"}]
+    ```
+
+    For faster inference you can merge the adapters with the base model by setting `merge_model=True` when creating the
+    pipeline.
+
+    ```py
+    >>> from peft import pipeline
+
+    >>> pipe = pipeline("text-generation", "ybelkada/opt-350m-lora", merge_model=True)
+    >>> pipe("Hello world")
+    [{"generated_text": "Hello world, how are you?"}]
+    ```
+    Note that once the model has been merged, it is not possible to switch between adapters.
+
+    Args:
+        model ([`Union[str, PeftModel]`]): Base transformer model.
+        processor ([`~transformers.PreTrainedTokenizer`]): Base model's tokenizer.
+        device ([`Union[str, int, torch.device`]): Device to run inference on.
+        base_model_kwargs (Dict[str, Any]):
+            Additional kwargs to pass when loading the base model (e.g. `load_in_8bit`).
+        merge_model (bool): Whether to merge the adapters with the base model or not. Defaults to `False`.
+        adapter_name (str): Name of the adapter to use when using LoRA. Defaults to `default`.
+
+    **Attributes**:
+        - **transformers_model_class** ([`class`])-- Class of the transformers model to load.
+        - **transformers_processor_class** ([`class`]) -- Class of the transformers processor to load.
+        - **task_type** (`str`) -- Name of the task the pipeline is targeted at.
+        - **supported_extra_args** (`Dict[str, type]`) -- Additional keyword arguments supported by the pipeline's
+          constructor
+        - **model** ([`PeftModel`]) -- The associated PEFT model
+        - **processor** ([`~transformers.PreTrainedTokenizer`]) -- Base model's tokenizer.
+        - **device** ([`Union[str, int, torch.device`]) -- Device to run inference on.
+
+
+    Example:
+
+        ```py
+        >>> from peft import pipeline
+
+        >>> pipe = pipeline("text-generation", "ybelkada/opt-350m-lora")
+        >>> pipe("Hello world")
+        [{"generated_text": "Hello world, how are you?"}]
+        ```
+    """
+
     transformers_model_class = AutoModelForCausalLM
     transformers_processor_class = AutoTokenizer
     task_type = "text-generation"
@@ -64,6 +121,9 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
 
             if getattr(self, "merge_model", False):
                 self.model = self.model.merge_and_unload()
+                self.merged_model = True
+            else:
+                self.merged_model = False
 
         elif isinstance(self.model, PeftModel):
             self.processor = self.transformers_processor_class.from_pretrained(
@@ -87,6 +147,9 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         set at the pipeline creation.
         """
         adapter_name = kwargs.pop("adapter_name", None)
+        if adapter_name is not None and self.merged_model:
+            raise ValueError("You can't switch between adapters if you have merged the model")
+
         skip_special_tokens = kwargs.pop("skip_special_tokens", True)
         if adapter_name is not None:
             if self.adapter_name is not None:

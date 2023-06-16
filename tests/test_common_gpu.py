@@ -225,7 +225,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         r"""
         Test if pipeline + 4bit works as expected
         """
-        peft_model_id = "ybelkada/test-st-lora"
+        peft_model_id = "ybelkada/opt-350m-lora"
         pipe = pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_4bit": True})
 
         self.assertTrue(pipe.model.base_model.is_loaded_in_4bit)
@@ -238,7 +238,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         r"""
         Test if pipeline + 8bit works as expected
         """
-        peft_model_id = "ybelkada/test-st-lora"
+        peft_model_id = "ybelkada/opt-350m-lora"
         pipe = pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_8bit": True})
 
         self.assertTrue(pipe.model.base_model.is_loaded_in_8bit)

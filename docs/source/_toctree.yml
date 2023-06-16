@@ -48,3 +48,5 @@
     title: Configuration
   - local: package_reference/tuners
     title: Tuners
+  - local: package_reference/pipelines
+    title: Pipelines
