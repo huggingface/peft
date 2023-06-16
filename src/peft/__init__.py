@@ -56,4 +56,4 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-from .pipeline import pipeline
+from .pipelines import pipeline
