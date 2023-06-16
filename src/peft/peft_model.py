@@ -199,7 +199,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = cls(model, config, adapter_name)
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
-        model.load_adapter(model_id, adapter_name, **kwargs)
+        model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
         return model
 
     def _setup_prompt_encoder(self, adapter_name):
@@ -508,7 +508,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             add_hook_to_module(self.get_base_model(), hook)
 
         # Set model in evaluation mode to deactivate Dropout modules by default
-        self.eval()
+        if not is_trainable:
+            self.eval()
         return load_result
 
     def set_adapter(self, adapter_name):
