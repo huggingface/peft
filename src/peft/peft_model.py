@@ -18,6 +18,7 @@ import os
 import warnings
 from contextlib import contextmanager
 
+from . import __version__
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
@@ -49,7 +50,7 @@ from .utils import (
     TaskType,
     _set_adapter,
     _set_trainable,
-    add_or_edit_model_card,
+    add_library_to_model_card,
     get_peft_model_state_dict,
     hub_file_exists,
     set_peft_model_state_dict,
@@ -128,7 +129,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
         os.makedirs(save_directory, exist_ok=True)
-        add_or_edit_model_card(save_directory)
+        self.create_or_update_model_card(save_directory)
 
         for adapter_name, peft_config in self.peft_config.items():
             # save only the trainable weights
@@ -525,6 +526,44 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @property
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
+
+    def create_or_update_model_card(self, output_dir):
+        """
+        Updates or create model card to include information about peft:
+        1. Adds `peft` library tag
+        2. Adds peft version
+        3. Adds quantization information if it was used
+        """
+        # Adds `peft` library tag
+        add_library_to_model_card(output_dir)
+
+        with open(os.path.join(output_dir, "README.md"), "r") as f:
+            lines = f.readlines()
+
+        quantization_config = self.config.quantization_config.to_dict()
+        training_config_text = ""
+        # Adds quantization information if it was used
+        if quantization_config is not None:
+            training_config_text += "\nThe following `bitsandbytes` quantization config was used during training:\n"
+            training_config_text += "\n".join([f"- {name}: {value}" for name, value in quantization_config.items()])
+            training_config_text += "\n"
+
+        training_procedure_heading = "## Training procedure"
+        if training_procedure_heading in lines:
+            lines.insert(lines.index(training_procedure_heading) + 2, training_config_text)
+        else:
+            lines.append(f"{training_procedure_heading}\n{training_config_text}")
+
+        # Adds peft version
+        framework_block_heading = "### Framework versions"
+        if framework_block_heading in lines:
+            lines.insert(lines.index(framework_block_heading) + 2, "library_name: peft\n")
+        else:
+            lines.append(f"{framework_block_heading}\n\n- PEFT {__version__}")
+
+        # write the lines back to README.md
+        with open(os.path.join(output_dir, "README.md"), "w") as f:
+            f.writelines(lines)
 
 
 class PeftModelForSequenceClassification(PeftModel):
