@@ -559,9 +559,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # Adds peft version
         framework_block_heading = "### Framework versions\n"
         if framework_block_heading in lines:
-            lines.insert(lines.index(framework_block_heading) + 2, "library_name: peft\n")
+            lines.insert(lines.index(framework_block_heading) + 2, f"- PEFT {__version__}\n")
         else:
-            lines.append(f"{framework_block_heading}\n\n- PEFT {__version__}")
+            lines.append(f"{framework_block_heading}\n\n- PEFT {__version__}\n")
 
         # write the lines back to README.md
         with open(os.path.join(output_dir, "README.md"), "w") as f:
