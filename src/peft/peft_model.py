@@ -550,14 +550,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             training_config_text += "\n".join([f"- {name}: {value}" for name, value in quantization_config.items()])
             training_config_text += "\n"
 
-        training_procedure_heading = "## Training procedure"
+        training_procedure_heading = "## Training procedure\n"
         if training_procedure_heading in lines:
             lines.insert(lines.index(training_procedure_heading) + 2, training_config_text)
         else:
             lines.append(f"{training_procedure_heading}\n{training_config_text}")
 
         # Adds peft version
-        framework_block_heading = "### Framework versions"
+        framework_block_heading = "### Framework versions\n"
         if framework_block_heading in lines:
             lines.insert(lines.index(framework_block_heading) + 2, "library_name: peft\n")
         else:
