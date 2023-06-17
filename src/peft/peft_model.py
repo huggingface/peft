@@ -18,7 +18,6 @@ import os
 import warnings
 from contextlib import contextmanager
 
-from . import __version__
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
@@ -32,6 +31,7 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
+from . import __version__
 from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
