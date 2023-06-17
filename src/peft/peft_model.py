@@ -540,7 +540,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         with open(os.path.join(output_dir, "README.md"), "r") as f:
             lines = f.readlines()
 
-        quantization_config = self.config.quantization_config.to_dict()
+        quantization_config = None
+        if hasattr(self.config, "quantization_config"):
+            quantization_config = self.config.quantization_config.to_dict()
         training_config_text = ""
         # Adds quantization information if it was used
         if quantization_config is not None:
