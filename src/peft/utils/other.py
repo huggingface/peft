@@ -21,7 +21,7 @@ import torch
 
 
 # Add or edit model card to have `library_name: peft`
-def add_or_edit_model_card(output_dir):
+def add_library_to_model_card(output_dir):
     if os.path.exists(os.path.join(output_dir, "README.md")):
         with open(os.path.join(output_dir, "README.md"), "r") as f:
             lines = f.readlines()
