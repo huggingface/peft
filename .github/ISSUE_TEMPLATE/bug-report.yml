@@ -1,0 +1,71 @@
+name: "\U0001F41B Bug Report"
+description: Submit a bug report to help us improve the library
+body:
+  - type: textarea
+    id: system-info
+    attributes:
+      label: System Info
+      description: Please share your relevant system information with us
+      placeholder: peft & accelerate & transformers version, platform, python version, ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: who-can-help
+    attributes:
+      label: Who can help?
+      description: |
+        Your issue will be replied to more quickly if you can figure out the right person to tag with @
+        If you know how to use git blame, that is the easiest way, otherwise, here is a rough guide of **who to tag**.
+        
+        All issues are read by one of the core maintainers, so if you don't know who to tag, just leave this blank and
+        a core maintainer will ping the right person.
+        
+        Please tag fewer than 3 people.
+        
+        Library: @pacman100 @younesbelkada @sayakpaul
+        
+        Documentation: @stevhliu and @MKhalusova
+
+      placeholder: "@Username ..."
+
+  - type: checkboxes
+    id: information-scripts-examples
+    attributes:
+      label: Information
+      description: 'The problem arises when using:'
+      options:
+        - label: "The official example scripts"
+        - label: "My own modified scripts"
+
+  - type: checkboxes
+    id: information-tasks
+    attributes:
+      label: Tasks
+      description: "The tasks I am working on are:"
+      options:
+        - label: "An officially supported task in the `examples` folder"
+        - label: "My own task or dataset (give details below)"
+
+  - type: textarea
+    id: reproduction
+    validations:
+      required: true
+    attributes:
+      label: Reproduction
+      description: |
+        Please provide a code sample that reproduces the problem you ran into. It can be a Colab link or just a code snippet.
+        Please provide the simplest reproducer as possible so that we can quickly fix the issue. 
+
+      placeholder: |
+        Reproducer: 
+        
+          
+
+  - type: textarea
+    id: expected-behavior
+    validations:
+      required: true
+    attributes:
+      label: Expected behavior
+      description: "A clear and concise description of what you would expect to happen."
