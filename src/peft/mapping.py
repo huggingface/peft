@@ -16,6 +16,7 @@
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
+    PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
@@ -36,6 +37,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
+    "QUESTION_ANS": PeftModelForQuestionAnswering,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
@@ -96,12 +98,12 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_attention_heads
 
     if getattr(peft_config, "encoder_hidden_size", None) is None:
-        setattr(peft_config, "encoder_hidden_size", token_dim)
+        setattr(peft_config, "encoder_hidden_size", peft_config.token_dim)
 
     return peft_config
 
 
-def get_peft_model(model, peft_config):
+def get_peft_model(model, peft_config) -> PeftModel:
     """
     Returns a Peft model object from a model and a config.
 
