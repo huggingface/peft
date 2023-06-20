@@ -3,7 +3,7 @@ name: Build Docker images (scheduled)
 on:
   push:
     branches:
-      - fix-docker
+      - fix-docker-upstream
 
 concurrency:
   group: docker-image-builds
