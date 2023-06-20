@@ -164,7 +164,9 @@ class IA3Model(torch.nn.Module):
             if isinstance(ia3_config.target_modules, str):
                 target_module_found = re.fullmatch(ia3_config.target_modules, key)
             else:
-                target_module_found = any(self._is_valid_match(key, target_key) for target_key in ia3_config.target_modules)
+                target_module_found = any(
+                    self._is_valid_match(key, target_key) for target_key in ia3_config.target_modules
+                )
             if target_module_found:
                 if isinstance(ia3_config.feedforward_modules, str):
                     is_feedforward = re.fullmatch(ia3_config.feedforward_modules, key)
@@ -223,15 +225,16 @@ class IA3Model(torch.nn.Module):
                 f"Target modules {ia3_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
+
     @staticmethod
     def _is_valid_match(key: str, target_key: str):
         """
-        Helper function to match module names target_key and key. Makes sure that either the key is exactly 
+        Helper function to match module names target_key and key. Makes sure that either the key is exactly
         the target_key or the target_key is a submodule of key
         """
         if key.endswith(target_key):
             if len(key) > len(target_key):
-                return key.endswith("."+target_key) # must be a sub module
+                return key.endswith("." + target_key)  # must be a sub module
             return True
         return False
 
@@ -303,7 +306,9 @@ class IA3Model(torch.nn.Module):
         if peft_config.feedforward_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING:
                 raise ValueError("Please specify `feedforward_modules` in `peft_config`")
-            peft_config.feedforward_modules = TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[model_config["model_type"]]        
+            peft_config.feedforward_modules = TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[
+                model_config["model_type"]
+            ]
         if peft_config.inference_mode:
             peft_config.merge_weights = True
         return peft_config
@@ -336,6 +341,7 @@ class IA3Model(torch.nn.Module):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
+
 
 # Below code is based on https://github.com/microsoft/lora/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -442,14 +448,13 @@ class Linear(nn.Linear, IA3Layer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        
+
         warnings.warn("Unmerge result can be inaccurate for IA3.")
         self.weight = transpose(self.weight, self.fan_in_fan_out)
         self.weight.data = torch.div(self.weight.data, self.ia3_l[self.active_adapter].data)
         self.weight = transpose(self.weight, self.fan_in_fan_out)
 
         self.merged = False
-            
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
@@ -460,7 +465,7 @@ class Linear(nn.Linear, IA3Layer):
             if self.merged:
                 self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-        
+
         if not self.merged:
             if self.is_feedforward:
                 result = F.linear(
@@ -520,16 +525,15 @@ if is_bnb_available():
 
                     if x.dtype != torch.float32:
                         x = x.float()
-                    if self.is_feedforward: 
-                        result = super().forward(x* self.ia3_l[self.active_adapter].flatten())
+                    if self.is_feedforward:
+                        result = super().forward(x * self.ia3_l[self.active_adapter].flatten())
                     else:
                         result = super().forward(x)
                         expected_dtype = result.dtype
                         result = (result * self.ia3_l[self.active_adapter].flatten()).to(expected_dtype)
                 else:
                     if self.is_feedforward:
-                        result = super().forward(x*self.ia3_l[self.active_adapter].flatten())
+                        result = super().forward(x * self.ia3_l[self.active_adapter].flatten())
                     else:
                         result = result * self.ia3_l[self.active_adapter].flatten()
             return result
-

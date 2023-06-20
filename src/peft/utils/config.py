@@ -169,6 +169,7 @@ class PeftConfig(PeftConfigMixin):
     task_type: Union[str, TaskType] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})
 
+
 @dataclass
 class PromptLearningConfig(PeftConfig):
     """
