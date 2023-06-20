@@ -36,7 +36,7 @@ RUN source activate peft && \
     scipy \
     git+https://github.com/huggingface/transformers \
     git+https://github.com/huggingface/accelerate \
-    peft[test]@https://github.com/huggingface/peft
+    peft[test]@git+https://github.com/huggingface/peft
 
 RUN python3 -m pip install --no-cache-dir bitsandbytes
 
