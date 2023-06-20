@@ -13,13 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
-import sys
-
-
-if sys.version_info[0] < 3.8:
-    _is_python_greater_3_8 = False
-else:
-    _is_python_greater_3_8 = True
 
 
 def is_bnb_available():
@@ -27,12 +20,9 @@ def is_bnb_available():
 
 
 def is_bnb_4bit_available():
-    if _is_python_greater_3_8:
-        from importlib.metadata import version
+    if not is_bnb_available():
+        return False
 
-        bnb_version = version("bitsandbytes")
-    else:
-        from pkg_resources import get_distribution
+    import bitsandbytes as bnb
 
-        bnb_version = get_distribution("bitsandbytes").version
-    return bnb_version >= "0.39.0"
+    return hasattr(bnb.nn, "Linear4bit")
