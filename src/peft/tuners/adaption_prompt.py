@@ -293,7 +293,9 @@ class AdaptedAttention(nn.Module):
         # which initializes the tokens with standard normal values.
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
-        target_dtype = model.q_proj.weight.dtype if model.q_proj.weight.dtype != torch.int8 else torch.float32
+        target_dtype = (
+            model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
+        )
         self.adaption_prompt = nn.Parameter(
             torch.empty(1, adapter_len, self.model.hidden_size, device=device, dtype=target_dtype).normal_()
         )
