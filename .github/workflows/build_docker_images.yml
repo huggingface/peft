@@ -1,6 +1,9 @@
 name: Build Docker images (scheduled)
 
 on:
+  push:
+    branches:
+      - fix-docker
   workflow_dispatch:
   workflow_call:
   schedule:
