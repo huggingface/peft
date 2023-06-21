@@ -17,6 +17,7 @@ import inspect
 import os
 import warnings
 from contextlib import contextmanager
+from typing import Optional
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -159,7 +160,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config.inference_mode = inference_mode
 
     @classmethod
-    def from_pretrained(cls, model, model_id, adapter_name="default", is_trainable=False, **kwargs):
+    def from_pretrained(
+        cls, model, model_id, adapter_name="default", config: Optional[PeftConfig] = None, is_trainable=False, **kwargs
+    ):
         r"""
         Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
 
@@ -177,14 +180,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
 
         # load the config
-        config = PEFT_TYPE_TO_CONFIG_MAPPING[
-            PeftConfig._get_peft_type(
-                model_id,
-                subfolder=kwargs.get("subfolder", None),
-                revision=kwargs.get("revision", None),
-                cache_dir=kwargs.get("cache_dir", None),
-            )
-        ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
+        if config is None:
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[
+                PeftConfig._get_peft_type(
+                    model_id,
+                    subfolder=kwargs.get("subfolder", None),
+                    revision=kwargs.get("revision", None),
+                    cache_dir=kwargs.get("cache_dir", None),
+                )
+            ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
+        else:
+            config.inference_mode = not is_trainable
 
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
