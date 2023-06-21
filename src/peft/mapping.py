@@ -13,24 +13,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .peft_model import (
-    PeftModel,
-    PeftModelForCausalLM,
-    PeftModelForQuestionAnswering,
-    PeftModelForSeq2SeqLM,
-    PeftModelForSequenceClassification,
-    PeftModelForTokenClassification,
-)
-from .tuners import (
-    AdaLoraConfig,
-    AdaptionPromptConfig,
-    LoraConfig,
-    PrefixTuningConfig,
-    PromptEncoderConfig,
-    PromptTuningConfig,
-)
+import logging
+from typing import TYPE_CHECKING, Any
+
+from .peft_model import (PeftModel, PeftModelForCausalLM,
+                         PeftModelForQuestionAnswering, PeftModelForSeq2SeqLM,
+                         PeftModelForSequenceClassification,
+                         PeftModelForTokenClassification)
+from .tuners import (AdaLoraConfig, AdaptionPromptConfig, LoraConfig,
+                     PrefixTuningConfig, PromptEncoderConfig,
+                     PromptTuningConfig)
 from .utils import PromptLearningConfig
 
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
+    from .utils import PeftConfig
 
 MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "SEQ_CLS": PeftModelForSequenceClassification,
@@ -103,20 +103,28 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     return peft_config
 
 
-def get_peft_model(model, peft_config) -> PeftModel:
+def get_peft_model(
+    model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default", **kwargs: Any
+) -> PeftModel:
     """
     Returns a Peft model object from a model and a config.
 
     Args:
         model ([`transformers.PreTrainedModel`]): Model to be wrapped.
         peft_config ([`PeftConfig`]): Configuration object containing the parameters of the Peft model.
+        adapter_name ([`str`]): Given name for this adapter. Default to "default"
+        kwargs: The rest of keyword argument to be passed into PeftModel.from_pretrained
     """
+    if "is_trainable" in kwargs and peft_config.inference_mode:
+        logger.warning("'is_trainable' will overwrite 'inference_mode' set in 'peft_config'")
     model_config = model.config.to_dict() if hasattr(model.config, "to_dict") else model.config
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not isinstance(
         peft_config, PromptLearningConfig
     ):
-        return PeftModel(model, peft_config)
+        return PeftModel.from_pretrained(model, peft_config, adapter_name=adapter_name, **kwargs)
     if isinstance(peft_config, PromptLearningConfig):
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
-    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config)
+    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type].from_pretrained(
+        model, peft_config, adapter_name=adapter_name, **kwargs
+    )
