@@ -1,0 +1,6 @@
+transformers==4.29.2 
+torch==1.13.1
+datasets 
+evaluate
+peft
+scikit-learn
