@@ -17,7 +17,7 @@ import warnings
 from huggingface_hub.utils import EntryNotFoundError
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import PeftConfig, PeftModel
+from peft import PeftConfig, PeftModelForCausalLM
 
 from .base import BasePeftPipeline
 
@@ -85,6 +85,7 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
 
     transformers_model_class = AutoModelForCausalLM
     transformers_processor_class = AutoTokenizer
+    peft_model_class = PeftModelForCausalLM
     task_type = "text-generation"
     supported_extra_args = {"merge_model": bool, "adapter_name": str}
 
@@ -116,7 +117,7 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
                     f"The provided `tokenizer` does not match the associated model - got {self.processor.__class__} whereas it should be {self.transformers_processor_class}"
                 )
 
-            self.model = PeftModel.from_pretrained(
+            self.model = self.peft_model_class.from_pretrained(
                 transformers_model,
                 self.model,
             )
@@ -130,13 +131,13 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
             else:
                 self.merged_model = False
 
-        elif isinstance(self.model, PeftModel):
+        elif isinstance(self.model, self.peft_model_class):
             self.processor = self.transformers_processor_class.from_pretrained(
                 self.model.peft_config.base_model_name_or_path
             )
         else:
             raise ValueError(
-                f"The model must be a path to a checkpoint or a PeftModel instance, got {self.model.__class__}"
+                f"The model must be a path to a checkpoint or a {self.peft_model_class.__class__} instance, got {self.model.__class__}"
             )
 
         if self.processor.pad_token is None:
