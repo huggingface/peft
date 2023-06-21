@@ -14,6 +14,7 @@ from peft import PeftModel, get_peft_model_state_dict
 # https://github.com/kohya-ss/sd-scripts/blob/c924c47f374ac1b6e33e71f82948eb1853e2243f/networks/lora.py#L664
 LORA_PREFIX_UNET = "lora_unet"
 LORA_PREFIX_TEXT_ENCODER = "lora_te"
+LORA_ADAPTER_NAME = "default"
 
 
 def get_module_kohya_state_dict(module: PeftModel, prefix: str, dtype: torch.dtype) -> Dict[str, torch.Tensor]:
@@ -28,7 +29,7 @@ def get_module_kohya_state_dict(module: PeftModel, prefix: str, dtype: torch.dty
         # Set alpha parameter
         if "lora_down" in kohya_key:
             alpha_key = f'{kohya_key.split(".")[0]}.alpha'
-            kohya_ss_state_dict[alpha_key] = torch.tensor(weight.size(0)).to(dtype)
+            kohya_ss_state_dict[alpha_key] = torch.tensor(module.peft_config[LORA_ADAPTER_NAME].lora_alpha).to(dtype)
 
     return kohya_ss_state_dict
 
@@ -75,7 +76,9 @@ if __name__ == "__main__":
         text_encoder = CLIPTextModel.from_pretrained(
             args.sd_checkpoint, subfolder="text_encoder", revision=args.sd_checkpoint_revision
         )
-        text_encoder = PeftModel.from_pretrained(text_encoder, text_encoder_peft_lora_path, adapter_name="default")
+        text_encoder = PeftModel.from_pretrained(
+            text_encoder, text_encoder_peft_lora_path, adapter_name=LORA_ADAPTER_NAME
+        )
         kohya_ss_state_dict.update(get_module_kohya_state_dict(text_encoder, LORA_PREFIX_TEXT_ENCODER, dtype))
 
     # Load UNet LoRA model
@@ -84,7 +87,7 @@ if __name__ == "__main__":
         unet = UNet2DConditionModel.from_pretrained(
             args.sd_checkpoint, subfolder="unet", revision=args.sd_checkpoint_revision
         )
-        unet = PeftModel.from_pretrained(unet, unet_peft_lora_path, adapter_name="default")
+        unet = PeftModel.from_pretrained(unet, unet_peft_lora_path, adapter_name=LORA_ADAPTER_NAME)
         kohya_ss_state_dict.update(get_module_kohya_state_dict(unet, LORA_PREFIX_UNET, dtype))
 
     # Save state dict
