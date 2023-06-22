@@ -40,6 +40,7 @@ if __name__ == "__main__":
     num_epochs = args.num_epochs
     lr = args.lr
     batch_size = args.batch_size
+    output = args.output_dir
 
     dataset = load_dataset("glue", task)
     metric = evaluate.load("glue", task)
@@ -69,7 +70,7 @@ if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
     model = get_peft_model(model, peft_config)
     training_args = TrainingArguments(
-        output_dir="your-name/roberta-large-peft-p-tuning",
+        output_dir=output,
         learning_rate=lr,
         per_device_train_batch_size=batch_size,
         per_device_eval_batch_size=batch_size,
