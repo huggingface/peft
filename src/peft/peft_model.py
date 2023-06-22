@@ -179,11 +179,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             adapter_name (`str`, *optional*, defaults to `"default"`):
                 The name of the adapter to be loaded. This is useful for loading multiple adapters.
             is_trainable (`bool`, *optional*, defaults to `False`):
-                Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and use for inference
+                Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and use for
+                inference
             config ([`~peft.PeftConfig`], *optional*):
-                The configuration object to use instead of an automatically loaded configuation. This configuration object
-                is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already loaded before
-                calling `from_pretrained`.
+                The configuration object to use instead of an automatically loaded configuation. This configuration
+                object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
+                loaded before calling `from_pretrained`.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific Lora configuration class.
         """
@@ -199,8 +200,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     cache_dir=kwargs.get("cache_dir", None),
                 )
             ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
-        else:
+        elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
+        else:
+            raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
