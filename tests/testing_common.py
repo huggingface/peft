@@ -157,6 +157,21 @@ class PeftCommonTester:
         self.assertTrue(hasattr(model, "from_pretrained"))
         self.assertTrue(hasattr(model, "push_to_hub"))
 
+    def _test_adapter_name(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, adapter_name="test-adapter")
+        correctly_converted = False
+        for n, _ in model.named_parameters():
+            if "test-adapter" in n:
+                correctly_converted = True
+                break
+
+        self.assertTrue(correctly_converted)
+
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
