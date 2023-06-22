@@ -161,7 +161,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     @classmethod
     def from_pretrained(
-        cls, model, model_id, adapter_name="default", config: Optional[PeftConfig] = None, is_trainable=False, **kwargs
+        cls, model, model_id, adapter_name="default", is_trainable=False, config: Optional[PeftConfig] = None, **kwargs
     ):
         r"""
         Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
@@ -176,6 +176,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                       Hub.
                     - A path to a directory containing a Lora configuration file saved using the `save_pretrained`
                       method (`./my_lora_config_directory/`).
+            adapter_name (`str`, *optional*, defaults to `"default"`):
+                The name of the adapter to be loaded. This is useful for loading multiple adapters.
+            is_trainable (`bool`, *optional*, defaults to `False`):
+                Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and use for inference
+            config ([`~peft.PeftConfig`], *optional*):
+                The configuration object to use instead of an automatically loaded configuation. This configuration object
+                is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already loaded before
+                calling `from_pretrained`.
+            kwargs: (`optional`):
+                Additional keyword arguments passed along to the specific Lora configuration class.
         """
         from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
 
