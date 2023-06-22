@@ -13,10 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import inspect
 import os
 import warnings
 from contextlib import contextmanager
+from typing import Any, Dict, Union
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -92,7 +95,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         in the base model if using [`PromptLearningConfig`].
     """
 
-    def __init__(self, model, peft_config: PeftConfig, adapter_name="default"):
+    def __init__(self, model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default"):
         super().__init__()
         self.base_model = model
         self.config = self.base_model.config
@@ -113,7 +116,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
-    def save_pretrained(self, save_directory, safe_serialization=False, **kwargs):
+    def save_pretrained(self, save_directory: str, safe_serialization: bool = False, **kwargs: Any):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
         reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
@@ -159,7 +162,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config.inference_mode = inference_mode
 
     @classmethod
-    def from_pretrained(cls, model, model_id, adapter_name="default", is_trainable=False, **kwargs):
+    def from_pretrained(
+        cls,
+        model: PreTrainedModel,
+        model_id: Union[str, os.PathLike],
+        adapter_name: str = "default",
+        is_trainable: bool = False,
+        **kwargs: Any,
+    ):
         r"""
         Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
 
@@ -203,7 +213,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
         return model
 
-    def _setup_prompt_encoder(self, adapter_name):
+    def _setup_prompt_encoder(self, adapter_name: str):
         config = self.peft_config[adapter_name]
         self.prompt_encoder = torch.nn.ModuleDict({})
         self.prompt_tokens = {}
@@ -238,7 +248,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.num_virtual_tokens * config.num_transformer_submodules
         ).long()
 
-    def _prepare_model_for_gradient_checkpointing(self, model):
+    def _prepare_model_for_gradient_checkpointing(self, model: PreTrainedModel):
         r"""
         Prepares the model for gradient checkpointing if necessary
         """
@@ -253,7 +263,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
         return model
 
-    def get_prompt_embedding_to_save(self, adapter_name):
+    def get_prompt_embedding_to_save(self, adapter_name: str):
         """
         Returns the prompt embedding to save when saving the model. Only applicable when `peft_config.peft_type !=
         PeftType.LORA`.
@@ -267,7 +277,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         prompt_embeddings = prompt_encoder(prompt_tokens)
         return prompt_embeddings[0].detach().cpu()
 
-    def get_prompt(self, batch_size):
+    def get_prompt(self, batch_size: int):
         """
         Returns the virtual prompts to use for Peft. Only applicable when `peft_config.peft_type != PeftType.LORA`.
         """
@@ -334,7 +344,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         except AttributeError:
             return getattr(self.base_model, name)
 
-    def forward(self, *args, **kwargs):
+    def forward(self, *args: Any, **kwargs: Any):
         """
         Forward pass of the model.
         """
@@ -364,7 +374,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         return self.base_model if isinstance(self.active_peft_config, PromptLearningConfig) else self.base_model.model
 
-    def add_adapter(self, adapter_name, peft_config):
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig):
         if peft_config.peft_type != self.peft_type:
             raise ValueError(
                 f"Cannot combine adapters with different peft types. "
@@ -387,7 +397,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             _set_trainable(self, adapter_name)
 
     @classmethod
-    def _split_kwargs(cls, kwargs):
+    def _split_kwargs(cls, kwargs: Dict[str, Any]):
         hf_hub_download_kwargs = {}
         other_kwargs = {}
 
@@ -399,7 +409,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return hf_hub_download_kwargs, other_kwargs
 
-    def load_adapter(self, model_id, adapter_name, is_trainable=False, **kwargs):
+    def load_adapter(self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
@@ -513,7 +523,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.eval()
         return load_result
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name: str):
         """
         Sets the active adapter.
         """
@@ -528,7 +538,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
 
-    def create_or_update_model_card(self, output_dir):
+    def create_or_update_model_card(self, output_dir: str):
         """
         Updates or create model card to include information about peft:
         1. Adds `peft` library tag

@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import TYPE_CHECKING, Any, Dict
+
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -30,6 +32,12 @@ from .tuners import (
     PromptTuningConfig,
 )
 from .utils import PromptLearningConfig
+
+
+if TYPE_CHECKING:
+    from transformers import PreTrainedModel
+
+    from .utils.config import PeftConfig
 
 
 MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
@@ -50,7 +58,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
 }
 
 
-def get_peft_config(config_dict):
+def get_peft_config(config_dict: Dict[str, Any]):
     """
     Returns a Peft config object from a dictionary.
 
@@ -61,7 +69,7 @@ def get_peft_config(config_dict):
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
 
 
-def _prepare_prompt_learning_config(peft_config, model_config):
+def _prepare_prompt_learning_config(peft_config: PeftConfig, model_config: Dict[str, Any]):
     if peft_config.num_layers is None:
         if "num_hidden_layers" in model_config:
             num_layers = model_config["num_hidden_layers"]
@@ -103,7 +111,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
     return peft_config
 
 
-def get_peft_model(model, peft_config) -> PeftModel:
+def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig) -> PeftModel:
     """
     Returns a Peft model object from a model and a config.
 
