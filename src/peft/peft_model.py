@@ -1063,7 +1063,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
             return self.base_model(
                 input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
             )
-        elif peft_config.peft_type == PeftType.PROMPT_TUNING:
+        elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
 
@@ -1139,7 +1139,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
                 if peft_config.peft_type == PeftType.PREFIX_TUNING:
                     outputs = self.base_model.generate(**kwargs)
-                elif peft_config.peft_type == PeftType.PROMPT_TUNING:
+                elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
                     kwargs = deepcopy(kwargs)
 
                     if "encoder_outputs" in kwargs:
@@ -1148,16 +1148,14 @@ class PeftModelForSeq2SeqLM(PeftModel):
                             "`encoder_outputs` should not be passed to `generate` when using prompt tuning. Ignoring it."
                         )
 
-                    input_ids = kwargs["input_ids"]
+                    input_ids = kwargs.pop("input_ids")
                     inputs_embeds = self.word_embeddings(input_ids)
-                    del kwargs["input_ids"]
                     batch_size = inputs_embeds.shape[0]
                     prompts = self.get_prompt(batch_size=batch_size)
                     prompts = prompts.to(inputs_embeds.dtype)
 
                     inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
-                    encoder_outputs = self.base_model.get_encoder()(inputs_embeds=inputs_embeds)
-                    kwargs["encoder_outputs"] = encoder_outputs
+                    kwargs["inputs_embeds"] = inputs_embeds
 
                     if "attention_mask" in kwargs:
                         prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(
