@@ -111,7 +111,7 @@ def _prepare_prompt_learning_config(peft_config: PeftConfig, model_config: Dict[
     return peft_config
 
 
-def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig) -> PeftModel:
+def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default") -> PeftModel:
     """
     Returns a Peft model object from a model and a config.
 
@@ -124,7 +124,7 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig) -> PeftModel
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not isinstance(
         peft_config, PromptLearningConfig
     ):
-        return PeftModel(model, peft_config)
+        return PeftModel(model, peft_config, adapter_name=adapter_name)
     if isinstance(peft_config, PromptLearningConfig):
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
-    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config)
+    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
