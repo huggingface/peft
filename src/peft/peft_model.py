@@ -649,7 +649,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -696,7 +696,7 @@ class PeftModelForSequenceClassification(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         past_key_values = self.get_prompt(batch_size)
         fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
@@ -835,7 +835,7 @@ class PeftModelForCausalLM(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -1032,7 +1032,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         if decoder_attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(
@@ -1242,7 +1242,7 @@ class PeftModelForTokenClassification(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -1289,7 +1289,7 @@ class PeftModelForTokenClassification(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         past_key_values = self.get_prompt(batch_size)
         fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
@@ -1416,7 +1416,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -1465,7 +1465,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        batch_size = input_ids.shape[0] if input_ids is not None else inputs_embeds.shape[0]
         past_key_values = self.get_prompt(batch_size)
         fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
