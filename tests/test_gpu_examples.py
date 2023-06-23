@@ -403,6 +403,12 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
             model.config.suppress_tokens = []
 
             model = prepare_model_for_int8_training(model)
+            # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
+            # to avoid this, make the inputs trainable
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.model.encoder.conv1.register_forward_hook(make_inputs_require_grad)
 
             config = LoraConfig(
                 r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none"
