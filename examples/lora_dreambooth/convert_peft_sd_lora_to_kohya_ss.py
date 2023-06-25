@@ -19,7 +19,7 @@ LORA_ADAPTER_NAME = "default"
 
 def get_module_kohya_state_dict(module: PeftModel, prefix: str, dtype: torch.dtype) -> Dict[str, torch.Tensor]:
     kohya_ss_state_dict = {}
-    for peft_key, weight in get_peft_model_state_dict(module).items():
+    for peft_key, weight in get_peft_model_state_dict(module, adapter_name=LORA_ADAPTER_NAME).items():
         kohya_key = peft_key.replace("base_model.model", prefix)
         kohya_key = kohya_key.replace("lora_A", "lora_down")
         kohya_key = kohya_key.replace("lora_B", "lora_up")
