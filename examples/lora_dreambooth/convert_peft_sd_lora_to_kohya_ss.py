@@ -16,8 +16,9 @@ LORA_PREFIX_TEXT_ENCODER = "lora_te"
 LORA_ADAPTER_NAME = "default"
 
 
-def get_module_kohya_state_dict(module: PeftModel, prefix: str, dtype: torch.dtype, adapter_name: str) -> Dict[
-    str, torch.Tensor]:
+def get_module_kohya_state_dict(
+    module: PeftModel, prefix: str, dtype: torch.dtype, adapter_name: str = LORA_ADAPTER_NAME
+) -> Dict[str, torch.Tensor]:
     kohya_ss_state_dict = {}
     for peft_key, weight in get_peft_model_state_dict(module, adapter_name=adapter_name).items():
         kohya_key = peft_key.replace("base_model.model", prefix)
@@ -80,7 +81,8 @@ if __name__ == "__main__":
             text_encoder, text_encoder_peft_lora_path, adapter_name=LORA_ADAPTER_NAME
         )
         kohya_ss_state_dict.update(
-            get_module_kohya_state_dict(text_encoder, LORA_PREFIX_TEXT_ENCODER, dtype, LORA_ADAPTER_NAME))
+            get_module_kohya_state_dict(text_encoder, LORA_PREFIX_TEXT_ENCODER, dtype, LORA_ADAPTER_NAME)
+        )
 
     # Load UNet LoRA model
     unet_peft_lora_path = os.path.join(args.peft_lora_path, "unet")
