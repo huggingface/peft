@@ -23,11 +23,11 @@ from .peft_model import (
 from .tuners import (
     AdaLoraConfig,
     AdaptionPromptConfig,
+    IA3Config,
     LoraConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    IA3Config,
 )
 from .utils import PromptLearningConfig
 

@@ -16,7 +16,14 @@ import os
 import tempfile
 import unittest
 
-from peft import AdaptionPromptConfig, LoraConfig, PrefixTuningConfig, PromptEncoderConfig, PromptTuningConfig
+from peft import (
+    AdaptionPromptConfig,
+    IA3Config,
+    LoraConfig,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
+    PromptTuningConfig,
+)
 
 
 PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
@@ -29,6 +36,7 @@ class PeftConfigTestMixin:
         PrefixTuningConfig,
         PromptTuningConfig,
         AdaptionPromptConfig,
+        IA3Config,
     )
 
 

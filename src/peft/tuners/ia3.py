@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import math
 import re
 import warnings
 from dataclasses import asdict, dataclass, field
@@ -26,8 +25,8 @@ from transformers.pytorch_utils import Conv1D
 
 from ..import_utils import is_bnb_available
 from ..utils import (
-    TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     PeftConfig,
     PeftType,
@@ -210,6 +209,16 @@ class IA3Model(torch.nn.Module):
                                     "Setting fan_in_fan_out to False."
                                 )
                                 kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
+                        elif isinstance(target, Conv1D):
+                            in_features, out_features = (
+                                target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
+                            )
+                            if not kwargs["fan_in_fan_out"]:
+                                warnings.warn(
+                                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                                    "Setting fan_in_fan_out to True."
+                                )
+                                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = True
                         else:
                             raise ValueError(
                                 f"Target module {target} is not supported. "
@@ -229,8 +238,8 @@ class IA3Model(torch.nn.Module):
     @staticmethod
     def _is_valid_match(key: str, target_key: str):
         """
-        Helper function to match module names target_key and key. Makes sure that either the key is exactly
-        the target_key or the target_key is a submodule of key
+        Helper function to match module names target_key and key. Makes sure that either the key is exactly the
+        target_key or the target_key is a submodule of key
         """
         if key.endswith(target_key):
             if len(key) > len(target_key):
@@ -315,8 +324,8 @@ class IA3Model(torch.nn.Module):
 
     def merge_and_unload(self):
         r"""
-        This method merges the ia3 layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method merges the ia3 layers into the base model. This is needed if someone wants to use the base model as
+        a standalone model.
         """
         if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging ia3 layers")

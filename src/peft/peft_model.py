@@ -34,11 +34,11 @@ from transformers.utils import PushToHubMixin
 from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
+    IA3Model,
     LoraModel,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
-    IA3Model,
 )
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,

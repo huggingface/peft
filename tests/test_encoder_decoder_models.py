@@ -31,9 +31,9 @@ FULL_GRID = {"model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST, "task_type": "SEQ
 
 def skip_non_lora_or_pt(test_list):
     r"""
-    Skip tests that are not lora or prefix tuning
+    Skip tests that are not lora or ia3 or prefix tuning
     """
-    return [test for test in test_list if ("lora" in test[0] or "prefix_tuning" in test[0])]
+    return [test for test in test_list if ("lora" in test[0] or "prefix_tuning" in test[0] or "ia3" in test[0])]
 
 
 class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):

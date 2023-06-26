@@ -19,6 +19,7 @@ from collections import OrderedDict
 import torch
 
 from peft import (
+    IA3Config,
     LoraConfig,
     PeftModel,
     PrefixTuningConfig,
@@ -31,12 +32,17 @@ from peft import (
 
 
 CONFIG_CLASSES = (
+    IA3Config,
     LoraConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
 )
 CONFIG_TESTING_KWARGS = (
+    {
+        "target_modules": None,
+        "feedforward_modules": None,
+    },
     {
         "r": 8,
         "lora_alpha": 32,
@@ -57,10 +63,11 @@ CONFIG_TESTING_KWARGS = (
 )
 
 CLASSES_MAPPING = {
-    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
-    "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[1]),
-    "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[2]),
-    "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[3]),
+    "ia3": (IA3Config, CONFIG_TESTING_KWARGS[0]),
+    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[1]),
+    "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[2]),
+    "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[3]),
+    "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
 }
 
 
@@ -249,7 +256,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type != "LORA":
+        if config.peft_type not in ("IA3", "LORA"):
             with self.assertRaises(AttributeError):
                 model = model.merge_and_unload()
         elif model.config.model_type == "gpt2":
@@ -258,7 +265,7 @@ class PeftCommonTester:
         else:
             dummy_input = self.prepare_inputs_for_testing()
             model.eval()
-            logits_lora = model(**dummy_input)[0]
+            logits_unmerged = model(**dummy_input)[0]
 
             model = model.merge_and_unload()
 
@@ -268,8 +275,9 @@ class PeftCommonTester:
 
             logits_transformers = transformers_model(**dummy_input)[0]
 
-            self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-4, rtol=1e-4))
-            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
+            self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
+            if config_cls == LoraConfig:  # merge does not change logits for IA3
+                self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
 
             with tempfile.TemporaryDirectory() as tmp_dirname:
                 model.save_pretrained(tmp_dirname)
@@ -321,7 +329,7 @@ class PeftCommonTester:
             _ = model.generate(input_ids, attention_mask=attention_mask)
 
     def _test_training(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
+        if config_cls not in (IA3Config, LoraConfig):
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -338,9 +346,9 @@ class PeftCommonTester:
         output = model(**inputs)[0]
         loss = output.sum()
         loss.backward()
-
+        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
         for n, param in model.named_parameters():
-            if "lora" in n:
+            if parameter_prefix in n:
                 self.assertIsNotNone(param.grad)
             else:
                 self.assertIsNone(param.grad)
@@ -433,7 +441,7 @@ class PeftCommonTester:
         self.assertLess(nb_trainable, nb_trainable_all)
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
+        if config_cls not in (LoraConfig,):  # only added for LoRA
             return
 
         model = self.transformers_class.from_pretrained(model_id)
