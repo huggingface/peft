@@ -32,7 +32,7 @@ CONFIG_TESTING_KWARGS = (
             "r": 8,
             "lora_alpha": 8,
             "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-            "lora_dropout": 0.00,
+            "lora_dropout": 0.0,
             "bias": "none",
         },
         "unet": {
