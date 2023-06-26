@@ -1,0 +1,11 @@
+transformers==4.29.2 
+datasets 
+evaluate
+peft
+scikit-learn
+loralib
+tqdm
+diffusers
+Pillow
+torchvision
+huggingface_hub
