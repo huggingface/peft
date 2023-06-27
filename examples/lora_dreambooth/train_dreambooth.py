@@ -587,7 +587,7 @@ def main(args):
         import wandb
 
         wandb.login(key=args.wandb_key)
-        wandb.init(project=args.wandb_project)
+        wandb.init(project=args.wandb_project_name)
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
     # TODO (patil-suraj): Remove this check when gradient accumulation with two models is enabled in accelerate.
