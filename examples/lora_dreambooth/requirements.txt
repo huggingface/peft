@@ -9,3 +9,4 @@ Pillow
 torchvision
 huggingface_hub
 safetensors
+wandb
