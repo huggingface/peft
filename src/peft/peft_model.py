@@ -286,6 +286,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 past_key_values = prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
             else:
                 past_key_values = prompt_encoder(prompt_tokens)
+            if self.base_model_torch_dtype is not None:
+                past_key_values = past_key_values.to(self.base_model_torch_dtype)
             past_key_values = past_key_values.view(
                 batch_size,
                 peft_config.num_virtual_tokens,
@@ -932,22 +934,6 @@ class PeftModelForCausalLM(PeftModel):
 
             if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
                 past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
-
-                if self.base_model_torch_dtype is not None:
-                    # handle the case for Bloom where it outputs tuple of tuples
-                    if isinstance(past_key_values[0], tuple):
-                        past_key_values = tuple(
-                            tuple(
-                                past_key_value.to(self.base_model_torch_dtype)
-                                for past_key_value in past_key_value_tuple
-                            )
-                            for past_key_value_tuple in past_key_values
-                        )
-                    else:
-                        past_key_values = tuple(
-                            past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_values
-                        )
-
                 model_kwargs["past_key_values"] = past_key_values
             else:
                 if model_kwargs["past_key_values"] is None:
@@ -1185,19 +1171,6 @@ class PeftModelForSeq2SeqLM(PeftModel):
         if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
             batch_size = model_kwargs["decoder_input_ids"].shape[0]
             past_key_values = self.get_prompt(batch_size)
-            if self.base_model_torch_dtype is not None:
-                # handle the case for Bloom where it outputs tuple of tuples
-                if isinstance(past_key_values[0], tuple):
-                    past_key_values = tuple(
-                        tuple(
-                            past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_value_tuple
-                        )
-                        for past_key_value_tuple in past_key_values
-                    )
-                else:
-                    past_key_values = tuple(
-                        past_key_value.to(self.base_model_torch_dtype) for past_key_value in past_key_values
-                    )
             model_kwargs["past_key_values"] = past_key_values
 
         return model_kwargs
