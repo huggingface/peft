@@ -17,9 +17,11 @@ LORA_PREFIX_TEXT_ENCODER = "lora_te"
 LORA_ADAPTER_NAME = "default"
 
 
-def get_module_kohya_state_dict(module: PeftModel, prefix: str, dtype: torch.dtype) -> Dict[str, torch.Tensor]:
+def get_module_kohya_state_dict(
+    module: PeftModel, prefix: str, dtype: torch.dtype, adapter_name: str = LORA_ADAPTER_NAME
+) -> Dict[str, torch.Tensor]:
     kohya_ss_state_dict = {}
-    for peft_key, weight in get_peft_model_state_dict(module).items():
+    for peft_key, weight in get_peft_model_state_dict(module, adapter_name=adapter_name).items():
         kohya_key = peft_key.replace("base_model.model", prefix)
         kohya_key = kohya_key.replace("lora_A", "lora_down")
         kohya_key = kohya_key.replace("lora_B", "lora_up")
@@ -29,7 +31,7 @@ def get_module_kohya_state_dict(module: PeftModel, prefix: str, dtype: torch.dty
         # Set alpha parameter
         if "lora_down" in kohya_key:
             alpha_key = f'{kohya_key.split(".")[0]}.alpha'
-            kohya_ss_state_dict[alpha_key] = torch.tensor(module.peft_config[LORA_ADAPTER_NAME].lora_alpha).to(dtype)
+            kohya_ss_state_dict[alpha_key] = torch.tensor(module.peft_config[adapter_name].lora_alpha).to(dtype)
 
     return kohya_ss_state_dict
 
@@ -79,7 +81,9 @@ if __name__ == "__main__":
         text_encoder = PeftModel.from_pretrained(
             text_encoder, text_encoder_peft_lora_path, adapter_name=LORA_ADAPTER_NAME
         )
-        kohya_ss_state_dict.update(get_module_kohya_state_dict(text_encoder, LORA_PREFIX_TEXT_ENCODER, dtype))
+        kohya_ss_state_dict.update(
+            get_module_kohya_state_dict(text_encoder, LORA_PREFIX_TEXT_ENCODER, dtype, LORA_ADAPTER_NAME)
+        )
 
     # Load UNet LoRA model
     unet_peft_lora_path = os.path.join(args.peft_lora_path, "unet")
@@ -88,7 +92,7 @@ if __name__ == "__main__":
             args.sd_checkpoint, subfolder="unet", revision=args.sd_checkpoint_revision
         )
         unet = PeftModel.from_pretrained(unet, unet_peft_lora_path, adapter_name=LORA_ADAPTER_NAME)
-        kohya_ss_state_dict.update(get_module_kohya_state_dict(unet, LORA_PREFIX_UNET, dtype))
+        kohya_ss_state_dict.update(get_module_kohya_state_dict(unet, LORA_PREFIX_UNET, dtype, LORA_ADAPTER_NAME))
 
     # Save state dict
     save_file(
