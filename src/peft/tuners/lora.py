@@ -426,6 +426,15 @@ class LoraModel(torch.nn.Module):
             if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
+                elif isinstance(target, nn.Conv2d):
+                    new_module = torch.nn.Conv2d(
+                        target.in_channels,
+                        target.out_channels,
+                        kernel_size=target.kernel_size,
+                        stride=target.stride,
+                        padding=target.padding,
+                        dilation=target.dilation,
+                    )
                 else:
                     bias = target.bias is not None
                     new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)

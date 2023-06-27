@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import unittest
+from contextlib import contextmanager
 
+import numpy as np
 import torch
 
 
@@ -47,3 +49,27 @@ def require_bitsandbytes(test_case):
         return unittest.skip("test requires bitsandbytes")(test_case)
     else:
         return test_case
+
+
+@contextmanager
+def temp_seed(seed: int):
+    """Temporarily set the random seed. This works for python numpy, pytorch."""
+
+    np_state = np.random.get_state()
+    np.random.seed(seed)
+
+    torch_state = torch.random.get_rng_state()
+    torch.random.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch_cuda_states = torch.cuda.get_rng_state_all()
+        torch.cuda.manual_seed_all(seed)
+
+    try:
+        yield
+    finally:
+        np.random.set_state(np_state)
+
+        torch.random.set_rng_state(torch_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(torch_cuda_states)
