@@ -74,6 +74,10 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
+
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
