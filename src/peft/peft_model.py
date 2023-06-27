@@ -17,6 +17,7 @@ import inspect
 import os
 import warnings
 from contextlib import contextmanager
+from copy import deepcopy
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -1062,6 +1063,22 @@ class PeftModelForSeq2SeqLM(PeftModel):
             return self.base_model(
                 input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
             )
+        elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+
+            if attention_mask is not None:
+                # concat prompt attention mask
+                prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(
+                    attention_mask.device
+                )
+                kwargs["attention_mask"] = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+
+            prompts = self.get_prompt(batch_size=batch_size)
+            prompts = prompts.to(inputs_embeds.dtype)
+            inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
+
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1122,6 +1139,31 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
                 if peft_config.peft_type == PeftType.PREFIX_TUNING:
                     outputs = self.base_model.generate(**kwargs)
+                elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
+                    kwargs = deepcopy(kwargs)
+
+                    if "encoder_outputs" in kwargs:
+                        del kwargs["encoder_ouputs"]
+                        warnings.warn(
+                            "`encoder_outputs` should not be passed to `generate` when using prompt tuning. Ignoring it."
+                        )
+
+                    input_ids = kwargs.pop("input_ids")
+                    inputs_embeds = self.word_embeddings(input_ids)
+                    batch_size = inputs_embeds.shape[0]
+                    prompts = self.get_prompt(batch_size=batch_size)
+                    prompts = prompts.to(inputs_embeds.dtype)
+
+                    inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
+                    kwargs["inputs_embeds"] = inputs_embeds
+
+                    if "attention_mask" in kwargs:
+                        prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(
+                            kwargs["attention_mask"].device
+                        )
+                        kwargs["attention_mask"] = torch.cat((prefix_attention_mask, kwargs["attention_mask"]), dim=1)
+
+                    return self.base_model.generate(**kwargs)
                 else:
                     raise NotImplementedError
         except:
