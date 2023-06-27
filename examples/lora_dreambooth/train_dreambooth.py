@@ -899,6 +899,8 @@ def main(args):
                 if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                     if step % args.gradient_accumulation_steps == 0:
                         progress_bar.update(1)
+                        if args.report_to == "wandb":
+                            accelerator.print(progress_bar)
                     continue
 
                 with accelerator.accumulate(unet):
@@ -964,6 +966,8 @@ def main(args):
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
+                    if args.report_to == "wandb":
+                        accelerator.print(progress_bar)
                     global_step += 1
 
                     # if global_step % args.checkpointing_steps == 0:
