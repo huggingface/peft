@@ -403,6 +403,7 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
             model.config.suppress_tokens = []
 
             model = prepare_model_for_int8_training(model)
+
             # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
             # to avoid this, make the inputs trainable
             def make_inputs_require_grad(module, input, output):

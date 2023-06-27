@@ -9,6 +9,7 @@ from transformers import CLIPTextModel
 
 from peft import PeftModel, get_peft_model_state_dict
 
+
 # Default kohya_ss LoRA replacement modules
 # https://github.com/kohya-ss/sd-scripts/blob/c924c47f374ac1b6e33e71f82948eb1853e2243f/networks/lora.py#L664
 LORA_PREFIX_UNET = "lora_unet"
