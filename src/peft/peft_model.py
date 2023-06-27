@@ -17,8 +17,8 @@ import inspect
 import os
 import warnings
 from contextlib import contextmanager
-from typing import Optional
 from copy import deepcopy
+from typing import Optional
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
