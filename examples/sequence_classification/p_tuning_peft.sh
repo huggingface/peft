@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
+
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
 mkdir -p $LOG_DIR
 mkdir -p $OUTPUT_DIR
 
-model=${1:-"google/vit-base-patch16-224-in21k"}
-lr=${3:-5e-3}
-bs=${4:-128}
-ep=${2:-5}
+model=${1:-"roberta-large"}
+tk=${2:-"mrpc"}
+ep=${3:-20}
+lr=${4:-1e-3}
+bs=${5:-32}
 
 model_name=${model#*/}
 log_file="${LOG_DIR}/${model_name}.log"
 output_dir="${OUTPUT_DIR}/${model_name}"
 
-/usr/bin/env python image_classification_peft_lora.py \
-    --model_checkpoint $model \
-    --learning_rate $lr \
+/usr/bin/env python p_tuning_refactor.py \
+    --model $model \
+    --task $tk \
+    --num_epochs $ep \
+    --lr $lr \
     --batch_size $bs \
-    --num_train_epochs $ep \
     --output_dir $output_dir \
-     2>&1 | tee $log_file
-
+    2>&1 | tee $log_file

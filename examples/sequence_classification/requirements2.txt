@@ -1,3 +1,5 @@
+torch==1.13.1 
+moreh-driver==23.6.0
 transformers==4.29.2 
 datasets 
 evaluate
