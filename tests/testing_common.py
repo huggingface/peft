@@ -255,6 +255,23 @@ class PeftCommonTester:
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
+    def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(
+                model_from_pretrained, tmp_dirname, is_trainable=False, config=config
+            )
+
+            self.assertTrue(model_from_pretrained.peft_config["default"].inference_mode)
+            self.assertIs(model_from_pretrained.peft_config["default"], config)
+
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
