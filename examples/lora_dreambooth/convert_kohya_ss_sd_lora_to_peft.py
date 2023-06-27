@@ -1,6 +1,7 @@
 import argparse
 import os
-from typing import List, Optional
+import re
+from typing import Callable, List, Optional, Union
 
 import safetensors
 import torch
@@ -49,6 +50,17 @@ def get_modules_names(
     return sorted(modules_names)
 
 
+def get_rank_alpha(
+    layer_names: List[str],
+    value_getter: Callable[[str], Union[int, float]],
+    filter_string: str,
+) -> Union[int, float]:
+    values = [value_getter(p) for p in filter(lambda x: bool(re.search(filter_string, x)), layer_names)]
+    value = values[0]
+    assert all(v == value for v in values), f"All LoRA ranks and alphas must be same, found: {values}"
+    return value
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -81,8 +93,22 @@ if __name__ == "__main__":
     with safetensors.safe_open(args.kohya_lora_path, framework="pt", device="cpu") as f:
         # Extract information about LoRA structure
         metadata = f.metadata()
-        lora_r = lora_text_encoder_r = int(metadata["ss_network_dim"])
-        lora_alpha = lora_text_encoder_alpha = float(metadata["ss_network_alpha"])
+        if (metadata is not None) and ("ss_network_dim" in metadata) and ("ss_network_alpha" in metadata):
+            # LoRA rank and alpha are in safetensors metadata, just get it
+            lora_r = lora_text_encoder_r = int(metadata["ss_network_dim"])
+            lora_alpha = lora_text_encoder_alpha = float(metadata["ss_network_alpha"])
+        else:
+            # LoRA rank and alpha are not present, so infer them
+            lora_r = get_rank_alpha(
+                f.keys(), lambda n: f.get_tensor(n).size(0), f"^{LORA_PREFIX_UNET}\w+\.lora_down\.weight$"
+            )
+            lora_text_encoder_r = get_rank_alpha(
+                f.keys(), lambda n: f.get_tensor(n).size(0), f"^{LORA_PREFIX_TEXT_ENCODER}\w+\.lora_down\.weight$"
+            )
+            lora_alpha = get_rank_alpha(f.keys(), lambda n: f.get_tensor(n).item(), f"^{LORA_PREFIX_UNET}\w+\.alpha$")
+            lora_text_encoder_alpha = get_rank_alpha(
+                f.keys(), lambda n: f.get_tensor(n).item(), f"^{LORA_PREFIX_TEXT_ENCODER}\w+\.alpha$"
+            )
 
         # Create LoRA for text encoder
         text_encoder_config = LoraConfig(

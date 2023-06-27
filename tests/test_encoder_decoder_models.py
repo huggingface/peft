@@ -63,6 +63,10 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_adapter_name(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
