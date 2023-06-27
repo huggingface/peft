@@ -523,6 +523,9 @@ if is_bnb_available():
                 result = result + output
             return result
 
+
+if is_bnb_4bit_available():
+
     class SVDLinear4bit(bnb.nn.Linear4bit, AdaLoraLayer):
         # Low-rank matrix for SVD-based adaptation
         def __init__(
