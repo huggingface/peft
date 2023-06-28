@@ -32,9 +32,12 @@ SHELL ["/bin/bash", "-c"]
 # Activate the conda env and install transformers + accelerate from source
 RUN source activate peft && \
     python3 -m pip install --no-cache-dir \
+    librosa \
+    "soundfile>=0.12.1" \
+    scipy \
     git+https://github.com/huggingface/transformers \
     git+https://github.com/huggingface/accelerate \
-    git+https://github.com/huggingface/peft#egg=peft[test]
+    peft[test]@git+https://github.com/huggingface/peft
 
 RUN python3 -m pip install --no-cache-dir bitsandbytes
 

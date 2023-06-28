@@ -17,9 +17,15 @@ import unittest
 
 import pytest
 import torch
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoTokenizer, WhisperForConditionalGeneration
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    LlamaForCausalLM,
+    WhisperForConditionalGeneration,
+)
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import AdaptionPromptConfig, LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
@@ -54,6 +60,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         gc.collect()
 
     @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
     def test_lora_bnb_8bit_quantization(self):
         r"""
         Test that tests if the 8bit quantization using LoRA works as expected
@@ -104,6 +112,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
     def test_lora_bnb_4bit_quantization_from_pretrained_safetensors(self):
         r"""
         Test that tests if the 4bit quantization using LoRA works as expected with safetensors weights.
@@ -114,9 +123,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", load_in_4bit=True)
         model = PeftModel.from_pretrained(model, peft_model_id)
 
-        _ = model.generate(torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        _ = model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
     @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
     def test_lora_bnb_4bit_quantization(self):
         r"""
         Test that tests if the 4bit quantization using LoRA works as expected
@@ -217,3 +228,49 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         # this should work without any problem
         _ = model.generate(input_ids=input_ids)
+
+    @require_torch_multi_gpu
+    @pytest.mark.multi_gpu_tests
+    @require_bitsandbytes
+    def test_adaption_prompt_8bit(self):
+        model = LlamaForCausalLM.from_pretrained(
+            "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+            load_in_8bit=True,
+            torch_dtype=torch.float16,
+            device_map="auto",
+        )
+
+        model = prepare_model_for_kbit_training(model)
+
+        config = AdaptionPromptConfig(
+            adapter_len=10,
+            adapter_layers=2,
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, config)
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(0)
+        _ = model(random_input)
+
+    @require_torch_multi_gpu
+    @pytest.mark.multi_gpu_tests
+    @require_bitsandbytes
+    def test_adaption_prompt_4bit(self):
+        model = LlamaForCausalLM.from_pretrained(
+            "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+            load_in_4bit=True,
+            torch_dtype=torch.float16,
+            device_map="auto",
+        )
+
+        model = prepare_model_for_kbit_training(model)
+
+        config = AdaptionPromptConfig(
+            adapter_len=10,
+            adapter_layers=2,
+            task_type="CAUSAL_LM",
+        )
+        model = get_peft_model(model, config)
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(0)
+        _ = model(random_input)
