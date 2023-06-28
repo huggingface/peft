@@ -18,7 +18,7 @@ from .text_generation import PeftTextGenerationPipeline
 PEFT_PIPELINE_MAPPING = {"text-generation": PeftTextGenerationPipeline}
 
 
-def pipeline(task_type, *args, **kwargs):
+def peft_pipeline(task_type, *args, **kwargs):
     if task_type not in PEFT_PIPELINE_MAPPING:
         raise ValueError(
             f"`task_type` {task_type} not supported. Supported values are {list(PEFT_PIPELINE_MAPPING.keys())}"

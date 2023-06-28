@@ -19,7 +19,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM
 
-from peft import LoraConfig, PeftModel, get_peft_model, pipeline
+from peft import LoraConfig, PeftModel, get_peft_model, peft_pipeline
 
 from ..testing_common import PeftTestConfigManager
 
@@ -61,7 +61,7 @@ class PeftTextGenerationPipelineTester:
 
         model.save_pretrained(save_dir)
 
-        pipe = pipeline("text-generation", save_dir, **kwargs)
+        pipe = peft_pipeline("text-generation", save_dir, **kwargs)
         return pipe
 
     def _test_load_pipeline(self, model_id, config_cls, config_kwargs):

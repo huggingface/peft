@@ -25,7 +25,14 @@ from transformers import (
     WhisperForConditionalGeneration,
 )
 
-from peft import AdaptionPromptConfig, LoraConfig, PeftModel, get_peft_model, pipeline, prepare_model_for_kbit_training
+from peft import (
+    AdaptionPromptConfig,
+    LoraConfig,
+    PeftModel,
+    get_peft_model,
+    peft_pipeline,
+    prepare_model_for_kbit_training,
+)
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
@@ -237,7 +244,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         Test if pipeline + 4bit works as expected
         """
         peft_model_id = "ybelkada/opt-350m-lora"
-        pipe = pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_4bit": True})
+        pipe = peft_pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_4bit": True})
 
         self.assertTrue(pipe.model.base_model.is_loaded_in_4bit)
         _ = pipe("hello")
@@ -273,7 +280,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         Test if pipeline + 8bit works as expected
         """
         peft_model_id = "ybelkada/opt-350m-lora"
-        pipe = pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_8bit": True})
+        pipe = peft_pipeline("text-generation", peft_model_id, base_model_kwargs={"load_in_8bit": True})
 
         self.assertTrue(pipe.model.base_model.is_loaded_in_8bit)
         _ = pipe("hello")
