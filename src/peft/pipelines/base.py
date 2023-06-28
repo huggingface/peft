@@ -12,12 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from abc import ABC, abstractmethod
 from typing import Any, Union
 
 import torch
 
 
-class BasePeftPipeline(object):
+class BasePeftPipeline(ABC):
     r"""
     Base skeleton class for all PEFT pipelines. This class cannot be used as it is and should be subclassed and the
     method `_load_model_and_processor` should be implemented.
@@ -50,9 +51,6 @@ class BasePeftPipeline(object):
         self._load_model_and_processor()
         self._maybe_move_model_to_device()
 
-    def _load_model_and_processor(self):
-        raise NotImplementedError
-
     def _maybe_move_model_to_device(self):
         if not hasattr(self.model, "hf_device_map") and self.device is not None:
             self.model = self.model.to(self.device)
@@ -64,5 +62,10 @@ class BasePeftPipeline(object):
             else:
                 self.device = "cpu"
 
+    @abstractmethod
+    def _load_model_and_processor(self):
+        return
+
+    @abstractmethod
     def __call__(self, *args: Any, **kwds: Any) -> Any:
-        raise NotImplementedError
+        return
