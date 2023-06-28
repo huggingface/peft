@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import warnings
 
 from huggingface_hub.utils import EntryNotFoundError
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -147,22 +146,10 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
     def __call__(self, text, **kwargs):
         r"""
         Generate the text given text inputs using the underlying PEFT model. For LoRA models only it is possible to
-        specify the adapter to use via the `adapter_name` keyword argument and potentially overwrite the default adapter
-        set at the pipeline creation.
+        specify the adapter to use via the `adapter_name` keyword argument and potentially overwrite the default
+        adapter set at the pipeline creation.
         """
-        adapter_name = kwargs.pop("adapter_name", None)
-        if adapter_name is not None and self.merged_model:
-            raise ValueError("You can't switch between adapters if you have merged the model")
-
         skip_special_tokens = kwargs.pop("skip_special_tokens", True)
-        if adapter_name is not None:
-            if self.adapter_name is not None:
-                warnings.warn(
-                    "You are setting an adapter name but the pipeline already has one set. This will overwrite the existing adapter."
-                )
-
-            self.model.set_adapter(adapter_name)
-
         encoded_text = self.processor(text, return_tensors="pt", padding=True).to(self.device)
 
         generate_output = self.model.generate(**encoded_text, **kwargs)
