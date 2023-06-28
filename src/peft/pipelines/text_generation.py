@@ -80,12 +80,13 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         ```
     """
 
-    transformers_model_class = AutoModelForCausalLM
-    transformers_processor_class = AutoTokenizer
-    peft_model_class = PeftModelForCausalLM
-    task_type = "text-generation"
-
     def __init__(self, *args, **kwargs):
+        self.transformers_model_class = AutoModelForCausalLM
+        self.transformers_processor_class = AutoTokenizer
+        self.peft_model_class = PeftModelForCausalLM
+        self.task_type = "text-generation"
+        self.peft_task_type = "CAUSAL_LM"
+
         self.merge_model = kwargs.pop("merge_model", False)
         self.adapter_name = kwargs.pop("adapter_name", "default")
 

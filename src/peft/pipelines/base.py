@@ -13,9 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, Union
-
-import torch
+from typing import Any
 
 
 class BasePeftPipeline(ABC):
@@ -32,12 +30,9 @@ class BasePeftPipeline(ABC):
             The task type of the pipeline - i.e. the name of the pipeline.
         device (Union[str, int, torch.device]):
             The device to run the pipeline on.
+        peft_task_type (str):
+            The task type of the PEFT model.
     """
-    transformers_model_class = None
-    transformers_processor_class = None
-    peft_model_class = None
-    task_type: str = None
-    device: Union[str, int, torch.device] = None
 
     def __init__(self, model, processor=None, device=None, base_model_kwargs=None):
         self.model = model
@@ -47,6 +42,7 @@ class BasePeftPipeline(ABC):
 
         self._load_model_and_processor()
         self._maybe_move_model_to_device()
+        self._sanity_check_task_type()
 
     def _maybe_move_model_to_device(self):
         if not hasattr(self.model, "hf_device_map") and self.device is not None:
@@ -58,6 +54,13 @@ class BasePeftPipeline(ABC):
                 self.device = min(list_gpu_devices) if isinstance(list_gpu_devices[0], int) else list_gpu_devices[0]
             else:
                 self.device = "cpu"
+
+    def _sanity_check_task_type(self):
+        if self.model.peft_config[self.adapter_name].task_type != self.peft_task_type:
+            raise ValueError(
+                f"""peft_pipeline got task_type: '{self.task_type}' but model has task_type:
+'{self.model.peft_config[self.adapter_name].task_type}'"""
+            )
 
     @abstractmethod
     def _load_model_and_processor(self):
