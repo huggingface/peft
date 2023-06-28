@@ -20,11 +20,11 @@ from typing import TYPE_CHECKING, Any, Dict
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
+    PeftModelForEmbedding,
     PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
-    PeftModelForEmbedding,
 )
 from .tuners import (
     AdaLoraConfig,
