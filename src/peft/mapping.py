@@ -24,6 +24,7 @@ from .peft_model import (
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
+    PeftModelForEmbedding,
 )
 from .tuners import (
     AdaLoraConfig,
@@ -48,6 +49,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
     "QUESTION_ANS": PeftModelForQuestionAnswering,
+    "EMBEDDING": PeftModelForEmbedding,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
