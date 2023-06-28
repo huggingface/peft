@@ -157,6 +157,21 @@ class PeftCommonTester:
         self.assertTrue(hasattr(model, "from_pretrained"))
         self.assertTrue(hasattr(model, "push_to_hub"))
 
+    def _test_adapter_name(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, adapter_name="test-adapter")
+        correctly_converted = False
+        for n, _ in model.named_parameters():
+            if "test-adapter" in n:
+                correctly_converted = True
+                break
+
+        self.assertTrue(correctly_converted)
+
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -239,6 +254,23 @@ class PeftCommonTester:
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+    def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(
+                model_from_pretrained, tmp_dirname, is_trainable=False, config=config
+            )
+
+            self.assertTrue(model_from_pretrained.peft_config["default"].inference_mode)
+            self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -463,3 +495,25 @@ class PeftCommonTester:
                 self.assertIsNotNone(param.grad)
             else:
                 self.assertIsNone(param.grad)
+
+    def _test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            return
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model = self.transformers_class.from_pretrained(model_id)
+
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            _ = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname, device_map={"": "cpu"}).to(
+                self.torch_device
+            )

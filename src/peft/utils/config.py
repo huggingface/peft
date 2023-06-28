@@ -39,6 +39,7 @@ class TaskType(str, enum.Enum):
     SEQ_2_SEQ_LM = "SEQ_2_SEQ_LM"
     CAUSAL_LM = "CAUSAL_LM"
     TOKEN_CLS = "TOKEN_CLS"
+    QUESTION_ANS = "QUESTION_ANS"
 
 
 @dataclass
@@ -101,7 +102,7 @@ class PeftConfigMixin(PushToHubMixin):
             else pretrained_model_name_or_path
         )
 
-        hf_hub_download_kwargs, class_kwargs = cls._split_kwargs(kwargs)
+        hf_hub_download_kwargs, class_kwargs, other_kwargs = cls._split_kwargs(kwargs)
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)
@@ -141,14 +142,40 @@ class PeftConfigMixin(PushToHubMixin):
     def _split_kwargs(cls, kwargs):
         hf_hub_download_kwargs = {}
         class_kwargs = {}
+        other_kwargs = {}
 
         for key, value in kwargs.items():
             if key in inspect.signature(hf_hub_download).parameters:
                 hf_hub_download_kwargs[key] = value
-            else:
+            elif key in list(cls.__annotations__):
                 class_kwargs[key] = value
+            else:
+                other_kwargs[key] = value
 
-        return hf_hub_download_kwargs, class_kwargs
+        return hf_hub_download_kwargs, class_kwargs, other_kwargs
+
+    @classmethod
+    def _get_peft_type(
+        cls,
+        model_id,
+        subfolder: Optional[str] = None,
+        revision: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+    ):
+        path = os.path.join(model_id, subfolder) if subfolder is not None else model_id
+
+        if os.path.isfile(os.path.join(path, CONFIG_NAME)):
+            config_file = os.path.join(path, CONFIG_NAME)
+        else:
+            try:
+                config_file = hf_hub_download(
+                    model_id, CONFIG_NAME, subfolder=subfolder, revision=revision, cache_dir=cache_dir
+                )
+            except Exception:
+                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{model_id}'")
+
+        loaded_attributes = cls.from_json_file(config_file)
+        return loaded_attributes["peft_type"]
 
 
 @dataclass
