@@ -32,15 +32,12 @@ class BasePeftPipeline(ABC):
             The task type of the pipeline - i.e. the name of the pipeline.
         device (Union[str, int, torch.device]):
             The device to run the pipeline on.
-        supported_extra_args (tuple):
-            The list of extra arguments supported by the pipeline.
     """
     transformers_model_class = None
     transformers_processor_class = None
     peft_model_class = None
     task_type: str = None
     device: Union[str, int, torch.device] = None
-    supported_extra_args: dict = {}
 
     def __init__(self, model, processor=None, device=None, base_model_kwargs=None):
         self.model = model

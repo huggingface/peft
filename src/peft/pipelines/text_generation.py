@@ -65,8 +65,6 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         - **transformers_model_class** ([`class`])-- Class of the transformers model to load.
         - **transformers_processor_class** ([`class`]) -- Class of the transformers processor to load.
         - **task_type** (`str`) -- Name of the task the pipeline is targeted at.
-        - **supported_extra_args** (`Dict[str, type]`) -- Additional keyword arguments supported by the pipeline's
-          constructor
         - **model** ([`PeftModel`]) -- The associated PEFT model
         - **processor** ([`~transformers.PreTrainedTokenizer`]) -- Base model's tokenizer.
         - **device** ([`Union[str, int, torch.device`]) -- Device to run inference on.
@@ -87,7 +85,6 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
     transformers_processor_class = AutoTokenizer
     peft_model_class = PeftModelForCausalLM
     task_type = "text-generation"
-    supported_extra_args = {"merge_model": bool, "adapter_name": str}
 
     def __init__(self, *args, **kwargs):
         self.merge_model = kwargs.pop("merge_model", False)
