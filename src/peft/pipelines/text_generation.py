@@ -147,8 +147,6 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         if self.processor.pad_token is None:
             self.processor.pad_token = self.processor.eos_token
 
-        if hasattr(self, "adapter_name") and self.adapter_name is not None:
-            self.model.set_adapter(self.adapter_name)
 
     def __call__(self, text, **kwargs):
         r"""
