@@ -21,7 +21,7 @@ import torch
 class BasePeftPipeline(ABC):
     r"""
     Base skeleton class for all PEFT pipelines. This class cannot be used as it is and should be subclassed and the
-    method `_load_model_and_processor` should be implemented.
+    method `_load_model_and_processor` and `__call__` should be implemented.
 
     Attributes:
         transformers_model_class (`transformers.PreTrainedModel`):

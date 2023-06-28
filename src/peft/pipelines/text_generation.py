@@ -149,7 +149,7 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
 
     def __call__(self, text, **kwargs):
         r"""
-        Generate the text give text inputs using the underlying PEFT model. For LoRA models only it is possible to
+        Generate the text given text inputs using the underlying PEFT model. For LoRA models only it is possible to
         specify the adapter to use via the `adapter_name` keyword argument and potentiall overwrite the default adapter
         set at the pipeline creation.
         """
