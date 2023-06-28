@@ -109,7 +109,7 @@ class PeftTextGenerationPipelineTester:
 
     def _test_load_pipeline_raise_error(self, model_id, config_cls, config_kwargs):
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            with self.assertRaises(ValueError):
+            with self.assertRaises(TypeError):
                 _ = self._create_pipeline(model_id, config_cls, config_kwargs, tmp_dirname, kwargs={"dummy_arg": True})
 
 

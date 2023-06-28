@@ -147,7 +147,6 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
         if self.processor.pad_token is None:
             self.processor.pad_token = self.processor.eos_token
 
-
     def __call__(self, text, **kwargs):
         r"""
         Generate the text give text inputs using the underlying PEFT model. For LoRA models only it is possible to
