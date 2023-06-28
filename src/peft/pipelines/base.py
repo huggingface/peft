@@ -41,13 +41,12 @@ class BasePeftPipeline(object):
     device: Union[str, int, torch.device] = None
     supported_extra_args: dict = {}
 
-    def __init__(self, model, processor=None, device=None, base_model_kwargs={}, **kwargs):
+    def __init__(self, model, processor=None, device=None, base_model_kwargs=None):
         self.model = model
         self.processor = processor
         self.device = device
-        self.base_model_kwargs = base_model_kwargs
+        self.base_model_kwargs = base_model_kwargs if base_model_kwargs is not None else {}
 
-        self._setup_additional_args(**kwargs)
         self._load_model_and_processor()
         self._maybe_move_model_to_device()
 
@@ -58,18 +57,12 @@ class BasePeftPipeline(object):
         if not hasattr(self.model, "hf_device_map") and self.device is not None:
             self.model = self.model.to(self.device)
         elif hasattr(self.model, "hf_device_map") and self.device is None:
-            self.device = list(set(self.model.hf_device_map.values()))[0]
-
-    def _setup_additional_args(self, **kwargs):
-        for key, value in kwargs.items():
-            if key in self.supported_extra_args.keys():
-                if not isinstance(value, self.supported_extra_args[key]):
-                    raise ValueError(f"Parameter {key} should be of type {self.supported_extra_args[key]}")
-                setattr(self, key, value)
+            list_devices = list(set(self.model.hf_device_map.values()))[0]
+            list_gpu_devices = [device for device in list_devices if device not in ["cpu", "disk"]]
+            if len(list_gpu_devices) > 0:
+                self.device = min(list_gpu_devices) if isinstance(list_gpu_devices[0], int) else list_gpu_devices[0]
             else:
-                raise ValueError(
-                    f"Tried to pass non supported additional extra parameter: {key} - the supported parameters are {self.supported_extra_args}"
-                )
+                self.device = "cpu"
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         raise NotImplementedError

@@ -90,6 +90,9 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
     supported_extra_args = {"merge_model": bool, "adapter_name": str}
 
     def __init__(self, *args, **kwargs):
+        self.merge_model = kwargs.pop("merge_model", False)
+        self.adapter_name = kwargs.pop("adapter_name", "default")
+
         super().__init__(*args, **kwargs)
 
     def _load_model_and_processor(self):
@@ -120,6 +123,7 @@ class PeftTextGenerationPipeline(BasePeftPipeline):
             self.model = self.peft_model_class.from_pretrained(
                 transformers_model,
                 self.model,
+                adapter_name=self.adapter_name,
             )
 
             if self.device is None and not hasattr(self.model, "hf_device_map"):
