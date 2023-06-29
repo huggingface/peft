@@ -20,6 +20,7 @@ from peft import (
     AdaptionPromptConfig,
     IA3Config,
     LoraConfig,
+    PeftConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -104,6 +105,24 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
             config = config_class()
             self.assertEqual(config.to_dict(), config.__dict__)
             self.assertTrue(isinstance(config.to_dict(), dict))
+
+    def test_from_pretrained_cache_dir(self):
+        r"""
+        Test if the config is correctly loaded with extra kwargs
+        """
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            for config_class in self.all_config_classes:
+                for model_name, revision in PEFT_MODELS_TO_TEST:
+                    # Test we can load config from delta
+                    _ = config_class.from_pretrained(model_name, revision=revision, cache_dir=tmp_dirname)
+
+    def test_from_pretrained_cache_dir_remote(self):
+        r"""
+        Test if the config is correctly loaded with a checkpoint from the hub
+        """
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            _ = PeftConfig.from_pretrained("ybelkada/test-st-lora", cache_dir=tmp_dirname)
+            self.assertTrue("models--ybelkada--test-st-lora" in os.listdir(tmp_dirname))
 
     def test_set_attributes(self):
         # manually set attributes and check if they are correctly written

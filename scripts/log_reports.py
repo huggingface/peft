@@ -9,10 +9,12 @@ passed = []
 group_info = []
 
 total_num_failed = 0
+empty_file = False or len(list(Path().glob("*.log"))) == 0
 for log in Path().glob("*.log"):
     section_num_failed = 0
     with open(log, "r") as f:
-        for line in f:
+        nb_lines = sum(1 for _ in f)
+        for i, line in f:
             line = json.loads(line)
             if line.get("nodeid", "") != "":
                 test = line["nodeid"]
@@ -24,6 +26,8 @@ for log in Path().glob("*.log"):
                         total_num_failed += 1
                     else:
                         passed.append([test, duration, log.name.split('_')[0]])
+        if nb_lines == 0:
+            empty_file = True
     group_info.append([str(log), section_num_failed, failed])
     os.remove(log)
     failed = []
@@ -31,7 +35,7 @@ no_error_payload = {
     "type": "section",
     "text": {
         "type": "plain_text",
-        "text": "🌞 There were no failures!",
+        "text": "🌞 There were no failures!" if not empty_file else "Something went wrong - please check GH action results.",
         "emoji": True
     }
 }
@@ -100,6 +104,7 @@ if os.environ.get("TEST_TYPE", "") != "":
     }
     payload.append(date_report)
 
+    print(payload)
 
     client = WebClient(token=os.environ.get("SLACK_API_TOKEN"))
     client.chat_postMessage(channel="#peft-ci-daily", text=message, blocks=payload)
