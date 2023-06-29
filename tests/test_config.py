@@ -40,7 +40,7 @@ ALL_CONFIG_CLASSES = (
 class TestPeftConfig:
     @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
     def test_methods_exist(self, config_class):
-        r""" Test if all configs have the expected methods. Here we test """
+        r"""Test if all configs have the expected methods. Here we test"""
         config = config_class()
         methods_expected = ["to_dict", "save_pretrained", "from_pretrained", "from_json_file"]
         for method in methods_expected:
