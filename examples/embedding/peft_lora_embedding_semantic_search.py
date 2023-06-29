@@ -14,34 +14,29 @@
 # limitations under the License.
 
 import argparse
-import json
 import logging
 import math
 import os
 import random
 from pathlib import Path
-from tqdm import tqdm
 
 import datasets
-from datasets import load_dataset, DatasetDict
-
 import evaluate
 import torch
-from torch import nn
-from torch.utils.data import DataLoader
-
 import transformers
-from transformers import AutoTokenizer, AutoModel, default_data_collator, SchedulerType, get_scheduler
-from transformers.utils import check_min_version, get_full_repo_name, send_example_telemetry
-from transformers.utils.versions import require_version
-
-from huggingface_hub import Repository, create_repo
-
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
+from datasets import DatasetDict, load_dataset
+from huggingface_hub import Repository, create_repo
+from torch import nn
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+from transformers import AutoModel, AutoTokenizer, SchedulerType, default_data_collator, get_scheduler
+from transformers.utils import get_full_repo_name
 
-from peft import get_peft_model, LoraConfig, TaskType
+from peft import LoraConfig, TaskType, get_peft_model
+
 
 logger = get_logger(__name__)
 
