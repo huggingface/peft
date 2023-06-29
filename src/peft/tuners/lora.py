@@ -418,12 +418,12 @@ class LoraModel(torch.nn.Module):
         >>> from peft import PeftModel
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
-        # load LoRA adapater
 
+        # load LoRA adapater
         >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
         >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
+        
         # merge LoRA layers into base model
-
         >>> merged_model = model.merge_and_unload()
         ```
         """
