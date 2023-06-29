@@ -173,7 +173,6 @@ class IA3Model(torch.nn.Module):
                     is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
-                # import pdb; pdb.set_trace()
                 parent, target, target_name = _get_submodules(self.model, key)
                 bias = target.bias is not None
                 if isinstance(target, IA3Layer):
@@ -477,15 +476,16 @@ class Linear(nn.Linear, IA3Layer):
 
         if not self.merged:
             if self.is_feedforward:
+                x = x.to(self.ia3_l[self.active_adapter].dtype)
+                interm = x * self.ia3_l[self.active_adapter].flatten()
                 result = F.linear(
-                    x * self.ia3_l[self.active_adapter].flatten(),
+                    interm.to(self.weight.dtype),
                     transpose(self.weight, self.fan_in_fan_out),
                     bias=self.bias,
                 )
             else:
                 result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-                result = result * self.ia3_l[self.active_adapter].flatten()
-
+                result = result.to(self.ia3_l[self.active_adapter].dtype) * self.ia3_l[self.active_adapter].flatten()
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 

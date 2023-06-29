@@ -307,7 +307,7 @@ class PeftCommonTester:
             _ = model.generate(inputs["input_ids"])
 
     def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, PrefixTuningConfig):
+        if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig):
             return
 
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
@@ -441,7 +441,7 @@ class PeftCommonTester:
         self.assertLess(nb_trainable, nb_trainable_all)
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):  # only added for LoRA
+        if config_cls not in (LoraConfig, IA3Config):
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -465,9 +465,9 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
-
+        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
         for n, param in model.named_parameters():
-            if "lora" in n:
+            if parameter_prefix in n:
                 self.assertIsNotNone(param.grad)
             else:
                 self.assertIsNone(param.grad)
