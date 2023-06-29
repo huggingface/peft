@@ -21,7 +21,7 @@ import torch
 
 
 # Add or edit model card to have `library_name: peft`
-def add_or_edit_model_card(output_dir):
+def add_library_to_model_card(output_dir):
     if os.path.exists(os.path.join(output_dir, "README.md")):
         with open(os.path.join(output_dir, "README.md"), "r") as f:
             lines = f.readlines()
@@ -237,7 +237,8 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
-    "starcoder": ["c_attn"],
+    "gpt_bigcode": ["c_attn"],
+    "mpt": ["Wqkv"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {

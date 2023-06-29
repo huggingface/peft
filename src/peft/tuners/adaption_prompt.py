@@ -293,13 +293,14 @@ class AdaptedAttention(nn.Module):
         # which initializes the tokens with standard normal values.
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
+        target_dtype = (
+            model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
+        )
         self.adaption_prompt = nn.Parameter(
-            torch.empty(
-                1, adapter_len, self.model.hidden_size, device=device, dtype=model.q_proj.weight.dtype
-            ).normal_()
+            torch.empty(1, adapter_len, self.model.hidden_size, device=device, dtype=target_dtype).normal_()
         )
         # Initialize the gate to 0 as this is "zero-init".
-        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=model.q_proj.weight.dtype))
+        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=target_dtype))
 
     def forward(self, **kwargs):
         """
@@ -347,7 +348,9 @@ class AdaptedAttention(nn.Module):
 
         previous_dtype = query_states.dtype
         # (bsz, num_heads, q_len, adapter_len)
-        scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(self.model.head_dim)
+        scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
+            self.model.head_dim
+        )
         # Upcast attention to fp32
         # (bsz, num_heads, q_len, adapter_len)
         scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(previous_dtype)
