@@ -252,6 +252,8 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "gpt_neox": ["query_key_value", "dense_4h_to_h"],
     "gpt_neo": ["q_proj", "v_proj", "c_proj"],
     "bart": ["q_proj", "v_proj", "fc2"],
+    "gpt_bigcode": ["c_attn", "mlp.c_proj"],
+    "llama": ["k_proj", "v_proj", "down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -265,6 +267,8 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "gpt_neox": ["dense_4h_to_h"],
     "gpt_neo": ["c_proj"],
     "bart": ["fc2"],
+    "gpt_bigcode": ["mlp.c_proj"],
+    "llama": ["down_proj"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
