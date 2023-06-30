@@ -31,12 +31,14 @@ jobs:
           python -m pytest tests/test_config.py
 
       - name: Disambiguate coverage filename
-        run: mv .coverage ".coverage-config_${{ matrix.os }}_${{ matrix.python-version }}"
+        run: |
+          mv .coverage ".coverage-config_${{ matrix.os }}_${{ matrix.python-version }}"
+          ls -la .coverage*
       - name: Upload coverage data
         uses: actions/upload-artifact@v3
         with:
           name: coverage-data
-          path: .coverage.*
+          path: ".coverage-config_${{ matrix.os }}_${{ matrix.python-version }}"
 
   tests-stablediffusion:
     strategy:
@@ -63,12 +65,14 @@ jobs:
           python -m pytest tests/test_stablediffusion.py
 
       - name: Disambiguate coverage filename
-        run: mv .coverage ".coverage-stablediffusion_${{ matrix.os }}_${{ matrix.python-version }}"
+        run: |
+          mv .coverage ".coverage-stablediffusion_${{ matrix.os }}_${{ matrix.python-version }}"
+          ls -la .coverage*
       - name: Upload coverage data
         uses: actions/upload-artifact@v3
         with:
           name: coverage-data
-          path: .coverage.*
+          path: ".coverage-stablediffusion_${{ matrix.os }}_${{ matrix.python-version }}"
 
   coverage:
     # adopted from https://github.com/bentoml/OpenLLM/blob/77cb8516b6c19ce059b6e1baf7594e01d9a8dc60/.github/workflows/ci.yml#L32
@@ -97,7 +101,9 @@ jobs:
         with:
           name: coverage-data
       - name: Combine coverage data
-        run: coverage combine .coverage-*
+        run: |
+          ls -la .coverage*
+          coverage combine .coverage*
 
       - name: Export coverage reports
         run: |
