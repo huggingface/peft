@@ -102,7 +102,6 @@ jobs:
           name: coverage-data
       - name: Combine coverage data
         run: |
-          ls -la .coverage*
           coverage combine .coverage*
 
       - name: Export coverage reports

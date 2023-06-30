@@ -37,3 +37,10 @@ doctest_optionflags = [
 
 [tool.pytest.ini_options]
 addopts = "--cov=src/peft --cov-report=term-missing"
+
+[tool.coverage.paths]
+source = [
+    "src/peft/",
+    "*/site-packages"
+    "*/src/peft",
+]
