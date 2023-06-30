@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dataclasses import asdict, replace
 from unittest import TestCase
 
 import numpy as np
@@ -30,14 +31,14 @@ CONFIG_TESTING_KWARGS = (
     {
         "text_encoder": {
             "r": 8,
-            "lora_alpha": 8,
+            "lora_alpha": 32,
             "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
             "lora_dropout": 0.0,
             "bias": "none",
         },
         "unet": {
             "r": 8,
-            "lora_alpha": 8,
+            "lora_alpha": 32,
             "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
             "lora_dropout": 0.0,
             "bias": "none",
@@ -59,21 +60,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     """
     transformers_class = StableDiffusionPipeline
 
-    def prepare_inputs_for_testing(self):
-        return {
-            "prompt": "a high quality digital photo of a cute corgi",
-            "num_inference_steps": 20,
-        }
-
-    @parameterized.expand(
-        PeftStableDiffusionTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-            },
-        )
-    )
-    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+    def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):
         # Instantiate StableDiffusionPipeline
         model = self.transformers_class.from_pretrained(model_id)
 
@@ -92,6 +79,26 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Move model to device
         model = model.to(self.torch_device)
 
+        return model
+
+    def prepare_inputs_for_testing(self):
+        return {
+            "prompt": "a high quality digital photo of a cute corgi",
+            "num_inference_steps": 20,
+        }
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+            },
+        )
+    )
+    def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        # Instantiate model & adapters
+        model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+
         # Generate output for peft modified StableDiffusion
         dummy_input = self.prepare_inputs_for_testing()
         with temp_seed(seed=42):
@@ -107,3 +114,30 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
 
         # Images are in uint8 drange, so use large atol
         self.assertTrue(np.allclose(peft_output, merged_output, atol=1.0))
+
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+            },
+        )
+    )
+    def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
+        # Instantiate model & adapters
+        model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+
+        # Get current available adapter config
+        text_encoder_adapter_name = next(iter(model.text_encoder.peft_config.keys()))
+        unet_adapter_name = next(iter(model.unet.peft_config.keys()))
+        text_encoder_adapter_config = replace(model.text_encoder.peft_config[text_encoder_adapter_name])
+        unet_adapter_config = replace(model.unet.peft_config[unet_adapter_name])
+
+        # Create weighted adapters
+        model.text_encoder.add_weighted_adapter([unet_adapter_name], [0.5], "weighted_adapter_test")
+        model.unet.add_weighted_adapter([unet_adapter_name], [0.5], "weighted_adapter_test")
+
+        # Assert that base adapters config did not change
+        self.assertTrue(asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name]))        
+        self.assertTrue(asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name]))        
