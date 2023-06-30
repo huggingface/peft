@@ -28,7 +28,7 @@ jobs:
           pip install -e .[test]
       - name: Test with pytest
         run: |
-          python -m pytest tests/test_config.py $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+          python -m pytest tests/test_config.py
 
       - name: Disambiguate coverage filename
         run: mv .coverage ".coverage-config_${{ matrix.os }}_${{ matrix.python-version }}"
@@ -60,7 +60,7 @@ jobs:
           pip install -e .[test]
       - name: Test with pytest
         run: |
-          python -m pytest tests/test_stablediffusion.py $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
+          python -m pytest tests/test_stablediffusion.py
 
       - name: Disambiguate coverage filename
         run: mv .coverage ".coverage-stablediffusion_${{ matrix.os }}_${{ matrix.python-version }}"
