@@ -41,6 +41,6 @@ addopts = "--cov=src/peft --cov-report=term-missing"
 [tool.coverage.paths]
 source = [
     "src/peft/",
-    "*/site-packages"
+    "*/site-packages",
     "*/src/peft",
 ]
