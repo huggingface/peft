@@ -1,9 +1,9 @@
 name: testing combining cov reports
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "*/20 * * * *"
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
 
