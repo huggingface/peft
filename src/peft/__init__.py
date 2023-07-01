@@ -27,7 +27,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
     PeftModelForQuestionAnswering,
-    PeftModelForEmbedding,
+    PeftModelForFeatureExtraction,
 )
 from .tuners import (
     AdaptionPromptConfig,

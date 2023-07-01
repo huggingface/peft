@@ -1547,7 +1547,7 @@ class PeftModelForQuestionAnswering(PeftModel):
             )
 
 
-class PeftModelForEmbedding(PeftModel):
+class PeftModelForFeatureExtraction(PeftModel):
     def __init__(self, model, peft_config: PeftConfig = None, adapter_name="default"):
         super().__init__(model, peft_config, adapter_name)
 

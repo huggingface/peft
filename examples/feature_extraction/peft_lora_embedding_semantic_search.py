@@ -140,12 +140,32 @@ def parse_args():
         action="store_true",
         help="Whether to enable experiment trackers for logging.",
     )
+    parser.add_argument(
+        "--use_peft",
+        action="store_true",
+        help="Whether to enable experiment trackers for logging.",
+    )
     args = parser.parse_args()
 
     if args.push_to_hub:
         assert args.output_dir is not None, "Need an `output_dir` to create a repo when `--push_to_hub` is passed."
 
     return args
+
+
+def save_model_hook(models, weights, output_dir):
+    for i, model in enumerate(models):
+        model.save_pretrained(output_dir, state_dict=weights[i])
+        # make sure to pop weight so that corresponding model is not saved again
+        weights.pop()
+
+
+def load_model_hook(models, input_dir):
+    while len(models) > 0:
+        model = models.pop()
+        # pop models so that they are not loaded again
+        if hasattr(model, "active_adapter") and hasattr(model, "load_adapter"):
+            model.load_adapter(input_dir, model.active_adapter, is_trainable=True)
 
 
 class AutoModelForSentenceEmbedding(nn.Module):
@@ -266,9 +286,17 @@ def main():
     # base model
     model = AutoModelForSentenceEmbedding(args.model_name_or_path, tokenizer)
 
-    # peft config and wrapping
-    peft_config = LoraConfig(r=8, lora_alpha=16, bias="none", task_type=TaskType.EMBEDDING)
-    model = get_peft_model(model, peft_config)
+    if args.use_peft:
+        # peft config and wrapping
+        peft_config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            bias="none",
+            task_type=TaskType.FEATURE_EXTRACTION,
+            target_modules=["key", "query", "value"],
+        )
+        model = get_peft_model(model, peft_config)
+        model.print_trainable_parameters()
 
     accelerator.print(model)
 
@@ -333,6 +361,11 @@ def main():
     metric = evaluate.load("roc_auc")
 
     total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
+
+    if args.use_peft:
+        # saving and loading checkpoints for resuming training
+        accelerator.register_save_state_pre_hook(save_model_hook)
+        accelerator.register_load_state_pre_hook(load_model_hook)
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(processed_datasets['train'])}")
@@ -437,6 +470,8 @@ def main():
         if args.output_dir is not None:
             accelerator.wait_for_everyone()
             if accelerator.is_main_process:
+                if isinstance(checkpointing_steps, str):
+                    accelerator.save_state(os.path.join(args.output_dir, f"epoch_{epoch}"))
                 accelerator.unwrap_model(model).save_pretrained(
                     args.output_dir, state_dict=accelerator.get_state_dict(accelerator.unwrap_model(model))
                 )

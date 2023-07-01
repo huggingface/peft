@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
-    PeftModelForEmbedding,
+    PeftModelForFeatureExtraction,
     PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
@@ -49,7 +49,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
     "QUESTION_ANS": PeftModelForQuestionAnswering,
-    "EMBEDDING": PeftModelForEmbedding,
+    "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
