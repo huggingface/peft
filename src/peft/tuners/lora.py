@@ -15,7 +15,7 @@
 import math
 import re
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
@@ -450,8 +450,9 @@ class LoraModel(torch.nn.Module):
     def add_weighted_adapter(self, adapters, weights, adapter_name):
         if len({self.peft_config[adapter].r for adapter in adapters}) != 1:
             raise ValueError("All adapters must have the same r value")
-        self.peft_config[adapter_name] = self.peft_config[adapters[0]]
-        self.peft_config[adapter_name].lora_alpha = self.peft_config[adapters[0]].r
+        self.peft_config[adapter_name] = replace(
+            self.peft_config[adapters[0]], lora_alpha=self.peft_config[adapters[0]].r
+        )
         self._find_and_replace(adapter_name)
         mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         _freeze_adapter(self.model, adapter_name)
