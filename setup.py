@@ -18,7 +18,7 @@ extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
-extras["test"] = extras["dev"] + ["pytest", "pytest-xdist", "parameterized", "datasets"]
+extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers"]
 
 setup(
     name="peft",
@@ -35,7 +35,7 @@ setup(
     package_dir={"": "src"},
     packages=find_packages("src"),
     entry_points={},
-    python_requires=">=3.7.0",
+    python_requires=">=3.8.0",
     install_requires=[
         "numpy>=1.17",
         "packaging>=20.0",
@@ -55,7 +55,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
 )

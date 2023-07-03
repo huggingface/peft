@@ -43,7 +43,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # cpu version of pytorch
-          pip install .[test]
+          pip install -e .[test]
       - name: Test with pytest
         run: |
           make test

@@ -37,7 +37,13 @@ from transformers import (
     WhisperTokenizer,
 )
 
-from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
+from peft import (
+    AdaLoraConfig,
+    LoraConfig,
+    get_peft_model,
+    prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
+)
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
@@ -80,10 +86,10 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
 @require_torch_gpu
 @require_bitsandbytes
-class PeftInt8GPUExampleTests(unittest.TestCase):
+class PeftBnbGPUExampleTests(unittest.TestCase):
     r"""
-    A single GPU int8 test suite, this will test if training fits correctly on a single GPU device (1x NVIDIA T4 16GB)
-    using bitsandbytes.
+    A single GPU int8 + fp4 test suite, this will test if training fits correctly on a single GPU device (1x NVIDIA T4
+    16GB) using bitsandbytes.
 
     The tests are the following:
 
@@ -142,6 +148,67 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
             data = load_dataset("ybelkada/english_quotes_copy")
             data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_4bit_adalora_causalLM(self):
+        r"""
+        Tests the 4bit training with adalora
+        """
+        model_id = "facebook/opt-350m"
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+        model.gradient_checkpointing_enable()
+        model = prepare_model_for_kbit_training(model)
+
+        peft_config = AdaLoraConfig(
+            init_r=6,
+            target_r=4,
+            tinit=50,
+            tfinal=100,
+            deltaT=5,
+            beta1=0.3,
+            beta2=0.3,
+            orth_reg_weight=0.2,
+            lora_alpha=32,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        model = get_peft_model(model, peft_config)
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
                 model=model,
                 train_dataset=data["train"],
@@ -403,6 +470,13 @@ class PeftInt8GPUExampleTests(unittest.TestCase):
             model.config.suppress_tokens = []
 
             model = prepare_model_for_int8_training(model)
+
+            # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
+            # to avoid this, make the inputs trainable
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model.model.encoder.conv1.register_forward_hook(make_inputs_require_grad)
 
             config = LoraConfig(
                 r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none"
