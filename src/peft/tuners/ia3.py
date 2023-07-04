@@ -140,7 +140,7 @@ class IA3Model(torch.nn.Module):
         #     raise ValueError(
         #         "IA3 supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
         #     )
-        mark_only_ia3_as_trainable(self.model, bias="none")
+        mark_only_ia3_as_trainable(self.model)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
 
