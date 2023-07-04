@@ -109,11 +109,13 @@ class IA3Model(torch.nn.Module):
         >>> config = IA3Config(
         ...     peft_type="IA3",
         ...     task_type="SEQ_2_SEQ_LM",
-        ...     target_modules=["k", "v"],
+        ...     target_modules=["k", "v", "w0"],
+        ...     ### New code sample ###
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
         >>> ia3_model = IA3Model(config, model)
+        feedforward_modules=["w0"],
         ```
 
     **Attributes**:
@@ -361,18 +363,10 @@ class IA3Model(torch.nn.Module):
 #  ------------------------------------------------------------------------------------------
 
 
-def mark_only_ia3_as_trainable(model: nn.Module, bias: str = "none") -> None:
+def mark_only_ia3_as_trainable(model: nn.Module) -> None:
     for n, p in model.named_parameters():
         if "ia3_" not in n:
             p.requires_grad = False
-    if bias == "none":
-        return
-    elif bias == "all":
-        for n, p in model.named_parameters():
-            if "bias" in n:
-                p.requires_grad = True
-    else:
-        raise NotImplementedError
 
 
 class IA3Layer:

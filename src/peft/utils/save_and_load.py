@@ -67,9 +67,6 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
             prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
     elif config.peft_type == PeftType.IA3:
-        # to_return = lora_state_dict(model, bias=model.peft_config.bias)
-        # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
-        # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
     else:
         raise NotImplementedError
