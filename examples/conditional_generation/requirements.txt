@@ -1,4 +1,4 @@
-transformers
+transformers==4.29.2
 accelerate
 loralib
 evaluate

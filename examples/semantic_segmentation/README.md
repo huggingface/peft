@@ -1,4 +1,14 @@
-# Fine-tuning for semantic segmentation using LoRA and 🤗 PEFT
+1. Setup env - train all models (the technique is specialize and this task is run with example model name user can explore more, see more in code).
+```
+sh semantic_segmentation_peft_lora.sh
+```
+* To track top GPU vRAM usage by device, open a new terminal and run this script, pass device ID, for ex device 0:
+```
+sh ../memory_record_moreh.sh 0
+```
+
+# Model
+## Fine-tuning for semantic segmentation using LoRA and 🤗 PEFT
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/huggingface/peft/blob/main/examples/semantic_segmentation/semantic_segmentation_peft_lora.ipynb) 
 
