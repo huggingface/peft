@@ -93,9 +93,8 @@ class IA3Config(PeftConfig):
 
 class IA3Model(torch.nn.Module):
     """
-    Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) 
-    model from a pretrained transformers model. The method is described in
-    detail in https://arxiv.org/pdf/2205.05638.pdf
+    Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
+    transformers model. The method is described in detail in https://arxiv.org/pdf/2205.05638.pdf
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
@@ -140,7 +139,7 @@ class IA3Model(torch.nn.Module):
             config = self._prepare_ia3_config(config, model_config)
             self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
-        
+
         mark_only_ia3_as_trainable(self.model)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
@@ -152,7 +151,7 @@ class IA3Model(torch.nn.Module):
                 "To use (IA)^3 with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
-    
+
     def _create_new_module(self, ia3_config, adapter_name, target, is_feedforward):
         kwargs = {
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
@@ -209,7 +208,7 @@ class IA3Model(torch.nn.Module):
                 adapter_name, in_features, out_features, is_feedforward=is_feedforward, bias=bias, **kwargs
             )
         return new_module
-    
+
     def _check_target_module_exists(self, ia3_config, key):
         if isinstance(ia3_config.target_modules, str):
             target_module_found = re.fullmatch(ia3_config.target_modules, key)
@@ -222,10 +221,10 @@ class IA3Model(torch.nn.Module):
     def _find_and_replace(self, adapter_name):
         ia3_config = self.peft_config[adapter_name]
         if not ia3_config.feedforward_modules:
-            ia3_config.feedforward_modules = [] # convert to list if None
+            ia3_config.feedforward_modules = []  # convert to list if None
         self._check_quantization_dependency()
         is_target_modules_in_base_model = False
-        
+
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
             if not self._check_target_module_exists(ia3_config, key):
@@ -239,7 +238,7 @@ class IA3Model(torch.nn.Module):
             if not is_target_modules_in_base_model:
                 is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(self.model, key)
-            
+
             if isinstance(target, IA3Layer):
                 target.update_layer(
                     adapter_name,
@@ -343,8 +342,8 @@ class IA3Model(torch.nn.Module):
 
     def merge_and_unload(self):
         r"""
-        This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model as
-        a standalone model.
+        This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
         """
         if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging ia3 layers")
