@@ -1,4 +1,3 @@
-
 base_env=$(conda info | grep -i 'base environment' | awk -F': ' '{print $2}' | sed 's/ (read only)//' | tr -d ' ')
 current_dir=$(pwd)
 
@@ -21,11 +20,8 @@ echo "environment name: ${env_name}"
 
 if [ "$CONDA_DEFAULT_ENV" = "${env_name}" ] && [ "$install_requirements" == "1" ]; then
     echo "installing requirements in conda env ${env_name}.."
-    #cd ..
-    pip install -e .
-    #cd ${current_dir}/${task}
     cd ${current_dir}
-    pip install -r requirements.txt
+    pip install -r ../requirements.txt
     moreh-switch-model -M 2
     echo -e "\\n" | update-moreh --torch 1.10.0 --target 23.6.0 --force
 fi

@@ -1,0 +1,14 @@
+microsoft/beit-base-patch16-224-pt22k 512
+google/bit-50 256
+facebook/convnext-small-224 512
+microsoft/cvt-13 512
+google/mobilenet_v1_1.0_224 512
+google/mobilenet_v2_1.0_224 512
+sail/poolformer_s24 512
+facebook/regnet-y-040 512
+microsoft/resnet-34 512
+nvidia/segformer-b0-finetuned-ade-512-512 256
+microsoft/swin-small-patch4-window7-224 512
+microsoft/swinv2-small-patch4-window8-256 256
+Visual-Attention-Network/van-small 512
+google/vit-base-patch16-224 512

@@ -1,5 +1,0 @@
-transformers==4.29.2 
-datasets 
-evaluate
-peft
-scikit-learn
