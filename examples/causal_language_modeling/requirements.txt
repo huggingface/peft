@@ -1,4 +1,3 @@
-transformers
 accelerate
 loralib
 evaluate
