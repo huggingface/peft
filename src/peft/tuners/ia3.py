@@ -46,11 +46,14 @@ class IA3Config(PeftConfig):
     This is the configuration class to store the configuration of a [`IA3Model`].
 
     Args:
-        target_modules (`Union[List[str],str]`): The names of the modules to apply IA3 to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply (IA)^3 to.
+        feedforward_modules (`Union[List[str],str]`): The names of the modules to be treated as feedforward modules
+        as in the original paper.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
-        modules_to_save (`List[str]`):List of modules apart from IA3 layers to be set as trainable
+        modules_to_save (`List[str]`):List of modules apart from (IA)^3 layers to be set as trainable
             and saved in the final checkpoint.
+        init_ia3_weights (`bool`): Whether to initialize the vectors in the (IA)^3 layers, defaults to `True`.
     """
 
     target_modules: Optional[Union[List[str], str]] = field(
@@ -71,18 +74,17 @@ class IA3Config(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    # bias: str = field(default="none", metadata={"help": "Bias type for ia3. Can be 'none', 'all' or 'ia3_only'"})
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from ia3 layers to be set as trainable and saved in the final checkpoint. "
+            "help": "List of modules apart from (IA)^3 layers to be set as trainable and saved in the final checkpoint. "
             "For example, in Sequence Classification or Token Classification tasks, "
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
     init_ia3_weights: bool = field(
         default=True,
-        metadata={"help": "Whether to initialize the vectors in the IA3 layers."},
+        metadata={"help": "Whether to initialize the vectors in the (IA)^3 layers."},
     )
 
     def __post_init__(self):
@@ -91,14 +93,16 @@ class IA3Config(PeftConfig):
 
 class IA3Model(torch.nn.Module):
     """
-    Creates IA3 model from a pretrained transformers model.
+    Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) 
+    model from a pretrained transformers model. The method is described in
+    detail in https://arxiv.org/pdf/2205.05638.pdf
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`IA3Config`]): The configuration of the ia3 model.
+        config ([`IA3Config`]): The configuration of the (IA)^3 model.
 
     Returns:
-        `torch.nn.Module`: The ia3 model.
+        `torch.nn.Module`: The (IA)^3 model.
 
     Example:
 
@@ -120,7 +124,7 @@ class IA3Model(torch.nn.Module):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`ia3Config`]): The configuration of the ia3 model.
+        - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
     """
 
     def __init__(self, model, config, adapter_name):
@@ -136,100 +140,114 @@ class IA3Model(torch.nn.Module):
             config = self._prepare_ia3_config(config, model_config)
             self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
-        # if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
-        #     raise ValueError(
-        #         "IA3 supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
-        #     )
+        
         mark_only_ia3_as_trainable(self.model)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
 
-    def _find_and_replace(self, adapter_name):
-        ia3_config = self.peft_config[adapter_name]
-        if not ia3_config.feedforward_modules:
-            ia3_config.feedforward_modules = []
+    def _check_quantization_dependency(self):
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and not is_bnb_available():
             raise ImportError(
-                "To use ia3 with 8-bit quantization, please install the `bitsandbytes` package. "
+                "To use (IA)^3 with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
-        is_target_modules_in_base_model = False
-
+    
+    def _create_new_module(self, ia3_config, adapter_name, target, is_feedforward):
         kwargs = {
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
             "init_ia3_weights": ia3_config.init_ia3_weights,
         }
+        bias = hasattr(target, "bias") and target.bias is not None
+        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+
+        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+            eightbit_kwargs = kwargs.copy()
+            eightbit_kwargs.update(
+                {
+                    "has_fp16_weights": target.state.has_fp16_weights,
+                    "memory_efficient_backward": target.state.memory_efficient_backward,
+                    "threshold": target.state.threshold,
+                    "index": target.index,
+                }
+            )
+            new_module = Linear8bitLt(
+                adapter_name,
+                target.in_features,
+                target.out_features,
+                is_feedforward,
+                bias=bias,
+                **eightbit_kwargs,
+            )
+        else:
+            #  Create a new Linear module with (IA)^3 parameters for torch.nn.Linear
+            # or Conv1D modules
+            if isinstance(target, torch.nn.Linear):
+                in_features, out_features = target.in_features, target.out_features
+                if kwargs["fan_in_fan_out"]:
+                    warnings.warn(
+                        "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                        "Setting fan_in_fan_out to False."
+                    )
+                    kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
+            elif isinstance(target, Conv1D):
+                in_features, out_features = (
+                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
+                )
+                if not kwargs["fan_in_fan_out"]:
+                    warnings.warn(
+                        "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                        "Setting fan_in_fan_out to True."
+                    )
+                    kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = True
+            else:
+                raise ValueError(
+                    f"Target module {target} is not supported. "
+                    f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
+                )
+            new_module = Linear(
+                adapter_name, in_features, out_features, is_feedforward=is_feedforward, bias=bias, **kwargs
+            )
+        return new_module
+    
+    def _check_target_module_exists(self, ia3_config, key):
+        if isinstance(ia3_config.target_modules, str):
+            target_module_found = re.fullmatch(ia3_config.target_modules, key)
+        else:
+            target_module_found = any(
+                self._is_valid_match(key, target_key) for target_key in ia3_config.target_modules
+            )
+        return target_module_found
+
+    def _find_and_replace(self, adapter_name):
+        ia3_config = self.peft_config[adapter_name]
+        if not ia3_config.feedforward_modules:
+            ia3_config.feedforward_modules = [] # convert to list if None
+        self._check_quantization_dependency()
+        is_target_modules_in_base_model = False
+        
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
-            if isinstance(ia3_config.target_modules, str):
-                target_module_found = re.fullmatch(ia3_config.target_modules, key)
+            if not self._check_target_module_exists(ia3_config, key):
+                continue
+            # check if target module is in feedforward_modules
+            if isinstance(ia3_config.feedforward_modules, str):
+                is_feedforward = re.fullmatch(ia3_config.feedforward_modules, key)
             else:
-                target_module_found = any(
-                    self._is_valid_match(key, target_key) for target_key in ia3_config.target_modules
-                )
-            if target_module_found:
-                if isinstance(ia3_config.feedforward_modules, str):
-                    is_feedforward = re.fullmatch(ia3_config.feedforward_modules, key)
-                else:
-                    is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
-                if not is_target_modules_in_base_model:
-                    is_target_modules_in_base_model = True
-                parent, target, target_name = _get_submodules(self.model, key)
-                bias = target.bias is not None
-                if isinstance(target, IA3Layer):
-                    target.update_layer(
-                        adapter_name,
-                        ia3_config.init_ia3_weights,
-                    )
-                else:
-                    if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
-                        eightbit_kwargs = kwargs.copy()
-                        eightbit_kwargs.update(
-                            {
-                                "has_fp16_weights": target.state.has_fp16_weights,
-                                "memory_efficient_backward": target.state.memory_efficient_backward,
-                                "threshold": target.state.threshold,
-                                "index": target.index,
-                            }
-                        )
-                        new_module = Linear8bitLt(
-                            adapter_name,
-                            target.in_features,
-                            target.out_features,
-                            is_feedforward,
-                            bias=bias,
-                            **eightbit_kwargs,
-                        )
-                    else:
-                        if isinstance(target, torch.nn.Linear):
-                            in_features, out_features = target.in_features, target.out_features
-                            if kwargs["fan_in_fan_out"]:
-                                warnings.warn(
-                                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                                    "Setting fan_in_fan_out to False."
-                                )
-                                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
-                        elif isinstance(target, Conv1D):
-                            in_features, out_features = (
-                                target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                            )
-                            if not kwargs["fan_in_fan_out"]:
-                                warnings.warn(
-                                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                                    "Setting fan_in_fan_out to True."
-                                )
-                                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = True
-                        else:
-                            raise ValueError(
-                                f"Target module {target} is not supported. "
-                                f"Currently, only `torch.nn.Linear` are supported."
-                            )
-                        new_module = Linear(
-                            adapter_name, in_features, out_features, is_feedforward=is_feedforward, bias=bias, **kwargs
-                        )
+                is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
 
-                    self._replace_module(parent, target_name, new_module, target)
+            if not is_target_modules_in_base_model:
+                is_target_modules_in_base_model = True
+            parent, target, target_name = _get_submodules(self.model, key)
+            
+            if isinstance(target, IA3Layer):
+                target.update_layer(
+                    adapter_name,
+                    ia3_config.init_ia3_weights,
+                )
+            else:
+                new_module = self._create_new_module(ia3_config, adapter_name, target, is_feedforward)
+                self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
             raise ValueError(
                 f"Target modules {ia3_config.target_modules} not found in the base model. "
@@ -325,7 +343,7 @@ class IA3Model(torch.nn.Module):
 
     def merge_and_unload(self):
         r"""
-        This method merges the ia3 layers into the base model. This is needed if someone wants to use the base model as
+        This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model as
         a standalone model.
         """
         if getattr(self.config, "model_type", None) == "gpt2":
@@ -402,14 +420,14 @@ class IA3Layer:
 
 
 class Linear(nn.Linear, IA3Layer):
-    # IA3 implemented in a dense layer
+    # (IA)^3 implemented in a dense layer
     def __init__(
         self,
         adapter_name: str,
         in_features: int,
         out_features: int,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        is_feedforward: bool = False,  # Set to True if the layer is a feedforward layer
+        is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
         **kwargs,
     ):
         init_ia3_weights = kwargs.pop("init_ia3_weights", True)
@@ -451,9 +469,10 @@ class Linear(nn.Linear, IA3Layer):
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
-        warnings.warn("Unmerge result can be inaccurate for IA3.")
+        warnings.warn("Unmerge result can be inaccurate for (IA)^3.")
         self.weight = transpose(self.weight, self.fan_in_fan_out)
-        self.weight.data = torch.div(self.weight.data, self.ia3_l[self.active_adapter].data)
+        # divide by (IA)^3 vector. Add tolerace to avoid division by zero
+        self.weight.data = torch.div(self.weight.data, self.ia3_l[self.active_adapter].data + 1e-8)
         self.weight = transpose(self.weight, self.fan_in_fan_out)
 
         self.merged = False
@@ -491,7 +510,7 @@ class Linear(nn.Linear, IA3Layer):
 if is_bnb_available():
 
     class Linear8bitLt(bnb.nn.Linear8bitLt, IA3Layer):
-        # ia3 implemented in a dense layer
+        # (IA)^3 implemented in a dense layer
         def __init__(
             self,
             adapter_name,
