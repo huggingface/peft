@@ -4,7 +4,7 @@ sh run_all_models.sh model_batchsize.txt
 ```
 * To track top GPU vRAM usage by device, open a new terminal and run this script, pass device ID, for ex device 2:
 ```
-sh memory_record_moreh.sh 2
+sh ../memory_record_moreh.sh 2
 ```
 
 * You can also pick one and train as you want
