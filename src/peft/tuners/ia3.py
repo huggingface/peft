@@ -94,7 +94,7 @@ class IA3Config(PeftConfig):
 class IA3Model(torch.nn.Module):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
-    transformers model. The method is described in detail in https://arxiv.org/pdf/2205.05638.pdf
+    transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
