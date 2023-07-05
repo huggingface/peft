@@ -557,7 +557,8 @@ class LoraModel(torch.nn.Module):
                         getattr(target, attr).pop(adapter_name)
 
     def unload(self):
-        self.merge_and_unload(merge=False)
+        model = self.merge_and_unload(merge=False)
+        return model
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
