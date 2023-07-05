@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-sh ../setup.sh image_classification
+
+bash ../setup.sh image_classification
 
 input_file=$1
 [[ ! -f $input_file ]] && echo "${input_file} not exist" && exit 1

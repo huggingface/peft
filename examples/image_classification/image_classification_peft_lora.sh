@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
 mkdir -p $LOG_DIR

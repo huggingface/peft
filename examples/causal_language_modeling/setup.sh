@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+
 base_env=$(conda info | grep -i 'base environment' | awk -F': ' '{print $2}' | sed 's/ (read only)//' | tr -d ' ')
 current_dir=$(pwd)
 
