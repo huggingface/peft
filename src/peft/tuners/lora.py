@@ -554,7 +554,7 @@ class LoraModel(torch.nn.Module):
             if isinstance(target, LoraLayer):
                 for attr in ["r", "lora_alpha", "scaling", "lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"]:
                     if adapter_name in getattr(target, attr):
-                        del getattr(target, attr)[adapter_name]
+                        getattr(target, attr).pop(adapter_name)
 
     def unload(self):
         self.merge_and_unload(merge=False)
