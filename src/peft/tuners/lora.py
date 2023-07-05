@@ -552,7 +552,16 @@ class LoraModel(torch.nn.Module):
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, LoraLayer):
-                for attr in ["r", "lora_alpha", "scaling", "lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"]:
+                for attr in [
+                    "r",
+                    "lora_alpha",
+                    "scaling",
+                    "lora_A",
+                    "lora_B",
+                    "lora_embedding_A",
+                    "lora_embedding_B",
+                    "lora_dropout",
+                ]:
                     if adapter_name in getattr(target, attr):
                         getattr(target, attr).pop(adapter_name)
 
