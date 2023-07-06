@@ -1,4 +1,4 @@
-transformers==4.29.2 
+transformers==4.29.2
 datasets 
 evaluate
 peft
@@ -9,3 +9,4 @@ diffusers
 Pillow
 torchvision
 huggingface_hub
+accelerate

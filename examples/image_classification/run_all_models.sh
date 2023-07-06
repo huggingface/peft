@@ -1,9 +1,8 @@
-#!/usr/bin/env bash
-sh ../setup.sh
+
+bash ../setup.sh image_classification
 
 input_file=$1
 [[ ! -f $input_file ]] && echo "${input_file} not exist" && exit 1
-#!/usr/bin/env bash
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
 mkdir -p $LOG_DIR
