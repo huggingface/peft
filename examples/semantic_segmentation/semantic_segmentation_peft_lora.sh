@@ -18,7 +18,7 @@ output_dir="${OUTPUT_DIR}/${model_name}"
 echo "# ========================================================= #"
 echo "training ${model_name}.."
 
-python semantic_segmentation_peft_lora.py \
+python mlflow_semantic_segmentation_peft_lora.py \
     --checkpoint $checkpoint \
     --learning_rate $learning_rate \
     --num_train_epochs $num_train_epochs \
