@@ -241,7 +241,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "mpt": ["Wqkv"],
 }
 
-COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", 'layer']
+COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
