@@ -43,6 +43,7 @@ peft_config = AdaLoraConfig(
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
 
 # mlflow initial
 experiment_id = mlflow.create_experiment('conditional_generation-{}'.format(model_name_or_path))
