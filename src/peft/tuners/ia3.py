@@ -113,12 +113,12 @@ class IA3Model(torch.nn.Module):
         ...     peft_type="IA3",
         ...     task_type="SEQ_2_SEQ_LM",
         ...     target_modules=["k", "v", "w0"],
-        ...     ### New code sample ###
+        ...     feedforward_modules=["w0"],
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
         >>> ia3_model = IA3Model(config, model)
-        feedforward_modules=["w0"],
+        
         ```
 
     **Attributes**:
@@ -145,6 +145,9 @@ class IA3Model(torch.nn.Module):
             _freeze_adapter(self.model, adapter_name)
 
     def _check_quantization_dependency(self):
+        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
+        if loaded_in_4bit:
+            raise NotImplementedError("4-bit quantization is not supported for IA3 yet, 8-bit quantization can be used instead.")
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and not is_bnb_available():
             raise ImportError(
@@ -313,16 +316,6 @@ class IA3Model(torch.nn.Module):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.active_adapter = adapter_name
-
-    def merge_adapter(self):
-        for module in self.model.modules():
-            if isinstance(module, IA3Layer):
-                module.merge()
-
-    def unmerge_adapter(self):
-        for module in self.model.modules():
-            if isinstance(module, IA3Layer):
-                module.unmerge()
 
     @staticmethod
     def _prepare_ia3_config(peft_config, model_config):
