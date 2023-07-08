@@ -29,8 +29,6 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
 FULL_GRID = {"model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST, "task_type": "SEQ_2_SEQ_LM"}
 
 
-
-
 class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     r"""
     Test if the PeftModel behaves as expected. This includes:

@@ -118,7 +118,6 @@ class IA3Model(torch.nn.Module):
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
         >>> ia3_model = IA3Model(config, model)
-        
         ```
 
     **Attributes**:
@@ -147,7 +146,9 @@ class IA3Model(torch.nn.Module):
     def _check_quantization_dependency(self):
         loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
         if loaded_in_4bit:
-            raise NotImplementedError("4-bit quantization is not supported for IA3 yet, 8-bit quantization can be used instead.")
+            raise NotImplementedError(
+                "4-bit quantization is not supported for IA3 yet, 8-bit quantization can be used instead."
+            )
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         if loaded_in_8bit and not is_bnb_available():
             raise ImportError(
