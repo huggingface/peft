@@ -34,3 +34,6 @@ doctest_optionflags = [
     "ELLIPSIS",
     "NUMBER",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--cov=src/peft --cov-report=term-missing"

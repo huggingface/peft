@@ -29,11 +29,6 @@ PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
 FULL_GRID = {"model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST, "task_type": "SEQ_2_SEQ_LM"}
 
 
-def skip_non_lora_or_pt(test_list):
-    r"""
-    Skip tests that are not lora or ia3 or prefix tuning
-    """
-    return [test for test in test_list if ("lora" in test[0] or "prefix_tuning" in test[0] or "ia3" in test[0])]
 
 
 class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
@@ -91,7 +86,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     # skip non lora models - generate does not work for prefix tuning, prompt tuning
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_lora_or_pt))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
 

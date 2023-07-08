@@ -271,7 +271,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "llama": ["down_proj"],
 }
 
-COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
+COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
