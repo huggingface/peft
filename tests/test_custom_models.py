@@ -14,6 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import unittest
 
 import torch
@@ -21,7 +22,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import LoraConfig
+from peft import LoraConfig, get_peft_model
 
 from .testing_common import PeftCommonTester
 
@@ -112,11 +113,11 @@ TEST_CASES = [
     ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Embedding + transformers Conv1D", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
-    ("Embedding + transformers Conv1D", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
-    ("Embedding + transformers Conv1D", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
-    ("Conv2d", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Embedding + transformers Conv1D 1", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
 ]
 
 
@@ -189,6 +190,42 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
-    def test_only_params_are_updated(self):
-        # TODO
-        pass
+    @parameterized.expand(TEST_CASES)
+    def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
+        # An explicit test that when using LoRA on a custom model, only the LoRA parameters are updated during training
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model_before = copy.deepcopy(model)
+
+        model.train()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+
+        # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
+        # breaking of some LoRA layers that are initialized with constants)
+        for _ in range(3):
+            optimizer.zero_grad()
+            y_pred = model(**X)
+            loss = y_pred.sum()
+            loss.backward()
+            optimizer.step()
+
+        tol = 1e-4
+        params_before = dict(model_before.named_parameters())
+        params_after = dict(model.named_parameters())
+        assert params_before.keys() == params_after.keys()
+        for name, param_before in params_before.items():
+            param_after = params_after[name]
+            print("\n", "*"*10, name, torch.allclose(param_before, param_after, atol=tol, rtol=tol))
+
+
+        for name, param_before in params_before.items():
+            param_after = params_after[name]
+            if "lora_" in name:
+                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+            else:
+                assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
