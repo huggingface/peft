@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import pickle
 import tempfile
 from collections import OrderedDict
 
@@ -284,7 +285,7 @@ class PeftCommonTester:
         if config.peft_type != "LORA":
             with self.assertRaises(AttributeError):
                 model = model.merge_and_unload()
-        elif model.config.model_type == "gpt2":
+        elif model.config["model_type"] == "gpt2":
             with self.assertRaises(ValueError):
                 model = model.merge_and_unload()
         else:
@@ -303,14 +304,18 @@ class PeftCommonTester:
             self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-4, rtol=1e-4))
             self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
 
-            with tempfile.TemporaryDirectory() as tmp_dirname:
-                model.save_pretrained(tmp_dirname)
+            # test that the logits are identical after a save-load-roundtrip
+            if hasattr(model, "save_pretrained"):
+                # model is a transformers model
+                with tempfile.TemporaryDirectory() as tmp_dirname:
+                    model.save_pretrained(tmp_dirname)
+                    model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
+            else:
+                # model is not a transformers model
+                model_from_pretrained = pickle.loads(pickle.dumps(model))
 
-                model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
-
-                logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
-
-                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
+            logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
+            self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -383,7 +388,6 @@ class PeftCommonTester:
 
         config = config_cls(
             base_model_name_or_path=model_id,
-            layers_to_transform=[0],
             **config_kwargs,
         )
         model = self.transformers_class.from_pretrained(model_id)
@@ -398,6 +402,10 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
+
+        # set to eval mode, since things like dropout can affect the output otherwise
+        model.eval()
+        logits = model(**inputs)[0][0]
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname, safe_serialization=True)
@@ -470,7 +478,7 @@ class PeftCommonTester:
 
         model = self.transformers_class.from_pretrained(model_id)
 
-        if not model.supports_gradient_checkpointing:
+        if not getattr(model, "supports_gradient_checkpointing", False):
             return
 
         model.gradient_checkpointing_enable()

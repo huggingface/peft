@@ -173,9 +173,16 @@ class LoraModel(torch.nn.Module):
         self.peft_config = config
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
+        # transformers models have a .config attribute, whose presence is assumed later on
+        if not hasattr(self, "config"):
+            self.config = {"model_type": "custom"}
+
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
-            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
+            model_config = getattr(self.model, "config", {"model_type": "custom"})
+            if hasattr(model_config, "to_dict"):
+                model_config = model_config.to_dict()
+
             config = self._prepare_lora_config(config, model_config)
             self.peft_config[adapter_name] = config
         self._find_and_replace(adapter_name)
