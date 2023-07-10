@@ -11,7 +11,12 @@ import evaluate
 from peft import LoraConfig, get_peft_model
 from huggingface_hub import cached_download, hf_hub_url
 import mlflow
-mlflow.set_tracking_uri("http://127.0.0.1:5000")
+import os
+
+mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+if (not mlflow_uri):
+    mlflow_uri = "http://127.0.0.1:5001"
+    mlflow.set_tracking_uri(mlflow_uri)
 
 # Argument parsing
 parser = argparse.ArgumentParser()

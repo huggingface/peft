@@ -15,6 +15,7 @@ from torchvision.transforms import (
 import evaluate
 from peft import LoraConfig, get_peft_model
 import mlflow
+import os
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Image Classification with LoRA")
@@ -31,7 +32,10 @@ parser.add_argument("--output_dir", type=str, default="./outputs", help="Output 
 args = parser.parse_args()
 
 # mlflow init
-mlflow.set_tracking_uri("http://127.0.0.1:5000")
+mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+if (not mlflow_uri):
+    mlflow_uri = "http://127.0.0.1:5001"
+    mlflow.set_tracking_uri(mlflow_uri)
 
 # Load dataset
 dataset = load_dataset("food101", split="train[:5000]")

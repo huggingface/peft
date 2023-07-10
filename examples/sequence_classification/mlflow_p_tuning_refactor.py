@@ -19,6 +19,7 @@ import evaluate
 import torch
 import numpy as np
 import mlflow
+import os
 
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
@@ -37,7 +38,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # mlflow init
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if (not mlflow_uri):
+        mlflow_uri = "http://127.0.0.1:5001"
+        mlflow.set_tracking_uri(mlflow_uri)
 
     model_name_or_path = args.model
     task = args.task

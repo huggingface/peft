@@ -54,7 +54,10 @@ def main():
         return model_inputs
 
     # mlflow initial
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if (not mlflow_uri):
+        mlflow_uri = "http://127.0.0.1:5001"
+        mlflow.set_tracking_uri(mlflow_uri)
 
     experiment_id = mlflow.create_experiment('conditional_generation-{}'.format(model_name_or_path))
     experiment = mlflow.get_experiment(experiment_id)

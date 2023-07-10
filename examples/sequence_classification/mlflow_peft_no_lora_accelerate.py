@@ -18,9 +18,13 @@ from peft import (
 from peft.utils.other import fsdp_auto_wrap_policy
 import mlflow
 import time
+import os
 
 # mlflow init
-mlflow.set_tracking_uri("http://127.0.0.1:5000")
+mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+if (not mlflow_uri):
+    mlflow_uri = "http://127.0.0.1:5001"
+    mlflow.set_tracking_uri(mlflow_uri)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
