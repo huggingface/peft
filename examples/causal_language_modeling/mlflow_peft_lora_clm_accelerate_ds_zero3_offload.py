@@ -22,6 +22,10 @@ from peft import LoraConfig, TaskType, get_peft_model
 import mlflow
 import time
 
+mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+if (not mlflow_uri):
+    mlflow_uri = "http://127.0.0.1:5001"
+    mlflow.set_tracking_uri(mlflow_uri)
 
 def levenshtein_distance(str1, str2):
     # TC: O(N^2)
@@ -109,8 +113,6 @@ class TorchTracemalloc:
 
 
 def main():
-    mlflow.set_tracking_uri("http://127.0.0.1:5000")
-
     accelerator = Accelerator()
     model_name_or_path = "bigscience/bloomz-7b1"
     dataset_name = "twitter_complaints"
