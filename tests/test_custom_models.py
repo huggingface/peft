@@ -108,10 +108,10 @@ class MockTransformerWrapper:
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
-    # ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
-    # ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
-    # ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
-    # ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
     ("Embedding + transformers Conv1D", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
