@@ -136,7 +136,7 @@ with mlflow_runner:
 
         # Calculate metrics
         epoch_runtime = end_time - start_time
-        samples_per_second = len(train_dataloader.dataset) / epoch_runtime
+        samples_per_second = len(train_dataloader) / epoch_runtime
         steps_per_second = len(train_dataloader) / epoch_runtime
 
         # Calculate average loss for the epoch
