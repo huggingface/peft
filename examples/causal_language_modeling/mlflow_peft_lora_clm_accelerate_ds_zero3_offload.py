@@ -20,6 +20,7 @@ from transformers import (
 
 from peft import LoraConfig, TaskType, get_peft_model
 import mlflow
+import time
 
 
 def levenshtein_distance(str1, str2):
@@ -246,11 +247,13 @@ def main():
     if getattr(accelerator.state, "deepspeed_plugin", None):
         is_ds_zero_3 = accelerator.state.deepspeed_plugin.zero_stage == 3
 
+
     with mlflow_runner:
         for epoch in range(num_epochs):
             with TorchTracemalloc() as tracemalloc:
                 model.train()
                 total_loss = 0
+                start_time = time.time()  # Start time for the epoch
                 for step, batch in enumerate(tqdm(train_dataloader)):
                     outputs = model(**batch)
                     loss = outputs.loss
@@ -259,9 +262,24 @@ def main():
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad()
-                    mlflow.log_metric('loss', loss)
-                    mlflow.log_metric('total loss', total_loss)
+                    
+                end_time = time.time()  # End time for the epoch
+
+                # Calculate metrics
+                epoch_runtime = end_time - start_time
+                samples_per_second = len(train_dataloader) / epoch_runtime
+                steps_per_second = len(train_dataloader) / epoch_runtime
+                avg_loss = total_loss / len(train_dataloader)
+
+                # Log metrics for the epoch
+                mlflow.log_metric('loss', avg_loss)
+                mlflow.log_metric('total_loss', total_loss)
+                mlflow.log_metric('train_runtime', epoch_runtime)
+                mlflow.log_metric('train_samples_per_second', samples_per_second)
+                mlflow.log_metric('train_steps_per_second', steps_per_second)
+            
             mlflow.end_run()
+
 
             # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
             accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
