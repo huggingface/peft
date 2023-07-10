@@ -153,12 +153,7 @@ def main():
             accelerator.print(f"{accuracy=}")
             accelerator.print(f"{eval_preds[:10]=}")
             accelerator.print(f"{dataset['validation'][label_column][:10]=}")
-            accelerator.wait_for_everyone()
-            model.push_to_hub(
-                "smangrul/" + f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
-                state_dict=accelerator.get_state_dict(model),
-                use_auth_token=True,
-            )
+            
             accelerator.wait_for_everyone()
         mlflow.end_run()
         

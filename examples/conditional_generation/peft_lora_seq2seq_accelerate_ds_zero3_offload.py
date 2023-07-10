@@ -297,13 +297,7 @@ def main():
         os.makedirs(f"data/{dataset_name}", exist_ok=True)
         pred_df.to_csv(f"data/{dataset_name}/predictions.csv", index=False)
 
-    accelerator.wait_for_everyone()
-    model.push_to_hub(
-        "smangrul/"
-        + f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
-        state_dict=accelerator.get_state_dict(model),
-        use_auth_token=True,
-    )
+    
     accelerator.wait_for_everyone()
 
 
