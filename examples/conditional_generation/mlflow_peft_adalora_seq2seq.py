@@ -8,6 +8,7 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, default_data_coll
 
 from peft import AdaLoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 import mlflow
+import time
 
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -116,6 +117,7 @@ with mlflow_runner:
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
+        start_time = time.time()  # Start time for the epoch
         for step, batch in enumerate(tqdm(train_dataloader)):
             batch = {k: v.to(device) for k, v in batch.items()}
             outputs = model(**batch)
@@ -129,8 +131,23 @@ with mlflow_runner:
             model.base_model.update_and_allocate(global_step)
             optimizer.zero_grad()
             global_step += 1
-            mlflow.log_metric('loss', loss)
-            mlflow.log_metric('total loss', total_loss)
+
+        end_time = time.time()  # End time for the epoch
+
+        # Calculate metrics
+        epoch_runtime = end_time - start_time
+        samples_per_second = len(train_dataloader.dataset) / epoch_runtime
+        steps_per_second = len(train_dataloader) / epoch_runtime
+
+        # Calculate average loss for the epoch
+        avg_loss = total_loss / len(train_dataloader)
+
+        # Log metrics for the epoch
+        mlflow.log_metric('loss', avg_loss)
+        mlflow.log_metric('total_loss', total_loss)
+        mlflow.log_metric('train_runtime', epoch_runtime)
+        mlflow.log_metric('train_samples_per_second', samples_per_second)
+        mlflow.log_metric('train_steps_per_second', steps_per_second)
 
         model.eval()
         eval_loss = 0
