@@ -1,6 +1,7 @@
 
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
+export MLFLOW_TRACKING_URI="http://127.0.0.1:5001"
 mkdir -p $LOG_DIR
 mkdir -p $OUTPUT_DIR
 
@@ -13,7 +14,7 @@ model_name=${model#*/}
 log_file="${LOG_DIR}/${model_name}.log"
 output_dir="${OUTPUT_DIR}/${model_name}"
 
-/usr/bin/env python image_classification_peft_lora.py \
+/usr/bin/env python mlflow_image_classification_peft_lora.py \
     --model_checkpoint $model \
     --learning_rate $lr \
     --batch_size $bs \

@@ -2,6 +2,8 @@
 
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
+export MLFLOW_TRACKING_URI="http://127.0.0.1:5001"
+
 mkdir -p $LOG_DIR
 mkdir -p $OUTPUT_DIR
 
@@ -15,7 +17,7 @@ model_name=${model#*/}
 log_file="${LOG_DIR}/${model_name}.log"
 output_dir="${OUTPUT_DIR}/${model_name}"
 
-/usr/bin/env python p_tuning_refactor.py \
+/usr/bin/env python mlflow_p_tuning_refactor.py \
     --model $model \
     --task $tk \
     --num_epochs $ep \

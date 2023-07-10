@@ -13,6 +13,8 @@ from tqdm import tqdm
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
 
 from peft import LoraConfig, TaskType, get_peft_model
+import mlflow
+import time
 
 
 def levenshtein_distance(str1, str2):
@@ -128,6 +130,16 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in classes])
 
+    # mlflow initial
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if (not mlflow_uri):
+        mlflow_uri = "http://127.0.0.1:5001"
+        mlflow.set_tracking_uri(mlflow_uri)
+
+    experiment_id = mlflow.create_experiment('conditional_generation-{}'.format(model_name_or_path))
+    experiment = mlflow.get_experiment(experiment_id)
+    mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
+
     def preprocess_function(examples):
         inputs = examples[text_column]
         targets = examples[label_column]
@@ -188,85 +200,112 @@ def main():
     if getattr(accelerator.state, "deepspeed_plugin", None):
         is_ds_zero_3 = accelerator.state.deepspeed_plugin.zero_stage == 3
 
-    for epoch in range(num_epochs):
-        with TorchTracemalloc() as tracemalloc:
-            model.train()
-            total_loss = 0
-            for step, batch in enumerate(tqdm(train_dataloader)):
-                outputs = model(**batch)
-                loss = outputs.loss
-                total_loss += loss.detach().float()
-                accelerator.backward(loss)
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
-        accelerator.print(
-            "GPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
+
+    with mlflow_runner:
+        for epoch in range(num_epochs):
+            with TorchTracemalloc() as tracemalloc:
+                model.train()
+                total_loss = 0
+                start_time = time.time()  # Start time for the epoch
+                for step, batch in enumerate(tqdm(train_dataloader)):
+                    outputs = model(**batch)
+                    loss = outputs.loss
+                    total_loss += loss.detach().float()
+                    accelerator.backward(loss)
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad()
+
+                end_time = time.time()  # End time for the epoch
+
+                # Calculate metrics
+                epoch_runtime = end_time - start_time
+                samples_per_second = len(train_dataloader) / epoch_runtime
+                steps_per_second = len(train_dataloader) / epoch_runtime
+                avg_loss = total_loss / len(train_dataloader)
+
+                # Log metrics for the epoch
+                mlflow.log_metric('loss', avg_loss)
+                mlflow.log_metric('total_loss', total_loss)
+                mlflow.log_metric('train_runtime', epoch_runtime)
+                mlflow.log_metric('train_samples_per_second', samples_per_second)
+                mlflow.log_metric('train_steps_per_second', steps_per_second)
+
+            mlflow.log_metric('loss', avg_loss)  # Log final loss for the epoch
+            mlflow.log_metric('total_loss', total_loss)  # Log final total loss for the epoch
+
+            mlflow.end_run()
+
+
+
+            # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
+            accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
+            accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
+            accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
+            accelerator.print(
+                "GPU Total Peak Memory consumed during the train (max): {}".format(
+                    tracemalloc.peaked + b2mb(tracemalloc.begin)
+                )
             )
-        )
 
-        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
-        accelerator.print(
-            "CPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+            accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
+            accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
+            accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
+            accelerator.print(
+                "CPU Total Peak Memory consumed during the train (max): {}".format(
+                    tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+                )
             )
-        )
-        train_epoch_loss = total_loss / len(train_dataloader)
-        train_ppl = torch.exp(train_epoch_loss)
-        accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
+            train_epoch_loss = total_loss / len(train_dataloader)
+            train_ppl = torch.exp(train_epoch_loss)
+            accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
 
-        model.eval()
-        eval_preds = []
-        with TorchTracemalloc() as tracemalloc:
-            for _, batch in enumerate(tqdm(eval_dataloader)):
-                batch = {k: v for k, v in batch.items() if k != "labels"}
-                with torch.no_grad():
-                    outputs = accelerator.unwrap_model(model).generate(
-                        **batch, synced_gpus=is_ds_zero_3
-                    )  # synced_gpus=True for DS-stage 3
-                outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
-                preds = accelerator.gather_for_metrics(outputs).detach().cpu().numpy()
-                eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
+            model.eval()
+            eval_preds = []
+            with TorchTracemalloc() as tracemalloc:
+                for _, batch in enumerate(tqdm(eval_dataloader)):
+                    batch = {k: v for k, v in batch.items() if k != "labels"}
+                    with torch.no_grad():
+                        outputs = accelerator.unwrap_model(model).generate(
+                            **batch, synced_gpus=is_ds_zero_3
+                        )  # synced_gpus=True for DS-stage 3
+                    outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
+                    preds = accelerator.gather_for_metrics(outputs).detach().cpu().numpy()
+                    eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
-        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the eval : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.peaked))
-        accelerator.print(
-            "GPU Total Peak Memory consumed during the eval (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
+            # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
+            accelerator.print("GPU Memory before entering the eval : {}".format(b2mb(tracemalloc.begin)))
+            accelerator.print("GPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.used))
+            accelerator.print("GPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.peaked))
+            accelerator.print(
+                "GPU Total Peak Memory consumed during the eval (max): {}".format(
+                    tracemalloc.peaked + b2mb(tracemalloc.begin)
+                )
             )
-        )
 
-        accelerator.print("CPU Memory before entering the eval : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.cpu_peaked))
-        accelerator.print(
-            "CPU Total Peak Memory consumed during the eval (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+            accelerator.print("CPU Memory before entering the eval : {}".format(b2mb(tracemalloc.cpu_begin)))
+            accelerator.print("CPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.cpu_used))
+            accelerator.print("CPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.cpu_peaked))
+            accelerator.print(
+                "CPU Total Peak Memory consumed during the eval (max): {}".format(
+                    tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+                )
             )
-        )
 
-        correct = 0
-        total = 0
-        assert len(eval_preds) == len(
-            dataset["train"][label_column]
-        ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
-        for pred, true in zip(eval_preds, dataset["train"][label_column]):
-            if pred.strip() == true.strip():
-                correct += 1
-            total += 1
-        accuracy = correct / total * 100
-        accelerator.print(f"{accuracy=}")
-        accelerator.print(f"{eval_preds[:10]=}")
-        accelerator.print(f"{dataset['train'][label_column][:10]=}")
+            correct = 0
+            total = 0
+            assert len(eval_preds) == len(
+                dataset["train"][label_column]
+            ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
+            for pred, true in zip(eval_preds, dataset["train"][label_column]):
+                if pred.strip() == true.strip():
+                    correct += 1
+                total += 1
+            accuracy = correct / total * 100
+            accelerator.print(f"{accuracy=}")
+            accelerator.print(f"{eval_preds[:10]=}")
+            accelerator.print(f"{dataset['train'][label_column][:10]=}")
+        mlflow.end_run()
 
     if do_test:
         model.eval()

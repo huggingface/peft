@@ -9,6 +9,8 @@ from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, default_data_coll
 
 from peft import LoraConfig, TaskType, get_peft_model
 from peft.utils.other import fsdp_auto_wrap_policy
+import mlflow
+import time
 
 
 def main():
@@ -51,6 +53,16 @@ def main():
         model_inputs["labels"] = labels
         return model_inputs
 
+    # mlflow initial
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if (not mlflow_uri):
+        mlflow_uri = "http://127.0.0.1:5001"
+        mlflow.set_tracking_uri(mlflow_uri)
+
+    experiment_id = mlflow.create_experiment('conditional_generation-{}'.format(model_name_or_path))
+    experiment = mlflow.get_experiment(experiment_id)
+    mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
+
     with accelerator.main_process_first():
         processed_datasets = dataset.map(
             preprocess_function,
@@ -86,46 +98,65 @@ def main():
     )
     accelerator.print(model)
 
-    for epoch in range(num_epochs):
-        model.train()
-        total_loss = 0
-        for step, batch in enumerate(tqdm(train_dataloader)):
-            outputs = model(**batch)
-            loss = outputs.loss
-            total_loss += loss.detach().float()
-            loss.backward()
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
-
-        model.eval()
-        eval_loss = 0
-        eval_preds = []
-        for step, batch in enumerate(tqdm(eval_dataloader)):
-            with torch.no_grad():
+    with mlflow_runner:
+        for epoch in range(num_epochs):
+            model.train()
+            total_loss = 0
+            start_time = time.time()  # Start time for the epoch
+            for step, batch in enumerate(tqdm(train_dataloader)):
                 outputs = model(**batch)
-            loss = outputs.loss
-            eval_loss += loss.detach().float()
-            preds = accelerator.gather_for_metrics(torch.argmax(outputs.logits, -1)).detach().cpu().numpy()
-            eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
-        eval_epoch_loss = eval_loss / len(eval_dataloader)
-        eval_ppl = torch.exp(eval_epoch_loss)
-        train_epoch_loss = total_loss / len(train_dataloader)
-        train_ppl = torch.exp(train_epoch_loss)
-        accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
+                loss = outputs.loss
+                total_loss += loss.detach().float()
+                loss.backward()
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
 
-        correct = 0
-        total = 0
-        for pred, true in zip(eval_preds, dataset["validation"][label_column]):
-            if pred.strip() == true.strip():
-                correct += 1
-            total += 1
-        accuracy = correct / total * 100
-        accelerator.print(f"{accuracy=}")
-        accelerator.print(f"{eval_preds[:10]=}")
-        accelerator.print(f"{dataset['validation'][label_column][:10]=}")
+            end_time = time.time()  # End time for the epoch
+
+            # Calculate metrics
+            epoch_runtime = end_time - start_time
+            samples_per_second = len(train_dataloader) / epoch_runtime
+            steps_per_second = len(train_dataloader) / epoch_runtime
+            avg_loss = total_loss / len(train_dataloader)
+
+            # Log metrics for the epoch
+            mlflow.log_metric('loss', avg_loss)
+            mlflow.log_metric('total_loss', total_loss)
+            mlflow.log_metric('train_runtime', epoch_runtime)
+            mlflow.log_metric('train_samples_per_second', samples_per_second)
+            mlflow.log_metric('train_steps_per_second', steps_per_second)
+
+            model.eval()
+            eval_loss = 0
+            eval_preds = []
+            for step, batch in enumerate(tqdm(eval_dataloader)):
+                with torch.no_grad():
+                    outputs = model(**batch)
+                loss = outputs.loss
+                eval_loss += loss.detach().float()
+                preds = accelerator.gather_for_metrics(torch.argmax(outputs.logits, -1)).detach().cpu().numpy()
+                eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
+            eval_epoch_loss = eval_loss / len(eval_dataloader)
+            eval_ppl = torch.exp(eval_epoch_loss)
+            train_epoch_loss = total_loss / len(train_dataloader)
+            train_ppl = torch.exp(train_epoch_loss)
+            accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=} {eval_ppl=} {eval_epoch_loss=}")
+
+            correct = 0
+            total = 0
+            for pred, true in zip(eval_preds, dataset["validation"][label_column]):
+                if pred.strip() == true.strip():
+                    correct += 1
+                total += 1
+            accuracy = correct / total * 100
+            accelerator.print(f"{accuracy=}")
+            accelerator.print(f"{eval_preds[:10]=}")
+            accelerator.print(f"{dataset['validation'][label_column][:10]=}")
+            
+            accelerator.wait_for_everyone()
+        mlflow.end_run()
         
-        accelerator.wait_for_everyone()
 
 
 if __name__ == "__main__":
