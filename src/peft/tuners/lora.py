@@ -288,6 +288,7 @@ class LoraModel(torch.nn.Module):
                 in_features, out_features = (
                     target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
                 )
+                kwargs["is_target_conv_1d_layer"] = True
                 if not kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to False but the target module is `Conv1D`. "
@@ -344,6 +345,7 @@ class LoraModel(torch.nn.Module):
 
     def _replace_module(self, parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
+
         new_module.weight = old_module.weight
         if hasattr(old_module, "bias"):
             if old_module.bias is not None:
@@ -456,7 +458,10 @@ class LoraModel(torch.nn.Module):
                     )
                 else:
                     bias = target.bias is not None
-                    new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+                    if getattr(target, "is_target_conv_1d_layer", False):
+                        new_module = Conv1D(target.out_features, target.in_features)
+                    else:
+                        new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 target.merge()
                 self._replace_module(parent, target_name, new_module, target)
 
@@ -636,6 +641,7 @@ class Linear(nn.Linear, LoraLayer):
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        is_target_conv_1d_layer: bool = False,
         **kwargs,
     ):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
@@ -652,6 +658,7 @@ class Linear(nn.Linear, LoraLayer):
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
+        self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self):
         if self.active_adapter not in self.lora_A.keys():
