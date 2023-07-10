@@ -217,18 +217,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         tol = 1e-4
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
-        assert params_before.keys() == params_after.keys()
-        for name, param_before in params_before.items():
-            param_after = params_after[name]
-            print("\n", "*"*10, name, torch.allclose(param_before, param_after, atol=tol, rtol=tol))
-
-
+        self.assertEqual(params_before.keys(), params_after.keys())
         for name, param_before in params_before.items():
             param_after = params_after[name]
             if "lora_" in name:
-                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+                self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
             else:
-                assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
+                self.assertTrue(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
@@ -260,5 +255,5 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with model.disable_adapter():
             outputs_disabled = model(**X)
 
-        assert not torch.allclose(outputs_before, outputs_after)
-        assert torch.allclose(outputs_before, outputs_disabled)
+        self.assertFalse(torch.allclose(outputs_before, outputs_after))
+        self.assertTrue(torch.allclose(outputs_before, outputs_disabled))
