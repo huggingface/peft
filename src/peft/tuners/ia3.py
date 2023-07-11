@@ -330,8 +330,6 @@ class IA3Model(torch.nn.Module):
             peft_config.feedforward_modules = TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[
                 model_config["model_type"]
             ]
-        if peft_config.inference_mode:
-            peft_config.merge_weights = True
         return peft_config
 
     def merge_and_unload(self):
