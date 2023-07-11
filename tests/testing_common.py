@@ -294,14 +294,13 @@ class PeftCommonTester:
             logits_lora = model(**dummy_input)[0]
 
             model = model.merge_and_unload()
-
             logits_merged = model(**dummy_input)[0]
-
-            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-
-            logits_transformers = transformers_model(**dummy_input)[0]
-
             self.assertTrue(torch.allclose(logits_lora, logits_merged, atol=1e-4, rtol=1e-4))
+
+            # For this test to work, init_lora_weights must be False. This ensures that weights are not initialized to
+            # the identity transform.
+            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            logits_transformers = transformers_model(**dummy_input)[0]
             self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
 
             # test that the logits are identical after a save-load-roundtrip

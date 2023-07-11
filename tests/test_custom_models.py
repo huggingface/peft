@@ -27,6 +27,22 @@ from peft import LoraConfig, get_peft_model
 from .testing_common import PeftCommonTester
 
 
+# MLP is a vanilla FF network with only linear layers
+# EmbConv1D has an embedding and a Conv1D layer
+# Conv2D has a Conv2D layer
+TEST_CASES = [
+    ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Embedding + transformers Conv1D 1", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+]
+
+
 class MLP(nn.Module):
     def __init__(self):
         super().__init__()
@@ -105,22 +121,6 @@ class MockTransformerWrapper:
         raise ValueError(f"model_id {model_id} not implemented")
 
 
-# MLP is a vanilla FF network with only linear layers
-# EmbConv1D has an embedding and a Conv1D layer
-# Conv2D has a Conv2D layer
-TEST_CASES = [
-    ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Embedding + transformers Conv1D 1", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
-    ("Embedding + transformers Conv1D 2", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
-    ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
-    ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
-]
-
-
 class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     """TODO"""
 
@@ -156,6 +156,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        # for embeddings, even with init_lora_weights=False, the LoRA embeddings weights are still initialized to
+        # perform the identity transform, thus the test would fail.
+        if config_kwargs["target_modules"] == ["emb"]:
+            return
+
+        config_kwargs = config_kwargs.copy()
+        config_kwargs["init_lora_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
