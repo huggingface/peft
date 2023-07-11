@@ -533,6 +533,7 @@ class PeftCommonTester:
 
             if hasattr(output, "images"):  # for SD
                 import numpy as np
+
                 img = output.images[0]
                 return torch.from_numpy(np.array(img))
 
