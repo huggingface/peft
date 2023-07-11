@@ -124,3 +124,21 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+            filter_params_func=skip_non_pt_mqa,
+        )
+    )
+    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        # FIXME following tests are failing right now
+        # test_ybelkada_tiny_random_T5ForConditionalGeneration_calibrated_prompt_encoder
+        # test_ybelkada_tiny_random_T5ForConditionalGeneration_calibrated_prompt_tuning
+        # test_hf_internal_testing_tiny_random_BartForConditionalGeneration_prompt_encoder
+        # test_hf_internal_testing_tiny_random_BartForConditionalGeneration_prompt_tuning
+        self._test_disable_adapter(model_id, config_cls, config_kwargs)

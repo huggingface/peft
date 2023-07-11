@@ -261,6 +261,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             prompt_encoder = PrefixEncoder(config)
         else:
             raise ValueError("Not supported")
+
+        prompt_encoder = prompt_encoder.to(self.device)
         self.prompt_encoder.update(torch.nn.ModuleDict({adapter_name: prompt_encoder}))
         self.prompt_tokens[adapter_name] = torch.arange(
             config.num_virtual_tokens * config.num_transformer_submodules
@@ -377,14 +379,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         try:
             if isinstance(self.peft_config[self.active_adapter], PromptLearningConfig):
+                # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
+                # letting the underyling methods deal with it, same as how LoRA does it.
                 old_forward = self.forward
                 self.forward = self.base_model.forward
+                old_prepare_inputs_for_generation = self.prepare_inputs_for_generation
+                self.prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
             else:
                 self.base_model.disable_adapter_layers()
             yield
         finally:
             if isinstance(self.peft_config[self.active_adapter], PromptLearningConfig):
                 self.forward = old_forward
+                self.old_prepare_inputs_for_generation = old_prepare_inputs_for_generation
             else:
                 self.base_model.enable_adapter_layers()
 

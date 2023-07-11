@@ -142,3 +142,15 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name])
         )
         self.assertTrue(asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name]))
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+            },
+        )
+    )
+    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        # FIXME outputs are not the same after disabling
+        self._test_disable_adapter(model_id, config_cls, config_kwargs)

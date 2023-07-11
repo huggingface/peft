@@ -324,3 +324,19 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         )
         adapted = adapted.to(self.torch_device)
         _ = adapted.generate(input_ids=input_ids)
+
+    def test_disable_adapter(self):
+        llama_config = self._create_test_llama_config()
+        model = LlamaForCausalLM(llama_config).to(self.torch_device)
+        dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
+        output_before = model(dummy_input).logits
+
+        config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config).to(self.torch_device)
+        output_peft = model(dummy_input).logits
+        self.assertFalse(torch.allclose(output_before, output_peft))
+
+        with model.disable_adapter():
+            output_peft_disabled = model(input).logits
+        # FIXME this is not working at the momement
+        self.assertTrue(torch.allclose(output_before, output_peft_disabled))

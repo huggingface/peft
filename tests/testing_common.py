@@ -17,6 +17,7 @@ import tempfile
 from collections import OrderedDict
 
 import torch
+from diffusers import StableDiffusionPipeline
 
 from peft import (
     LoraConfig,
@@ -517,3 +518,50 @@ class PeftCommonTester:
             _ = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname, device_map={"": "cpu"}).to(
                 self.torch_device
             )
+
+    def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        def get_output(model):
+            # helper function that works with different model types
+
+            if hasattr(model, "generate"):
+                # let's check the scores, not the output ids, since the latter can easily be identical even if the
+                # weights are slightly changed
+                output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
+                # take element 0, as output is a tuple
+            else:
+                output = model(**input)
+
+            if hasattr(output, "images"):  # for SD
+                import numpy as np
+                img = output.images[0]
+                return torch.from_numpy(np.array(img))
+
+            return output
+
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        input = self.prepare_inputs_for_testing()
+        output_before = get_output(model)
+
+        if hasattr(self, "instantiate_sd_peft"):
+            # SD models are instantiated differently
+            peft_model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+        else:
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            peft_model = get_peft_model(model, config)
+        output_peft = get_output(peft_model)
+
+        # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
+        # must be False
+        self.assertFalse(torch.allclose(output_before, output_peft))
+
+        if isinstance(peft_model, StableDiffusionPipeline):
+            with peft_model.unet.disable_adapter():
+                with peft_model.text_encoder.disable_adapter():
+                    output_peft_disabled = get_output(peft_model)
+        else:
+            with peft_model.disable_adapter():
+                output_peft_disabled = get_output(peft_model)
+        self.assertTrue(torch.allclose(output_before, output_peft_disabled))
