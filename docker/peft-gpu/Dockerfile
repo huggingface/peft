@@ -42,7 +42,7 @@ RUN source activate peft && \
 RUN python3 -m pip install --no-cache-dir bitsandbytes
 
 # Stage 2
-FROM nvidia/cuda:11.2.2-cudnn8-devel-ubuntu20.04 AS build-image
+FROM nvidia/cuda:11.3.1-devel-ubuntu20.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
