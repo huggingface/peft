@@ -345,7 +345,6 @@ class LoraModel(torch.nn.Module):
 
     def _replace_module(self, parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
-
         new_module.weight = old_module.weight
         if hasattr(old_module, "bias"):
             if old_module.bias is not None:

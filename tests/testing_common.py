@@ -285,7 +285,12 @@ class PeftCommonTester:
         if config.peft_type != "LORA":
             with self.assertRaises(AttributeError):
                 model = model.merge_and_unload()
-        elif model.config["model_type"] == "gpt2":
+
+        try:
+            model_type = model.config.model_type
+        except AttributeError:
+            model_type = model.config["model_type"]
+        if model_type == "gpt2":
             with self.assertRaises(ValueError):
                 model = model.merge_and_unload()
         else:
