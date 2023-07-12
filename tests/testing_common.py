@@ -352,6 +352,21 @@ class PeftCommonTester:
             # check if `generate` raises an error if no positional arguments are passed
             _ = model.generate(input_ids, attention_mask=attention_mask)
 
+    def _test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (PrefixTuningConfig,):
+            return
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config)
+        model = model.half()
+
+        self.assertEqual(model.base_model_torch_dtype, torch.float16)
+
     def _test_training(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
             return
