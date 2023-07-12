@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import math
-import re
 import warnings
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
@@ -33,6 +32,7 @@ from ..utils import (
     PeftType,
     _freeze_adapter,
     _get_submodules,
+    _is_matching_module_name,
     transpose,
 )
 
@@ -201,32 +201,6 @@ class LoraModel(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
 
-    def _check_target_module_exists(self, lora_config, key):
-        if isinstance(lora_config.target_modules, str):
-            target_module_found = re.fullmatch(lora_config.target_modules, key)
-        else:
-            target_module_found = any(key.endswith(target_key) for target_key in lora_config.target_modules)
-            is_using_layer_indexes = getattr(lora_config, "layers_to_transform", None) is not None
-            layer_indexing_pattern = getattr(lora_config, "layers_pattern", None)
-
-            if is_using_layer_indexes and target_module_found:
-                layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
-
-                for pattern in layers_pattern:
-                    layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                    if layer_index is not None:
-                        layer_index = int(layer_index.group(1))
-                        if isinstance(lora_config.layers_to_transform, int):
-                            target_module_found = layer_index == lora_config.layers_to_transform
-                        else:
-                            target_module_found = layer_index in lora_config.layers_to_transform
-
-                        break
-                    else:
-                        target_module_found = False
-        return target_module_found
-
     def _create_new_module(self, lora_config, adapter_name, target):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
@@ -301,16 +275,47 @@ class LoraModel(torch.nn.Module):
 
         return new_module
 
+    def _yield_matching_target_keys(self, model, lora_config: LoraConfig):
+        """For the given model and config, yield all module names that match."""
+
+        # normalize the parameters
+        target_modules = lora_config.target_modules
+        if isinstance(target_modules, str):
+            target_modules = [target_modules]
+        layers_to_transform = lora_config.layers_to_transform
+        if isinstance(layers_to_transform, int):
+            layers_to_transform = [layers_to_transform]
+        layers_pattern = lora_config.layers_pattern
+        if layers_pattern is None:
+            layers_pattern = COMMON_LAYERS_PATTERN
+
+        for key, _ in model.named_modules():
+            if _is_matching_module_name(
+                key,
+                target_modules=target_modules,
+                layers_to_transform=layers_to_transform,
+                layers_pattern=layers_pattern,
+            ):
+                yield key
+
+    def inspect_matching_modules(self, adapter_name: str = "default") -> dict[str, list[str]]:
+        """Inspect module names that match or don't match.
+
+        This method is intended for debugging the config. It allows to quickly inspect which modules would, or would
+        not, be chosen for fine-tuning.
+
+        """
+        lora_config = self.peft_config[adapter_name]
+        matching = list(self._yield_matching_target_keys(self.model, lora_config))
+        not_matching = [key for key, _ in self.model.named_parameters() if key not in matching]
+        return {"matching": matching, "not_matching": not_matching}
+
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]
         self._check_quantization_dependency()
         is_target_modules_in_base_model = False
-        key_list = [key for key, _ in self.model.named_modules()]
 
-        for key in key_list:
-            if not self._check_target_module_exists(lora_config, key):
-                continue
-
+        for key in self._yield_matching_target_keys(self.model, lora_config):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(self.model, key)
 

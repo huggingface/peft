@@ -26,6 +26,7 @@ from .other import (
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
+    _is_matching_module_name,
     _set_trainable,
     add_library_to_model_card,
     bloom_model_postprocess_past_key_value,

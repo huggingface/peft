@@ -12,9 +12,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import copy
 import os
+import re
 import warnings
 
 import torch
@@ -176,6 +178,36 @@ def _set_adapter(model, adapter_name):
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
             module.active_adapter = adapter_name
+
+
+def _is_matching_module_name(
+    key: str,
+    *,
+    target_modules: list[str],
+    layers_to_transform: list[int] | None,
+    layers_pattern: list[int],
+) -> bool:
+    """TODO"""
+    for name in target_modules:
+        if not key.endswith(name):
+            continue
+
+        if layers_to_transform is None:
+            # no layers_to_transform means that all matching keys should be considered valid
+            return True
+
+        for pattern in layers_pattern:
+            # check the first layer pattern that matches
+            match = re.match(f".*.{pattern}\.(\d+)\.*", key)
+            if match is None:
+                continue
+
+            # if the layer pattern matches, check that index matches
+            layer_index = int(match.group(1))
+            if layer_index in layers_to_transform:
+                return True
+
+    return False
 
 
 def fsdp_auto_wrap_policy(model):
