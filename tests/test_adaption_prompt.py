@@ -337,6 +337,6 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         self.assertFalse(torch.allclose(output_before, output_peft))
 
         with model.disable_adapter():
-            output_peft_disabled = model(input).logits
+            output_peft_disabled = model(dummy_input).logits
         # FIXME this is not working at the momement
         self.assertTrue(torch.allclose(output_before, output_peft_disabled))
