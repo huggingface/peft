@@ -519,7 +519,7 @@ class PeftCommonTester:
                 self.torch_device
             )
 
-    def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
+    def _test_disable_adapter(self, model_id, config_cls, config_kwargs, do_merge=False):
         def get_output(model):
             # helper function that works with different model types
 
@@ -552,6 +552,12 @@ class PeftCommonTester:
                 **config_kwargs,
             )
             peft_model = get_peft_model(model, config)
+
+        if do_merge == "merge_adapter":
+            peft_model.merge_and_unload()
+        elif do_merge == "merge_and_unload":
+            peft_model.merge_adapter()
+
         output_peft = get_output(peft_model)
 
         # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
@@ -566,3 +572,12 @@ class PeftCommonTester:
             with peft_model.disable_adapter():
                 output_peft_disabled = get_output(peft_model)
         self.assertTrue(torch.allclose(output_before, output_peft_disabled))
+
+        # for models that support it (LoRA), run this very test again, this time with merging, except for GPT2, which
+        # does not support merging
+        if (peft_model.config.model_type == "gpt2") or (do_merge is not False):
+            return
+        if hasattr(peft_model, "merge_adapter"):
+            self._test_disable_adapter(model_id, config_cls, config_kwargs, do_merge="merge_adapter")
+        if hasattr(peft_model, "merge_and_unload"):
+            self._test_disable_adapter(model_id, config_cls, config_kwargs, do_merge="merge_and_unload")
