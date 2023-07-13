@@ -567,8 +567,13 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        task_type = config_kwargs.get("task_type")
+        if (task_type == "SEQ_2_SEQ_LM") and (config_cls in (PromptTuningConfig, PromptEncoderConfig)):
+            self.skipTest("Seq2Seq + prompt tuning/prompt encoder does not work with disabling adapters")
+
         def get_output(model):
             # helper function that works with different model types
+            torch.manual_seed(0)
 
             if hasattr(model, "generate"):
                 # let's check the scores, not the output ids, since the latter can easily be identical even if the
@@ -586,8 +591,10 @@ class PeftCommonTester:
 
             return output
 
-        # output from BASE MODEL
+        # initialize model
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+        # output from BASE MODEL
         input = self.prepare_inputs_for_testing()
         output_before = get_output(model)
 
