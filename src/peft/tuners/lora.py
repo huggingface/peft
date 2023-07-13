@@ -15,7 +15,7 @@
 import math
 import re
 import warnings
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from typing import List, Optional, Tuple, Union
 
@@ -90,7 +90,12 @@ class LoraConfig(PeftConfig):
     )
     init_lora_weights: bool = field(
         default=True,
-        metadata={"help": "Whether to initialize the weights of the Lora layers."},
+        metadata={
+            "help": (
+                "Whether to initialize the weights of the Lora layers with their default initialization. Don't change "
+                "this setting, except if you know exactly what you're doing."
+            ),
+        },
     )
     layers_to_transform: Optional[Union[List, int]] = field(
         default=None,
@@ -410,6 +415,18 @@ class LoraModel(torch.nn.Module):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
+
+        Example:
+
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import PeftModel
+
+        >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
+        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
+        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
+        >>> merged_model = model.merge_and_unload()
+        ```
         """
         if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging LORA layers")
@@ -450,8 +467,9 @@ class LoraModel(torch.nn.Module):
     def add_weighted_adapter(self, adapters, weights, adapter_name):
         if len({self.peft_config[adapter].r for adapter in adapters}) != 1:
             raise ValueError("All adapters must have the same r value")
-        self.peft_config[adapter_name] = self.peft_config[adapters[0]]
-        self.peft_config[adapter_name].lora_alpha = self.peft_config[adapters[0]].r
+        self.peft_config[adapter_name] = replace(
+            self.peft_config[adapters[0]], lora_alpha=self.peft_config[adapters[0]].r
+        )
         self._find_and_replace(adapter_name)
         mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         _freeze_adapter(self.model, adapter_name)
@@ -583,12 +601,10 @@ class LoraLayer:
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         if r > 0:
-            self.lora_embedding_A.update(
-                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((r, self.in_features)))})
-            )
-            self.lora_embedding_B.update(
-                nn.ParameterDict({adapter_name: nn.Parameter(self.weight.new_zeros((self.out_features, r)))})
-            )
+            weight_A = torch.randn((r, self.in_features), dtype=self.weight.dtype, device=self.weight.device)
+            weight_B = torch.randn((self.out_features, r), dtype=self.weight.dtype, device=self.weight.device)
+            self.lora_embedding_A.update(nn.ParameterDict({adapter_name: nn.Parameter(weight_A)}))
+            self.lora_embedding_B.update(nn.ParameterDict({adapter_name: nn.Parameter(weight_B)}))
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
