@@ -397,9 +397,10 @@ class IA3Layer:
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
         if self.is_feedforward:
-            self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(1, self.in_features))}))
+            weight = torch.randn((1, self.in_features))
         else:
-            self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(self.out_features, 1))}))
+            weight = torch.randn((self.out_features, 1))
+        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
