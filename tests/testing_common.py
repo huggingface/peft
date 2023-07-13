@@ -25,6 +25,7 @@ from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PromptLearningConfig,
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
@@ -525,3 +526,26 @@ class PeftCommonTester:
             _ = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname, device_map={"": "cpu"}).to(
                 self.torch_device
             )
+
+    def _test_training_prompt_learning_tasks(self, model_id, config_cls, config_kwargs):
+        if not isinstance(config_cls, PromptLearningConfig):
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        # check if `training` works
+        output = model(**inputs)[0]
+        loss = output.sum()
+        loss.backward()
+
+        # check that prompt encoder has grads
+        for param in model.prompt_encoder.parameters():
+            self.assertIsNotNone(param.grad)
