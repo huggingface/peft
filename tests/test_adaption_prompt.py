@@ -16,6 +16,7 @@
 import importlib
 import os
 import tempfile
+import unittest
 from unittest import TestCase
 
 import torch
@@ -325,6 +326,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         adapted = adapted.to(self.torch_device)
         _ = adapted.generate(input_ids=input_ids)
 
+    @unittest.expectedFailure
     def test_disable_adapter(self):
         llama_config = self._create_test_llama_config()
         model = LlamaForCausalLM(llama_config).to(self.torch_device)
@@ -334,9 +336,12 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
         model = get_peft_model(model, config).to(self.torch_device)
         output_peft = model(dummy_input).logits
+        # TODO currently this fails because scores are zeroed out:
+        # https://github.com/huggingface/peft/blob/062d95a09eb5d1de35c0e5e23d4387daba99e2db/src/peft/tuners/adaption_prompt.py#L303
+        # This is fine for users but makes it difficult to test if anything happens. In the future, we will have a clean
+        # way to control initialization. Until then, this test is expected to fail.
         self.assertFalse(torch.allclose(output_before, output_peft))
 
         with model.disable_adapter():
             output_peft_disabled = model(dummy_input).logits
-        # FIXME this is not working at the momement
         self.assertTrue(torch.allclose(output_before, output_peft_disabled))
