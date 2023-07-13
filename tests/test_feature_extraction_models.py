@@ -25,7 +25,6 @@ PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-BertModel",
     "hf-internal-testing/tiny-random-RobertaModel",
     "hf-internal-testing/tiny-random-DebertaModel",
-    "hf-internal-testing/tiny-random-DebertaModel",
     "hf-internal-testing/tiny-random-DebertaV2Model",
 ]
 
