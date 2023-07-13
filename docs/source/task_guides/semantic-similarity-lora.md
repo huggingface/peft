@@ -12,7 +12,7 @@ In this guide, we'll be using a LoRA [script](https://github.com/huggingface/pef
 
 ## Setup
 
-Start by installing 🤗 PEFT from [source](https://moon-ci-docs.huggingface.co/docs/peft/pr_647/en/install#source), and then navigate to the directory containing the training scripts for fine-tuning DreamBooth with LoRA:
+Start by installing 🤗 PEFT from [source](https://github.com/huggingface/peft), and then navigate to the directory containing the training scripts for fine-tuning DreamBooth with LoRA:
 
 ```bash
 cd peft/examples/embedding
@@ -38,7 +38,7 @@ Let's start by importing all the necessary libraries you'll need:
 
 <Tip>
 
-It is assumed that PyTorch with CUDA support, Pandas, NumPy, and WandB are already installed.
+It is assumed that PyTorch with CUDA support is already installed.
 
 </Tip>
 
@@ -293,8 +293,3 @@ cosine_sim_score=0.88 product='Mastering Machine Learning with scikit-learn - Se
 Books on deep learning and machine learning are retrieved even though `machine learning` wasn't included in the query. This means the model has learned that these books are semantically relevant to the query based on the purchase behavior of customers on Amazon. 
 
 The next steps would ideally involve using ONNX/TensorRT to optimize the model and using a Triton server to host it. Check out 🤗 [Optimum](https://huggingface.co/docs/optimum/index) for related optimizations for efficient serving!
-
-
-
-
-
