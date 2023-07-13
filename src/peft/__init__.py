@@ -19,6 +19,13 @@
 
 __version__ = "0.4.0.dev0"
 
+from .auto import (
+    AutoPeftModelForCausalLM,
+    AutoPeftModelForSequenceClassification,
+    AutoPeftModelForSeq2SeqLM,
+    AutoPeftModelForTokenClassification,
+    AutoPeftModelForQuestionAnswering,
+)
 from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING, get_peft_config, get_peft_model
 from .peft_model import (
     PeftModel,
