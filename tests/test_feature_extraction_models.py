@@ -36,9 +36,9 @@ FULL_GRID = {
 
 def skip_deberta_lora_tests(test_list):
     r"""
-    Skip tests that are checkpointing with lora tests for Deberta models (couldn't find much info on the error)
+    Skip tests that are checkpointing with lora/ia3 tests for Deberta models (couldn't find much info on the error)
     """
-    return [test for test in test_list if not ("lora" in test[0] and "Deberta" in test[0])]
+    return [test for test in test_list if not (any(k in test[0] for k in ["lora", "ia3"]) and "Deberta" in test[0])]
 
 
 class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
