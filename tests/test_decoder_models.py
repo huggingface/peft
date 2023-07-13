@@ -105,6 +105,10 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
+    def test_prefix_tuning_half_prec_conversion(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
+
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_training_decoders(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
