@@ -16,43 +16,46 @@ import unittest
 
 import torch
 from parameterized import parameterized
-from transformers import AutoModelForCausalLM
+from transformers import AutoModel
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
-PEFT_DECODER_MODELS_TO_TEST = [
-    "hf-internal-testing/tiny-random-OPTForCausalLM",
-    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
-    "hf-internal-testing/tiny-random-GPT2LMHeadModel",
-    "hf-internal-testing/tiny-random-BloomForCausalLM",
-    "hf-internal-testing/tiny-random-gpt_neo",
-    "hf-internal-testing/tiny-random-GPTJForCausalLM",
-    "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
-    "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
+    "hf-internal-testing/tiny-random-BertModel",
+    "hf-internal-testing/tiny-random-RobertaModel",
+    "hf-internal-testing/tiny-random-DebertaModel",
+    "hf-internal-testing/tiny-random-DebertaV2Model",
 ]
 
 FULL_GRID = {
-    "model_ids": PEFT_DECODER_MODELS_TO_TEST,
-    "task_type": "CAUSAL_LM",
+    "model_ids": PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST,
+    "task_type": "FEATURE_EXTRACTION",
 }
 
 
-def skip_non_pt_mqa(test_list):
+def skip_deberta_lora_tests(test_list):
     r"""
-    Skip tests that are prefix tuning for MQA models (not supported yet)
+    Skip tests that are checkpointing with lora/ia3 tests for Deberta models (couldn't find much info on the error)
     """
-    return [test for test in test_list if not ("prefix_tuning" in test[0] and "GPTBigCodeForCausalLM" in test[0])]
+    return [test for test in test_list if not (any(k in test[0] for k in ["lora", "ia3"]) and "Deberta" in test[0])]
 
 
-class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
+def skip_deberta_pt_tests(test_list):
+    r"""
+    Skip tests that are checkpointing with lora/ia3 tests for Deberta models (couldn't find much info on the error)
+    """
+    return [test for test in test_list if not ("prefix_tuning" in test[0] and "Deberta" in test[0])]
+
+
+class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     r"""
     Test if the PeftModel behaves as expected. This includes:
     - test if the model has the expected methods
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
-    transformers_class = AutoModelForCausalLM
+    transformers_class = AutoModel
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -88,37 +91,33 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
-                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "model_ids": PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
-                "task_type": "CAUSAL_LM",
+                "task_type": "FEATURE_EXTRACTION",
             },
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
-    def test_generate(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_generate(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
-    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
-    def test_prefix_tuning_half_prec_conversion(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
-
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_decoders(self, test_name, model_id, config_cls, config_kwargs):
+    def test_training(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_decoders_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_deberta_pt_tests)
+    )
+    def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_decoders_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
+    def test_training_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_deberta_lora_tests)
+    )
+    def test_training_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))

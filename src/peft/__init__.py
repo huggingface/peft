@@ -27,12 +27,15 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
     PeftModelForQuestionAnswering,
+    PeftModelForFeatureExtraction,
 )
 from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     LoraConfig,
     LoraModel,
+    IA3Config,
+    IA3Model,
     AdaLoraConfig,
     AdaLoraModel,
     PrefixEncoder,

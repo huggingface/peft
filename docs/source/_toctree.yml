@@ -25,6 +25,8 @@
     title: LoRA for token classification
   - local: task_guides/int8-asr
     title: int8 training for automatic speech recognition
+  - local: task_guides/semantic-similarity-lora
+    title: semantic similairty with peft
 
 - title: 🤗 Accelerate integrations
   sections:
@@ -39,6 +41,8 @@
     title: LoRA
   - local: conceptual_guides/prompting
     title: Prompting
+  - local: conceptual_guides/ia3
+    title: IA3
 
 - title: Reference
   sections:

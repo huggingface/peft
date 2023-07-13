@@ -32,6 +32,7 @@ class PeftType(str, enum.Enum):
     LORA = "LORA"
     ADALORA = "ADALORA"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
+    IA3 = "IA3"
 
 
 class TaskType(str, enum.Enum):
@@ -40,6 +41,7 @@ class TaskType(str, enum.Enum):
     CAUSAL_LM = "CAUSAL_LM"
     TOKEN_CLS = "TOKEN_CLS"
     QUESTION_ANS = "QUESTION_ANS"
+    FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
 
 
 @dataclass
