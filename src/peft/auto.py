@@ -43,7 +43,7 @@ class _BaseAutoPeftModel:
     _target_peft_class = None
 
     def __init__(self, *args, **kwargs):
-        raise EnvironmentError(
+        raise TypeError(
             f"{self.__class__.__name__} is designed to be instantiated "
             f"using the `{self.__class__.__name__}.from_pretrained(pretrained_model_name_or_path)` or "
             f"`{self.__class__.__name__}.from_config(config)` methods."
