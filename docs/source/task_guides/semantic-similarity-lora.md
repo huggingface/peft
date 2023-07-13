@@ -1,4 +1,4 @@
-# LoRA for Feature Extraction and Embedding tasks such as Semantic Similarity
+# LoRA for semantic similarity tasks
 
 Low-Rank Adaptation (LoRA) is a reparametrization method that aims to reduce the number of trainable parameters with low-rank representations. The weight matrix is broken down into low-rank matrices that are trained and updated. All the pretrained model parameters remain frozen. After training, the low-rank matrices are added back to the original weights. This makes it more efficient to store and train a LoRA model because there are significantly fewer parameters.
 
@@ -8,26 +8,17 @@ Low-Rank Adaptation (LoRA) is a reparametrization method that aims to reduce the
 
 </Tip>
 
-In this guide we'll be using a DreamBooth fine-tuning script that is available in 
-[PEFT's GitHub repo](https://github.com/huggingface/peft/tree/main/examples/lora_dreambooth). Feel free to explore it and 
-learn how things work.
+In this guide, we'll be using a LoRA [script](https://github.com/huggingface/peft/tree/main/examples/lora_dreambooth) to fine-tune a [`intfloat/e5-large-v2`](https://huggingface.co/intfloat/e5-large-v2) model on the [`smangrul/amazon_esci`](https://huggingface.co/datasets/smangrul/amazon_esci) dataset for semantic similarity tasks. Feel free to explore the script to learn how things work in greater detail!
 
-## Set up your environment 
+## Setup
 
-Start by cloning the PEFT repository:
-
-```bash
-git clone https://github.com/huggingface/peft
-```
-
-Navigate to the directory containing the training scripts for fine-tuning Dreambooth with LoRA:
+Start by installing 🤗 PEFT from [source](https://moon-ci-docs.huggingface.co/docs/peft/pr_647/en/install#source), and then navigate to the directory containing the training scripts for fine-tuning DreamBooth with LoRA:
 
 ```bash
 cd peft/examples/embedding
 ```
 
-Set up your environment: install PEFT, and all the required libraries. At the time of writing this guide we recommend 
-installing PEFT from source.  
+Install all the necessary required libraries with:
 
 ```bash
 pip install -r requirements.txt
@@ -45,12 +36,17 @@ Let's start by importing all the necessary libraries you'll need:
 - 🤗 huggingface_hub for uploading the trained model to HF hub
 - hnswlib for creating the search index and doing fast approximate nearest neighbor search
 
-Note: It is assumed that PyTorch with CUDA support, Pandas, Numpy and Wandb are already installed
+<Tip>
 
-## Fine-Tuning E5 model for Semantic Similarity
+It is assumed that PyTorch with CUDA support, Pandas, NumPy, and WandB are already installed.
 
-Launch the training script with `accelerate` and pass hyperparameters along with `--use_peft` to enable LoRA.
-The LoRA Config used is shown below:
+</Tip>
+
+## Train
+
+Launch the training script with `accelerate launch` and pass your hyperparameters along with the `--use_peft` argument to enable LoRA.
+
+This guide uses the following [`LoraConfig`]:
 
 ```py
 peft_config = LoraConfig(
@@ -62,7 +58,7 @@ peft_config = LoraConfig(
         )
 ```
 
-Here's what the full set of script arguments may look like when running in Colab on a V100 GPU with Standard RAM:
+Here's what a full set of script arguments may look like when running in Colab on a V100 GPU with standard RAM:
 
 ```bash
 accelerate launch \
@@ -86,27 +82,24 @@ peft_lora_embedding_semantic_search.py \
 --checkpointing_steps "epoch"
 ```
 
-### Dataset and the Task:
+## Dataset for semantic similarity
 
-The small dataset that we will be using is dervied from [esci-data](https://github.com/amazon-science/esci-data.git).
-It can be found on 🤗 Hub here: [smangrul/amazon_esci](https://huggingface.co/datasets/smangrul/amazon_esci). 
-Each sample contains a tuple of (Query, Product Title, Relevance Label) wherein Relevance Label is 1 if product matches 
-the intent of query and 0 otherwise. 
+The dataset we'll be using is a small subset of the [esci-data](https://github.com/amazon-science/esci-data.git) dataset (it can be found on Hub at [smangrul/amazon_esci](https://huggingface.co/datasets/smangrul/amazon_esci)). 
+Each sample contains a tuple of `(query, product_title, relevance_label)` where `relevance_label` is `1` if the product matches the intent of the `query`, otherwise it is `0`. 
 
 Our task is to build an embedding model that can retrieve semantically similar products given a product query. 
-This is usually the first stage in building a Product Search Engine 
-involving retrieving all the potentially relevant products to a given query. 
-This stage usually involves using Bi-Encoder models as the cross-join between query and millions of products could blow up quickly. 
-Instead, model performs retrieving by returning top K nearest similar products for a given query by 
+This is usually the first stage in building a product search engine to retrieve all the potentially relevant products of a given query. 
+Typically, this involves using Bi-Encoder models to cross-join the query and millions of products which could blow up quickly. 
+Instead, you can use a Transformer model to retrieve the top K nearest similar products for a given query by 
 embedding the query and products in the same latent embedding space. 
-The millions of produts are embedded offline to create a search index. 
-At run time, only the query is embedded via the model and products are retrieved from this index via 
-fast approximate nearest neighbor search libraries such as FAISS, HNSWlib ... 
+The millions of products are embedded offline to create a search index. 
+At run time, only the query is embedded by the model, and products are retrieved from the search index with a  
+fast approximate nearest neighbor search library such as [FAISS](https://github.com/facebookresearch/faiss) or [HNSWlib](https://github.com/nmslib/hnswlib).
 
 
-The next stage involves reranking this retrieved list of products to return the most relevant ones;
-this stage can utilize cross-encoder based models as the cross-join between query and set of retrieved products is limited.
-Below is the rough semantic search pipeline from [awesome-semantic-search](https://github.com/rom1504/awesome-semantic-search)
+The next stage involves reranking the retrieved list of products to return the most relevant ones;
+this stage can utilize cross-encoder based models as the cross-join between the query and a limited set of retrieved products.
+The diagram below from [awesome-semantic-search](https://github.com/rom1504/awesome-semantic-search) outlines a rough semantic search pipeline:
 
 <div class="flex justify-center">
      <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/semantic_search_pipeline.png" 
@@ -116,9 +109,11 @@ Below is the rough semantic search pipeline from [awesome-semantic-search](https
 For this task guide, we will explore the first stage of training an embedding model to predict semantically similar products 
 given a product query.
 
-### Dive deep into the training script:
+## Training script deep dive
 
-We finetune [e5-large-v2](https://huggingface.co/intfloat/e5-large-v2) which tops [MTEB benchmark](https://huggingface.co/spaces/mteb/leaderboard) using PEFT-LoRA. The model is to get the embeddings and functions for computing loss are given below (snippets from the script):
+We finetune [e5-large-v2](https://huggingface.co/intfloat/e5-large-v2) which tops the [MTEB benchmark](https://huggingface.co/spaces/mteb/leaderboard) using PEFT-LoRA. 
+
+[`AutoModelForSentenceEmbedding`] returns the query and product embeddings, and the `mean_pooling` function pools them across the sequence dimension and normalizes them:
 
 ```py
 class AutoModelForSentenceEmbedding(nn.Module):
@@ -150,7 +145,7 @@ class AutoModelForSentenceEmbedding(nn.Module):
             return getattr(self.model, name)
 
 
-def get_cosing_embeddings(query_embs, product_embs):
+def get_cosine_embeddings(query_embs, product_embs):
     return torch.sum(query_embs * product_embs, axis=1)
 
 
@@ -158,13 +153,13 @@ def get_loss(cosine_score, labels):
     return torch.mean(torch.square(labels * (1 - cosine_score) + torch.clamp((1 - labels) * cosine_score, min=0.0)))
 ```
 
-We get the query and product embeddings (mean-pooled across sequence dimension and normalized), compute their cosine similarity and loss enables models to learn to given cosine score of 1 for query and product pairs that are relevant and to return cosine score of 0 or below for irrelevant pairs.
+The `get_cosine_embeddings` function computes the cosine similarity and the `get_loss` function computes the loss. The loss enables the model to learn that a cosine score of `1` for query and product pairs is relevant, and a cosine score of `0` or below is irrelevant.
 
-The peft config was already provided at the start. We wrap the model as PEftModel via `model = get_peft_model(model, peft_config)`. We use 🤗 Accelerate for handling all the device management, mixed precision training, gradient accumulation, tracking to wandb and saving/loading utils. 
+Define the [`PeftConfig`] with your LoRA hyperparameters, and create a [`PeftModel`]. We use 🤗 Accelerate for handling all device management, mixed precision training, gradient accumulation, WandB tracking, and saving/loading utilities.
 
 ## Results
 
-Below table compares the traiing time, batch size that could be fit in Colab and best ROC-AUC scores between PEFT model and fully fine-tuned model
+The table below compares the training time, the batch size that could be fit in Colab, and the best ROC-AUC scores between a PEFT model and a fully fine-tuned model:
 
 
 | Training Type | Training time per epoch (Hrs) | Batch Size that fits | ROC-AUC score (higher is better) |
@@ -173,16 +168,15 @@ Below table compares the traiing time, batch size that could be fit in Colab and
 | PEFT              |   1.73        | 64         |  0.787   |
 | Full Fine-Tuning  |   2.33        | 32         | 0.7969   |
 
-We can observe that PEFT-LoRA trains **1.35X** faster and can fit **2X** batch size when compared to full fine-tuning.
-The performance of PEFT-LoRA is comparable to full fine-tuning with relative drop of **-1.24%** in ROC-AUC. We believe this gap to close as the models get bigger as mentioned in [The Power of Scale for Parameter-Efficient Prompt Tuning
-](https://arxiv.org/pdf/2104.08691.pdf).
+The PEFT-LoRA model trains **1.35X** faster and can fit **2X** batch size compared to the fully fine-tuned model, and the performance of PEFT-LoRA is comparable to the fully fine-tuned model with a relative drop of **-1.24%** in ROC-AUC. This gap can probably be closed with bigger models as mentioned in [The Power of Scale for Parameter-Efficient Prompt Tuning
+](https://huggingface.co/papers/2104.08691).
 
-## Inference: Building search index and retrieving semantically similar products
+## Inference
 
-Let's go! Now we have the model, we need to first create the search index of all the products in our catalog. 
-Please refer `peft_lora_embedding_semantic_similarity_inference.ipynb` for the entire inference code. 
+Let's go! Now we have the model, we need to create a search index of all the products in our catalog. 
+Please refer to `peft_lora_embedding_semantic_similarity_inference.ipynb` for the complete inference code. 
 
-1. Get a list of ids to products. Let's call this `ids_to_products_dict`
+1. Get a list of ids to products which we can call `ids_to_products_dict`:
 
 ```bash
 {0: 'RamPro 10" All Purpose Utility Air Tires/Wheels with a 5/8" Diameter Hole with Double Sealed Bearings (Pack of 2)',
@@ -198,7 +192,7 @@ Please refer `peft_lora_embedding_semantic_similarity_inference.ipynb` for the e
  10: 'Honda 42710-VE2-M02ZE (Replaces 42710-VE2-M01ZE) Lawn Mower Rear Wheel Set of 2' ...
 ```
 
-2. Use out trained model to get the product embeddings. The model is available at [smangrul/peft_lora_e5_ecommerce_semantic_search_colab](https://huggingface.co/smangrul/peft_lora_e5_ecommerce_semantic_search_colab). Below is the relevant snippet:
+2. Use the trained [smangrul/peft_lora_e5_ecommerce_semantic_search_colab](https://huggingface.co/smangrul/peft_lora_e5_ecommerce_semantic_search_colab) model to get the product embeddings:
 
 ```py
 # base model
@@ -227,7 +221,7 @@ for step, batch in enumerate(tqdm(dataloader)):
     del product_embs, batch
 ```
 
-3. Create search index using HNSWlib
+3. Create a search index using HNSWlib:
 
 ```py
 def construct_search_index(dim, num_elements, data):
@@ -246,7 +240,7 @@ def construct_search_index(dim, num_elements, data):
 product_search_index = construct_search_index(d, num_products, product_embeddings_array)
 ```
 
-4. utils for getting query embeddings and nearest neighbours
+4. Get the query embeddings and nearest neighbors:
 
 ```py
 def get_query_embeddings(query, model, tokenizer, device):
@@ -267,7 +261,7 @@ def get_nearest_neighbours(k, search_index, query_embeddings, ids_to_products_di
     return [(ids_to_products_dict[label], (1-distance)) for label, distance in zip(labels[0], distances[0]) if (1-distance)>=threshold]
 ```
 
-5. Let's test it out with query `deep learning books`
+5. Let's test it out with the query `deep learning books`:
 
 ```py
 query = "deep learning books"
@@ -296,9 +290,9 @@ cosine_sim_score=0.88 product='Mastering Machine Learning with scikit-learn'
 cosine_sim_score=0.88 product='Mastering Machine Learning with scikit-learn - Second Edition: Apply effective learning algorithms to real-world problems using scikit-learn'
 ```
 
-we can see that books related to Deep Learning and Machine Learning are being retrieved even though the word `Machine Learning` doesn't appear in query. This means that model has learnt that these books are semantically relevant to the query based on purchase behaviour of customers of Amazon. 
+Books on deep learning and machine learning are retrieved even though `machine learning` wasn't included in the query. This means the model has learned that these books are semantically relevant to the query based on the purchase behavior of customers on Amazon. 
 
-Next steps would ideally involve using ONNX/TensorRT to optimize the model and use triton server for hosting it. Check out 🤗 optimum for related optimizations for efficient serving. 
+The next steps would ideally involve using ONNX/TensorRT to optimize the model and using a Triton server to host it. Check out 🤗 [Optimum](https://huggingface.co/docs/optimum/index) for related optimizations for efficient serving!
 
 
 
