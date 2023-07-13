@@ -553,10 +553,8 @@ class PeftCommonTester:
             )
             peft_model = get_peft_model(model, config)
 
-        if do_merge == "merge_adapter":
-            peft_model.merge_and_unload()
-        elif do_merge == "merge_and_unload":
-            peft_model.merge_adapter()
+        if do_merge:
+            peft_model = peft_model.merge_and_unload()
 
         output_peft = get_output(peft_model)
 
@@ -568,16 +566,21 @@ class PeftCommonTester:
             with peft_model.unet.disable_adapter():
                 with peft_model.text_encoder.disable_adapter():
                     output_peft_disabled = get_output(peft_model)
-        else:
+        elif not do_merge:
             with peft_model.disable_adapter():
                 output_peft_disabled = get_output(peft_model)
-        self.assertTrue(torch.allclose(output_before, output_peft_disabled))
+        else:
+            output_peft_disabled = get_output(peft_model)
+
+        if do_merge:
+            self.assertFalse(torch.allclose(output_before, output_peft_disabled))
+        else:
+            self.assertTrue(torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6))
 
         # for models that support it (LoRA), run this very test again, this time with merging, except for GPT2, which
         # does not support merging
         if (peft_model.config.model_type == "gpt2") or (do_merge is not False):
             return
-        if hasattr(peft_model, "merge_adapter"):
-            self._test_disable_adapter(model_id, config_cls, config_kwargs, do_merge="merge_adapter")
+
         if hasattr(peft_model, "merge_and_unload"):
-            self._test_disable_adapter(model_id, config_cls, config_kwargs, do_merge="merge_and_unload")
+            self._test_disable_adapter(model_id, config_cls, config_kwargs, do_merge=True)
