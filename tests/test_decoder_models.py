@@ -134,6 +134,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_non_pt_mqa,
