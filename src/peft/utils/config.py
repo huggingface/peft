@@ -32,6 +32,7 @@ class PeftType(str, enum.Enum):
     LORA = "LORA"
     ADALORA = "ADALORA"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
+    IA3 = "IA3"
 
 
 class TaskType(str, enum.Enum):
@@ -55,12 +56,8 @@ class PeftConfigMixin(PushToHubMixin):
     """
     peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
 
-    @property
-    def __dict__(self):
-        return asdict(self)
-
     def to_dict(self):
-        return self.__dict__
+        return asdict(self)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
@@ -78,7 +75,7 @@ class PeftConfigMixin(PushToHubMixin):
 
         os.makedirs(save_directory, exist_ok=True)
 
-        output_dict = self.__dict__
+        output_dict = asdict(self)
         output_path = os.path.join(save_directory, CONFIG_NAME)
 
         # save it
