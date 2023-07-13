@@ -254,6 +254,9 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "bart": ["q_proj", "v_proj", "fc2"],
     "gpt_bigcode": ["c_attn", "mlp.c_proj"],
     "llama": ["k_proj", "v_proj", "down_proj"],
+    "bert": ["key", "value", "output.dense"],
+    "deberta-v2": ["key_proj", "value_proj", "output.dense"],
+    "deberta": ["in_proj", "output.dense"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -269,6 +272,9 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "bart": ["fc2"],
     "gpt_bigcode": ["mlp.c_proj"],
     "llama": ["down_proj"],
+    "bert": ["output.dense"],
+    "deberta-v2": ["output.dense"],
+    "deberta": ["output.dense"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]

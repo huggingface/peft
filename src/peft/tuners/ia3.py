@@ -397,9 +397,10 @@ class IA3Layer:
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
         if self.is_feedforward:
-            self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(1, self.in_features))}))
+            weight = torch.randn((1, self.in_features))
         else:
-            self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.ones(self.out_features, 1))}))
+            weight = torch.randn((self.out_features, 1))
+        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
@@ -439,7 +440,6 @@ class Linear(nn.Linear, IA3Layer):
         self.is_feedforward = is_feedforward
 
     def merge(self):
-
         if self.active_adapter not in self.ia3_l.keys():
             return
         if self.merged:
@@ -453,7 +453,6 @@ class Linear(nn.Linear, IA3Layer):
         self.merged = True
 
     def unmerge(self):
-
         if self.active_adapter not in self.ia3_l.keys():
             return
         if not self.merged:
@@ -473,12 +472,12 @@ class Linear(nn.Linear, IA3Layer):
 
         if self.active_adapter not in self.ia3_l.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-
-        if not self.merged:
+        elif not self.merged:
             if self.is_feedforward:
                 x = x.to(self.ia3_l[self.active_adapter].dtype)
                 interm = x * self.ia3_l[self.active_adapter].flatten()
@@ -535,7 +534,6 @@ if is_bnb_available():
                 return super().forward(x)
             else:
                 if not torch.is_autocast_enabled():
-
                     if x.dtype != torch.float32:
                         x = x.float()
                     if self.is_feedforward:
