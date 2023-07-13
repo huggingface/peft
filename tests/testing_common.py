@@ -562,10 +562,12 @@ class PeftCommonTester:
 
             return output
 
+        # output from BASE MODEL
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         input = self.prepare_inputs_for_testing()
         output_before = get_output(model)
 
+        # output from PEFT MODEL
         if hasattr(self, "instantiate_sd_peft"):
             # SD models are instantiated differently
             peft_model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
@@ -585,6 +587,7 @@ class PeftCommonTester:
         # must be False
         self.assertFalse(torch.allclose(output_before, output_peft))
 
+        # output with DISABLED ADAPTER
         if isinstance(peft_model, StableDiffusionPipeline):
             with peft_model.unet.disable_adapter():
                 with peft_model.text_encoder.disable_adapter():
