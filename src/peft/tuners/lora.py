@@ -399,11 +399,17 @@ class LoraModel(torch.nn.Module):
                 module.active_adapter = adapter_name
 
     def merge_adapter(self):
+        """
+        This method merges the LoRa layers into the base model.
+        """
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
                 module.merge()
 
     def unmerge_adapter(self):
+        """
+        This method unmerges the LoRa layers from the base model.
+        """
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
                 module.unmerge()
@@ -542,6 +548,8 @@ class LoraModel(torch.nn.Module):
 
     def delete_adapter(self, adapter_name):
         """
+        Deletes an existing adapter.
+
         Args:
             adapter_name (str): Name of the adapter to be deleted.
         """
@@ -566,6 +574,10 @@ class LoraModel(torch.nn.Module):
                         getattr(target, attr).pop(adapter_name)
 
     def unload(self):
+        """
+        Gets back the base model by removing all the lora modules without merging.
+        This gives back the original base model.
+        """
         model = self.merge_and_unload(merge=False)
         return model
 

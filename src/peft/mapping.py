@@ -121,9 +121,8 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
         model ([`transformers.PreTrainedModel`]): Model to be wrapped.
         peft_config ([`PeftConfig`]): Configuration object containing the parameters of the Peft model.
     """
-    if hasattr(model, "config"):
-        model_config = model.config.to_dict() if hasattr(model.config, "to_dict") else model.config
-        peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+    model_config = model.config.to_dict() if hasattr(model.config, "to_dict") else model.config
+    peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
 
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not isinstance(
         peft_config, PromptLearningConfig
