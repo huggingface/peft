@@ -1563,12 +1563,26 @@ class PeftModelForFeatureExtraction(PeftModel):
     Example:
 
         ```py
-        >>> from transformers import AutoModel >>> from peft import PeftModelForFeatureExtraction, get_peft_config >>>
-        config = { ... "peft_type": "LORA", ... "task_type": "FEATURE_EXTRACTION", ... "inference_mode": False, ...
-        "r": 16, ... "target_modules": ["query", "value"], ... "lora_alpha": 32, ... "lora_dropout": 0.05, ...
-        "fan_in_fan_out": False, ... "bias": "none", ... } >>> peft_config = get_peft_config(config) >>> model =
-        AutoModel.from_pretrained("bert-base-cased") >>> peft_model = PeftModelForFeatureExtraction(model, peft_config)
-        >>> peft_model.print_trainable_parameters()"""
+        >>> from transformers import AutoModel
+        >>> from peft import PeftModelForFeatureExtraction, get_peft_config
+
+        >>> config = {
+        ...     "peft_type": "LORA",
+        ...     "task_type": "FEATURE_EXTRACTION",
+        ...     "inference_mode": False,
+        ...     "r": 16,
+        ...     "target_modules": ["query", "value"],
+        ...     "lora_alpha": 32,
+        ...     "lora_dropout": 0.05,
+        ...     "fan_in_fan_out": False,
+        ...     "bias": "none",
+        ... }
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModel.from_pretrained("bert-base-cased")
+        >>> peft_model = PeftModelForFeatureExtraction(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        ```
+    """
 
     def __init__(self, model, peft_config: PeftConfig = None, adapter_name="default"):
         super().__init__(model, peft_config, adapter_name)
