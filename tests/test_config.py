@@ -20,6 +20,7 @@ import unittest
 
 from peft import (
     AdaptionPromptConfig,
+    IA3Config,
     LoraConfig,
     PeftConfig,
     PrefixTuningConfig,
@@ -38,6 +39,7 @@ class PeftConfigTestMixin:
         PrefixTuningConfig,
         PromptTuningConfig,
         AdaptionPromptConfig,
+        IA3Config,
     )
 
 

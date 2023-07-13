@@ -39,6 +39,8 @@
     title: LoRA
   - local: conceptual_guides/prompting
     title: Prompting
+  - local: conceptual_guides/ia3
+    title: IA3
 
 - title: Reference
   sections:
