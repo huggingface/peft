@@ -55,12 +55,11 @@ class _BaseAutoPeftModel:
         the config object init.
         """
         from_pretrained_arguments = list(inspect.signature(cls._target_peft_class.from_pretrained).parameters)
-        if len(peft_model_args) > 0:
-            if any([arg in from_pretrained_arguments for arg in kwargs.keys()]):
-                raise ValueError(
-                    f"Make sure to pass the arguments for {cls._target_peft_class.__name__} as positional arguments"
-                    " and not as keyword arguments."
-                )
+        if any([arg in from_pretrained_arguments for arg in kwargs.keys()]):
+            raise ValueError(
+                f"Make sure to pass the arguments for {cls._target_peft_class.__name__} as positional arguments"
+                " and not as keyword arguments."
+            )
 
         peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
