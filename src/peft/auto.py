@@ -18,6 +18,7 @@ from __future__ import annotations
 import inspect
 
 from transformers import (
+    AutoModel,
     AutoModelForCausalLM,
     AutoModelForQuestionAnswering,
     AutoModelForSeq2SeqLM,
@@ -28,6 +29,7 @@ from transformers import (
 from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
 from .peft_model import (
     PeftModelForCausalLM,
+    PeftModelForFeatureExtraction,
     PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
@@ -103,3 +105,8 @@ class AutoPeftModelForTokenClassification(_BaseAutoPeftModel):
 class AutoPeftModelForQuestionAnswering(_BaseAutoPeftModel):
     _target_class = AutoModelForQuestionAnswering
     _target_peft_class = PeftModelForQuestionAnswering
+
+
+class AutoPeftModelForFeatureExtraction(_BaseAutoPeftModel):
+    _target_class = AutoModel
+    _target_peft_class = PeftModelForFeatureExtraction

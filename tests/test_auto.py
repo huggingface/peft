@@ -19,11 +19,13 @@ import torch
 
 from peft import (
     AutoPeftModelForCausalLM,
+    AutoPeftModelForFeatureExtraction,
     AutoPeftModelForQuestionAnswering,
     AutoPeftModelForSeq2SeqLM,
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
     PeftModelForCausalLM,
+    PeftModelForFeatureExtraction,
     PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
@@ -170,5 +172,34 @@ class PeftAutoModelTester(unittest.TestCase):
         is_trainable = False
         # This should work
         _ = AutoPeftModelForQuestionAnswering.from_pretrained(
+            model_id, adapter_name, is_trainable, torch_dtype=torch.bfloat16
+        )
+
+    def test_peft_feature_extraction(self):
+        model_id = "peft-internal-testing/tiny_OPTForFeatureExtraction-lora"
+        model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id)
+        self.assertTrue(isinstance(model, PeftModelForFeatureExtraction))
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id)
+            self.assertTrue(isinstance(model, PeftModelForFeatureExtraction))
+
+        # check if kwargs are passed correctly
+        model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        self.assertTrue(isinstance(model, PeftModelForFeatureExtraction))
+        self.assertTrue(model.base_model.model.decoder.embed_tokens.weight.dtype == torch.bfloat16)
+
+        # check positional arg issue
+        with self.assertRaises(ValueError):
+            model = AutoPeftModelForFeatureExtraction.from_pretrained(
+                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
+            )
+
+        adapter_name = "default"
+        is_trainable = False
+        # This should work
+        _ = AutoPeftModelForFeatureExtraction.from_pretrained(
             model_id, adapter_name, is_trainable, torch_dtype=torch.bfloat16
         )

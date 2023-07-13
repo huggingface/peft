@@ -25,6 +25,7 @@ from .auto import (
     AutoPeftModelForSeq2SeqLM,
     AutoPeftModelForTokenClassification,
     AutoPeftModelForQuestionAnswering,
+    AutoPeftModelForFeatureExtraction,
 )
 from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING, get_peft_config, get_peft_model
 from .peft_model import (
