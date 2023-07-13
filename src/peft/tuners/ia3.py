@@ -439,7 +439,6 @@ class Linear(nn.Linear, IA3Layer):
         self.is_feedforward = is_feedforward
 
     def merge(self):
-
         if self.active_adapter not in self.ia3_l.keys():
             return
         if self.merged:
@@ -453,7 +452,6 @@ class Linear(nn.Linear, IA3Layer):
         self.merged = True
 
     def unmerge(self):
-
         if self.active_adapter not in self.ia3_l.keys():
             return
         if not self.merged:
@@ -535,7 +533,6 @@ if is_bnb_available():
                 return super().forward(x)
             else:
                 if not torch.is_autocast_enabled():
-
                     if x.dtype != torch.float32:
                         x = x.float()
                     if self.is_feedforward:
