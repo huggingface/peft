@@ -281,9 +281,6 @@ class LoraModel(torch.nn.Module):
         """For the given model and config, yield all module names that match."""
 
         # normalize the parameters
-        target_modules = lora_config.target_modules
-        if isinstance(target_modules, str):
-            target_modules = [target_modules]
         layers_to_transform = lora_config.layers_to_transform
         if isinstance(layers_to_transform, int):
             layers_to_transform = [layers_to_transform]
@@ -294,7 +291,7 @@ class LoraModel(torch.nn.Module):
         for key, _ in model.named_modules():
             if _is_matching_module_name(
                 key,
-                target_modules=target_modules,
+                target_modules=lora_config.target_modules,
                 layers_to_transform=layers_to_transform,
                 layers_pattern=layers_pattern,
             ):

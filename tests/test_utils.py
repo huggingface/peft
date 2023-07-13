@@ -44,6 +44,12 @@ class TestMatchingModuleName(unittest.TestCase):
         ("foo", ["foo"], None, [], True),
         ("foo", ["bar"], None, [], False),
         ("foo", ["foo", "bar"], None, [], True),
+        # with regex
+        ("foo", "foo", None, [], True),
+        ("foo", ".*oo", None, [], True),
+        ("foo", "fo.*", None, [], True),
+        ("foo", ".*bar.*", None, [], False),
+        ("foobar", ".*oba.*", None, [], True),
         # with layers_to_transform
         ("foo.bar.1.baz", ["baz"], [1], ["bar"], True),
         ("foo.bar.1.baz", ["baz"], [0], ["bar"], False),
@@ -89,6 +95,34 @@ class TestMatchingModuleName(unittest.TestCase):
             key, target_modules=target_modules, layers_to_transform=layers_to_transform, layers_pattern=layers_pattern
         )
         self.assertEqual(output, expected)
+
+    invalid_test_cases = [
+        # tuple of
+        # 1. key
+        # 2. target_modules
+        # 3. layers_to_transform
+        # 4. layers_pattern
+        # 5. expected result
+        # some basic examples
+        ("", "foo", [0], [], False),
+        ("", "foo", None, ["foo"], False),
+        ("", "foo", [0], ["foo"], False),
+    ]
+
+    @parameterized.expand(invalid_test_cases)
+    def test_invalid_options_raise(self, key, target_modules, layers_to_transform, layers_pattern, expected):
+        # check that an error is raised when users try to use layer indexing with a str target module, which does not
+        # work
+        with self.assertRaises(ValueError) as exc:
+            _is_matching_module_name(
+                key,
+                target_modules=target_modules,
+                layers_to_transform=layers_to_transform,
+                layers_pattern=layers_pattern,
+            )
+
+        expected_msg = "Layer indexing not supported when setting target_modules to a str"
+        self.assertEqual(exc.exception.args[0], expected_msg)
 
     def test_lora_inspect_matching_modules(self):
         # peft models that have a module matching capacity provide a method to inspect the matching modules to allow

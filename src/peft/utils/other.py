@@ -183,7 +183,7 @@ def _set_adapter(model, adapter_name):
 def _is_matching_module_name(
     key: str,
     *,
-    target_modules: list[str],
+    target_modules: str | list[str],
     layers_to_transform: list[int] | None,
     layers_pattern: list[int],
 ) -> bool:
