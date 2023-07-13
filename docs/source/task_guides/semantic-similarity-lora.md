@@ -120,7 +120,7 @@ class AutoModelForSentenceEmbedding(nn.Module):
     def __init__(self, model_name, tokenizer, normalize=True):
         super(AutoModelForSentenceEmbedding, self).__init__()
 
-        self.model = AutoModel.from_pretrained(model_name)  # , load_in_8bit=True, device_map={"":0})
+        self.model = AutoModel.from_pretrained(model_name)  
         self.normalize = normalize
         self.tokenizer = tokenizer
 
