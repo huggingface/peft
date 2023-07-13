@@ -483,6 +483,8 @@ class LoraModel(torch.nn.Module):
 
     def add_weighted_adapter(self, adapters, weights, adapter_name, combination_type="svd"):
         """
+        This method adds a new adapter by merging the given adapters with the given weights.
+
         Args:
             adapters (list): List of adapter names to be merged.
             weights (list): List of weights for each adapter.
