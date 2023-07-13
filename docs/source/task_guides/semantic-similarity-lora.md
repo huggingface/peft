@@ -15,7 +15,7 @@ In this guide, we'll be using a LoRA [script](https://github.com/huggingface/pef
 Start by installing 🤗 PEFT from [source](https://github.com/huggingface/peft), and then navigate to the directory containing the training scripts for fine-tuning DreamBooth with LoRA:
 
 ```bash
-cd peft/examples/embedding
+cd peft/examples/feature_extraction
 ```
 
 Install all the necessary required libraries with:
