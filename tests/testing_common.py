@@ -528,7 +528,7 @@ class PeftCommonTester:
             )
 
     def _test_training_prompt_learning_tasks(self, model_id, config_cls, config_kwargs):
-        if not isinstance(config_cls, PromptLearningConfig):
+        if not issubclass(config_cls, PromptLearningConfig):
             return
 
         model = self.transformers_class.from_pretrained(model_id)
