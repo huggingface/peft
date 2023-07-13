@@ -187,7 +187,20 @@ def _is_matching_module_name(
     layers_to_transform: list[int] | None,
     layers_pattern: list[int],
 ) -> bool:
-    """TODO"""
+    """Match the given module name to the desired target modules.
+
+    For a given module name, check if it matches the desired target modules. If target modules are just a string, a
+    simple regex match is performed, otherwise it is checked if the name ends the same and, if applicable, if the layer
+    index matches.
+
+    """
+    if isinstance(target_modules, str):
+        if layers_to_transform or layers_pattern:
+            # When users pass a string as target_modules, layer indexing is not performed. Users may not notice this,
+            # therefore it is best to raise an error.
+            raise ValueError("Layer indexing not supported when setting target_modules to a str")
+        return bool(re.fullmatch(target_modules, key))
+
     for name in target_modules:
         if not key.endswith(name):
             continue
