@@ -474,12 +474,12 @@ class Linear(nn.Linear, IA3Layer):
 
         if self.active_adapter not in self.ia3_l.keys():
             return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-
-        if not self.merged:
+        elif not self.merged:
             if self.is_feedforward:
                 x = x.to(self.ia3_l[self.active_adapter].dtype)
                 interm = x * self.ia3_l[self.active_adapter].flatten()
