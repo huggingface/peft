@@ -43,6 +43,7 @@ class _BaseAutoPeftModel:
     _target_peft_class = None
 
     def __init__(self, *args, **kwargs):
+        # For consistency with transformers: https://github.com/huggingface/transformers/blob/91d7df58b6537d385e90578dac40204cb550f706/src/transformers/models/auto/auto_factory.py#L400
         raise EnvironmentError(
             f"{self.__class__.__name__} is designed to be instantiated "
             f"using the `{self.__class__.__name__}.from_pretrained(pretrained_model_name_or_path)` or "
