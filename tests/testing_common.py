@@ -16,6 +16,7 @@ import os
 import pickle
 import tempfile
 from collections import OrderedDict
+from dataclasses import replace
 
 import torch
 from diffusers import StableDiffusionPipeline
@@ -32,6 +33,8 @@ from peft import (
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
 )
+from peft.tuners.lora import LoraLayer
+from peft.utils import _get_submodules
 
 
 CONFIG_CLASSES = (
@@ -264,6 +267,66 @@ class PeftCommonTester:
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        new_adapter_config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model.add_adapter("new_adapter", new_adapter_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            model_from_pretrained.load_adapter(tmp_dirname, "new_adapter")
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+
+            # check if same keys
+            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                self.assertTrue(
+                    torch.allclose(
+                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                    )
+                )
+
+            # check if `adapter_model.bin` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+
+            # check if `adapter_config.json` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+
+            # check if `pytorch_model.bin` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+
+            # check if `config.json` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname, selected_adapters=["default"])
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            self.assertTrue("default" in model_from_pretrained.peft_config.keys())
+            self.assertTrue("new_adapter" not in model_from_pretrained.peft_config.keys())
 
     def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -575,6 +638,134 @@ class PeftCommonTester:
         # check that prompt encoder has grads
         for param in model.prompt_encoder.parameters():
             self.assertIsNotNone(param.grad)
+
+    def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        adapter_to_delete = "delete_me"
+        model = get_peft_model(model, config)
+        model.add_adapter(adapter_to_delete, config)
+        model.set_adapter(adapter_to_delete)
+        model = model.to(self.torch_device)
+
+        if config.peft_type not in ("LORA"):
+            with self.assertRaises(AttributeError):
+                model.delete_adapter(adapter_to_delete)
+        else:
+            model.delete_adapter(adapter_to_delete)
+            self.assertFalse(adapter_to_delete in model.peft_config)
+            key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+            for key in key_list:
+                _, target, _ = _get_submodules(model, key)
+                if isinstance(target, LoraLayer):
+                    for attr in [
+                        "r",
+                        "lora_alpha",
+                        "scaling",
+                        "lora_A",
+                        "lora_B",
+                        "lora_embedding_A",
+                        "lora_embedding_B",
+                        "lora_dropout",
+                    ]:
+                        self.assertFalse(adapter_to_delete in getattr(target, attr))
+
+    def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        if config.peft_type not in ("LORA"):
+            with self.assertRaises(AttributeError):
+                model = model.unload()
+        elif model.config.model_type == "gpt2":
+            with self.assertRaises(ValueError):
+                model = model.unload()
+        else:
+            dummy_input = self.prepare_inputs_for_testing()
+            logits_with_lora = model(**dummy_input)[0]
+
+            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            logits_transformers = transformers_model(**dummy_input)[0]
+
+            model.eval()
+            model = model.unload()
+            logits_unload = model(**dummy_input)[0]
+
+            self.assertFalse(torch.allclose(logits_with_lora, logits_unload, atol=1e-10, rtol=1e-10))
+            self.assertTrue(torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4))
+
+    def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
+        weight_list = [0.5, 1.5, 1.5]
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if not isinstance(config, (LoraConfig)):
+            return
+        model = get_peft_model(model, config, adapter_list[0])
+        model.add_adapter(adapter_list[1], config)
+        model.add_adapter(adapter_list[2], replace(config, r=20))
+        model = model.to(self.torch_device)
+
+        # test re-weighting single adapter
+        model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
+
+        # test svd re-weighting with multiple adapters
+        model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
+
+        # test linear re-weighting with multiple adapters
+        model.add_weighted_adapter(
+            adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
+        )
+
+        with self.assertRaises(ValueError):
+            model.add_weighted_adapter(
+                adapter_list[1:],
+                weight_list[1:],
+                "multi_adapter_linear_reweighting_uneven_r",
+                combination_type="linear",
+            )
+
+        new_adapters = [
+            "single_adapter_reweighting",
+            "multi_adapter_svd_reweighting",
+            "multi_adapter_linear_reweighting",
+        ]
+        for new_adapter in new_adapters:
+            self.assertTrue(new_adapter in model.peft_config)
+
+        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(model, key)
+            if isinstance(target, LoraLayer):
+                for adapter_name in new_adapters:
+                    if "single" in adapter_name:
+                        new_delta_weight = target.get_delta_weight(adapter_name)
+                        weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
+                        self.assertTrue(
+                            torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
+                        )
+                    elif "svd" in adapter_name:
+                        self.assertTrue(target.r[adapter_name] == 20)
+                    elif "linear" in adapter_name:
+                        self.assertTrue(target.r[adapter_name] == 8)
+
+        for adapter_name in new_adapters:
+            # ensuring new adapters pass the forward loop
+            model.set_adapter(adapter_name)
+            dummy_input = self.prepare_inputs_for_testing()
+            model.eval()
+            _ = model(**dummy_input)[0]
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")

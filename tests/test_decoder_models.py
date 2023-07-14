@@ -82,6 +82,10 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
@@ -129,6 +133,38 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_unload_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    def test_weighted_combination_of_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_weighted_combination_of_adapters(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
+    def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
