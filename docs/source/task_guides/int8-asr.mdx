@@ -205,7 +205,7 @@ Let's also apply LoRA to the training to make it even more efficient. Load a [`~
 ```py
 from peft import LoraConfig, PeftModel, LoraModel, LoraConfig, get_peft_model
 
-config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="None")
+config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
 ```
 
 After you set up the [`~peft.LoraConfig`], wrap it and the base model with the [`get_peft_model`] function to create a [`PeftModel`]. Print out the number of trainable parameters to see how much more efficient LoRA is compared to fully training the model!
