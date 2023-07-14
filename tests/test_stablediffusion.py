@@ -64,16 +64,20 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Instantiate StableDiffusionPipeline
         model = self.transformers_class.from_pretrained(model_id)
 
+        config_kwargs = config_kwargs.copy()
+        text_encoder_kwargs = config_kwargs.pop("text_encoder")
+        unet_kwargs = config_kwargs.pop("unet")
+        # the remaining config kwargs should be applied to both configs
+        for key, val in config_kwargs.items():
+            text_encoder_kwargs[key] = val
+            unet_kwargs[key] = val
+
         # Instantiate text_encoder adapter
-        config_text_encoder = config_cls(
-            **config_kwargs["text_encoder"],
-        )
+        config_text_encoder = config_cls(**text_encoder_kwargs)
         model.text_encoder = get_peft_model(model.text_encoder, config_text_encoder)
 
         # Instantiate unet adapter
-        config_unet = config_cls(
-            **config_kwargs["unet"],
-        )
+        config_unet = config_cls(**unet_kwargs)
         model.unet = get_peft_model(model.unet, config_unet)
 
         # Move model to device

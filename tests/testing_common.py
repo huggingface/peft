@@ -613,16 +613,22 @@ class PeftCommonTester:
 
         # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
         # must be False
-        self.assertFalse(torch.allclose(output_before, output_peft))
+        if isinstance(peft_model, StableDiffusionPipeline):
+            # for SD, check that most pixels have different values
+            self.assertTrue((output_before != output_peft).float().mean() > 0.9)
+        else:
+            self.assertFalse(torch.allclose(output_before, output_peft))
 
         # output with DISABLED ADAPTER
         if isinstance(peft_model, StableDiffusionPipeline):
             with peft_model.unet.disable_adapter():
                 with peft_model.text_encoder.disable_adapter():
                     output_peft_disabled = get_output(peft_model)
+            # for SD, very rarely, a pixel can differ
+            self.assertTrue((output_before != output_peft_disabled).float().mean() < 1e-4)
         else:
             with peft_model.disable_adapter():
                 output_peft_disabled = get_output(peft_model)
+            self.assertTrue(torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6))
 
-        self.assertTrue(torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6))
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
