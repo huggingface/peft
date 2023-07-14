@@ -50,12 +50,6 @@ class PeftAutoModelTester(unittest.TestCase):
         self.assertTrue(isinstance(model, PeftModelForCausalLM))
         self.assertTrue(model.base_model.lm_head.weight.dtype == torch.bfloat16)
 
-        # check positional arg issue
-        with self.assertRaises(ValueError):
-            model = AutoPeftModelForCausalLM.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
-            )
-
         adapter_name = "default"
         is_trainable = False
         # This should work
@@ -77,12 +71,6 @@ class PeftAutoModelTester(unittest.TestCase):
         self.assertTrue(isinstance(model, PeftModelForSeq2SeqLM))
         self.assertTrue(model.base_model.lm_head.weight.dtype == torch.bfloat16)
 
-        # check positional arg issue
-        with self.assertRaises(ValueError):
-            model = AutoPeftModelForSeq2SeqLM.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
-            )
-
         adapter_name = "default"
         is_trainable = False
         # This should work
@@ -103,12 +91,6 @@ class PeftAutoModelTester(unittest.TestCase):
         model = AutoPeftModelForSequenceClassification.from_pretrained(model_id, torch_dtype=torch.bfloat16)
         self.assertTrue(isinstance(model, PeftModelForSequenceClassification))
         self.assertTrue(model.score.original_module.weight.dtype == torch.bfloat16)
-
-        # check positional arg issue
-        with self.assertRaises(ValueError):
-            model = AutoPeftModelForSequenceClassification.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
-            )
 
         adapter_name = "default"
         is_trainable = False
@@ -133,12 +115,6 @@ class PeftAutoModelTester(unittest.TestCase):
         self.assertTrue(isinstance(model, PeftModelForTokenClassification))
         self.assertTrue(model.base_model.classifier.original_module.weight.dtype == torch.bfloat16)
 
-        # check positional arg issue
-        with self.assertRaises(ValueError):
-            model = AutoPeftModelForTokenClassification.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
-            )
-
         adapter_name = "default"
         is_trainable = False
         # This should work
@@ -162,12 +138,6 @@ class PeftAutoModelTester(unittest.TestCase):
         self.assertTrue(isinstance(model, PeftModelForQuestionAnswering))
         self.assertTrue(model.base_model.qa_outputs.original_module.weight.dtype == torch.bfloat16)
 
-        # check positional arg issue
-        with self.assertRaises(ValueError):
-            model = AutoPeftModelForQuestionAnswering.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
-            )
-
         adapter_name = "default"
         is_trainable = False
         # This should work
@@ -190,12 +160,6 @@ class PeftAutoModelTester(unittest.TestCase):
         model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id, torch_dtype=torch.bfloat16)
         self.assertTrue(isinstance(model, PeftModelForFeatureExtraction))
         self.assertTrue(model.base_model.model.decoder.embed_tokens.weight.dtype == torch.bfloat16)
-
-        # check positional arg issue
-        with self.assertRaises(ValueError):
-            model = AutoPeftModelForFeatureExtraction.from_pretrained(
-                model_id, torch_dtype=torch.bfloat16, adapter_name="default"
-            )
 
         adapter_name = "default"
         is_trainable = False

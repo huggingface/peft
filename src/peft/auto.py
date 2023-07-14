@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 
-import inspect
+from typing import Optional
 
 from transformers import (
     AutoModel,
@@ -43,26 +43,26 @@ class _BaseAutoPeftModel:
     _target_peft_class = None
 
     def __init__(self, *args, **kwargs):
-        raise TypeError(
+        raise EnvironmentError(
             f"{self.__class__.__name__} is designed to be instantiated "
             f"using the `{self.__class__.__name__}.from_pretrained(pretrained_model_name_or_path)` or "
             f"`{self.__class__.__name__}.from_config(config)` methods."
         )
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *peft_model_args, **kwargs):
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path,
+        adapter_name: str = "default",
+        is_trainable: bool = False,
+        config: Optional[PeftConfig] = None,
+        **kwargs,
+    ):
         r"""
         A wrapper around all the preprocessing steps a user needs to perform in order to load a PEFT model. The kwargs
         are passed along to `PeftConfig` that automatically takes care of filtering the kwargs of the Hub methods and
         the config object init.
         """
-        from_pretrained_arguments = list(inspect.signature(cls._target_peft_class.from_pretrained).parameters)
-        if any(arg in from_pretrained_arguments for arg in kwargs.keys()):
-            raise ValueError(
-                f"Make sure to pass the arguments for {cls._target_peft_class.__name__} as positional arguments"
-                " and not as keyword arguments."
-            )
-
         peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
 
@@ -78,7 +78,12 @@ class _BaseAutoPeftModel:
                 )
 
         return cls._target_peft_class.from_pretrained(
-            transformers_model, pretrained_model_name_or_path, *peft_model_args, **kwargs
+            transformers_model,
+            pretrained_model_name_or_path,
+            adapter_name=adapter_name,
+            is_trainable=is_trainable,
+            config=config,
+            **kwargs,
         )
 
 
