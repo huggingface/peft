@@ -20,7 +20,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -53,6 +53,7 @@ from .utils import (
     PeftType,
     PromptLearningConfig,
     TaskType,
+    _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
     add_library_to_model_card,
@@ -118,7 +119,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
-    def save_pretrained(self, save_directory: str, safe_serialization: bool = False, **kwargs: Any):
+    def save_pretrained(
+        self,
+        save_directory: str,
+        safe_serialization: bool = False,
+        selected_adapters: Optional[List[str]] = None,
+        **kwargs: Any,
+    ):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
         reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
@@ -133,10 +140,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
+
+        if selected_adapters is None:
+            selected_adapters = list(self.peft_config.keys())
+        else:
+            if any(
+                selected_adapter_name not in list(self.peft_config.keys())
+                for selected_adapter_name in selected_adapters
+            ):
+                raise ValueError(
+                    f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
+                    f" {list(self.peft_config.keys())} - got {selected_adapters}."
+                )
+
         os.makedirs(save_directory, exist_ok=True)
         self.create_or_update_model_card(save_directory)
 
-        for adapter_name, peft_config in self.peft_config.items():
+        for adapter_name in selected_adapters:
+            peft_config = self.peft_config[adapter_name]
             # save only the trainable weights
             output_state_dict = get_peft_model_state_dict(
                 self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
@@ -146,7 +167,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
             if safe_serialization:
                 safe_save_file(
-                    output_state_dict, os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME), metadata={"format": "pt"}
+                    output_state_dict,
+                    os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
+                    metadata={"format": "pt"},
                 )
             else:
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
@@ -234,8 +257,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def _setup_prompt_encoder(self, adapter_name: str):
         config = self.peft_config[adapter_name]
-        self.prompt_encoder = torch.nn.ModuleDict({})
-        self.prompt_tokens = {}
+        if not hasattr(self, "prompt_encoder"):
+            self.prompt_encoder = torch.nn.ModuleDict({})
+            self.prompt_tokens = {}
         transformer_backbone = None
         for name, module in self.base_model.named_children():
             for param in module.parameters():
@@ -412,6 +436,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
         self.peft_config[adapter_name] = peft_config
         if isinstance(peft_config, PromptLearningConfig):
+            if hasattr(self.config, "to_dict"):
+                dict_config = self.config.to_dict()
+            else:
+                dict_config = self.config
+
+            peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
             self._setup_prompt_encoder(adapter_name)
         else:
             self.base_model.add_adapter(adapter_name, peft_config)

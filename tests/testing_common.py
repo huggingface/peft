@@ -267,6 +267,66 @@ class PeftCommonTester:
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
+    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        new_adapter_config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model.add_adapter("new_adapter", new_adapter_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            model_from_pretrained.load_adapter(tmp_dirname, "new_adapter")
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+
+            # check if same keys
+            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                self.assertTrue(
+                    torch.allclose(
+                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                    )
+                )
+
+            # check if `adapter_model.bin` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+
+            # check if `adapter_config.json` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+
+            # check if `pytorch_model.bin` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+
+            # check if `config.json` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname, selected_adapters=["default"])
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            self.assertTrue("default" in model_from_pretrained.peft_config.keys())
+            self.assertTrue("new_adapter" not in model_from_pretrained.peft_config.keys())
+
     def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
