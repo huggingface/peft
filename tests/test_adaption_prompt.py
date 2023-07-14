@@ -159,6 +159,56 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
+    def test_save_pretrained_selected_adapters(self) -> None:
+        seed = 420
+        torch.manual_seed(seed)
+        model = LlamaForCausalLM(self._create_test_llama_config())
+        config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        new_adapter_config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model.add_adapter("new_adapter", new_adapter_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            torch.manual_seed(seed)
+            model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            model_from_pretrained.load_adapter(tmp_dirname, "new_adapter")
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+
+            # check if same keys
+            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+
+            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+            self.assertEqual(len(list(state_dict.keys())), 4)
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                self.assertTrue(
+                    torch.allclose(
+                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                    )
+                )
+
+            # check if `adapter_model.bin` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+
+            # check if `adapter_config.json` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+
+            # check if `pytorch_model.bin` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+
+            # check if `config.json` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
     def test_generate(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
         config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
