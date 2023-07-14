@@ -157,35 +157,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         for adapter_name in selected_adapters:
             peft_config = self.peft_config[adapter_name]
-                # save only the trainable weights
-                output_state_dict = get_peft_model_state_dict(
-                    self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
-                )
-                output_dir = (
-                    os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
-                )
-                os.makedirs(output_dir, exist_ok=True)
+            # save only the trainable weights
+            output_state_dict = get_peft_model_state_dict(
+                self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
+            )
+            output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
+            os.makedirs(output_dir, exist_ok=True)
 
-                if safe_serialization:
-                    safe_save_file(
-                        output_state_dict,
-                        os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
-                        metadata={"format": "pt"},
-                    )
-                else:
-                    torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+            if safe_serialization:
+                safe_save_file(
+                    output_state_dict,
+                    os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
+                    metadata={"format": "pt"},
+                )
+            else:
+                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
-                # save the config and change the inference mode to `True`
-                if peft_config.base_model_name_or_path is None:
-                    peft_config.base_model_name_or_path = (
-                        self.base_model.__dict__.get("name_or_path", None)
-                        if isinstance(peft_config, PromptLearningConfig)
-                        else self.base_model.model.__dict__.get("name_or_path", None)
-                    )
-                inference_mode = peft_config.inference_mode
-                peft_config.inference_mode = True
-                peft_config.save_pretrained(output_dir)
-                peft_config.inference_mode = inference_mode
+            # save the config and change the inference mode to `True`
+            if peft_config.base_model_name_or_path is None:
+                peft_config.base_model_name_or_path = (
+                    self.base_model.__dict__.get("name_or_path", None)
+                    if isinstance(peft_config, PromptLearningConfig)
+                    else self.base_model.model.__dict__.get("name_or_path", None)
+                )
+            inference_mode = peft_config.inference_mode
+            peft_config.inference_mode = True
+            peft_config.save_pretrained(output_dir)
+            peft_config.inference_mode = inference_mode
 
     @classmethod
     def from_pretrained(
