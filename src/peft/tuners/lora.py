@@ -538,6 +538,8 @@ class LoraModel(torch.nn.Module):
                 delta_weight = delta_weight.flatten(start_dim=1)
             else:
                 delta_weight = delta_weight.squeeze()
+        if target.fan_in_fan_out:
+            delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
         U, S, Vh = torch.linalg.svd(delta_weight)

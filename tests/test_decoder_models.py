@@ -157,6 +157,6 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_weighted_combination_of_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_weighted_combination_of_adapters(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
     def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
