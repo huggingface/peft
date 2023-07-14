@@ -141,9 +141,4 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
-        # FIXME following tests are failing right now
-        # test_ybelkada_tiny_random_T5ForConditionalGeneration_calibrated_prompt_encoder
-        # test_ybelkada_tiny_random_T5ForConditionalGeneration_calibrated_prompt_tuning
-        # test_hf_internal_testing_tiny_random_BartForConditionalGeneration_prompt_encoder
-        # test_hf_internal_testing_tiny_random_BartForConditionalGeneration_prompt_tuning
         self._test_disable_adapter(model_id, config_cls, config_kwargs)

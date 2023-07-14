@@ -156,5 +156,4 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
-        # FIXME outputs are not the same after disabling
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
