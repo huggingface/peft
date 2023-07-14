@@ -685,9 +685,6 @@ class PeftCommonTester:
         if config.peft_type not in ("LORA"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
-        elif model.config.model_type == "gpt2":
-            with self.assertRaises(ValueError):
-                model = model.unload()
         else:
             dummy_input = self.prepare_inputs_for_testing()
             logits_with_lora = model(**dummy_input)[0]
