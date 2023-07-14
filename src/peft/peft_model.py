@@ -20,7 +20,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -118,7 +118,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
-    def save_pretrained(self, save_directory: str, safe_serialization: bool = False, **kwargs: Any):
+    def save_pretrained(
+        self,
+        save_directory: str,
+        safe_serialization: bool = False,
+        selected_adapters: Optional[List[str]] = None,
+        **kwargs: Any,
+    ):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
         reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
@@ -136,32 +142,40 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         os.makedirs(save_directory, exist_ok=True)
         self.create_or_update_model_card(save_directory)
 
+        if selected_adapters is None:
+            selected_adapters = list(self.peft_config.keys())
+
         for adapter_name, peft_config in self.peft_config.items():
-            # save only the trainable weights
-            output_state_dict = get_peft_model_state_dict(
-                self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
-            )
-            output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
-            os.makedirs(output_dir, exist_ok=True)
-
-            if safe_serialization:
-                safe_save_file(
-                    output_state_dict, os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME), metadata={"format": "pt"}
+            if adapter_name in selected_adapters:
+                # save only the trainable weights
+                output_state_dict = get_peft_model_state_dict(
+                    self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
                 )
-            else:
-                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-
-            # save the config and change the inference mode to `True`
-            if peft_config.base_model_name_or_path is None:
-                peft_config.base_model_name_or_path = (
-                    self.base_model.__dict__.get("name_or_path", None)
-                    if isinstance(peft_config, PromptLearningConfig)
-                    else self.base_model.model.__dict__.get("name_or_path", None)
+                output_dir = (
+                    os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
                 )
-            inference_mode = peft_config.inference_mode
-            peft_config.inference_mode = True
-            peft_config.save_pretrained(output_dir)
-            peft_config.inference_mode = inference_mode
+                os.makedirs(output_dir, exist_ok=True)
+
+                if safe_serialization:
+                    safe_save_file(
+                        output_state_dict,
+                        os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
+                        metadata={"format": "pt"},
+                    )
+                else:
+                    torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+
+                # save the config and change the inference mode to `True`
+                if peft_config.base_model_name_or_path is None:
+                    peft_config.base_model_name_or_path = (
+                        self.base_model.__dict__.get("name_or_path", None)
+                        if isinstance(peft_config, PromptLearningConfig)
+                        else self.base_model.model.__dict__.get("name_or_path", None)
+                    )
+                inference_mode = peft_config.inference_mode
+                peft_config.inference_mode = True
+                peft_config.save_pretrained(output_dir)
+                peft_config.inference_mode = inference_mode
 
     @classmethod
     def from_pretrained(
