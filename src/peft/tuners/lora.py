@@ -489,7 +489,7 @@ class LoraModel(torch.nn.Module):
             adapters (list): List of adapter names to be merged.
             weights (list): List of weights for each adapter.
             adapter_name (str): Name of the new adapter.
-            type (str): Type of merging. Can be one of [`svd`, `linear`]
+            combination_type (str): Type of merging. Can be one of [`svd`, `linear`]
         """
         if adapter_name in list(self.peft_config.keys()):
             return
