@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Optional
 
 from transformers import (
@@ -28,6 +29,7 @@ from transformers import (
 
 from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
 from .peft_model import (
+    PeftModel,
     PeftModelForCausalLM,
     PeftModelForFeatureExtraction,
     PeftModelForQuestionAnswering,
@@ -67,9 +69,16 @@ class _BaseAutoPeftModel:
         peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
 
-        transformers_model = cls._target_class.from_pretrained(base_model_path, **kwargs)
-
         task_type = getattr(peft_config, "task_type", None)
+
+        if cls._target_class is not None:
+            target_class = cls._target_class
+        elif cls._target_class is None and task_type is not None:
+            # this is only in the case where we use `AutoPeftModel`
+            raise ValueError(
+                "Cannot use `AutoPeftModel` with a task type, please use a specific class for your task type. (e.g. `AutoPeftModelForCausalLM` for `task_type='CAUSAL_LM'`)"
+            )
+
         if task_type is not None:
             expected_target_class = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[task_type]
             if cls._target_peft_class.__name__ != expected_target_class.__name__:
@@ -77,15 +86,33 @@ class _BaseAutoPeftModel:
                     f"Expected target PEFT class: {expected_target_class.__name__}, but you have asked for: {cls._target_peft_class.__name__ }"
                     " make sure that you are loading the correct model for your task type."
                 )
+        elif task_type is None and getattr(peft_config, "auto_mapping", None) is not None:
+            auto_mapping = getattr(peft_config, "auto_mapping", None)
+            base_model_class = auto_mapping["base_model_class"]
+            parent_library_name = auto_mapping["parent_library"]
+
+            parent_library = importlib.import_module(parent_library_name)
+            target_class = getattr(parent_library, base_model_class)
+        else:
+            raise ValueError(
+                "Cannot infer the auto class from the config, please make sure that you are loading the correct model for your task type."
+            )
+
+        base_model = target_class.from_pretrained(base_model_path, **kwargs)
 
         return cls._target_peft_class.from_pretrained(
-            transformers_model,
+            base_model,
             pretrained_model_name_or_path,
             adapter_name=adapter_name,
             is_trainable=is_trainable,
             config=config,
             **kwargs,
         )
+
+
+class AutoPeftModel(_BaseAutoPeftModel):
+    _target_class = None
+    _target_peft_class = PeftModel
 
 
 class AutoPeftModelForCausalLM(_BaseAutoPeftModel):
