@@ -144,6 +144,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         if selected_adapters is None:
             selected_adapters = list(self.peft_config.keys())
+        elif selected_adapters is not None:
+            if any(
+                selected_adapter_name not in list(self.peft_config.keys())
+                for selected_adapter_name in selected_adapters
+            ):
+                raise ValueError(
+                    f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
+                    f" {list(self.peft_config.keys())} - got {selected_adapters}."
+                )
 
         for adapter_name, peft_config in self.peft_config.items():
             if adapter_name in selected_adapters:
