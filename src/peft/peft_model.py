@@ -273,18 +273,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         r"""
         Prepares the model for gradient checkpointing if necessary
         """
-        try:
-            if not (getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)):
-                if hasattr(model, "enable_input_require_grads"):
-                    model.enable_input_require_grads()
-                else:
+        if not (getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)):
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            else:
 
-                    def make_inputs_require_grad(module, input, output):
-                        output.requires_grad_(True)
+                def make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
 
-                    model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-        except:
-            pass
+                model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
         return model
 
     def get_prompt_embedding_to_save(self, adapter_name: str):

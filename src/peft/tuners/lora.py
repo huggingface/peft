@@ -427,23 +427,7 @@ class LoraModel(torch.nn.Module):
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
         return peft_config
 
-    def merge_and_unload(self, merge=True):
-        r"""
-        This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
-
-        Example:
-
-        ```py
-        >>> from transformers import AutoModelForCausalLM
-        >>> from peft import PeftModel
-
-        >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
-        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
-        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
-        >>> merged_model = model.merge_and_unload()
-        ```
-        """
+    def _unload_and_optionally_merge(self, merge=True):
         if getattr(self.config, "model_type", None) == "gpt2":
             raise ValueError("GPT2 models are not supported for merging LORA layers")
 
@@ -534,36 +518,42 @@ class LoraModel(torch.nn.Module):
                             current_adapter_lora_A = target.lora_A[adapter].weight
                             current_adapter_lora_B = target.lora_B[adapter].weight
                         elif adapter in target.lora_embedding_A:
-                            current_adapter_lora_A = target.lora_embedding_A[adapter_name]
+                            current_adapter_lora_A = target.lora_embedding_A[adapter]
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data * weight
+                        target_lora_B.data += current_adapter_lora_B.data
                 elif combination_type == "svd":
-                    delta_weight = weights[0] * target.get_delta_weight(adapter[0])
-                    for adapter, weight in zip(adapters[1:], weights[1:]):
-                        delta_weight += weight * target.get_delta_weight(adapter)
-                    conv2d = isinstance(target, Conv2d)
-                    if conv2d:
-                        conv2d_1x1 = target.weight.size()[2:4] == (1, 1)
-                        if not conv2d_1x1:
-                            delta_weight = delta_weight.flatten(start_dim=1)
-                        else:
-                            delta_weight = delta_weight.squeeze()
-                    U, S, Vh = torch.linalg.svd(delta_weight)
-                    U = U[:, :new_rank]
-                    S = S[:new_rank]
-                    U = U @ torch.diag(S)
-                    Vh = Vh[:new_rank, :]
-                    dist = torch.cat([U.flatten(), Vh.flatten()])
-                    hi_val = torch.quantile(dist, CLAMP_QUANTILE)
-                    low_val = -hi_val
-                    U = U.clamp(low_val, hi_val)
-                    Vh = Vh.clamp(low_val, hi_val)
-                    if conv2d:
-                        U = U.reshape(target_lora_B.data.shape)
-                        Vh = Vh.reshape(target_lora_A.data.shape)
-                    target_lora_A.data = Vh
-                    target_lora_B.data = U
+                    target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
+                        adapters, weights, new_rank, target, target_lora_A, target_lora_B
+                    )
+
+    def _svd_weighted_adapter(self, adapters, weights, new_rank, target, target_lora_A, target_lora_B):
+        delta_weight = weights[0] * target.get_delta_weight(adapters[0])
+        for adapter, weight in zip(adapters[1:], weights[1:]):
+            delta_weight += weight * target.get_delta_weight(adapter)
+        conv2d = isinstance(target, Conv2d)
+        if conv2d:
+            conv2d_1x1 = target.weight.size()[2:4] == (1, 1)
+            if not conv2d_1x1:
+                delta_weight = delta_weight.flatten(start_dim=1)
+            else:
+                delta_weight = delta_weight.squeeze()
+
+        # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
+        U, S, Vh = torch.linalg.svd(delta_weight)
+        U = U[:, :new_rank]
+        S = S[:new_rank]
+        U = U @ torch.diag(S)
+        Vh = Vh[:new_rank, :]
+        dist = torch.cat([U.flatten(), Vh.flatten()])
+        hi_val = torch.quantile(dist, CLAMP_QUANTILE)
+        low_val = -hi_val
+        U = U.clamp(low_val, hi_val)
+        Vh = Vh.clamp(low_val, hi_val)
+        if conv2d:
+            U = U.reshape(target_lora_B.data.shape)
+            Vh = Vh.reshape(target_lora_A.data.shape)
+        return Vh, U
 
     def delete_adapter(self, adapter_name):
         """
@@ -591,14 +581,38 @@ class LoraModel(torch.nn.Module):
                 ]:
                     if adapter_name in getattr(target, attr):
                         getattr(target, attr).pop(adapter_name)
+                if target.active_adapter == adapter_name:
+                    resetting_active_adapter = list(self.peft_config.keys())[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
+                    )
+                    target.active_adapter = resetting_active_adapter
+
+    def merge_and_unload(self):
+        r"""
+        This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
+
+        Example:
+
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import PeftModel
+
+        >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
+        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
+        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
+        >>> merged_model = model.merge_and_unload()
+        ```
+        """
+        return self._unload_and_optionally_merge()
 
     def unload(self):
         """
-        Gets back the base model by removing all the lora modules without merging.
-        This gives back the original base model.
+        Gets back the base model by removing all the lora modules without merging. This gives back the original base
+        model.
         """
-        model = self.merge_and_unload(merge=False)
-        return model
+        return self._unload_and_optionally_merge(merge=False)
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
