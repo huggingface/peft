@@ -282,6 +282,12 @@ class PeftCommonTester:
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig, IA3Config):
+            # Merge layers only supported for LoRA and IA³
+            return
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -294,41 +300,33 @@ class PeftCommonTester:
             with self.assertRaises(AttributeError):
                 model = model.merge_and_unload()
 
-        try:
-            model_type = model.config.model_type
-        except AttributeError:
-            model_type = model.config["model_type"]
-        if model_type == "gpt2":
-            with self.assertRaises(ValueError):
-                model = model.merge_and_unload()
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+        logits_unmerged = model(**dummy_input)[0]
+
+        model = model.merge_and_unload()
+        logits_merged = model(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
+
+        # For this test to work, init_lora_weights must be False. This ensures that weights are not initialized to
+        # the identity transform.
+        transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        logits_transformers = transformers_model(**dummy_input)[0]
+        self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
+
+        # test that the logits are identical after a save-load-roundtrip
+        if hasattr(model, "save_pretrained"):
+            # model is a transformers model
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
+                model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
         else:
-            dummy_input = self.prepare_inputs_for_testing()
-            model.eval()
-            logits_unmerged = model(**dummy_input)[0]
+            # model is not a transformers model
+            model_from_pretrained = pickle.loads(pickle.dumps(model))
 
-            model = model.merge_and_unload()
-            logits_merged = model(**dummy_input)[0]
-
-            self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
-
-            # For this test to work, init_lora_weights must be False. This ensures that weights are not initialized to
-            # the identity transform.
-            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-            logits_transformers = transformers_model(**dummy_input)[0]
-            self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
-
-            # test that the logits are identical after a save-load-roundtrip
-            if hasattr(model, "save_pretrained"):
-                # model is a transformers model
-                with tempfile.TemporaryDirectory() as tmp_dirname:
-                    model.save_pretrained(tmp_dirname)
-                    model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
-            else:
-                # model is not a transformers model
-                model_from_pretrained = pickle.loads(pickle.dumps(model))
-
-            logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
-            self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
+        logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
+        self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
