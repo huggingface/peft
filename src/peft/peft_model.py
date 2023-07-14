@@ -1068,7 +1068,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
             return self.base_model(
-                input_ids=input_ids, decoder_input_ids=decoder_input_ids, past_key_values=past_key_values, **kwargs
+                input_ids=input_ids,
+                decoder_input_ids=decoder_input_ids,
+                decoder_inputs_embeds=decoder_inputs_embeds,
+                past_key_values=past_key_values,
+                **kwargs,
             )
         elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
             if inputs_embeds is None:
@@ -1085,7 +1089,12 @@ class PeftModelForSeq2SeqLM(PeftModel):
             prompts = prompts.to(inputs_embeds.dtype)
             inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
 
-            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
+            return self.base_model(
+                inputs_embeds=inputs_embeds,
+                decoder_input_ids=decoder_input_ids,
+                decoder_inputs_embeds=decoder_inputs_embeds,
+                **kwargs,
+            )
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
