@@ -285,6 +285,8 @@ class PeftCommonTester:
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
+            model_from_pretrained.load_adapter(tmp_dirname, "new_adapter")
+
             # check if the state dicts are equal
             state_dict = get_peft_model_state_dict(model)
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
