@@ -145,7 +145,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         if selected_adapters is None:
             selected_adapters = list(self.peft_config.keys())
-        elif selected_adapters is not None:
+        else:
             if any(
                 selected_adapter_name not in list(self.peft_config.keys())
                 for selected_adapter_name in selected_adapters
@@ -155,8 +155,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
 
-        for adapter_name, peft_config in self.peft_config.items():
-            if adapter_name in selected_adapters:
+        for adapter_name in selected_adapters:
+            peft_config = self.peft_config[adapter_name]
                 # save only the trainable weights
                 output_state_dict = get_peft_model_state_dict(
                     self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
