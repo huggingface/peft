@@ -30,6 +30,7 @@ Supported methods:
 3. P-Tuning: [GPT Understands, Too](https://arxiv.org/abs/2103.10385)
 4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/abs/2104.08691)
 5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://arxiv.org/abs/2303.10512)  
+6. $(IA)^3$ : [Infused Adapter by Inhibiting and Amplifying Inner Activations](https://arxiv.org/abs/2205.05638)
 
 ## Getting started
 
@@ -223,68 +224,68 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 ## Models support matrix
 
 ### Causal Language Modeling
-| Model        | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  |
-|--------------| ---- | ---- | ---- | ----  |
-| GPT-2        | ✅  | ✅  | ✅  | ✅  |
-| Bloom        | ✅  | ✅  | ✅  | ✅  |
-| OPT          | ✅  | ✅  | ✅  | ✅  |
-| GPT-Neo      | ✅  | ✅  | ✅  | ✅  |
-| GPT-J        | ✅  | ✅  | ✅  | ✅  |
-| GPT-NeoX-20B | ✅  | ✅  | ✅  | ✅  |
-| LLaMA        | ✅  | ✅  | ✅  | ✅  |
-| ChatGLM      | ✅  | ✅  | ✅  | ✅  |
+| Model        | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+|--------------| ---- | ---- | ---- | ----  | ----  |
+| GPT-2        | ✅  | ✅  | ✅  | ✅  | ✅  |
+| Bloom        | ✅  | ✅  | ✅  | ✅  | ✅  |
+| OPT          | ✅  | ✅  | ✅  | ✅  | ✅  |
+| GPT-Neo      | ✅  | ✅  | ✅  | ✅  | ✅  |
+| GPT-J        | ✅  | ✅  | ✅  | ✅  | ✅  |
+| GPT-NeoX-20B | ✅  | ✅  | ✅  | ✅  | ✅  |
+| LLaMA        | ✅  | ✅  | ✅  | ✅  | ✅  |
+| ChatGLM      | ✅  | ✅  | ✅  | ✅  | ✅  |
 
 ### Conditional Generation
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ---- |
-| T5        | ✅   | ✅   | ✅   | ✅   |
-| BART      | ✅   | ✅   | ✅   | ✅   |
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ---- | ---- |
+| T5        | ✅   | ✅   | ✅   | ✅   | ✅   |
+| BART      | ✅   | ✅   | ✅   | ✅   | ✅   |
 
 ### Sequence Classification
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ----  |
-| BERT           | ✅  | ✅  | ✅  | ✅  |  
-| RoBERTa        | ✅  | ✅  | ✅  | ✅  |
-| GPT-2          | ✅  | ✅  | ✅  | ✅  | 
-| Bloom          | ✅  | ✅  | ✅  | ✅  |   
-| OPT            | ✅  | ✅  | ✅  | ✅  |
-| GPT-Neo        | ✅  | ✅  | ✅  | ✅  |
-| GPT-J          | ✅  | ✅  | ✅  | ✅  |
-| Deberta        | ✅  |     | ✅  | ✅  |     
-| Deberta-v2     | ✅  |     | ✅  | ✅  |    
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ----  | ----  |
+| BERT           | ✅  | ✅  | ✅  | ✅  |  ✅  |  
+| RoBERTa        | ✅  | ✅  | ✅  | ✅  | ✅  |
+| GPT-2          | ✅  | ✅  | ✅  | ✅  |   |
+| Bloom          | ✅  | ✅  | ✅  | ✅  |   |
+| OPT            | ✅  | ✅  | ✅  | ✅  |   |
+| GPT-Neo        | ✅  | ✅  | ✅  | ✅  |   |
+| GPT-J          | ✅  | ✅  | ✅  | ✅  |   |
+| Deberta        | ✅  |     | ✅  | ✅  |   | 
+| Deberta-v2     | ✅  |     | ✅  | ✅  |   |
 
 ### Token Classification
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ----  |
-| BERT           | ✅  | ✅  |   |   |  
-| RoBERTa        | ✅  | ✅  |   |   |
-| GPT-2          | ✅  | ✅  |   |   | 
-| Bloom          | ✅  | ✅  |   |   |   
-| OPT            | ✅  | ✅  |   |   |
-| GPT-Neo        | ✅  | ✅  |   |   |
-| GPT-J          | ✅  | ✅  |   |   |
-| Deberta        | ✅  |     |   |   | 
-| Deberta-v2     | ✅  |     |   |   |
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ----  | ----  |
+| BERT           | ✅  | ✅  |   |   |   |  
+| RoBERTa        | ✅  | ✅  |   |   |   |
+| GPT-2          | ✅  | ✅  |   |   |   |
+| Bloom          | ✅  | ✅  |   |   |   |
+| OPT            | ✅  | ✅  |   |   |   |
+| GPT-Neo        | ✅  | ✅  |   |   |   |
+| GPT-J          | ✅  | ✅  |   |   |   |
+| Deberta        | ✅  |     |   |   |   |
+| Deberta-v2     | ✅  |     |   |   |   |
 
 ### Text-to-Image Generation
 
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ----  |
-| Stable Diffusion           | ✅  |   |   |   |  
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ----  | ----  |
+| Stable Diffusion           | ✅  |   |   |   |   |  
 
 
 ### Image Classification
 
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ----  |
-| ViT           | ✅  |   |   |   | 
-| Swin           | ✅  |   |   |   | 
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ----  | ----  |
+| ViT           | ✅  |   |   |   |    | 
+| Swin           | ✅  |   |   |   |   |  
 
 ### Image to text (Multi-modal models)
 
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ----  |
-| Blip-2           | ✅  |   |   |   | 
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3
+| --------- | ---- | ---- | ---- | ----  | ----  |
+| Blip-2           | ✅  |   |   |   |   |
 
 ___Note that we have tested LoRA for [ViT](https://huggingface.co/docs/transformers/model_doc/vit) and [Swin](https://huggingface.co/docs/transformers/model_doc/swin) for fine-tuning on image classification. However, it should be possible to use LoRA for any compatible model [provided](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) by 🤗 Transformers. Check out the respective
 examples to learn more. If you run into problems, please open an issue.___
@@ -293,9 +294,9 @@ The same principle applies to our [segmentation models](https://huggingface.co/m
 
 ### Semantic Segmentation
 
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | 
-| --------- | ---- | ---- | ---- | ----  |
-| SegFormer           | ✅  |   |   |   | 
+|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ----  | ----  |
+| SegFormer           | ✅  |   |   |   |   | 
 
 
 ## Caveats:
@@ -358,7 +359,8 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 - [x] Add tests
 - [x] Multi Adapter training and inference support
 - [x] Add more use cases and examples
-- [ ] Explore and possibly integrate `Bottleneck Adapters`, `(IA)^3`, `AdaptionPrompt` ...
+- [x] Integrate`(IA)^3`, `AdaptionPrompt`
+- [ ] Explore and possibly integrate methods like `Bottleneck Adapters`,  ...
 
 ## Citing 🤗 PEFT
 
