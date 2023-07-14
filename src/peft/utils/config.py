@@ -100,7 +100,7 @@ class PeftConfigMixin(PushToHubMixin):
             else pretrained_model_name_or_path
         )
 
-        hf_hub_download_kwargs, class_kwargs, other_kwargs = cls._split_kwargs(kwargs)
+        hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)

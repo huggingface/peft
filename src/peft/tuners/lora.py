@@ -866,7 +866,7 @@ class Embedding(nn.Embedding, LoraLayer):
 
     def forward(self, x: torch.Tensor):
         if self.disable_adapters:
-            if self.r[self.active.adapter] > 0 and self.merged:
+            if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
             return nn.Embedding.forward(self, x)
 

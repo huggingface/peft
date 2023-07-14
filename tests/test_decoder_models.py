@@ -160,3 +160,17 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
     def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+            filter_params_func=skip_non_pt_mqa,
+        )
+    )
+    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_disable_adapter(model_id, config_cls, config_kwargs)
