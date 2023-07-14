@@ -39,6 +39,7 @@ from .other import (
     _set_adapter,
     _freeze_adapter,
     ModulesToSaveWrapper,
+    _prepare_prompt_learning_config,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict

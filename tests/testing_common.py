@@ -264,9 +264,6 @@ class PeftCommonTester:
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
-            return
-
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -279,6 +276,7 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+
         model.add_adapter("new_adapter", new_adapter_config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:

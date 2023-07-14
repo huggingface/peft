@@ -53,6 +53,7 @@ from .utils import (
     PeftType,
     PromptLearningConfig,
     TaskType,
+    _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
     add_library_to_model_card,
@@ -257,8 +258,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def _setup_prompt_encoder(self, adapter_name: str):
         config = self.peft_config[adapter_name]
-        self.prompt_encoder = torch.nn.ModuleDict({})
-        self.prompt_tokens = {}
+        if not hasattr(self, "prompt_encoder"):
+            self.prompt_encoder = torch.nn.ModuleDict({})
+            self.prompt_tokens = {}
         transformer_backbone = None
         for name, module in self.base_model.named_children():
             for param in module.parameters():
@@ -428,6 +430,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
         self.peft_config[adapter_name] = peft_config
         if isinstance(peft_config, PromptLearningConfig):
+            if hasattr(self.config, "to_dict"):
+                dict_config = self.config.to_dict()
+            else:
+                dict_config = self.config
+
+            peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
             self._setup_prompt_encoder(adapter_name)
         else:
             self.base_model.add_adapter(adapter_name, peft_config)
