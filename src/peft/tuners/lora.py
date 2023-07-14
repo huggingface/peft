@@ -759,7 +759,7 @@ class Embedding(nn.Embedding, LoraLayer):
 
     def forward(self, x: torch.Tensor):
         if self.disable_adapters:
-            if self.r[self.active.adapter] > 0 and self.merged:
+            if self.r[self.active_adapter] > 0 and self.merged:
                 self.weight.data -= (
                     transpose(
                         self.lora_embedding_B[self.active_adapter].weight
