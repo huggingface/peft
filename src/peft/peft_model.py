@@ -140,8 +140,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
-        os.makedirs(save_directory, exist_ok=True)
-        self.create_or_update_model_card(save_directory)
 
         if selected_adapters is None:
             selected_adapters = list(self.peft_config.keys())
@@ -154,6 +152,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
+
+        os.makedirs(save_directory, exist_ok=True)
+        self.create_or_update_model_card(save_directory)
 
         for adapter_name in selected_adapters:
             peft_config = self.peft_config[adapter_name]
