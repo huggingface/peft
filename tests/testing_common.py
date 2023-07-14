@@ -18,6 +18,7 @@ import tempfile
 from collections import OrderedDict
 
 import torch
+from diffusers import StableDiffusionPipeline
 
 from peft import (
     IA3Config,
@@ -574,3 +575,70 @@ class PeftCommonTester:
         # check that prompt encoder has grads
         for param in model.prompt_encoder.parameters():
             self.assertIsNotNone(param.grad)
+
+    def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
+        task_type = config_kwargs.get("task_type")
+        if (task_type == "SEQ_2_SEQ_LM") and (config_cls in (PromptTuningConfig, PromptEncoderConfig)):
+            self.skipTest("Seq2Seq + prompt tuning/prompt encoder does not work with disabling adapters")
+
+        def get_output(model):
+            # helper function that works with different model types
+            torch.manual_seed(0)
+
+            if hasattr(model, "generate"):
+                # let's check the scores, not the output ids, since the latter can easily be identical even if the
+                # weights are slightly changed
+                output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
+                # take element 0, as output is a tuple
+            else:
+                output = model(**input)
+
+            if hasattr(output, "images"):  # for SD
+                import numpy as np
+
+                img = output.images[0]
+                return torch.from_numpy(np.array(img))
+
+            return output
+
+        # initialize model
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+
+        # output from BASE MODEL
+        input = self.prepare_inputs_for_testing()
+        output_before = get_output(model)
+
+        # output from PEFT MODEL
+        if hasattr(self, "instantiate_sd_peft"):
+            # SD models are instantiated differently
+            peft_model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+        else:
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            peft_model = get_peft_model(model, config)
+
+        output_peft = get_output(peft_model)
+
+        # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
+        # must be False
+        if isinstance(peft_model, StableDiffusionPipeline):
+            # for SD, check that most pixels have different values
+            self.assertTrue((output_before != output_peft).float().mean() > 0.9)
+        else:
+            self.assertFalse(torch.allclose(output_before, output_peft))
+
+        # output with DISABLED ADAPTER
+        if isinstance(peft_model, StableDiffusionPipeline):
+            with peft_model.unet.disable_adapter():
+                with peft_model.text_encoder.disable_adapter():
+                    output_peft_disabled = get_output(peft_model)
+            # for SD, very rarely, a pixel can differ
+            self.assertTrue((output_before != output_peft_disabled).float().mean() < 1e-4)
+        else:
+            with peft_model.disable_adapter():
+                output_peft_disabled = get_output(peft_model)
+            self.assertTrue(torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6))
+
+        # TODO: add tests to check if disabling adapters works after calling merge_adapter
