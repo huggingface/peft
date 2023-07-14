@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
+    PeftModelForFeatureExtraction,
     PeftModelForQuestionAnswering,
     PeftModelForSeq2SeqLM,
     PeftModelForSequenceClassification,
@@ -28,6 +29,7 @@ from .peft_model import (
 from .tuners import (
     AdaLoraConfig,
     AdaptionPromptConfig,
+    IA3Config,
     LoraConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -48,6 +50,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "CAUSAL_LM": PeftModelForCausalLM,
     "TOKEN_CLS": PeftModelForTokenClassification,
     "QUESTION_ANS": PeftModelForQuestionAnswering,
+    "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING = {
@@ -57,6 +60,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
     "ADALORA": AdaLoraConfig,
+    "IA3": IA3Config,
 }
 
 

@@ -39,6 +39,7 @@ from . import __version__
 from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
+    IA3Model,
     LoraModel,
     PrefixEncoder,
     PromptEmbedding,
@@ -69,6 +70,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.PREFIX_TUNING: PrefixEncoder,
     PeftType.ADALORA: AdaLoraModel,
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
+    PeftType.IA3: IA3Model,
 }
 
 
@@ -104,7 +106,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_config = {}
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
-        self.base_model_torch_dtype = getattr(model, "dtype", None)
         if not isinstance(peft_config, PromptLearningConfig):
             self.peft_config[adapter_name] = peft_config
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
@@ -244,6 +245,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if transformer_backbone is None:
                     transformer_backbone = module
                     self.transformer_backbone_name = name
+        if transformer_backbone is None:
+            transformer_backbone = self.base_model
 
         if config.num_transformer_submodules is None:
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
@@ -553,6 +556,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if not isinstance(self.peft_config[adapter_name], PromptLearningConfig):
             self.base_model.set_adapter(adapter_name)
         _set_adapter(self, adapter_name)
+
+    @property
+    def base_model_torch_dtype(self):
+        return getattr(self.base_model, "dtype", None)
 
     @property
     def active_peft_config(self):
@@ -1545,3 +1552,96 @@ class PeftModelForQuestionAnswering(PeftModel):
                 hidden_states=outputs.hidden_states,
                 attentions=outputs.attentions,
             )
+
+
+class PeftModelForFeatureExtraction(PeftModel):
+    """
+    Peft model for extracting features/embeddings from transformer models
+
+    Args:
+        model ([`~transformers.PreTrainedModel`]): Base transformer model.
+        peft_config ([`PeftConfig`]): Peft config.
+
+    **Attributes**:
+        - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
+
+    Example:
+
+        ```py
+        >>> from transformers import AutoModel
+        >>> from peft import PeftModelForFeatureExtraction, get_peft_config
+
+        >>> config = {
+        ...     "peft_type": "LORA",
+        ...     "task_type": "FEATURE_EXTRACTION",
+        ...     "inference_mode": False,
+        ...     "r": 16,
+        ...     "target_modules": ["query", "value"],
+        ...     "lora_alpha": 32,
+        ...     "lora_dropout": 0.05,
+        ...     "fan_in_fan_out": False,
+        ...     "bias": "none",
+        ... }
+        >>> peft_config = get_peft_config(config)
+        >>> model = AutoModel.from_pretrained("bert-base-cased")
+        >>> peft_model = PeftModelForFeatureExtraction(model, peft_config)
+        >>> peft_model.print_trainable_parameters()
+        ```
+    """
+
+    def __init__(self, model, peft_config: PeftConfig = None, adapter_name="default"):
+        super().__init__(model, peft_config, adapter_name)
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        **kwargs,
+    ):
+        peft_config = self.active_peft_config
+        if not isinstance(peft_config, PromptLearningConfig):
+            return self.base_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                inputs_embeds=inputs_embeds,
+                output_attentions=output_attentions,
+                output_hidden_states=output_hidden_states,
+                return_dict=return_dict,
+                **kwargs,
+            )
+
+        batch_size = input_ids.shape[0]
+        if attention_mask is not None:
+            # concat prompt attention mask
+            prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
+            attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+
+        if kwargs.get("position_ids", None) is not None:
+            warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
+            kwargs["position_ids"] = None
+        if kwargs.get("token_type_ids", None) is not None:
+            warnings.warn("Token type ids are not supported for parameter efficient tuning. Ignoring token type ids")
+            kwargs["token_type_ids"] = None
+        kwargs.update(
+            {
+                "attention_mask": attention_mask,
+                "output_attentions": output_attentions,
+                "output_hidden_states": output_hidden_states,
+                "return_dict": return_dict,
+            }
+        )
+
+        if peft_config.peft_type == PeftType.PREFIX_TUNING:
+            past_key_values = self.get_prompt(batch_size)
+            return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
+        else:
+            if inputs_embeds is None:
+                inputs_embeds = self.word_embeddings(input_ids)
+            prompts = self.get_prompt(batch_size=batch_size)
+            prompts = prompts.to(inputs_embeds.dtype)
+            inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
+            return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
