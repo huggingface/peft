@@ -120,7 +120,23 @@ If you have saved your adapter locally or on the Hub, you can leverage the `Auto
 + peft_model = AutoPeftModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora")
 ```
 
-Currently, supported auto classes are: `AutoPeftModelForCausalLM`, `AutoPeftModelForSequenceClassification`, `AutoPeftModelForSeq2SeqLM`, `AutoPeftModelForTokenClassification`, `AutoPeftModelForQuestionAnswering` and `AutoPeftModelForFeatureExtraction`.
+Currently, supported auto classes are: `AutoPeftModelForCausalLM`, `AutoPeftModelForSequenceClassification`, `AutoPeftModelForSeq2SeqLM`, `AutoPeftModelForTokenClassification`, `AutoPeftModelForQuestionAnswering` and `AutoPeftModelForFeatureExtraction`. For other tasks (e.g. Whisper, StableDiffusion), you can load the model with:
+
+```diff
+- from peft import PeftModel, PeftConfig, AutoPeftModel
++ from peft import AutoPeftModel
+- from transformers import WhisperForConditionalGeneration
+
+- model_id = "smangrul/openai-whisper-large-v2-LORA-colab"
+
+peft_model_id = "smangrul/openai-whisper-large-v2-LORA-colab"
+- peft_config = PeftConfig.from_pretrained(peft_model_id)
+- model = WhisperForConditionalGeneration.from_pretrained(
+-     peft_config.base_model_name_or_path, load_in_8bit=True, device_map="auto"
+- )
+- model = PeftModel.from_pretrained(model, peft_model_id)
++ model = AutoPeftModel.from_pretrained(peft_model_id)
+```
 
 ## Next steps
 
