@@ -56,6 +56,9 @@ class PeftConfigMixin(PushToHubMixin):
         peft_type (Union[[`~peft.utils.config.PeftType`], `str`]): The type of Peft method to use.
     """
     peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
+    auto_mapping: Optional[dict] = field(
+        default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
+    )
 
     def to_dict(self):
         return asdict(self)
@@ -75,9 +78,14 @@ class PeftConfigMixin(PushToHubMixin):
             raise AssertionError(f"Provided path ({save_directory}) should be a directory, not a file")
 
         os.makedirs(save_directory, exist_ok=True)
+        auto_mapping_dict = kwargs.pop("auto_mapping_dict", None)
 
         output_dict = asdict(self)
         output_path = os.path.join(save_directory, CONFIG_NAME)
+
+        # Add auto mapping details for custom models.
+        if auto_mapping_dict is not None:
+            output_dict["auto_mapping"] = auto_mapping_dict
 
         # save it
         with open(output_path, "w") as writer:

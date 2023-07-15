@@ -18,12 +18,14 @@ import unittest
 import torch
 
 from peft import (
+    AutoPeftModel,
     AutoPeftModelForCausalLM,
     AutoPeftModelForFeatureExtraction,
     AutoPeftModelForQuestionAnswering,
     AutoPeftModelForSeq2SeqLM,
     AutoPeftModelForSequenceClassification,
     AutoPeftModelForTokenClassification,
+    PeftModel,
     PeftModelForCausalLM,
     PeftModelForFeatureExtraction,
     PeftModelForQuestionAnswering,
@@ -167,3 +169,24 @@ class PeftAutoModelTester(unittest.TestCase):
         _ = AutoPeftModelForFeatureExtraction.from_pretrained(
             model_id, adapter_name, is_trainable, torch_dtype=torch.bfloat16
         )
+
+    def test_peft_whisper(self):
+        model_id = "peft-internal-testing/tiny_WhisperForConditionalGeneration-lora"
+        model = AutoPeftModel.from_pretrained(model_id)
+        self.assertTrue(isinstance(model, PeftModel))
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model = AutoPeftModel.from_pretrained(model_id)
+            self.assertTrue(isinstance(model, PeftModel))
+
+        # check if kwargs are passed correctly
+        model = AutoPeftModel.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        self.assertTrue(isinstance(model, PeftModel))
+        self.assertTrue(model.base_model.model.model.encoder.embed_positions.weight.dtype == torch.bfloat16)
+
+        adapter_name = "default"
+        is_trainable = False
+        # This should work
+        _ = AutoPeftModel.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=torch.bfloat16)

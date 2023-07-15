@@ -183,7 +183,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             inference_mode = peft_config.inference_mode
             peft_config.inference_mode = True
-            peft_config.save_pretrained(output_dir)
+
+            if peft_config.task_type is None:
+                # deal with auto mapping
+                base_model_class = self._get_base_model_class(
+                    is_prompt_tuning=isinstance(peft_config, PromptLearningConfig)
+                )
+                parent_library = base_model_class.__module__
+
+                auto_mapping_dict = {
+                    "base_model_class": base_model_class.__name__,
+                    "parent_library": parent_library,
+                }
+            else:
+                auto_mapping_dict = None
+
+            peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 
     @classmethod
@@ -398,6 +413,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Forward pass of the model.
         """
         return self.get_base_model()(*args, **kwargs)
+
+    def _get_base_model_class(self, is_prompt_tuning=False):
+        """
+        Returns the base model class.
+        """
+        if not is_prompt_tuning:
+            return self.base_model.model.__class__
+        return self.base_model.__class__
 
     @contextmanager
     def disable_adapter(self):
