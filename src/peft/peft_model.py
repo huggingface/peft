@@ -246,8 +246,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     subfolder=kwargs.get("subfolder", None),
                     revision=kwargs.get("revision", None),
                     cache_dir=kwargs.get("cache_dir", None),
+                    use_auth_token=kwargs.get("use_auth_token", None),
                 )
-            ].from_pretrained(model_id, subfolder=kwargs.get("subfolder", None), **kwargs)
+            ].from_pretrained(model_id, **kwargs)
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:
@@ -481,11 +482,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     @classmethod
     def _split_kwargs(cls, kwargs: Dict[str, Any]):
+        _kwargs_not_in_hf_hub_download_signature = ("use_auth_token",)
         hf_hub_download_kwargs = {}
         other_kwargs = {}
 
         for key, value in kwargs.items():
-            if key in inspect.signature(hf_hub_download).parameters:
+            if key in inspect.signature(hf_hub_download).parameters or key in _kwargs_not_in_hf_hub_download_signature:
                 hf_hub_download_kwargs[key] = value
             else:
                 other_kwargs[key] = value
@@ -502,15 +504,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config = PEFT_TYPE_TO_CONFIG_MAPPING[
                 PeftConfig._get_peft_type(
                     model_id,
-                    subfolder=kwargs.get("subfolder", None),
-                    revision=kwargs.get("revision", None),
-                    cache_dir=kwargs.get("cache_dir", None),
+                    **hf_hub_download_kwargs,
                 )
             ].from_pretrained(
                 model_id,
-                subfolder=kwargs.get("subfolder", None),
-                revision=kwargs.get("revision", None),
-                cache_dir=kwargs.get("cache_dir", None),
+                **hf_hub_download_kwargs,
             )
             if isinstance(peft_config, PromptLearningConfig) and is_trainable:
                 raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
@@ -529,7 +527,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             use_safetensors = False
         else:
             has_remote_safetensors_file = hub_file_exists(
-                model_id, SAFETENSORS_WEIGHTS_NAME, revision=kwargs.get("revision", None)
+                model_id,
+                SAFETENSORS_WEIGHTS_NAME,
+                revision=hf_hub_download_kwargs.get("revision", None),
+                repo_type=hf_hub_download_kwargs.get("repo_type", None),
             )
             use_safetensors = has_remote_safetensors_file
 
@@ -538,14 +539,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 filename = hf_hub_download(
                     model_id,
                     SAFETENSORS_WEIGHTS_NAME,
-                    subfolder=kwargs.get("subfolder", None),
                     **hf_hub_download_kwargs,
                 )
             else:
                 try:
-                    filename = hf_hub_download(
-                        model_id, WEIGHTS_NAME, subfolder=kwargs.get("subfolder", None), **hf_hub_download_kwargs
-                    )
+                    filename = hf_hub_download(model_id, WEIGHTS_NAME, **hf_hub_download_kwargs)
                 except EntryNotFoundError:
                     raise ValueError(
                         f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "

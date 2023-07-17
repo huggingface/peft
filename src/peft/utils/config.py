@@ -164,10 +164,10 @@ class PeftConfigMixin(PushToHubMixin):
     def _get_peft_type(
         cls,
         model_id,
-        subfolder: Optional[str] = None,
-        revision: Optional[str] = None,
-        cache_dir: Optional[str] = None,
+        **hf_hub_download_kwargs,
     ):
+        subfolder = hf_hub_download_kwargs.get("subfolder", None)
+
         path = os.path.join(model_id, subfolder) if subfolder is not None else model_id
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
@@ -175,7 +175,9 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             try:
                 config_file = hf_hub_download(
-                    model_id, CONFIG_NAME, subfolder=subfolder, revision=revision, cache_dir=cache_dir
+                    model_id,
+                    CONFIG_NAME,
+                    **hf_hub_download_kwargs,
                 )
             except Exception:
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{model_id}'")
