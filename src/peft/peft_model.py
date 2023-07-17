@@ -102,7 +102,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def __init__(self, model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default"):
         super().__init__()
         self.base_model = model
-        self.config = self.base_model.config
+        self.config = getattr(self.base_model, "config", {"model_type": "custom"})
         self.modules_to_save = None
         self.peft_config = {}
         self.active_adapter = adapter_name
@@ -317,7 +317,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if not (getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)):
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
-            else:
+            elif hasattr(model, "get_input_embeddings"):
 
                 def make_inputs_require_grad(module, input, output):
                     output.requires_grad_(True)
