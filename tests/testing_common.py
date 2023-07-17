@@ -23,6 +23,7 @@ from diffusers import StableDiffusionPipeline
 
 from peft import (
     AdaLoraConfig,
+    AdaMixConfig,
     IA3Config,
     LoraConfig,
     PeftModel,
@@ -39,6 +40,7 @@ from peft.utils import _get_submodules, infer_device
 
 
 CONFIG_CLASSES = (
+    AdaMixConfig,
     IA3Config,
     LoraConfig,
     PrefixTuningConfig,
@@ -46,6 +48,14 @@ CONFIG_CLASSES = (
     PromptTuningConfig,
 )
 CONFIG_TESTING_KWARGS = (
+    {
+        "target_modules": None,
+        "adapter_dim": 16,
+        "num_expert": 4,
+        "sharing_down": False,
+        "sharing_up": True,
+        "return_two_views": True
+    },
     # IA³
     {
         "target_modules": None,
@@ -79,12 +89,13 @@ CONFIG_TESTING_KWARGS = (
 )
 
 CLASSES_MAPPING = {
-    "ia3": (IA3Config, CONFIG_TESTING_KWARGS[0]),
-    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[1]),
-    "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[2]),
-    "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[3]),
-    "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
-    "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
+    "adamix": (AdaMixConfig, CONFIG_TESTING_KWARGS[0]),
+    "ia3": (IA3Config, CONFIG_TESTING_KWARGS[1]),
+    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[2]),
+    "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[3]),
+    "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[4]),
+    "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[5]),
+    "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[6]),
 }
 
 
@@ -426,7 +437,7 @@ class PeftCommonTester:
             _ = model.generate(inputs["input_ids"])
 
     def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig):
+        if config_cls not in (AdaMixConfig, IA3Config, LoraConfig, PrefixTuningConfig):
             return
 
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
@@ -463,7 +474,7 @@ class PeftCommonTester:
         self.assertEqual(model.base_model_torch_dtype, torch.float16)
 
     def _test_training(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (IA3Config, LoraConfig):
+        if config_cls not in (AdaMixConfig, IA3Config, LoraConfig):
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -480,7 +491,12 @@ class PeftCommonTester:
         output = model(**inputs)[0]
         loss = output.sum()
         loss.backward()
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        if config_cls == IA3Config:
+            parameter_prefix = "ia3"
+        elif config_cls == AdaMixConfig:
+            parameter_prefix = "adamix"
+        else:
+            parameter_prefix = "lora"
         for n, param in model.named_parameters():
             if (parameter_prefix in n) or ("modules_to_save" in n):
                 self.assertIsNotNone(param.grad)
@@ -578,7 +594,7 @@ class PeftCommonTester:
         self.assertLess(nb_trainable, nb_trainable_all)
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
+        if config_cls not in (AdaMixConfig, LoraConfig, IA3Config):
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -602,7 +618,12 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        if config_cls == IA3Config:
+            parameter_prefix = "ia3"
+        elif config_cls == AdaMixConfig:
+            parameter_prefix = "adamix"
+        else:
+            parameter_prefix = "lora"
         for n, param in model.named_parameters():
             if parameter_prefix in n:
                 self.assertIsNotNone(param.grad)

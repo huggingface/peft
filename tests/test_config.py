@@ -23,6 +23,7 @@ import pytest
 
 from peft import (
     AdaptionPromptConfig,
+    AdaMixConfig,
     IA3Config,
     LoraConfig,
     PeftConfig,
@@ -44,6 +45,7 @@ class PeftConfigTestMixin:
         PromptTuningConfig,
         AdaptionPromptConfig,
         IA3Config,
+        AdaMixConfig,
     )
 
 

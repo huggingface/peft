@@ -395,6 +395,25 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "falcon": ["query_key_value"],
 }
 
+TRANSFORMERS_MODELS_TO_ADAMIX_TARGET_MODULES_MAPPING = {
+    "bert": ["BertLayer"]
+    # "t5": ["k", "v", "wo"],
+    # "mt5": ["k", "v", "wi_1"],
+    # "gpt2": ["c_attn", "mlp.c_proj"],
+    # "bloom": ["query_key_value", "mlp.dense_4h_to_h"],
+    # "roberta": ["key", "value", "output.dense"],
+    # "opt": ["q_proj", "k_proj", "fc2"],
+    # "gptj": ["q_proj", "v_proj", "fc_out"],
+    # "gpt_neox": ["query_key_value", "dense_4h_to_h"],
+    # "gpt_neo": ["q_proj", "v_proj", "c_proj"],
+    # "bart": ["q_proj", "v_proj", "fc2"],
+    # "gpt_bigcode": ["c_attn", "mlp.c_proj"],
+    # "llama": ["k_proj", "v_proj", "down_proj"],
+    # "bert": ["key", "value", "output.dense"],
+    # "deberta-v2": ["key_proj", "value_proj", "output.dense"],
+    # "deberta": ["in_proj", "output.dense"],
+}
+
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {

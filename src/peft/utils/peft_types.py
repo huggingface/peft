@@ -27,6 +27,7 @@ class PeftType(str, enum.Enum):
     ADALORA = "ADALORA"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    ADAMIX = "ADAMIX"
 
 
 class TaskType(str, enum.Enum):
