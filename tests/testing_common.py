@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import pickle
 import tempfile
 from collections import OrderedDict
 from dataclasses import replace
@@ -345,6 +346,12 @@ class PeftCommonTester:
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig, IA3Config):
+            # Merge layers only supported for LoRA and IA³
+            return
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -356,34 +363,34 @@ class PeftCommonTester:
         if config.peft_type not in ("IA3", "LORA"):
             with self.assertRaises(AttributeError):
                 model = model.merge_and_unload()
-        elif model.config.model_type == "gpt2":
-            with self.assertRaises(ValueError):
-                model = model.merge_and_unload()
-        else:
-            dummy_input = self.prepare_inputs_for_testing()
-            model.eval()
-            logits_unmerged = model(**dummy_input)[0]
 
-            model = model.merge_and_unload()
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+        logits_unmerged = model(**dummy_input)[0]
 
-            logits_merged = model(**dummy_input)[0]
+        model = model.merge_and_unload()
+        logits_merged = model(**dummy_input)[0]
 
-            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
 
-            logits_transformers = transformers_model(**dummy_input)[0]
+        # For this test to work, init_lora_weights must be False. This ensures that weights are not initialized to
+        # the identity transform.
+        transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        logits_transformers = transformers_model(**dummy_input)[0]
+        self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
 
-            self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
-            if config_cls == LoraConfig:  # merge does not change logits for IA3
-                self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
-
+        # test that the logits are identical after a save-load-roundtrip
+        if hasattr(model, "save_pretrained"):
+            # model is a transformers model
             with tempfile.TemporaryDirectory() as tmp_dirname:
                 model.save_pretrained(tmp_dirname)
-
                 model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
+        else:
+            # model is not a transformers model
+            model_from_pretrained = pickle.loads(pickle.dumps(model))
 
-                logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
-
-                self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
+        logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
+        self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -471,7 +478,6 @@ class PeftCommonTester:
 
         config = config_cls(
             base_model_name_or_path=model_id,
-            layers_to_transform=[0],
             **config_kwargs,
         )
         model = self.transformers_class.from_pretrained(model_id)
@@ -486,6 +492,10 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
+
+        # set to eval mode, since things like dropout can affect the output otherwise
+        model.eval()
+        logits = model(**inputs)[0][0]
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname, safe_serialization=True)
@@ -558,7 +568,7 @@ class PeftCommonTester:
 
         model = self.transformers_class.from_pretrained(model_id)
 
-        if not model.supports_gradient_checkpointing:
+        if not getattr(model, "supports_gradient_checkpointing", False):
             return
 
         model.gradient_checkpointing_enable()
@@ -674,9 +684,6 @@ class PeftCommonTester:
 
         if config.peft_type not in ("LORA"):
             with self.assertRaises(AttributeError):
-                model = model.unload()
-        elif model.config.model_type == "gpt2":
-            with self.assertRaises(ValueError):
                 model = model.unload()
         else:
             dummy_input = self.prepare_inputs_for_testing()
