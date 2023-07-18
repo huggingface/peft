@@ -150,6 +150,7 @@ class AdaMixModel(torch.nn.Module):
         self.model = model
         self.peft_config = config
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
+        self.forward = self.model.forward
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
@@ -200,8 +201,8 @@ class AdaMixModel(torch.nn.Module):
         #  Create the Mixture of Adapter Module
         if not hasattr(self.model.config, 'hidden_size'):
             raise KeyError ("Hidden size of the model must be known")
-
-        new_module = ExpertSoup(self.model.config.hidden_size, **adamix_config.to_dict())
+        
+        new_module = ExpertSoup(self.model.config.hidden_size, adapter_name, adamix_config.adapter_dim, adamix_config.num_expert, adamix_config.sharing_down, adamix_config.sharing_up, adamix_config.return_two_views, adamix_config.inference_mode)
         return new_module
 
     def _check_target_module_exists(self, adamix_config, key):
@@ -248,8 +249,16 @@ class AdaMixModel(torch.nn.Module):
             return True
         return False
 
+    @staticmethod
+    def composite_forward(f_out, f_in):
+        def wrapper(hidden_states, *args, **kwargs):
+            print("HS", hidden_states.shape)
+            return (f_out(f_in(hidden_states, *args, **kwargs)[0]),)
+        return wrapper
+
     def _add_adapter_module(self, target, new_module):
         target.add_module('adamix', new_module)
+        target.forward = self.composite_forward(new_module.forward, target.forward)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -314,8 +323,6 @@ def mark_only_adamix_as_trainable(model: nn.Module) -> None:
     for n, p in model.named_parameters():
         if "adamix" not in n:
             p.requires_grad = False
-        else:
-            p.requires_grad = True
 
 def get_two_view_from_model(model: nn.Module) -> Tuple[Tuple]:
     # NOTE: To perform backward pass on the two views, you must set retain_graph=True in the optimizer
@@ -342,20 +349,22 @@ def get_two_view_from_model(model: nn.Module) -> Tuple[Tuple]:
 # #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 # #  ------------------------------------------------------------------------------------------
 
-class MixtureSoup(torch.nn.Module):
+class MixtureSoup(nn.Module):
 
-    def __init__(self, expert, num_local_experts=1):
-        super(MixtureSoup, self).__init__()
-
-        self.expert_mixture = torch.nn.ModuleList(
-            [copy.deepcopy(expert) for i in range(num_local_experts)])
+    def __init__(self, expert, adapter_name, inference_mode=False, num_local_experts=1):
+        super().__init__()
+        self.inference_mode = inference_mode
+        self.dict_keys = ['_'.join([adapter_name, str(i)]) for i in range(num_local_experts)]
+        self.expert_mixture = nn.ModuleDict({})
+        for i in self.dict_keys:
+            self.expert_mixture[i] = copy.deepcopy(expert)
         self.num_local_experts = num_local_experts
 
     def get_expert_by_idx(self, idx):
-        return self.expert_mixture[idx]
+        return self.expert_mixture[self.dict_keys[idx]]
 
-    def expert_soup_forward(self, hidden_state):
-        output = F.linear(hidden_state,
+    def expert_soup_forward(self, x):
+        output = F.linear(x,
                           self.parameter_dict["weight"],
                           self.parameter_dict["bias"])
         return output
@@ -371,50 +380,58 @@ class MixtureSoup(torch.nn.Module):
                     p_name = "bias"
                 self.parameter_dict[p_name] = self.parameter_dict[p_name] + s_param/self.num_local_experts
         
-    def forward(self, hidden_state: torch.Tensor):
+    def forward(self, x: torch.Tensor):
         expert_output = None
 
-        if self.expert_mixture[0].training:
+        if not self.inference_mode:
+            print("Is training")
             expert_idx = torch.randint(low=0, high=self.num_local_experts, size=(1,)).item()  # selected expert
-            expert_output = self.get_expert_by_idx(expert_idx)(hidden_state)
+            expert_output = self.get_expert_by_idx(expert_idx)(x)
+            print("RG_MS", expert_output.requires_grad)
 
         else:
+            print("Is val")
             self.expert_soup()
-            expert_output = self.expert_soup_forward(input[0])
+            expert_output = self.expert_soup_forward(x)
+            print("RG_MS", expert_output.requires_grad)
 
         return expert_output
 
 class ExpertSoup(nn.Module):
-    def __init__(self, hidden_dim, adapter_dim, num_expert=4, sharing_down=False, sharing_up=True, return_two_views=False, **kwargs):
+    def __init__(self, hidden_dim, adapter_name, adapter_dim, num_expert=4, sharing_down=False, sharing_up=True, return_two_views=False, inference_mode=False):
         super().__init__()
 
+        self.return_two_views = return_two_views
+        self.inference_mode = inference_mode
         if sharing_down:
-            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), 1)
+            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, 1)
         else:
-            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), num_expert)
+            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, num_expert)
 
         if sharing_up:
-            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), 1)
+            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, 1)
         else:
-            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), num_expert)
+            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, num_expert)
 
         self.two_views = []
 
     # NOTE: During training, you must forward pass the input twice to get two outputs and apply the KL div minimization
     # Use the first ouput as input to next layer
     # During inference, only one forward pass is required
-    def forward(self, x, residual):
-        result1 = self.MoA_down(x)
-        result1 = nn.GeLU(result1)
+    def forward(self, x):
+        print("In ES forward")
+        result1 = F.gelu(self.MoA_down(x))
         result1 = self.MoA_up(result1)
-        result1 = result1 + residual
+        result1 = result1 + x
 
         if self.training and self.return_two_views:
-            result2 = self.MoA_down(x)
-            result2 = nn.GeLU(result2)
+            print("TwoViews")
+            result2 = F.gelu(self.MoA_down(x))
             result2 = self.MoA_up(result2)
-            result2 = result2 + residual
+            result2 = result2 + x
             self.two_views = torch.stack([result1, result2], dim=0)
+        print("RG_ES", result1.requires_grad, result2.requires_grad)
+        print("shape", result1.shape, x.shape)
         return result1
         
 

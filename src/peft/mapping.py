@@ -67,7 +67,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "LORA": LoraConfig,
     "ADALORA": AdaLoraConfig,
     "IA3": IA3Config,
-    "AdaMix": AdaMixConfig,
+    "ADAMIX": AdaMixConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {

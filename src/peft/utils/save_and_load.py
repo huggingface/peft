@@ -111,13 +111,21 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.IA3):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.IA3, PeftType.ADAMIX):
         peft_model_state_dict = {}
-        parameter_prefix = "ia3_" if config.peft_type == PeftType.IA3 else "lora_"
+        if config.peft_type == PeftType.IA3:
+            parameter_prefix = "ia3_"
+        elif config.peft_type == PeftType.ADAMIX:
+            parameter_prefix = "expert_mixture_"
+        elif config.peft_type == PeftType.LORA:
+            parameter_prefix = "lora_"
         for k, v in state_dict.items():
             if parameter_prefix in k:
-                suffix = k.split(parameter_prefix)[1]
-                if "." in suffix:
+                prefix, suffix = k.split(parameter_prefix)
+                if config.peft_type == PeftType.ADAMIX:
+                    split_suffix = suffix.split(".")
+                    k = f"{prefix+parameter_prefix[:-1]}.{adapter_name}_{split_suffix[0]}.{split_suffix[1]}"
+                elif "." in suffix:
                     suffix_to_replace = ".".join(suffix.split(".")[1:])
                     k = k.replace(suffix_to_replace, f"{adapter_name}.{suffix_to_replace}")
                 else:

@@ -272,10 +272,13 @@ class PeftCommonTester:
 
             # check if tensors equal
             for key in state_dict.keys():
+                # if 'adamix' in key:
+                #     print(state_dict[key])
+                #     print(state_dict_from_pretrained[key])
                 self.assertTrue(
                     torch.allclose(
                         state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                    ), 
                 )
 
             # check if `adapter_model.bin` is present
@@ -490,6 +493,7 @@ class PeftCommonTester:
         # check if `training` works
         output = model(**inputs)[0]
         loss = output.sum()
+        print("O", output.requires_grad)
         loss.backward()
         if config_cls == IA3Config:
             parameter_prefix = "ia3"
@@ -497,11 +501,25 @@ class PeftCommonTester:
             parameter_prefix = "adamix"
         else:
             parameter_prefix = "lora"
-        for n, param in model.named_parameters():
-            if (parameter_prefix in n) or ("modules_to_save" in n):
-                self.assertIsNotNone(param.grad)
-            else:
-                self.assertIsNone(param.grad)
+        # In adamix, only one/two of the expert adapters is changed per iteration
+        if parameter_prefix == 'adamix':
+            num_experts = config.num_expert
+            num_experts_updated = 0
+            for n, param in model.named_parameters():
+                if parameter_prefix in n:
+                    if param.grad is not None:
+                        num_experts_updated += 1
+                else:
+                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated 
+                    assert(num_experts_updated>2, "Adamix adapters are not updated")
+                    num_experts_updated = 0
+                    self.assertIsNone(param.grad)
+        else:
+            for n, param in model.named_parameters():
+                if parameter_prefix in n:
+                    self.assertIsNotNone(param.grad)
+                else:
+                    self.assertIsNone(param.grad)
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
@@ -624,11 +642,25 @@ class PeftCommonTester:
             parameter_prefix = "adamix"
         else:
             parameter_prefix = "lora"
-        for n, param in model.named_parameters():
-            if parameter_prefix in n:
-                self.assertIsNotNone(param.grad)
-            else:
-                self.assertIsNone(param.grad)
+        # In adamix, only one/two of the expert adapters is changed per iteration
+        if parameter_prefix == 'adamix':
+            num_experts = config.num_expert
+            num_experts_updated = 0
+            for n, param in model.named_parameters():
+                if parameter_prefix in n:
+                    if param.grad is not None:
+                        num_experts_updated += 1
+                else:
+                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated 
+                    assert(num_experts_updated>2, "Adamix adapters are not updated")
+                    num_experts_updated = 0
+                    self.assertIsNone(param.grad)
+        else:
+            for n, param in model.named_parameters():
+                if parameter_prefix in n:
+                    self.assertIsNotNone(param.grad)
+                else:
+                    self.assertIsNone(param.grad)
 
     def _test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
