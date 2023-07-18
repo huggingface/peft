@@ -281,6 +281,8 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "chatglm": ["query_key_value"],
     "gpt_bigcode": ["c_attn"],
     "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "falcon": ["query_key_value"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
