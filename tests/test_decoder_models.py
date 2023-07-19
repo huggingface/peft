@@ -19,6 +19,7 @@ from parameterized import parameterized
 from transformers import AutoModelForCausalLM
 
 from peft import AdaLoraConfig
+
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
@@ -187,8 +188,8 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         # test for issue #730
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
         config_kwargs = {
-            'target_modules': None,
-            'task_type': 'CAUSAL_LM',
-            'lora_dropout': 0.0,
+            "target_modules": None,
+            "task_type": "CAUSAL_LM",
+            "lora_dropout": 0.0,
         }
         self._test_generate(model_id, AdaLoraConfig, config_kwargs)
