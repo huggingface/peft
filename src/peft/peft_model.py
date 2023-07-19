@@ -1199,7 +1199,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     inputs_embeds=inputs_embeds, decoder_inputs_embeds=decoder_inputs_embeds, **kwargs
                 )
 
-    def generate(self, task_ids: torch.Tensor = None, **kwargs):
+    def generate(self, **kwargs):
         peft_config = self.active_peft_config
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
         self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
@@ -1240,7 +1240,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     input_ids = kwargs.pop("input_ids")
                     inputs_embeds = self.word_embeddings(input_ids)
                     batch_size = inputs_embeds.shape[0]
-                    prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
+                    prompts = self.get_prompt(batch_size=batch_size, task_ids=kwargs.get("task_ids", None))
+                    if "task_ids" in kwargs:
+                        del kwargs["task_ids"]
                     prompts = prompts.to(inputs_embeds.dtype)
 
                     inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)
