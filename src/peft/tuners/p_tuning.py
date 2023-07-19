@@ -143,9 +143,12 @@ class PromptEncoder(torch.nn.Module):
                 )
 
             elif self.encoder_type == PromptEncoderReparameterizationType.MLP:
-                warnings.warn(
-                    f"for {self.encoder_type}, the `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
-                )
+                encoder_num_layers_default = PromptEncoderConfig.encoder_num_layers
+                if config.encoder_num_layers != encoder_num_layers_default:
+                    warnings.warn(
+                        f"for {self.encoder_type}, the argument `encoder_num_layers` is ignored. "
+                        f"Exactly {encoder_num_layers_default} MLP layers are used."
+                    )
                 layers = [
                     torch.nn.Linear(self.input_size, self.hidden_size),
                     torch.nn.ReLU(),
