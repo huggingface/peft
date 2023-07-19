@@ -26,7 +26,6 @@ from peft.peft_model import PeftModel
 from peft.tuners.multitask_prompt_tuning import MultitaskPromptTuningConfig
 from peft.utils.other import prepare_model_for_int8_training
 from peft.utils.save_and_load import get_peft_model_state_dict
-from tests.test_adaption_prompt import AdaptionPromptTester
 from tests.testing_common import PeftCommonTester
 
 
@@ -41,7 +40,7 @@ def is_llama_available() -> bool:
 if is_llama_available():
     # We guard the import statement so that our unit tests will pass in CI environments
     # that don't have a transformers package with Llama.
-    from transformers import LlamaForCausalLM
+    from transformers import LlamaConfig, LlamaForCausalLM
 
 
 class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
@@ -60,7 +59,14 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
     @staticmethod
     def _create_test_llama_config():
         """Create a test config for a small Llama model for testing."""
-        return AdaptionPromptTester._create_test_llama_config()
+        return LlamaConfig(
+            vocab_size=16,
+            hidden_size=8,
+            intermediate_size=8,
+            num_hidden_layers=8,
+            num_attention_heads=4,
+            use_cache=False,
+        )
 
     @classmethod
     def _create_multitask_prompt_tuning_config(cls) -> MultitaskPromptTuningConfig:
