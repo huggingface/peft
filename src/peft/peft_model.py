@@ -119,6 +119,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
+        # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
+        # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
+        # behavior we disable that in this line.
+        if hasattr(self.base_model, "disable_pretraining_tp") and hasattr(self.config, "pretraining_tp"):
+            model.disable_pretraining_tp()
+
     def save_pretrained(
         self,
         save_directory: str,
@@ -394,6 +400,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # if using DS Zero 3 and the weights are initialized empty
             if num_params == 0 and hasattr(param, "ds_numel"):
                 num_params = param.ds_numel
+
+            # Due to the design of 4bit linear layers from bitsandbytes
+            # one needs to multiply the number of parameters by 2 to get
+            # the correct number of parameters
+            if param.__class__.__name__ == "Params4bit":
+                num_params = num_params * 2
 
             all_param += num_params
             if param.requires_grad:
