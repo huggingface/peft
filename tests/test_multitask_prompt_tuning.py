@@ -18,6 +18,7 @@ import tempfile
 
 import torch
 from torch.testing import assert_close
+from transformers import LlamaForCausalLM
 
 from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
@@ -25,7 +26,6 @@ from peft.tuners.multitask_prompt_tuning import MultitaskPromptTuningConfig
 from peft.utils.other import prepare_model_for_int8_training
 from peft.utils.save_and_load import get_peft_model_state_dict
 from tests.test_adaption_prompt import AdaptionPromptTester
-from transformers import LlamaForCausalLM
 
 
 class MultiTaskPromptTuningTester(AdaptionPromptTester):
