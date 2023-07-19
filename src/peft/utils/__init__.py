@@ -28,6 +28,7 @@ from .other import (
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
+    CLAMP_QUANTILE,
     _is_matching_module_name,
     _set_trainable,
     add_library_to_model_card,
@@ -40,6 +41,7 @@ from .other import (
     _set_adapter,
     _freeze_adapter,
     ModulesToSaveWrapper,
+    _prepare_prompt_learning_config,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
