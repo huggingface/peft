@@ -20,7 +20,6 @@ from unittest import TestCase
 
 import torch
 from torch.testing import assert_close
-from transformers import LlamaForCausalLM
 
 from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
