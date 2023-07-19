@@ -122,8 +122,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
         # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
         # behavior we disable that in this line.
-        if hasattr(self.base_model, "disable_pretraining_tp") and hasattr(self.config, "pretraining_tp"):
-            model.disable_pretraining_tp()
+        if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
+            self.base_model.config.pretraining_tp = 1
 
     def save_pretrained(
         self,
