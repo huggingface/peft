@@ -21,6 +21,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
     LlamaForCausalLM,
     WhisperForConditionalGeneration,
 )
@@ -274,3 +275,44 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(0)
         _ = model(random_input)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_print_4bit_expected(self):
+        EXPECTED_TRAINABLE_PARAMS = 294912
+        EXPECTED_ALL_PARAMS = 125534208
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_4bit=True,
+        )
+
+        config = LoraConfig(
+            r=8,
+        )
+        model = get_peft_model(model, config)
+        trainable_params, all_params = model.get_nb_trainable_parameters()
+
+        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
+        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
+
+        # test with double quant
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+        )
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+        )
+
+        config = LoraConfig(
+            r=8,
+        )
+        model = get_peft_model(model, config)
+        trainable_params, all_params = model.get_nb_trainable_parameters()
+
+        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
+        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
