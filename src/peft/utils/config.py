@@ -33,6 +33,7 @@ class PeftType(str, enum.Enum):
     LORA = "LORA"
     ADALORA = "ADALORA"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
+    IA3 = "IA3"
 
 
 class TaskType(str, enum.Enum):
@@ -41,6 +42,7 @@ class TaskType(str, enum.Enum):
     CAUSAL_LM = "CAUSAL_LM"
     TOKEN_CLS = "TOKEN_CLS"
     QUESTION_ANS = "QUESTION_ANS"
+    FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
 
 
 @dataclass
@@ -55,13 +57,12 @@ class PeftConfigMixin(PushToHubMixin):
         peft_type (Union[[`~peft.utils.config.PeftType`], `str`]): The type of Peft method to use.
     """
     peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
-
-    @property
-    def __dict__(self):
-        return asdict(self)
+    auto_mapping: Optional[dict] = field(
+        default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
+    )
 
     def to_dict(self):
-        return self.__dict__
+        return asdict(self)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
@@ -78,9 +79,14 @@ class PeftConfigMixin(PushToHubMixin):
             raise AssertionError(f"Provided path ({save_directory}) should be a directory, not a file")
 
         os.makedirs(save_directory, exist_ok=True)
+        auto_mapping_dict = kwargs.pop("auto_mapping_dict", None)
 
-        output_dict = self.__dict__
+        output_dict = asdict(self)
         output_path = os.path.join(save_directory, CONFIG_NAME)
+
+        # Add auto mapping details for custom models.
+        if auto_mapping_dict is not None:
+            output_dict["auto_mapping"] = auto_mapping_dict
 
         # save it
         with open(output_path, "w") as writer:
@@ -103,7 +109,7 @@ class PeftConfigMixin(PushToHubMixin):
             else pretrained_model_name_or_path
         )
 
-        hf_hub_download_kwargs, class_kwargs, other_kwargs = cls._split_kwargs(kwargs)
+        hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)
@@ -159,10 +165,10 @@ class PeftConfigMixin(PushToHubMixin):
     def _get_peft_type(
         cls,
         model_id,
-        subfolder: Optional[str] = None,
-        revision: Optional[str] = None,
-        cache_dir: Optional[str] = None,
+        **hf_hub_download_kwargs,
     ):
+        subfolder = hf_hub_download_kwargs.get("subfolder", None)
+
         path = os.path.join(model_id, subfolder) if subfolder is not None else model_id
 
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
@@ -170,7 +176,9 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             try:
                 config_file = hf_hub_download(
-                    model_id, CONFIG_NAME, subfolder=subfolder, revision=revision, cache_dir=cache_dir
+                    model_id,
+                    CONFIG_NAME,
+                    **hf_hub_download_kwargs,
                 )
             except Exception:
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{model_id}'")

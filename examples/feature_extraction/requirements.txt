@@ -1,0 +1,10 @@
+git+https://github.com/huggingface/peft
+git+https://github.com/huggingface/accelerate
+git+https://github.com/huggingface/transformers
+datasets
+evaluate
+hnswlib
+pandas
+tqdm
+huggingface_hub
+wandb

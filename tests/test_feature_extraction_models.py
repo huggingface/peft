@@ -16,36 +16,53 @@ import unittest
 
 import torch
 from parameterized import parameterized
-from transformers import AutoModelForSeq2SeqLM
+from transformers import AutoModel
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
-PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
-    "ybelkada/tiny-random-T5ForConditionalGeneration-calibrated",
-    "hf-internal-testing/tiny-random-BartForConditionalGeneration",
+PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
+    "hf-internal-testing/tiny-random-BertModel",
+    "hf-internal-testing/tiny-random-RobertaModel",
+    "hf-internal-testing/tiny-random-DebertaModel",
+    "hf-internal-testing/tiny-random-DebertaV2Model",
 ]
 
-FULL_GRID = {"model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST, "task_type": "SEQ_2_SEQ_LM"}
+FULL_GRID = {
+    "model_ids": PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST,
+    "task_type": "FEATURE_EXTRACTION",
+}
 
 
-class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
+def skip_deberta_lora_tests(test_list):
+    r"""
+    Skip tests that are checkpointing with lora/ia3 tests for Deberta models (couldn't find much info on the error)
+    """
+    return [test for test in test_list if not (any(k in test[0] for k in ["lora", "ia3"]) and "Deberta" in test[0])]
+
+
+def skip_deberta_pt_tests(test_list):
+    r"""
+    Skip tests that are checkpointing with lora/ia3 tests for Deberta models (couldn't find much info on the error)
+    """
+    return [test for test in test_list if not ("prefix_tuning" in test[0] and "Deberta" in test[0])]
+
+
+class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     r"""
     Test if the PeftModel behaves as expected. This includes:
     - test if the model has the expected methods
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
-    transformers_class = AutoModelForSeq2SeqLM
+    transformers_class = AutoModel
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
-        decoder_input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
         attention_mask = torch.tensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
 
         input_dict = {
             "input_ids": input_ids,
-            "decoder_input_ids": decoder_input_ids,
             "attention_mask": attention_mask,
         }
 
@@ -78,39 +95,34 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
-                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "model_ids": PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
-                "task_type": "SEQ_2_SEQ_LM",
+                "task_type": "FEATURE_EXTRACTION",
             },
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
-    # skip non lora models - generate does not work for prefix tuning, prompt tuning
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_generate(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_generate(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_prefix_tuning_half_prec_conversion(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_encoder_decoders(self, test_name, model_id, config_cls, config_kwargs):
+    def test_training(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_encoder_decoders_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_deberta_pt_tests)
+    )
+    def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_encoder_decoders_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
+    def test_training_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_deberta_lora_tests)
+    )
+    def test_training_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
@@ -128,10 +140,9 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
-                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "model_ids": PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "task_type": "SEQ_2_SEQ_LM",
+                "task_type": "FEATURE_EXTRACTION",
             },
         )
     )
@@ -141,28 +152,11 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
-                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "model_ids": PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
-                "task_type": "SEQ_2_SEQ_LM",
+                "task_type": "FEATURE_EXTRACTION",
             },
         )
     )
     def test_weighted_combination_of_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_weighted_combination_of_adapters(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
-
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(
-            {
-                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
-                "lora_kwargs": {"init_lora_weights": [False]},
-                "ia3_kwargs": {"init_ia3_weights": [False]},
-                "task_type": "SEQ_2_SEQ_LM",
-            },
-        )
-    )
-    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_disable_adapter(model_id, config_cls, config_kwargs)

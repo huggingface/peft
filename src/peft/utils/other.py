@@ -178,6 +178,48 @@ def _set_adapter(model, adapter_name):
             module.active_adapter = adapter_name
 
 
+def _prepare_prompt_learning_config(peft_config, model_config):
+    if peft_config.num_layers is None:
+        if "num_hidden_layers" in model_config:
+            num_layers = model_config["num_hidden_layers"]
+        elif "num_layers" in model_config:
+            num_layers = model_config["num_layers"]
+        elif "n_layer" in model_config:
+            num_layers = model_config["n_layer"]
+        else:
+            raise ValueError("Please specify `num_layers` in `peft_config`")
+        peft_config.num_layers = num_layers
+
+    if peft_config.token_dim is None:
+        if "hidden_size" in model_config:
+            token_dim = model_config["hidden_size"]
+        elif "n_embd" in model_config:
+            token_dim = model_config["n_embd"]
+        elif "d_model" in model_config:
+            token_dim = model_config["d_model"]
+        else:
+            raise ValueError("Please specify `token_dim` in `peft_config`")
+        peft_config.token_dim = token_dim
+
+    if peft_config.num_attention_heads is None:
+        if "num_attention_heads" in model_config:
+            num_attention_heads = model_config["num_attention_heads"]
+        elif "n_head" in model_config:
+            num_attention_heads = model_config["n_head"]
+        elif "num_heads" in model_config:
+            num_attention_heads = model_config["num_heads"]
+        elif "encoder_attention_heads" in model_config:
+            num_attention_heads = model_config["encoder_attention_heads"]
+        else:
+            raise ValueError("Please specify `num_attention_heads` in `peft_config`")
+        peft_config.num_attention_heads = num_attention_heads
+
+    if getattr(peft_config, "encoder_hidden_size", None) is None:
+        setattr(peft_config, "encoder_hidden_size", peft_config.token_dim)
+
+    return peft_config
+
+
 def fsdp_auto_wrap_policy(model):
     import functools
     import os
@@ -239,9 +281,54 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "chatglm": ["query_key_value"],
     "gpt_bigcode": ["c_attn"],
     "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
 }
 
-COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks"]
+TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
+    "t5": ["k", "v", "wo"],
+    "mt5": ["k", "v", "wi_1"],
+    "gpt2": ["c_attn", "mlp.c_proj"],
+    "bloom": ["query_key_value", "mlp.dense_4h_to_h"],
+    "roberta": ["key", "value", "output.dense"],
+    "opt": ["q_proj", "k_proj", "fc2"],
+    "gptj": ["q_proj", "v_proj", "fc_out"],
+    "gpt_neox": ["query_key_value", "dense_4h_to_h"],
+    "gpt_neo": ["q_proj", "v_proj", "c_proj"],
+    "bart": ["q_proj", "v_proj", "fc2"],
+    "gpt_bigcode": ["c_attn", "mlp.c_proj"],
+    "llama": ["k_proj", "v_proj", "down_proj"],
+    "bert": ["key", "value", "output.dense"],
+    "deberta-v2": ["key_proj", "value_proj", "output.dense"],
+    "deberta": ["in_proj", "output.dense"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+}
+
+TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
+    "t5": ["wo"],
+    "mt5": [],
+    "gpt2": ["mlp.c_proj"],
+    "bloom": ["mlp.dense_4h_to_h"],
+    "roberta": ["output.dense"],
+    "opt": ["fc2"],
+    "gptj": ["fc_out"],
+    "gpt_neox": ["dense_4h_to_h"],
+    "gpt_neo": ["c_proj"],
+    "bart": ["fc2"],
+    "gpt_bigcode": ["mlp.c_proj"],
+    "llama": ["down_proj"],
+    "bert": ["output.dense"],
+    "deberta-v2": ["output.dense"],
+    "deberta": ["output.dense"],
+    "RefinedWeb": ["query_key_value"],
+    "RefinedWebModel": ["query_key_value"],
+    "falcon": ["query_key_value"],
+}
+
+COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
@@ -269,3 +356,4 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
+CLAMP_QUANTILE = 0.99

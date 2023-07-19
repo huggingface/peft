@@ -22,10 +22,13 @@ from .other import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     COMMON_LAYERS_PATTERN,
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
+    CLAMP_QUANTILE,
     _set_trainable,
     add_library_to_model_card,
     bloom_model_postprocess_past_key_value,
@@ -37,6 +40,7 @@ from .other import (
     _set_adapter,
     _freeze_adapter,
     ModulesToSaveWrapper,
+    _prepare_prompt_learning_config,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict

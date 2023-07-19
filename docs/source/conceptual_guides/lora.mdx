@@ -33,6 +33,32 @@ parameters. However, for simplicity and further parameter efficiency, in Transfo
 attention blocks only. The resulting number of trainable parameters in a LoRA model depends on the size of the low-rank 
 update matrices, which is determined mainly by the rank `r` and the shape of the original weight matrix.
 
+## Merge LoRA weights into the base model
+
+While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA model. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model which allows you to effectively use the newly merged model as a standalone model.
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_diagram.png"/>
+</div>
+
+This works because during training, the smaller weight matrices (*A* and *B* in the diagram above) are separate. But once training is complete, the weights can actually be merged into a new weight matrix that is identical.
+
+## Utils for LoRA
+
+Use [`~LoraModel.merge_adapter`] to merge the LoRa layers into the base model while retaining the PeftModel.
+This will help in later unmerging, deleting, loading different adapters and so on.
+
+Use [`~LoraModel.unmerge_adapter`] to unmerge the LoRa layers from the base model while retaining the PeftModel.
+This will help in later merging, deleting, loading different adapters and so on.
+
+Use [`~LoraModel.unload`] to get back the base model without the merging of the active lora modules. 
+This will help when you want to get back the pretrained base model in some applications when you want to reset the model to its original state.
+For example, in Stable Diffusion WebUi, when the user wants to infer with base model post trying out LoRAs.
+
+Use [`~LoraModel.delete_adapter`] to delete an existing adapter.
+
+Use [`~LoraModel.add_weighted_adapter`] to combine multiple LoRAs into a new adapter based on the user provided weighing scheme.
+
 ## Common LoRA parameters in PEFT
 
 As with other methods supported by PEFT, to fine-tune a model using LoRA, you need to:
