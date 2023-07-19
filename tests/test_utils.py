@@ -73,7 +73,6 @@ class TestMatchingModuleName(unittest.TestCase):
         ("transformer.h.1.attn.attention.q_proj", ["q_proj", "v_proj"], [0, 1, 2], ["h"], True),
         # TODO: UNCLEAR if the output is actually  what we would expect
         ("transformer.h.1.attn.attention.q_proj.foo", ["q_proj"], None, [], False),
-        ("transformer.hi.1.attn.attention.q_proj.foo", ["q_proj"], None, [], False),
         ("foo.barq_proj", ["q_proj"], None, [], True),
         ("foo.bar.1.baz", ["baz"], [1], ["foo"], False),
         ("foo.bar.1.baz", ["baz"], [1], ["baz"], False),
@@ -102,15 +101,14 @@ class TestMatchingModuleName(unittest.TestCase):
         # 2. target_modules
         # 3. layers_to_transform
         # 4. layers_pattern
-        # 5. expected result
         # some basic examples
-        ("", "foo", [0], [], False),
-        ("", "foo", None, ["foo"], False),
-        ("", "foo", [0], ["foo"], False),
+        ("", "foo", [0], []),
+        ("", "foo", [0], ["foo"]),
+        ("", "foo|bar", [1, 2, 3], None),
     ]
 
     @parameterized.expand(invalid_test_cases)
-    def test_invalid_options_raise(self, key, target_modules, layers_to_transform, layers_pattern, expected):
+    def test_invalid_options_raise(self, key, target_modules, layers_to_transform, layers_pattern):
         # check that an error is raised when users try to use layer indexing with a str target module, which does not
         # work
         with self.assertRaises(ValueError) as exc:

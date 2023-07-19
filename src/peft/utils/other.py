@@ -237,7 +237,7 @@ def _is_matching_module_name(
 
     """
     if isinstance(target_modules, str):
-        if layers_to_transform or layers_pattern:
+        if layers_to_transform:
             # When users pass a string as target_modules, layer indexing is not performed. Users may not notice this,
             # therefore it is best to raise an error.
             raise ValueError("Layer indexing not supported when setting target_modules to a str")
