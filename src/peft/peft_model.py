@@ -119,6 +119,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
+        if hasattr(self.base_model, "disable_pretraining_tp") and hasattr(self.config, "pretraining_tp"):
+            model.disable_pretraining_tp()
+
     def save_pretrained(
         self,
         save_directory: str,
