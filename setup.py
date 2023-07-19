@@ -34,6 +34,7 @@ setup(
     url="https://github.com/huggingface/peft",
     package_dir={"": "src"},
     packages=find_packages("src"),
+    package_data={"peft": ["py.typed"]},
     entry_points={},
     python_requires=">=3.8.0",
     install_requires=[
