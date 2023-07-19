@@ -383,9 +383,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 prompts = prompt_encoder(prompt_tokens)
             return prompts
 
-    def print_trainable_parameters(self):
-        """
-        Prints the number of trainable parameters in the model.
+    def get_nb_trainable_parameters(self):
+        r"""
+        Returns the number of trainable parameters and number of all parameters in the model.
         """
         trainable_params = 0
         all_param = 0
@@ -404,6 +404,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             all_param += num_params
             if param.requires_grad:
                 trainable_params += num_params
+
+        return trainable_params, all_param
+
+    def print_trainable_parameters(self):
+        """
+        Prints the number of trainable parameters in the model.
+        """
+        trainable_params, all_param = self.get_nb_trainable_parameters()
+
         print(
             f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param}"
         )

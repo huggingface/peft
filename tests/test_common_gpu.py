@@ -60,11 +60,6 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.cuda.empty_cache()
         gc.collect()
 
-    # Borrowed from: https://stackoverflow.com/questions/33767627/python-write-unittest-for-console-print
-    @pytest.fixture(autouse=True)
-    def _pass_fixtures(self, capsys):
-        self.capsys = capsys
-
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
     @pytest.mark.single_gpu_tests
@@ -285,6 +280,9 @@ class PeftGPUCommonTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     @require_bitsandbytes
     def test_print_4bit_expected(self):
+        EXPECTED_TRAINABLE_PARAMS = 294912
+        EXPECTED_ALL_PARAMS = 125534208
+
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             load_in_4bit=True,
@@ -294,12 +292,10 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=8,
         )
         model = get_peft_model(model, config)
-        model.print_trainable_parameters()
+        trainable_params, all_params = model.get_nb_trainable_parameters()
 
-        captured = self.capsys.readouterr()
-        self.assertEqual(
-            "trainable params: 294,912 || all params: 125,534,208 || trainable%: 0.23492560689115113\n", captured.out
-        )
+        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
+        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
 
         # test with double quant
         bnb_config = BitsAndBytesConfig(
@@ -316,9 +312,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=8,
         )
         model = get_peft_model(model, config)
-        model.print_trainable_parameters()
+        trainable_params, all_params = model.get_nb_trainable_parameters()
 
-        captured = self.capsys.readouterr()
-        self.assertEqual(
-            "trainable params: 294,912 || all params: 125,534,208 || trainable%: 0.23492560689115113\n", captured.out
-        )
+        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
+        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
