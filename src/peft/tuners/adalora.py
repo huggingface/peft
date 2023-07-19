@@ -64,7 +64,7 @@ class AdaLoraConfig(LoraConfig):
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
-    https://openreview.net/pdf?id=lq62uWRJjiY
+    https://openreview.net/forum?id=lq62uWRJjiY
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
@@ -149,7 +149,7 @@ class AdaLoraModel(LoraModel):
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
                 parent, target, target_name = _get_submodules(self.model, key)
-                bias = target.bias is not None
+                bias = hasattr(target, "bias") and target.bias is not None
                 if isinstance(target, LoraLayer):
                     target.update_layer(
                         adapter_name,
@@ -183,6 +183,9 @@ class AdaLoraModel(LoraModel):
                         new_module = SVDLinear4bit(
                             adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
                         )
+                    elif isinstance(target, (nn.ModuleList, nn.ModuleDict)):
+                        # it's not applicable to replace whole module lists or module dicts
+                        continue
                     else:
                         if isinstance(target, torch.nn.Linear):
                             in_features, out_features = target.in_features, target.out_features
@@ -230,7 +233,7 @@ class AdaLoraModel(LoraModel):
         orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
         assert orth_reg_weight > 0
 
-        if hasattr(outputs, "loss"):
+        if getattr(outputs, "loss", None) is not None:
             regu_loss = 0
             num_param = 0
             for n, p in self.model.named_parameters():
@@ -345,18 +348,16 @@ class AdaLoraLayer(LoraLayer):
         if lora_dropout > 0.0:
             lora_dropout_layer = nn.Dropout(p=lora_dropout)
         else:
-
-            def lora_dropout_layer(x):
-                return x
+            lora_dropout_layer = nn.Identity()
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, self.in_features))}))
+        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
         # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, 1))}))
+        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
         # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(self.out_features, r))}))
+        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
         # The current rank
         self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
         self.ranknum[adapter_name].data.fill_(float(r))

@@ -18,6 +18,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM
 
+from peft import AdaLoraConfig
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
@@ -143,6 +144,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -172,6 +174,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_non_pt_mqa,
@@ -179,3 +182,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
+
+    def test_generate_adalora_no_dropout(self):
+        # test for issue #730
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        config_kwargs = {
+            'target_modules': None,
+            'task_type': 'CAUSAL_LM',
+            'lora_dropout': 0.0,
+        }
+        self._test_generate(model_id, AdaLoraConfig, config_kwargs)
