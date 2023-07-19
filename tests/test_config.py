@@ -17,6 +17,9 @@ import os
 import pickle
 import tempfile
 import unittest
+import warnings
+
+import pytest
 
 from peft import (
     AdaptionPromptConfig,
@@ -24,6 +27,7 @@ from peft import (
     LoraConfig,
     PeftConfig,
     PrefixTuningConfig,
+    PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
 )
@@ -156,3 +160,25 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
             config = config_class()
             copied = pickle.loads(pickle.dumps(config))
             self.assertEqual(config.to_dict(), copied.to_dict())
+
+    def test_prompt_encoder_warning_num_layers(self):
+        # This test checks that if a prompt encoder config is created with an argument that is ignored, there should be
+        # warning. However, there should be no warning if the default value is used.
+        kwargs = {
+            "num_virtual_tokens": 20,
+            "num_transformer_submodules": 1,
+            "token_dim": 768,
+            "encoder_hidden_size": 768,
+        }
+
+        # there should be no warning with just default argument for encoder_num_layer
+        config = PromptEncoderConfig(**kwargs)
+        with warnings.catch_warnings():
+            PromptEncoder(config)
+
+        # when changing encoder_num_layer, there should be a warning for MLP since that value is not used
+        config = PromptEncoderConfig(encoder_num_layers=123, **kwargs)
+        with pytest.warns(UserWarning) as record:
+            PromptEncoder(config)
+        expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
+        assert str(record.list[0].message) == expected_msg
