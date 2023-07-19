@@ -644,7 +644,7 @@ class RankAllocator(object):
         else:
             # Budget decreasing with a cubic scheduler
             mul_coeff = 1 - (step - tinit) / (total_step - tfinal - tinit)
-            budget = int((self.init_bgt - self.target_bgt) * (mul_coeff**3) + self.target_bgt)
+            budget = int((self.init_bgt - self.target_bgt) * (mul_coeff ** 3) + self.target_bgt)
             mask_ind = True if step % self.peft_config.deltaT == 0 else False
         return budget, mask_ind
 
