@@ -60,6 +60,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.cuda.empty_cache()
         gc.collect()
 
+    # Borrowed from: https://stackoverflow.com/questions/33767627/python-write-unittest-for-console-print
     @pytest.fixture(autouse=True)
     def _pass_fixtures(self, capsys):
         self.capsys = capsys
