@@ -1106,7 +1106,7 @@ if is_bnb_available():
                     in_features,
                     out_features,
                     bias=kwargs.get("bias", True),
-                    compute_dtype=kwargs.get("compute_dtype", torch.float32),
+                    compute_dtype=kwargs.get("compute_dtype", None),
                     compress_statistics=kwargs.get("compress_statistics", True),
                     quant_type=kwargs.get("quant_type", "nf4"),
                 )
