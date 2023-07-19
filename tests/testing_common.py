@@ -883,6 +883,7 @@ class PeftCommonTester:
             )
             peft_model = get_peft_model(model, config)
 
+        peft_model = peft_model.to(self.torch_device)
         output_peft = get_output(peft_model)
 
         # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight

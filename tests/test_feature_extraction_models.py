@@ -25,9 +25,9 @@ from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-BertModel",
-    # "hf-internal-testing/tiny-random-RobertaModel",
-    # "hf-internal-testing/tiny-random-DebertaModel",
-    # "hf-internal-testing/tiny-random-DebertaV2Model",
+    "hf-internal-testing/tiny-random-RobertaModel",
+    "hf-internal-testing/tiny-random-DebertaModel",
+    "hf-internal-testing/tiny-random-DebertaV2Model",
 ]
 
 FULL_GRID = {
@@ -129,7 +129,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
         self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_deberta_lora_tests)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID) # , filter_params_func=skip_deberta_lora_tests
     )
     def test_training_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)

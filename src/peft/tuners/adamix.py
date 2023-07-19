@@ -176,7 +176,7 @@ class AdaMixModel(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
 
-    def _create_new_module(self, adamix_config, adapter_name, target):
+    def _create_new_module(self, adamix_config, adapter_name, target, dtype):
         # loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
 
         # if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
@@ -202,7 +202,7 @@ class AdaMixModel(torch.nn.Module):
         if not hasattr(self.model.config, 'hidden_size'):
             raise KeyError ("Hidden size of the model must be known")
         
-        new_module = ExpertSoup(self.model.config.hidden_size, adapter_name, adamix_config.adapter_dim, adamix_config.num_expert, adamix_config.sharing_down, adamix_config.sharing_up, adamix_config.return_two_views, adamix_config.inference_mode)
+        new_module = ExpertSoup(self.model.config.hidden_size, adapter_name, adamix_config.adapter_dim, adamix_config.num_expert, adamix_config.sharing_down, adamix_config.sharing_up, adamix_config.return_two_views, adamix_config.inference_mode, dtype)
         return new_module
 
     def _check_target_module_exists(self, adamix_config, key):
@@ -212,6 +212,15 @@ class AdaMixModel(torch.nn.Module):
             for target in adamix_config.target_modules:
                 target_module_found = True if target == key else False
         return target_module_found
+
+    def get_param_dtype(self, target):
+        params = list(target.parameters())
+        pos = 0
+        while pos<len(params):
+            if params[pos] is not None:
+                dtype = params[pos].dtype
+                return dtype
+        raise ValueError ("All parameters in the model are None")
 
     def _find_and_replace(self, adapter_name):
         adamix_config = self.peft_config[adapter_name]
@@ -228,7 +237,8 @@ class AdaMixModel(torch.nn.Module):
                 is_target_modules_in_base_model = True
             _, target, _ = _get_submodules(self.model, key)
 
-            new_module = self._create_new_module(adamix_config, adapter_name, target)
+            dtype = self.get_param_dtype(target)
+            new_module = self._create_new_module(adamix_config, adapter_name, target, dtype)
             self._add_adapter_module(target, new_module)
 
         if not is_target_modules_in_base_model:
@@ -252,8 +262,15 @@ class AdaMixModel(torch.nn.Module):
     @staticmethod
     def composite_forward(f_out, f_in):
         def wrapper(hidden_states, *args, **kwargs):
-            print("HS", hidden_states.shape)
-            return (f_out(f_in(hidden_states, *args, **kwargs)[0]),)
+            tuple_input = False
+            hidden_states = f_in(hidden_states, *args, **kwargs)
+            if isinstance(hidden_states, tuple):
+                tuple_input = True
+                hidden_states, other_args = hidden_states[0], hidden_states[1:]
+            hidden_states = f_out(hidden_states)
+            if tuple_input:
+                return (hidden_states,) + other_args
+            return hidden_states
         return wrapper
 
     def _add_adapter_module(self, target, new_module):
@@ -384,23 +401,20 @@ class MixtureSoup(nn.Module):
         expert_output = None
 
         if not self.inference_mode:
-            print("Is training")
             expert_idx = torch.randint(low=0, high=self.num_local_experts, size=(1,)).item()  # selected expert
             expert_output = self.get_expert_by_idx(expert_idx)(x)
-            print("RG_MS", expert_output.requires_grad)
 
         else:
-            print("Is val")
             self.expert_soup()
             expert_output = self.expert_soup_forward(x)
-            print("RG_MS", expert_output.requires_grad)
 
         return expert_output
 
 class ExpertSoup(nn.Module):
-    def __init__(self, hidden_dim, adapter_name, adapter_dim, num_expert=4, sharing_down=False, sharing_up=True, return_two_views=False, inference_mode=False):
+    def __init__(self, hidden_dim, adapter_name, adapter_dim, num_expert=4, sharing_down=False, sharing_up=True, return_two_views=False, inference_mode=False, dtype=torch.float16):
         super().__init__()
 
+        self.disable_adapters = False
         self.return_two_views = return_two_views
         self.inference_mode = inference_mode
         if sharing_down:
@@ -414,26 +428,26 @@ class ExpertSoup(nn.Module):
             self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, num_expert)
 
         self.two_views = []
+        for p in self.parameters():
+            p.data = p.data.to(dtype)
 
     # NOTE: During training, you must forward pass the input twice to get two outputs and apply the KL div minimization
     # Use the first ouput as input to next layer
     # During inference, only one forward pass is required
     def forward(self, x):
-        print("In ES forward")
-        result1 = F.gelu(self.MoA_down(x))
-        result1 = self.MoA_up(result1)
-        result1 = result1 + x
+        if not self.disable_adapters:
+            result1 = F.gelu(self.MoA_down(x))
+            result1 = self.MoA_up(result1)
+            result1 = result1 + x
 
-        if self.training and self.return_two_views:
-            print("TwoViews")
-            result2 = F.gelu(self.MoA_down(x))
-            result2 = self.MoA_up(result2)
-            result2 = result2 + x
-            self.two_views = torch.stack([result1, result2], dim=0)
-        print("RG_ES", result1.requires_grad, result2.requires_grad)
-        print("shape", result1.shape, x.shape)
-        return result1
-        
+            if self.training and self.return_two_views:
+                result2 = F.gelu(self.MoA_down(x))
+                result2 = self.MoA_up(result2)
+                result2 = result2 + x
+                self.two_views = torch.stack([result1, result2], dim=0)
+            return result1
+        else:
+            return x
 
 
 # if is_bnb_available():

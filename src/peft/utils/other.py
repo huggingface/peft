@@ -396,7 +396,20 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
 }
 
 TRANSFORMERS_MODELS_TO_ADAMIX_TARGET_MODULES_MAPPING = {
-    "bert": ["BertLayer"]
+    "bart": ["BartEncoderLayer", "BartDecoderLayer"],
+    "bert": ["BertLayer"],
+    "bloom": ["BloomBlock"],
+    "deberta": ["DebertaLayer"],
+    "deberta-v2": ["DebertaV2Layer"],
+    "gpt_bigcode": ["GPTBigCodeBlock"],
+    "gptj": ["GPTJBlock"],
+    "gpt_neo": ["GPTNeoBlock"],
+    "gpt_neox": ["GPTNeoXLayer"],
+    "gpt2": ["GPT2Block"],
+    "llama": ["LlamaDecoderLayer"],
+    "opt": ["OPTDecoderLayer"],
+    "roberta": ["RobertaLayer"],
+    "t5": ["T5Block"],
     # "t5": ["k", "v", "wo"],
     # "mt5": ["k", "v", "wi_1"],
     # "gpt2": ["c_attn", "mlp.c_proj"],
