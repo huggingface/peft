@@ -398,6 +398,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             all_param += num_params
             if param.requires_grad:
                 trainable_params += num_params
+        loaded_in_4bit = getattr(self.get_base_model(), "is_loaded_in_4bit", False)
+        if loaded_in_4bit:
+            all_param *= 2
         print(
             f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param}"
         )
