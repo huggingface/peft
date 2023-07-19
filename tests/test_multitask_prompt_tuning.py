@@ -30,6 +30,7 @@ from tests.test_adaption_prompt import AdaptionPromptTester
 from tests.testing_common import PeftCommonTester
 from unittest import TestCase
 
+
 def is_llama_available() -> bool:
     """Check if Llama is available in the transformers library (it's not in earlier versions)."""
     try:
@@ -81,29 +82,30 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
 
         self.assertTrue(not dummy_output.requires_grad)
 
-    # def test_prepare_for_int8_training(self) -> None:
-    #     model = LlamaForCausalLM(self._create_test_llama_config())
-    #     model = prepare_model_for_int8_training(model)
-    #     model = model.to(self.torch_device)
+    def test_prepare_for_int8_training(self) -> None:
+        model = LlamaForCausalLM(self._create_test_llama_config())
+        model = prepare_model_for_int8_training(model)
+        model = model.to(self.torch_device)
 
-    #     for param in model.parameters():
-    #         self.assertTrue(not param.requires_grad)
+        for param in model.parameters():
+            self.assertTrue(not param.requires_grad)
 
-    #     model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
+        model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
 
-    #     # For backward compatibility
-    #     if hasattr(model, "enable_input_require_grads"):
-    #         model.enable_input_require_grads()
-    #     else:
-    #         def make_inputs_require_grad(module, input, output):
-    #             output.requires_grad_(True)
+        # For backward compatibility
+        if hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        else:
 
-    #         model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
 
-    #     dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
-    #     dummy_output = model.get_input_embeddings()(dummy_input)
+            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
-    #     self.assertTrue(dummy_output.requires_grad)
+        dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
+        dummy_output = model.get_input_embeddings()(dummy_input)
+
+        self.assertTrue(dummy_output.requires_grad)
 
     # def test_save_pretrained(self) -> None:
     #     seed = 420
@@ -149,20 +151,21 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
     #         # check if `config.json` is not present
     #         self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
-    # def test_generate(self) -> None:
-    #     model = LlamaForCausalLM(self._create_test_llama_config())
-    #     model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
-    #     model = model.to(self.torch_device)
+    def test_generate(self) -> None:
+        model = LlamaForCausalLM(self._create_test_llama_config())
+        model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
+        model = model.to(self.torch_device)
 
-    #     input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
-    #     attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+        task_ids = torch.LongTensor([1, 2]).to(self.torch_device)
 
-    #     # check if `generate` works
-    #     _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
+        # check if `generate` works
+        _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
-    #     with self.assertRaises(TypeError):
-    #         # check if `generate` raises an error if no positional arguments are passed
-    #         _ = model.generate(input_ids, attention_mask=attention_mask)
+        with self.assertRaises(TypeError):
+            # check if `generate` raises an error if no positional arguments are passed
+            _ = model.generate(input_ids, attention_mask=attention_mask)
 
     # def test_sequence_adapter_ops(self) -> None:
     #     """Test sequence of adapter operations."""
@@ -276,25 +279,30 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
     #     adapter_1_after_set = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
     #     assert_close(adapter_1_after.logits, adapter_1_after_set.logits, rtol=0, atol=0)
 
-    # def test_use_cache(self) -> None:
-    #     """Test that MultiTaskPromptTuning works when Llama config use_cache=True."""
-    #     input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
-    #     original = LlamaForCausalLM(self._create_test_llama_config())
-    #     mpt = get_peft_model(original, self._create_multitask_prompt_tuning_config())
-    #     mpt = mpt.to(self.torch_device)
-    #     expected = mpt.generate(input_ids=input_ids, max_length=8)
+    def test_use_cache(self) -> None:
+        """Test that MultiTaskPromptTuning works when Llama config use_cache=True."""
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        task_ids = torch.LongTensor([1, 2]).to(self.torch_device)
 
-    #     # Set use_cache = True and generate output again.
-    #     mpt.base_model.config.use_cache = True
-    #     actual = mpt.generate(input_ids=input_ids, max_length=8)
-    #     assert_close(expected, actual, rtol=0, atol=0)
+        original = LlamaForCausalLM(self._create_test_llama_config())
+        mpt = get_peft_model(original, self._create_multitask_prompt_tuning_config())
+        mpt = mpt.to(self.torch_device)
 
-    # def test_bf16_inference(self) -> None:
-    #     """Test that MultiTaskPromptTuning works when Llama using a half-precision model."""
-    #     input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
-    #     original = LlamaForCausalLM.from_pretrained(
-    #         "trl-internal-testing/tiny-random-LlamaForCausalLM", torch_dtype=torch.bfloat16
-    #     )
-    #     mpt = get_peft_model(original, self._create_multitask_prompt_tuning_config())
-    #     mpt = mpt.to(self.torch_device)
-    #     _ = mpt.generate(input_ids=input_ids, task_ids=torch.tensor([2, 4]))
+        expected = mpt.generate(input_ids=input_ids, max_length=8, task_ids=task_ids)
+
+        # Set use_cache = True and generate output again.
+        mpt.base_model.config.use_cache = True
+        actual = mpt.generate(input_ids=input_ids, max_length=8, task_ids=task_ids)
+        assert_close(expected, actual, rtol=0, atol=0)
+
+    def test_bf16_inference(self) -> None:
+        """Test that MultiTaskPromptTuning works when Llama using a half-precision model."""
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        task_ids = torch.tensor([1, 2]).to(self.torch_device)
+
+        original = LlamaForCausalLM.from_pretrained(
+            "trl-internal-testing/tiny-random-LlamaForCausalLM", torch_dtype=torch.bfloat16
+        )
+        mpt = get_peft_model(original, self._create_multitask_prompt_tuning_config())
+        mpt = mpt.to(self.torch_device)
+        _ = mpt.generate(input_ids=input_ids, task_ids=task_ids)
