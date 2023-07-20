@@ -81,7 +81,7 @@ class AdaLoraModel(LoraModel):
                 lora_dropout=0.01,
             )
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") 
-        >>> model = AdaLoraModel(model, config, "AdaLoraModel")
+        >>> model = AdaLoraModel(model, config, "default")
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
