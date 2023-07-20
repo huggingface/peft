@@ -26,7 +26,12 @@
   - local: task_guides/int8-asr
     title: int8 training for automatic speech recognition
   - local: task_guides/semantic-similarity-lora
-    title: semantic similairty with peft
+    title: Semantic similairty with peft
+
+- title: Developer guides
+  sections:
+  - local: developer_guides/custom_models
+    title: Working with custom models
 
 - title: 🤗 Accelerate integrations
   sections:
