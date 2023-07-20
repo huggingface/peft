@@ -26,6 +26,7 @@ Let's assume that we want to fine-tune a multilayer perceptron with LoRA. Here i
 ```python
 from torch import nn
 
+
 class MLP(nn.Module):
     def __init__(self, num_units_hidden=2000):
         super().__init__()
@@ -57,7 +58,7 @@ print([(n, type(m)) for n, m in MLP().named_modules()])
 
 This should print:
 
-```python
+```
 [('', __main__.MLP),
  ('seq', torch.nn.modules.container.Sequential),
  ('seq.0', torch.nn.modules.linear.Linear),
@@ -127,7 +128,7 @@ print([(n, type(m)) for n, m in MLP().named_modules()])
 
 This will print a very long list, we'll only show the first few:
 
-```python
+```
 [('', timm.models.metaformer.MetaFormer),
  ('stem', timm.models.metaformer.Stem),
  ('stem.conv', torch.nn.modules.conv.Conv2d),
@@ -177,10 +178,7 @@ also updated. Looking at the end of the list printed above, we can see that it's
 here is our LoRA config:
 
 ```python
-config = LoraConfig(
-    target_modules=r".*\.mlp\.fc\d",
-    modules_to_save=["head.fc"]
-)
+config = LoraConfig(target_modules=r".*\.mlp\.fc\d", modules_to_save=["head.fc"])
 ```
 
 Then we only need to create the PEFT model by passing our base model and the config to `get_peft_model`:
