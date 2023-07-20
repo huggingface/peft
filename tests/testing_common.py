@@ -19,6 +19,7 @@ from collections import OrderedDict
 from dataclasses import replace
 
 import torch
+import torch.nn.functional as F
 from diffusers import StableDiffusionPipeline
 
 from peft import (
@@ -910,13 +911,34 @@ class PeftCommonTester:
 
     def _test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/issues/727
+        model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
+        dummy_input = self.prepare_inputs_for_testing()
+        inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
+        # just check that no error is raised
+        model.forward(inputs_embeds=inputs_embeds)        
+
+    def _test_output_pair(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (AdaMixConfig,):
+            return
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
-        dummy_input = self.prepare_inputs_for_testing()
-        inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
-        # just check that no error is raised
-        model.forward(inputs_embeds=inputs_embeds)
+        
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        # check if `training` works
+        output = model(**inputs)[0]
+        two_views = model.get_two_view_from_model()
+
+        assert(two_views.shape[1] == 2)
+        
+        loss = 0
+        for i in two_views:
+            loss += (i[0]+i[1]).sum()
+        loss.backward()

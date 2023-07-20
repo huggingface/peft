@@ -48,6 +48,8 @@
     title: Prompting
   - local: conceptual_guides/ia3
     title: IA3
+  - local: conceptual_guides/adamix
+    title: AdaMix
 
 - title: Reference
   sections:

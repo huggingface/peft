@@ -177,28 +177,6 @@ class AdaMixModel(torch.nn.Module):
             )
 
     def _create_new_module(self, adamix_config, adapter_name, target, dtype):
-        # loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-
-        # if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
-        #     eightbit_kwargs = kwargs.copy()
-        #     eightbit_kwargs.update(
-        #         {
-        #             "has_fp16_weights": target.state.has_fp16_weights,
-        #             "memory_efficient_backward": target.state.memory_efficient_backward,
-        #             "threshold": target.state.threshold,
-        #             "index": target.index,
-        #         }
-        #     )
-        #     new_module = Linear8bitLt(
-        #         adapter_name,
-        #         target.in_features,
-        #         target.out_features,
-        #         is_feedforward,
-        #         bias=bias,
-        #         **eightbit_kwargs,
-        #     )
-        # else:
-        #  Create the Mixture of Adapter Module
         if not hasattr(self.model.config, 'hidden_size'):
             raise KeyError ("Hidden size of the model must be known")
         
@@ -336,25 +314,24 @@ class AdaMixModel(torch.nn.Module):
                 delattr(parent, target_name)
         return self.model
 
+    def get_two_view_from_model(self) -> Tuple[Tuple]:
+        # NOTE: To perform backward pass on the two views, you must set retain_graph=True in the optimizer
+
+        two_views = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, ExpertSoup):
+                two_views.append(module.two_views)
+
+        if len(two_views) == 0:
+            raise ValueError ("Returned views are empty")
+
+        return two_views
+
+
 def mark_only_adamix_as_trainable(model: nn.Module) -> None:
     for n, p in model.named_parameters():
         if "adamix" not in n:
             p.requires_grad = False
-
-def get_two_view_from_model(model: nn.Module) -> Tuple[Tuple]:
-    # NOTE: To perform backward pass on the two views, you must set retain_graph=True in the optimizer
-
-    two_views = []
-    for name, module in model.named_modules():
-        if 'adamix' in name:
-            if isinstance(module.two_views, list):
-                raise ValueError ("One of the returned view is empty")
-            two_views.append(module.two_views)
-    
-    if len(two_views) == 0:
-        raise ValueError ("Returned views are empty")
-
-    return torch.stack(two_views, dim=0)
 
 
 # # Below code is based on https://github.com/microsoft/lora/blob/main/loralib/layers.py
@@ -375,6 +352,8 @@ class MixtureSoup(nn.Module):
         self.expert_mixture = nn.ModuleDict({})
         for i in self.dict_keys:
             self.expert_mixture[i] = copy.deepcopy(expert)
+            # torch.nn.init.kaiming_uniform_(self.expert_mixture[i].weight.data)
+            # torch.nn.init.zeros_(self.expert_mixture[i].bias.data)
         self.num_local_experts = num_local_experts
 
     def get_expert_by_idx(self, idx):
@@ -448,56 +427,3 @@ class ExpertSoup(nn.Module):
             return result1
         else:
             return x
-
-
-# if is_bnb_available():
-
-#     class Linear8bitLt(bnb.nn.Linear8bitLt, IA3Layer):
-#         # (IA)^3 implemented in a dense layer
-#         def __init__(
-#             self,
-#             adapter_name,
-#             in_features,
-#             out_features,
-#             is_feedforward,
-#             **kwargs,
-#         ):
-#             bnb.nn.Linear8bitLt.__init__(
-#                 self,
-#                 in_features,
-#                 out_features,
-#                 bias=kwargs.get("bias", True),
-#                 has_fp16_weights=kwargs.get("has_fp16_weights", True),
-#                 memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-#                 threshold=kwargs.get("threshold", 0.0),
-#                 index=kwargs.get("index", None),
-#             )
-#             IA3Layer.__init__(self, in_features=in_features, out_features=out_features, is_feedforward=is_feedforward)
-
-#             # Freezing the pre-trained weight matrix
-#             self.weight.requires_grad = False
-
-#             init_adamix_weights = kwargs.pop("init_adamix_weights", True)
-#             self.update_layer(adapter_name, init_adamix_weights)
-#             self.active_adapter = adapter_name
-#             self.is_feedforward = is_feedforward
-
-# #         def forward(self, x: torch.Tensor):
-# #             if self.disable_adapters or self.active_adapter not in self.ia3_l.keys():
-# #                 return super().forward(x)
-# #             else:
-# #                 if not torch.is_autocast_enabled():
-# #                     if x.dtype != torch.float32:
-# #                         x = x.float()
-# #                     if self.is_feedforward:
-# #                         result = super().forward(x * self.ia3_l[self.active_adapter].flatten())
-# #                     else:
-# #                         result = super().forward(x)
-# #                         expected_dtype = result.dtype
-# #                         result = (result * self.ia3_l[self.active_adapter].flatten()).to(expected_dtype)
-# #                 else:
-# #                     if self.is_feedforward:
-# #                         result = super().forward(x * self.ia3_l[self.active_adapter].flatten())
-# #                     else:
-# #                         result = result * self.ia3_l[self.active_adapter].flatten()
-# #             return result

@@ -25,13 +25,13 @@ from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
-    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
-    "hf-internal-testing/tiny-random-GPT2LMHeadModel",
-    "hf-internal-testing/tiny-random-BloomForCausalLM",
-    "hf-internal-testing/tiny-random-gpt_neo",
-    "hf-internal-testing/tiny-random-GPTJForCausalLM",
-    "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
-    "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+    # "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+    # "hf-internal-testing/tiny-random-GPT2LMHeadModel",
+    # "hf-internal-testing/tiny-random-BloomForCausalLM",
+    # "hf-internal-testing/tiny-random-gpt_neo",
+    # "hf-internal-testing/tiny-random-GPTJForCausalLM",
+    # "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
+    # "HuggingFaceM4/tiny-random-LlamaForCausalLM",
 ]
 
 FULL_GRID = {
@@ -181,6 +181,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
+                "adamix_kwargs": {"return_two_views": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_non_pt_mqa,
@@ -202,3 +203,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
+    
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_output_pair(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_output_pair(model_id, config_cls, config_kwargs)

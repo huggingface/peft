@@ -649,6 +649,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         with open(os.path.join(output_dir, "README.md"), "w") as f:
             f.writelines(lines)
 
+    def get_two_view_from_model(self):
+        try:
+            return self.base_model.get_two_view_from_model()
+        except:
+            raise NameError("Base model has no function get_two_view_from_model")
+
 
 class PeftModelForSequenceClassification(PeftModel):
     """
