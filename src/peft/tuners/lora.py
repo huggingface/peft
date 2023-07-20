@@ -135,7 +135,7 @@ class LoraModel(torch.nn.Module):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = LoraModel(model, config, "LoraModel")
+        >>> lora_model = LoraModel(model, config, "default")
         ```
 
         ```py
