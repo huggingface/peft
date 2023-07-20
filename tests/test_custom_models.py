@@ -39,7 +39,8 @@ TEST_CASES = [
     (
         "Vanilla MLP 6",
         "MLP",
-        LoraConfig, {
+        LoraConfig,
+        {
             "target_modules": ["lin0"],
             "lora_alpha": 4,
             "lora_dropout": 0.1,
