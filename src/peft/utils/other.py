@@ -135,12 +135,13 @@ class ModulesToSaveWrapper(torch.nn.Module):
         self.modules_to_save = torch.nn.ModuleDict({})
         self.update(adapter_name)
         self.active_adapter = adapter_name
+        self.disable_adapter = False
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
 
     def forward(self, *args, **kwargs):
-        if self.active_adapter not in self.modules_to_save:
+        if self.disable_adapter or (self.active_adapter not in self.modules_to_save):
             return self.original_module(*args, **kwargs)
         return self.modules_to_save[self.active_adapter](*args, **kwargs)
 
