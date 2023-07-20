@@ -124,7 +124,7 @@ class LoraModel(torch.nn.Module):
 
         ```py
         >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import get_peft_model, LoraConfig
+        >>> from peft import LoraModel, LoraConfig
 
         >>> config = LoraConfig(
         ...     task_type="SEQ_2_SEQ_LM",
@@ -135,7 +135,7 @@ class LoraModel(torch.nn.Module):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = get_peft_model(model, config)
+        >>> lora_model = LoraModel(model, config, "LoraModel")
         ```
 
         ```py
