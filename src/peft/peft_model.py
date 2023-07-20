@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
-from accelerate.utils import get_balanced_memory
+from accelerate.utils import get_balanced_memory,is_xpu_available
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
@@ -576,12 +576,26 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     )
 
         if use_safetensors:
-            adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+            if torch.cuda.is_available():
+                adapters_weights = safe_load_file(filename, device="cuda")
+            elif is_xpu_available():
+                adapters_weights = safe_load_file(filename, device="xpu")
+            else:
+                adapters_weights = safe_load_file(filename, device="cpu") 
         else:
-            adapters_weights = torch.load(
-                filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            )
-
+            if torch.cuda.is_available():
+                adapters_weights = torch.load(
+                    filename, map_location=torch.device("cuda")
+                )
+            elif is_xpu_available():
+                adapters_weights = torch.load(
+                    filename, map_location=torch.device("xpu")
+                )
+            else:
+                adapters_weights = torch.load(
+                    filename, map_location=torch.device("cpu")
+                )
+                
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
         if (
