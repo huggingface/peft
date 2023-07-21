@@ -12,13 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import math
-import re
-import warnings
-from dataclasses import asdict, dataclass, field, replace
+import copy
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import List, Optional, Tuple, Union
-import copy
 
 import torch
 import torch.nn as nn
@@ -31,11 +28,10 @@ from ..utils import (
     ModulesToSaveWrapper,
     PeftType,
     _get_submodules,
-    transpose,
 )
 
 if is_bnb_available():
-    import bitsandbytes as bnb
+    pass
 
 
 @dataclass
@@ -71,27 +67,19 @@ class AdaMixConfig(PeftConfig):
     )
     num_expert: Optional[int] = field(
         default=4,
-        metadata={
-            "help": "The number of exprts per adapter module"
-        },
+        metadata={"help": "The number of exprts per adapter module"},
     )
     sharing_down: Optional[bool] = field(
         default=False,
-        metadata={
-            "help": "If the weights of the downsampling adapters are shared in each layer"
-        },
+        metadata={"help": "If the weights of the downsampling adapters are shared in each layer"},
     )
     sharing_up: Optional[bool] = field(
         default=True,
-        metadata={
-            "help": "If the weights of the upsampling adapters are shared in each layer"
-        },
+        metadata={"help": "If the weights of the upsampling adapters are shared in each layer"},
     )
     return_two_views: Optional[bool] = field(
         default=False,
-        metadata={
-            "help": "If two stochastic forward passes have to be made"
-        },
+        metadata={"help": "If two stochastic forward passes have to be made"},
     )
     fan_in_fan_out: bool = field(
         default=False,
@@ -177,10 +165,20 @@ class AdaMixModel(torch.nn.Module):
             )
 
     def _create_new_module(self, adamix_config, adapter_name, target, dtype):
-        if not hasattr(self.model.config, 'hidden_size'):
-            raise KeyError ("Hidden size of the model must be known")
-        
-        new_module = ExpertSoup(self.model.config.hidden_size, adapter_name, adamix_config.adapter_dim, adamix_config.num_expert, adamix_config.sharing_down, adamix_config.sharing_up, adamix_config.return_two_views, adamix_config.inference_mode, dtype)
+        if not hasattr(self.model.config, "hidden_size"):
+            raise KeyError("Hidden size of the model must be known")
+
+        new_module = ExpertSoup(
+            self.model.config.hidden_size,
+            adapter_name,
+            adamix_config.adapter_dim,
+            adamix_config.num_expert,
+            adamix_config.sharing_down,
+            adamix_config.sharing_up,
+            adamix_config.return_two_views,
+            adamix_config.inference_mode,
+            dtype,
+        )
         return new_module
 
     def _check_target_module_exists(self, adamix_config, key):
@@ -194,11 +192,11 @@ class AdaMixModel(torch.nn.Module):
     def get_param_dtype(self, target):
         params = list(target.parameters())
         pos = 0
-        while pos<len(params):
+        while pos < len(params):
             if params[pos] is not None:
                 dtype = params[pos].dtype
                 return dtype
-        raise ValueError ("All parameters in the model are None")
+        raise ValueError("All parameters in the model are None")
 
     def _find_and_replace(self, adapter_name):
         adamix_config = self.peft_config[adapter_name]
@@ -249,10 +247,11 @@ class AdaMixModel(torch.nn.Module):
             if tuple_input:
                 return (hidden_states,) + other_args
             return hidden_states
+
         return wrapper
 
     def _add_adapter_module(self, target, new_module):
-        target.add_module('adamix', new_module)
+        target.add_module("adamix", new_module)
         target.forward = self.composite_forward(new_module.forward, target.forward)
 
     def __getattr__(self, name: str):
@@ -292,7 +291,9 @@ class AdaMixModel(torch.nn.Module):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADAMIX_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADAMIX_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADAMIX_TARGET_MODULES_MAPPING[
+                model_config["model_type"]
+            ]
         return peft_config
 
     def zero_adapters(self):
@@ -323,7 +324,7 @@ class AdaMixModel(torch.nn.Module):
                 two_views.append(module.two_views)
 
         if len(two_views) == 0:
-            raise ValueError ("Returned views are empty")
+            raise ValueError("Returned views are empty")
 
         return two_views
 
@@ -343,12 +344,12 @@ def mark_only_adamix_as_trainable(model: nn.Module) -> None:
 # #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 # #  ------------------------------------------------------------------------------------------
 
-class MixtureSoup(nn.Module):
 
+class MixtureSoup(nn.Module):
     def __init__(self, expert, adapter_name, inference_mode=False, num_local_experts=1):
         super().__init__()
         self.inference_mode = inference_mode
-        self.dict_keys = ['_'.join([adapter_name, str(i)]) for i in range(num_local_experts)]
+        self.dict_keys = ["_".join([adapter_name, str(i)]) for i in range(num_local_experts)]
         self.expert_mixture = nn.ModuleDict({})
         for i in self.dict_keys:
             self.expert_mixture[i] = copy.deepcopy(expert)
@@ -360,9 +361,7 @@ class MixtureSoup(nn.Module):
         return self.expert_mixture[self.dict_keys[idx]]
 
     def expert_soup_forward(self, x):
-        output = F.linear(x,
-                          self.parameter_dict["weight"],
-                          self.parameter_dict["bias"])
+        output = F.linear(x, self.parameter_dict["weight"], self.parameter_dict["bias"])
         return output
 
     def expert_soup(self):
@@ -374,8 +373,8 @@ class MixtureSoup(nn.Module):
                     p_name = "weight"
                 else:
                     p_name = "bias"
-                self.parameter_dict[p_name] = self.parameter_dict[p_name] + s_param/self.num_local_experts
-        
+                self.parameter_dict[p_name] = self.parameter_dict[p_name] + s_param / self.num_local_experts
+
     def forward(self, x: torch.Tensor):
         expert_output = None
 
@@ -389,8 +388,20 @@ class MixtureSoup(nn.Module):
 
         return expert_output
 
+
 class ExpertSoup(nn.Module):
-    def __init__(self, hidden_dim, adapter_name, adapter_dim, num_expert=4, sharing_down=False, sharing_up=True, return_two_views=False, inference_mode=False, dtype=torch.float16):
+    def __init__(
+        self,
+        hidden_dim,
+        adapter_name,
+        adapter_dim,
+        num_expert=4,
+        sharing_down=False,
+        sharing_up=True,
+        return_two_views=False,
+        inference_mode=False,
+        dtype=torch.float16,
+    ):
         super().__init__()
 
         self.disable_adapters = False
@@ -399,12 +410,16 @@ class ExpertSoup(nn.Module):
         if sharing_down:
             self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, 1)
         else:
-            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, num_expert)
+            self.MoA_down = MixtureSoup(
+                nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, num_expert
+            )
 
         if sharing_up:
             self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, 1)
         else:
-            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, num_expert)
+            self.MoA_up = MixtureSoup(
+                nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, num_expert
+            )
 
         self.two_views = []
         for p in self.parameters():

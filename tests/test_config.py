@@ -22,8 +22,8 @@ import warnings
 import pytest
 
 from peft import (
-    AdaptionPromptConfig,
     AdaMixConfig,
+    AdaptionPromptConfig,
     IA3Config,
     LoraConfig,
     PeftConfig,

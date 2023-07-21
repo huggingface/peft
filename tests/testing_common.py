@@ -19,7 +19,6 @@ from collections import OrderedDict
 from dataclasses import replace
 
 import torch
-import torch.nn.functional as F
 from diffusers import StableDiffusionPipeline
 
 from peft import (
@@ -55,7 +54,7 @@ CONFIG_TESTING_KWARGS = (
         "num_expert": 4,
         "sharing_down": False,
         "sharing_up": True,
-        "return_two_views": True
+        "return_two_views": True,
     },
     # IA³
     {
@@ -279,7 +278,7 @@ class PeftCommonTester:
                 self.assertTrue(
                     torch.allclose(
                         state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    ), 
+                    ),
                 )
 
             # check if `adapter_model.bin` is present
@@ -503,16 +502,15 @@ class PeftCommonTester:
         else:
             parameter_prefix = "lora"
         # In adamix, only one/two of the expert adapters is changed per iteration
-        if parameter_prefix == 'adamix':
-            num_experts = config.num_expert
+        if parameter_prefix == "adamix":
             num_experts_updated = 0
             for n, param in model.named_parameters():
                 if parameter_prefix in n:
                     if param.grad is not None:
                         num_experts_updated += 1
                 else:
-                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated 
-                    assert(num_experts_updated>2, "Adamix adapters are not updated")
+                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated
+                    assert (num_experts_updated > 2, "Adamix adapters are not updated")
                     num_experts_updated = 0
                     self.assertIsNone(param.grad)
         else:
@@ -644,16 +642,15 @@ class PeftCommonTester:
         else:
             parameter_prefix = "lora"
         # In adamix, only one/two of the expert adapters is changed per iteration
-        if parameter_prefix == 'adamix':
-            num_experts = config.num_expert
+        if parameter_prefix == "adamix":
             num_experts_updated = 0
             for n, param in model.named_parameters():
                 if parameter_prefix in n:
                     if param.grad is not None:
                         num_experts_updated += 1
                 else:
-                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated 
-                    assert(num_experts_updated>2, "Adamix adapters are not updated")
+                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated
+                    assert (num_experts_updated > 2, "Adamix adapters are not updated")
                     num_experts_updated = 0
                     self.assertIsNone(param.grad)
         else:
@@ -933,11 +930,11 @@ class PeftCommonTester:
         inputs = self.prepare_inputs_for_testing()
 
         # check if `training` works
-        output = model(**inputs)[0]
+        model(**inputs)[0]
         two_views = model.get_two_view_from_model()
 
-        assert(two_views.shape[1] == 2)
-        
+        assert two_views.shape[1] == 2
+
         loss = 0
         for i in two_views:
             loss += (i[0]+i[1]).sum()

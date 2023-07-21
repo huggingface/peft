@@ -37,9 +37,9 @@ from . import __version__
 from .config import PeftConfig
 from .tuners import (
     AdaLoraModel,
+    AdaMixModel,
     AdaptionPromptModel,
     IA3Model,
-    AdaMixModel,
     LoraModel,
     PrefixEncoder,
     PromptEmbedding,
