@@ -14,7 +14,9 @@ specific language governing permissions and limitations under the License.
 
 ## LoRA
 
-Some fine-tuning techniques, such as prompt tuning, are specific to language models. That means in 🤗 PEFT, it is assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like [LoRA](./conceptual_guides/lora) - are not restricted to specific model types. 
+Some fine-tuning techniques, such as prompt tuning, are specific to language models. That means in 🤗 PEFT, it is
+assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like
+[LoRA](./conceptual_guides/lora) - are not restricted to specific model types.
 
 In this guide, we will see how LoRA can be applied to a multilayer perception and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
 
@@ -172,7 +174,8 @@ This will print a very long list, we'll only show the first few:
 ```
 
 Upon closer inspection, we see that the 2D conv layers have names such as `"stages.0.blocks.0.mlp.fc1"` and
-`"stages.0.blocks.0.mlp.fc2"`. How can we match those layer names specifically? You can write a [regular expressions](https://docs.python.org/3/library/re.html). to match the layer names. For our case, the regex
+`"stages.0.blocks.0.mlp.fc2"`. How can we match those layer names specifically? You can write a [regular
+expressions](https://docs.python.org/3/library/re.html) to match the layer names. For our case, the regex
 `r".*\.mlp\.fc\d"` should do the job.
 
 Furthermore, as in the first example, we should ensure that the output layer, in this case the classification head, is
