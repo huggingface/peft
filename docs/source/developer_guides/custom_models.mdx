@@ -44,8 +44,12 @@ class MLP(nn.Module):
 
 This is a straightforward multilayer perceptron with an input layer, a hidden layer, and an output layer. 
 
-_Note: For this toy example, we choose an exceedingly large number of hidden units to highlight the efficiency gains
-thanks to PEFT, but those gains are in line with more realistic examples._
+<Tip>
+
+For this toy example, we choose an exceedingly large number of hidden units to highlight the efficiency gains
+from PEFT, but those gains are in line with more realistic examples.
+
+</Tip>
 
 There are a few linear layers in this model that could be tuned with LoRA. When working with common 🤗 transformers
 models, PEFT will know which layers to apply LoRA to, but in this case, it is up to us as a user to choose the layers.
