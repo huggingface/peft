@@ -53,7 +53,7 @@ from PEFT, but those gains are in line with more realistic examples.
 
 There are a few linear layers in this model that could be tuned with LoRA. When working with common 🤗 Transformers
 models, PEFT will know which layers to apply LoRA to, but in this case, it is up to us as a user to choose the layers.
-To achieve that, we first have to determine the names of the layers. The small snippet below prints them:
+To determine the names of the layers to tune:
 
 ```python
 print([(n, type(m)) for n, m in MLP().named_modules()])
