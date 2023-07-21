@@ -285,22 +285,26 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with peft_model.disable_adapter():
                 pass  # there is nothing to be done
 
+        # check that bias=all and bias=lora_only give a warning with the correct message
         msg_start = "Careful, disabling adapter layers with bias configured to be"
+        with self.assertWarns(UserWarning, msg=msg_start):
+            run_with_disable(config_kwargs, bias="lora_only")
+        with self.assertWarns(UserWarning, msg=msg_start):
+            run_with_disable(config_kwargs, bias="all")
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
         # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning
+        bias_warning_was_given = False
         try:
             with self.assertWarns(UserWarning) as cm:
                 run_with_disable(config_kwargs, bias="none")
                 # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
                 # are not related to the bias setting
-                self.assertFalse(any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings))
+                if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
+                    bias_warning_was_given = True
         except AssertionError:
-            # This is good, there was no AssertionError, so there was no warning
+            # This is good, there was an AssertionError, i.e. there was no warning
             pass
-
-        with self.assertWarns(UserWarning, msg=msg_start):
-            run_with_disable(config_kwargs, bias="lora_only")
-
-        with self.assertWarns(UserWarning, msg=msg_start):
-            run_with_disable(config_kwargs, bias="all")
+        if bias_warning_was_given:
+            # This is bad, there was a warning about the bias when there should not have been any.
+            self.fail("There should be no warning when bias is set to 'none'")
