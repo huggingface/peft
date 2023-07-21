@@ -14,10 +14,9 @@ specific language governing permissions and limitations under the License.
 
 ## LoRA
 
-Some fine-tuning techniques such as prompt tuning are specific to language models. That means that in PEFT, it is
-assumed that a 🤗 transformers is being used. Other fine-tuning techniques, however, are not restricted to specific
-model types. One such technique is [LoRA](https://arxiv.org/abs/2106.09685). In this guide, we will see how LoRA can be
-applied to non 🤗 transformers models.
+Some fine-tuning techniques, such as prompt tuning, are specific to language models. That means in 🤗 PEFT, it is assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like [LoRA](./conceptual_guides/lora) - are not restricted to specific model types. 
+
+In this guide, we will see how LoRA can be applied to a multilayer perception and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
 
 ### Example 1: Multilayer perceptron
 
