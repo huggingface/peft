@@ -397,7 +397,7 @@ class LoraModel(torch.nn.Module):
             if isinstance(module, LoraLayer):
                 module.disable_adapters = False if enabled else True
             elif isinstance(module, ModulesToSaveWrapper):
-                module.disable_adapter = False if enabled else True
+                module.disable_adapters = False if enabled else True
 
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
