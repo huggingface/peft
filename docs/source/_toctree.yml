@@ -26,7 +26,7 @@
   - local: task_guides/int8-asr
     title: int8 training for automatic speech recognition
   - local: task_guides/semantic-similarity-lora
-    title: Semantic similairty with peft
+    title: Semantic similarity with LoRA
 
 - title: Developer guides
   sections:
