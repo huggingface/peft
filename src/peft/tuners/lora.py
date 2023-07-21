@@ -55,8 +55,8 @@ class LoraConfig(PeftConfig):
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'. If 'all' or 'lora_only', the
-            corresponding biases will be updated during training. Be aware that this means that, even when disabling the
-            adapters, the model will not produce the same output as the base model would have without adaptation.
+            corresponding biases will be updated during training. Be aware that this means that, even when disabling
+            the adapters, the model will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
             and saved in the final checkpoint.
         layers_to_transform (`Union[List[int],int]`):
