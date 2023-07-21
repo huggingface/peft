@@ -41,7 +41,9 @@ class AdaMixConfig(PeftConfig):
 
     Args:
         target_modules (`Union[List[str],str]`): The names of the modules to apply AdaMix to.
-        adapter_dim (`int`): The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling adapter has shape rxd where d is the hidden_dim of the model
+        adapter_dim (`int`):
+            The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling
+            adapter has shape rxd where d is the hidden_dim of the model
         num_expert (`int`): The number of exprts per adapter module
         sharing_down (`bool`): If the weights of the downsampling adapters are shared in each layer
         sharing_up (`bool`): If the weights of the upsampling adapters are shared in each layer
@@ -298,8 +300,8 @@ class AdaMixModel(torch.nn.Module):
 
     def zero_adapters(self):
         r"""
-        This method removes the added adapters. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method removes the added adapters. This is needed if someone wants to use the base model as a standalone
+        model.
         """
 
         # if getattr(self.model, "is_loaded_in_8bit", False):

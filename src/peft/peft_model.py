@@ -652,7 +652,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def get_two_view_from_model(self):
         try:
             return self.base_model.get_two_view_from_model()
-        except:
+        except AttributeError:
             raise NameError("Base model has no function get_two_view_from_model")
 
 

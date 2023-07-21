@@ -25,13 +25,13 @@ from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
-    # "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
-    # "hf-internal-testing/tiny-random-GPT2LMHeadModel",
-    # "hf-internal-testing/tiny-random-BloomForCausalLM",
-    # "hf-internal-testing/tiny-random-gpt_neo",
-    # "hf-internal-testing/tiny-random-GPTJForCausalLM",
-    # "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
-    # "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+    "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+    "hf-internal-testing/tiny-random-GPT2LMHeadModel",
+    "hf-internal-testing/tiny-random-BloomForCausalLM",
+    "hf-internal-testing/tiny-random-gpt_neo",
+    "hf-internal-testing/tiny-random-GPTJForCausalLM",
+    "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
+    "HuggingFaceM4/tiny-random-LlamaForCausalLM",
 ]
 
 FULL_GRID = {

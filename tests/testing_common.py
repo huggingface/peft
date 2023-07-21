@@ -493,7 +493,6 @@ class PeftCommonTester:
         # check if `training` works
         output = model(**inputs)[0]
         loss = output.sum()
-        print("O", output.requires_grad)
         loss.backward()
         if config_cls == IA3Config:
             parameter_prefix = "ia3"
@@ -501,17 +500,9 @@ class PeftCommonTester:
             parameter_prefix = "adamix"
         else:
             parameter_prefix = "lora"
-        # In adamix, only one/two of the expert adapters is changed per iteration
         if parameter_prefix == "adamix":
-            num_experts_updated = 0
             for n, param in model.named_parameters():
-                if parameter_prefix in n:
-                    if param.grad is not None:
-                        num_experts_updated += 1
-                else:
-                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated
-                    assert (num_experts_updated > 2, "Adamix adapters are not updated")
-                    num_experts_updated = 0
+                if parameter_prefix not in n:
                     self.assertIsNone(param.grad)
         else:
             for n, param in model.named_parameters():
@@ -643,15 +634,8 @@ class PeftCommonTester:
             parameter_prefix = "lora"
         # In adamix, only one/two of the expert adapters is changed per iteration
         if parameter_prefix == "adamix":
-            num_experts_updated = 0
             for n, param in model.named_parameters():
-                if parameter_prefix in n:
-                    if param.grad is not None:
-                        num_experts_updated += 1
-                else:
-                    # all the adamix layers come consecutively in the model, so atleast one downsampling and upsampling layer each is updated
-                    assert (num_experts_updated > 2, "Adamix adapters are not updated")
-                    num_experts_updated = 0
+                if parameter_prefix not in n:
                     self.assertIsNone(param.grad)
         else:
             for n, param in model.named_parameters():
@@ -933,7 +917,7 @@ class PeftCommonTester:
         model(**inputs)[0]
         two_views = model.get_two_view_from_model()
 
-        assert two_views.shape[1] == 2
+        self.assertEqual(two_views[0].shape[1], 2)
 
         loss = 0
         for i in two_views:
