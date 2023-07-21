@@ -35,7 +35,7 @@ from peft import (
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules
-
+from accelerate.utils import is_xpu_available
 
 CONFIG_CLASSES = (
     IA3Config,
@@ -152,7 +152,13 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        torch_device = "cuda"
+    elif is_xpu_available():
+        torch_device = "xpu"
+    else:
+        torch_device = "cpu"
+        
     transformers_class = None
 
     def prepare_inputs_for_common(self):

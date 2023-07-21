@@ -44,7 +44,7 @@ from peft import (
     prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
 )
-
+from accelerate.utils import is_xpu_available
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
 
@@ -113,7 +113,10 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         https://github.com/huggingface/transformers/issues/21094
         """
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif is_xpu_available():
+            torch.xpu.empty_cache()
         gc.collect()
 
     @pytest.mark.single_gpu_tests

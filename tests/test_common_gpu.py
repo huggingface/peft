@@ -28,7 +28,7 @@ from transformers import (
 
 from peft import AdaptionPromptConfig, LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-
+from accelerate.utils import is_xpu_available
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
 
@@ -49,7 +49,10 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.seq2seq_model_id = "google/flan-t5-base"
         self.causal_lm_model_id = "facebook/opt-350m"
         self.audio_model_id = "openai/whisper-large"
-        self.device = torch.device("cuda:0")
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda:0")
+        elif is_xpu_available():
+            self.device = torch.device("xpu:0")
 
     def tearDown(self):
         r"""
@@ -57,7 +60,10 @@ class PeftGPUCommonTests(unittest.TestCase):
         https://github.com/huggingface/transformers/issues/21094
         """
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif is_xpu_available():
+            torch.xpu.empty_cache()
         gc.collect()
 
     @require_bitsandbytes
