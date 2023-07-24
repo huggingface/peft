@@ -17,6 +17,7 @@ import unittest
 
 import pytest
 import torch
+from accelerate.utils import is_xpu_available
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -28,7 +29,7 @@ from transformers import (
 
 from peft import AdaptionPromptConfig, LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from accelerate.utils import is_xpu_available
+
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
 

@@ -19,6 +19,7 @@ from collections import OrderedDict
 from dataclasses import replace
 
 import torch
+from accelerate.utils import is_xpu_available
 from diffusers import StableDiffusionPipeline
 
 from peft import (
@@ -35,7 +36,7 @@ from peft import (
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules
-from accelerate.utils import is_xpu_available
+
 
 CONFIG_CLASSES = (
     IA3Config,
@@ -158,7 +159,7 @@ class PeftCommonTester:
         torch_device = "xpu"
     else:
         torch_device = "cpu"
-        
+
     transformers_class = None
 
     def prepare_inputs_for_common(self):
