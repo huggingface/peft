@@ -54,7 +54,9 @@ class LoraConfig(PeftConfig):
         lora_dropout (`float`): The dropout probability for Lora layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
-        bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'
+        bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'. If 'all' or 'lora_only', the
+            corresponding biases will be updated during training. Be aware that this means that, even when disabling
+            the adapters, the model will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
             and saved in the final checkpoint.
         layers_to_transform (`Union[List[int],int]`):
@@ -402,7 +404,27 @@ class LoraModel(torch.nn.Module):
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
 
+    def _get_active_adapter(self) -> str:
+        active_adapter = None
+        for module in self.model.modules():
+            if isinstance(module, LoraLayer):
+                active_adapter = module.active_adapter
+
+        if active_adapter is None:
+            raise ValueError(
+                "Something went wrong, no active adapter could be found, please report the issue on GitHub"
+            )
+        return active_adapter
+
     def disable_adapter_layers(self):
+        active_adapter = self._get_active_adapter()
+        val = self.peft_config[active_adapter].bias
+        if val != "none":
+            msg = (
+                f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+                "output as the the base model would without adaption."
+            )
+            warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name):
