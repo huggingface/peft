@@ -102,38 +102,7 @@ class AdaMixConfig(PeftConfig):
 
 class AdaMixModel(torch.nn.Module):
     # TODO: Modify description
-    """
-    Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
-    transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
-
-    Args:
-        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
-        config ([`IA3Config`]): The configuration of the (IA)^3 model.
-
-    Returns:
-        `torch.nn.Module`: The (IA)^3 model.
-
-    Example:
-
-        ```py
-        >>> from transformers import AutoModelForSeq2SeqLM, ia3Config
-        >>> from peft import IA3Model, IA3Config
-
-        >>> config = IA3Config(
-        ...     peft_type="IA3",
-        ...     task_type="SEQ_2_SEQ_LM",
-        ...     target_modules=["k", "v", "w0"],
-        ...     feedforward_modules=["w0"],
-        ... )
-
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> ia3_model = IA3Model(config, model)
-        ```
-
-    **Attributes**:
-        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
-    """
+    """ """
 
     def __init__(self, model, config, adapter_name):
         super().__init__()
@@ -276,6 +245,8 @@ class AdaMixModel(torch.nn.Module):
         for module in self.model.modules():
             if isinstance(module, ExpertSoup):
                 module.disable_adapters = False if enabled else True
+            elif isinstance(module, ModulesToSaveWrapper):
+                module.disable_adapters = False if enabled else True
 
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
@@ -337,8 +308,7 @@ def mark_only_adamix_as_trainable(model: nn.Module) -> None:
             p.requires_grad = False
 
 
-# # Below code is based on https://github.com/microsoft/lora/blob/main/loralib/layers.py
-# # and modified to work with PyTorch FSDP
+# # Below code is based on https://github.com/microsoft/AdaMix
 
 
 # #  ------------------------------------------------------------------------------------------
@@ -355,8 +325,6 @@ class MixtureSoup(nn.Module):
         self.expert_mixture = nn.ModuleDict({})
         for i in self.dict_keys:
             self.expert_mixture[i] = copy.deepcopy(expert)
-            # torch.nn.init.kaiming_uniform_(self.expert_mixture[i].weight.data)
-            # torch.nn.init.zeros_(self.expert_mixture[i].bias.data)
         self.num_local_experts = num_local_experts
 
     def get_expert_by_idx(self, idx):

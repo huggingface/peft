@@ -506,7 +506,7 @@ class PeftCommonTester:
                     self.assertIsNone(param.grad)
         else:
             for n, param in model.named_parameters():
-                if parameter_prefix in n:
+                if (parameter_prefix in n) or ("modules_to_save" in n):
                     self.assertIsNotNone(param.grad)
                 else:
                     self.assertIsNone(param.grad)
