@@ -35,6 +35,17 @@ TEST_CASES = [
     ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5", "MLP", LoraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "lora_alpha": 4,
+            "lora_dropout": 0.1,
+        },
+    ),
     ("Embedding + transformers Conv1D 1", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
@@ -227,7 +238,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertEqual(params_before.keys(), params_after.keys())
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if "lora_" in name:
+            if ("lora_" in name) or ("modules_to_save" in name):
+                # target_modules and modules_to_save _are_ updated
                 self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
             else:
                 self.assertTrue(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
@@ -262,8 +274,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with model.disable_adapter():
             outputs_disabled = model(**X)
 
+        # check that after leaving the disable_adapter context, everything is enabled again
+        outputs_enabled_after_disable = model(**X)
+
         self.assertFalse(torch.allclose(outputs_before, outputs_after))
         self.assertTrue(torch.allclose(outputs_before, outputs_disabled))
+        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
