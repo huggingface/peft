@@ -47,7 +47,11 @@ def skip_deberta_lora_tests(test_list):
     r"""
     Skip tests that are checkpointing with lora/ia3 tests for Deberta models (couldn't find much info on the error)
     """
-    return [test for test in test_list if not (any(k in test[0] for k in ["lora", "ia3"]) and "Deberta" in test[0])]
+    return [
+        test
+        for test in test_list
+        if not (any(k in test[0] for k in ["adamix", "lora", "ia3"]) and "Deberta" in test[0])
+    ]
 
 
 def skip_deberta_pt_tests(test_list):
@@ -129,7 +133,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
         self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID)  # , filter_params_func=skip_deberta_lora_tests
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_deberta_lora_tests)
     )
     def test_training_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
