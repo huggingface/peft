@@ -131,11 +131,10 @@ class LoraModel(torch.nn.Module):
     Example:
 
         ```py
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig
+        >>> from transformers import AutoModelForSeq2SeqLM
         >>> from peft import LoraModel, LoraConfig
 
         >>> config = LoraConfig(
-        ...     peft_type="LORA",
         ...     task_type="SEQ_2_SEQ_LM",
         ...     r=8,
         ...     lora_alpha=32,
@@ -144,7 +143,7 @@ class LoraModel(torch.nn.Module):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> lora_model = LoraModel(config, model)
+        >>> lora_model = LoraModel(model, config, "default")
         ```
 
         ```py
@@ -397,6 +396,8 @@ class LoraModel(torch.nn.Module):
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
+                module.disable_adapters = False if enabled else True
+            elif isinstance(module, ModulesToSaveWrapper):
                 module.disable_adapters = False if enabled else True
 
     def enable_adapter_layers(self):
