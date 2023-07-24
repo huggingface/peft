@@ -1261,9 +1261,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     input_ids = kwargs.pop("input_ids")
                     inputs_embeds = self.word_embeddings(input_ids)
                     batch_size = inputs_embeds.shape[0]
-                    prompts = self.get_prompt(batch_size=batch_size, task_ids=kwargs.get("task_ids", None))
-                    if "task_ids" in kwargs:
-                        del kwargs["task_ids"]
+                    prompts = self.get_prompt(batch_size=batch_size, task_ids=kwargs.pop("task_ids", None))
                     prompts = prompts.to(inputs_embeds.dtype)
 
                     inputs_embeds = torch.cat((prompts[:, : peft_config.num_virtual_tokens], inputs_embeds), dim=1)

@@ -124,7 +124,8 @@ class MultitaskPromptEmbedding(PromptEmbedding):
             self.load_state_dict(state_dict, strict=False)
 
     def forward(self, indices, task_ids):
-        assert task_ids is not None, "task_ids cannot be None"
+        if task_ids is None:
+            raise ValueError("task_ids cannot be None")
 
         prompt_embeddings = self.embedding(indices)
 
