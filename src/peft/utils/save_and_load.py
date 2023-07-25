@@ -89,7 +89,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     """
     config = model.peft_config[adapter_name]
     state_dict = {}
-    if model.modules_to_save is not None:
+    if hasattr(model, "modules_to_save") and model.modules_to_save is not None:
         for key, value in peft_model_state_dict.items():
             if any(module_name in key for module_name in model.modules_to_save):
                 for module_name in model.modules_to_save:
