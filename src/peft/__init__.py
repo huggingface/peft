@@ -28,7 +28,13 @@ from .auto import (
     AutoPeftModelForQuestionAnswering,
     AutoPeftModelForFeatureExtraction,
 )
-from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING, get_peft_config, get_peft_model
+from .mapping import (
+    MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
+    PEFT_TYPE_TO_CONFIG_MAPPING,
+    get_peft_config,
+    get_peft_model,
+    create_and_replace,
+)
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,

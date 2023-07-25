@@ -210,7 +210,8 @@ class LoraModel(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
 
-    def _check_target_module_exists(self, lora_config, key):
+    @staticmethod
+    def _check_target_module_exists(lora_config, key):
         if isinstance(lora_config.target_modules, str):
             target_module_found = re.fullmatch(lora_config.target_modules, key)
         else:
@@ -236,7 +237,15 @@ class LoraModel(torch.nn.Module):
                         target_module_found = False
         return target_module_found
 
-    def _create_new_module(self, lora_config, adapter_name, target):
+    @staticmethod
+    def create_and_replace(
+        lora_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        **optionnal_kwargs,
+    ):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": lora_config.r,
@@ -245,8 +254,19 @@ class LoraModel(torch.nn.Module):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
         }
-        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+
+        kwargs["loaded_in_8bit"] = optionnal_kwargs.pop("loaded_in_8bit", False)
+        kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
+        kwargs["bias"] = bias
+
+        new_module = LoraModel._create_new_module(lora_config, adapter_name, target, **kwargs)
+        LoraModel._replace_module(parent, target_name, new_module, target)
+
+    @staticmethod
+    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
+        loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
+        bias = kwargs.pop("bias", False)
 
         if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
@@ -350,7 +370,22 @@ class LoraModel(torch.nn.Module):
                     lora_config.init_lora_weights,
                 )
             else:
-                new_module = self._create_new_module(lora_config, adapter_name, target)
+                bias = hasattr(target, "bias") and target.bias is not None
+                kwargs = {
+                    "r": lora_config.r,
+                    "lora_alpha": lora_config.lora_alpha,
+                    "lora_dropout": lora_config.lora_dropout,
+                    "fan_in_fan_out": lora_config.fan_in_fan_out,
+                    "init_lora_weights": lora_config.init_lora_weights,
+                }
+                loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
+                loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+
+                kwargs["loaded_in_8bit"] = loaded_in_8bit
+                kwargs["loaded_in_4bit"] = loaded_in_4bit
+                kwargs["bias"] = bias
+
+                new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
                 self._replace_module(parent, target_name, new_module, target)
 
         if not is_target_modules_in_base_model:
@@ -359,7 +394,8 @@ class LoraModel(torch.nn.Module):
                 f"Please check the target modules and try again."
             )
 
-    def _replace_module(self, parent_module, child_name, new_module, old_module):
+    @staticmethod
+    def _replace_module(parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
         new_module.weight = old_module.weight
         if hasattr(old_module, "bias"):

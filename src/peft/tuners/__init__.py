@@ -24,3 +24,9 @@ from .adalora import AdaLoraConfig, AdaLoraModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+
+TUNERS_MAPPING = {
+    "LORA": LoraModel,
+    "IA3": IA3Model,
+    "ADALORA": AdaLoraModel,
+}

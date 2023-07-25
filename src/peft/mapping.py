@@ -27,6 +27,7 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .tuners import (
+    TUNERS_MAPPING,
     AdaLoraConfig,
     AdaptionPromptConfig,
     IA3Config,
@@ -35,7 +36,7 @@ from .tuners import (
     PromptEncoderConfig,
     PromptTuningConfig,
 )
-from .utils import PromptLearningConfig, _prepare_prompt_learning_config
+from .utils import PromptLearningConfig, _get_submodules, _prepare_prompt_learning_config
 
 
 if TYPE_CHECKING:
@@ -96,3 +97,35 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
     if isinstance(peft_config, PromptLearningConfig):
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
+
+
+# TODO: docstring and typehints
+def create_and_replace(peft_type, peft_config, model, adapter_name):
+    if peft_type not in TUNERS_MAPPING:
+        raise ValueError(
+            f"Task type {peft_type} is not supported. Supported task types are {list(TUNERS_MAPPING.keys())}"
+        )
+    tuner_cls = TUNERS_MAPPING[peft_type]
+
+    is_target_modules_in_base_model = False
+    key_list = [key for key, _ in model.named_modules()]
+
+    for key in key_list:
+        if not tuner_cls._check_target_module_exists(peft_config, key):
+            continue
+
+        is_target_modules_in_base_model = True
+        parent, target, target_name = _get_submodules(model, key)
+
+        optionnal_kwargs = {
+            "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
+        }
+
+        tuner_cls.create_and_replace(peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs)
+
+    if not is_target_modules_in_base_model:
+        raise ValueError(
+            f"Target modules {peft_config.target_modules} not found in the base model. "
+            f"Please check the target modules and try again."
+        )
