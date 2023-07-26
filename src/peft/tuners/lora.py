@@ -22,8 +22,8 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.pytorch_utils import Conv1D
 from tqdm import tqdm
+from transformers.pytorch_utils import Conv1D
 
 from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
@@ -55,6 +55,7 @@ class LoraConfig(PeftConfig):
         lora_dropout (`float`): The dropout probability for Lora layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
+            
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'. If 'all' or 'lora_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
