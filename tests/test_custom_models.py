@@ -35,6 +35,17 @@ TEST_CASES = [
     ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
     ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5", "MLP", LoraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6",
+        "MLP",
+        LoraConfig,
+        {
+            "target_modules": ["lin0"],
+            "lora_alpha": 4,
+            "lora_dropout": 0.1,
+        },
+    ),
     ("Embedding + transformers Conv1D 1", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
@@ -227,7 +238,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertEqual(params_before.keys(), params_after.keys())
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if "lora_" in name:
+            if ("lora_" in name) or ("modules_to_save" in name):
+                # target_modules and modules_to_save _are_ updated
                 self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
             else:
                 self.assertTrue(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
@@ -262,5 +274,53 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         with model.disable_adapter():
             outputs_disabled = model(**X)
 
+        # check that after leaving the disable_adapter context, everything is enabled again
+        outputs_enabled_after_disable = model(**X)
+
         self.assertFalse(torch.allclose(outputs_before, outputs_after))
         self.assertTrue(torch.allclose(outputs_before, outputs_disabled))
+        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
+
+    @parameterized.expand(TEST_CASES)
+    def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
+        # When training biases in lora, disabling adapters does not reset the biases, so the output is not what users
+        # might expect. Therefore, a warning should be given.
+
+        # Note: We test only with custom models since they run really fast. There is really no point in testing the same
+        # thing with decoder, encoder_decoder, etc.
+
+        def run_with_disable(config_kwargs, bias):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["bias"] = bias
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            config = config_cls(
+                base_model_name_or_path=model_id,
+                **config_kwargs,
+            )
+            peft_model = get_peft_model(model, config)
+            with peft_model.disable_adapter():
+                pass  # there is nothing to be done
+
+        # check that bias=all and bias=lora_only give a warning with the correct message
+        msg_start = "Careful, disabling adapter layers with bias configured to be"
+        with self.assertWarns(UserWarning, msg=msg_start):
+            run_with_disable(config_kwargs, bias="lora_only")
+        with self.assertWarns(UserWarning, msg=msg_start):
+            run_with_disable(config_kwargs, bias="all")
+
+        # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
+        # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning
+        bias_warning_was_given = False
+        try:
+            with self.assertWarns(UserWarning) as cm:
+                run_with_disable(config_kwargs, bias="none")
+                # if we get here, it means there was no AssertionError, i.e. there are warnings -- let's check that they
+                # are not related to the bias setting
+                if any(warning.message.args[0].startswith(msg_start) for warning in cm.warnings):
+                    bias_warning_was_given = True
+        except AssertionError:
+            # This is good, there was an AssertionError, i.e. there was no warning
+            pass
+        if bias_warning_was_given:
+            # This is bad, there was a warning about the bias when there should not have been any.
+            self.fail("There should be no warning when bias is set to 'none'")
