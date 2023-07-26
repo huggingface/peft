@@ -36,7 +36,7 @@ from ..utils import (
     _get_submodules,
     transpose,
 )
-from .tuners_utils import BaseTunerMixin
+from .tuners_utils import BaseTunerLayerMixin, BaseTunerMixin
 
 
 if is_bnb_available():
@@ -118,7 +118,7 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
 
 
-class LoraModel(torch.nn.Module):
+class LoraModel(torch.nn.Module, BaseTunerMixin):
     """
     Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
@@ -741,7 +741,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
         raise NotImplementedError
 
 
-class LoraLayer(BaseTunerMixin):
+class LoraLayer(BaseTunerLayerMixin):
     def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
         self.lora_alpha = {}

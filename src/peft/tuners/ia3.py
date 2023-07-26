@@ -35,7 +35,7 @@ from ..utils import (
     _is_valid_match,
     transpose,
 )
-from .tuners_utils import BaseTunerMixin
+from .tuners_utils import BaseTunerLayerMixin, BaseTunerMixin
 
 
 if is_bnb_available():
@@ -93,7 +93,7 @@ class IA3Config(PeftConfig):
         self.peft_type = PeftType.IA3
 
 
-class IA3Model(torch.nn.Module):
+class IA3Model(torch.nn.Module, BaseTunerMixin):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
     transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
@@ -411,7 +411,7 @@ def mark_only_ia3_as_trainable(model: nn.Module) -> None:
             p.requires_grad = False
 
 
-class IA3Layer(BaseTunerMixin):
+class IA3Layer(BaseTunerLayerMixin):
     def __init__(
         self,
         in_features: int,
