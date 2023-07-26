@@ -35,6 +35,7 @@ from ..utils import (
     _is_valid_match,
     transpose,
 )
+from .tuners_utils import BaseTunerMixin
 
 
 if is_bnb_available():
@@ -245,8 +246,14 @@ class IA3Model(torch.nn.Module):
             "is_feedforward": is_feedforward,
         }
 
-        new_module = IA3Model._create_new_module(ia3_config, adapter_name, target, **kwargs)
-        IA3Model._replace_module(parent, target_name, new_module, target)
+        if isinstance(target, IA3Layer):
+            target.update_layer(
+                adapter_name,
+                ia3_config.init_ia3_weights,
+            )
+        else:
+            new_module = IA3Model._create_new_module(ia3_config, adapter_name, target, **kwargs)
+            IA3Model._replace_module(parent, target_name, new_module, target)
 
     def _find_and_replace(self, adapter_name):
         ia3_config = self.peft_config[adapter_name]
@@ -404,7 +411,7 @@ def mark_only_ia3_as_trainable(model: nn.Module) -> None:
             p.requires_grad = False
 
 
-class IA3Layer:
+class IA3Layer(BaseTunerMixin):
     def __init__(
         self,
         in_features: int,
@@ -419,6 +426,8 @@ class IA3Layer:
         self.in_features = in_features
         self.out_features = out_features
         self.is_feedforward = is_feedforward
+
+        self._is_plugable = True
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters

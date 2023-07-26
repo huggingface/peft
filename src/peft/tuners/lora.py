@@ -36,6 +36,7 @@ from ..utils import (
     _get_submodules,
     transpose,
 )
+from .tuners_utils import BaseTunerMixin
 
 
 if is_bnb_available():
@@ -259,8 +260,35 @@ class LoraModel(torch.nn.Module):
         kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
 
-        new_module = LoraModel._create_new_module(lora_config, adapter_name, target, **kwargs)
-        LoraModel._replace_module(parent, target_name, new_module, target)
+        # TODO: better deal with that
+        if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
+            target.update_layer_conv2d(
+                adapter_name,
+                lora_config.r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+        elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
+            target.update_layer_embedding(
+                adapter_name,
+                lora_config.r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+
+        elif isinstance(target, LoraLayer):
+            target.update_layer(
+                adapter_name,
+                lora_config.r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+        else:
+            new_module = LoraModel._create_new_module(lora_config, adapter_name, target, **kwargs)
+            LoraModel._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -713,7 +741,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
         raise NotImplementedError
 
 
-class LoraLayer:
+class LoraLayer(BaseTunerMixin):
     def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
         self.lora_alpha = {}
@@ -730,6 +758,7 @@ class LoraLayer:
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
+        self._is_plugable = True
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r

@@ -105,6 +105,10 @@ def create_and_replace(peft_type, peft_config, model, adapter_name):
         )
     tuner_cls = TUNERS_MAPPING[peft_type]
 
+    for _, param in model.named_parameters():
+        # freeze parameters
+        param.requires_grad = False
+
     is_target_modules_in_base_model = False
     key_list = [key for key, _ in model.named_modules()]
 
