@@ -260,6 +260,18 @@ def transpose(weight, fan_in_fan_out):
     return weight.T if fan_in_fan_out else weight
 
 
+def _is_valid_match(key: str, target_key: str):
+    """
+    Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
+    or the target_key is a submodule of key
+    """
+    if key.endswith(target_key):
+        if len(key) > len(target_key):
+            return key.endswith("." + target_key)  # must be a sub module
+        return True
+    return False
+
+
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
     "mt5": ["q", "v"],

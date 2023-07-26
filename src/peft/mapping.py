@@ -36,13 +36,13 @@ from .tuners import (
     PromptEncoderConfig,
     PromptTuningConfig,
 )
-from .utils import PromptLearningConfig, _get_submodules, _prepare_prompt_learning_config
+from .utils import _get_submodules, _prepare_prompt_learning_config
 
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
-    from .utils.config import PeftConfig
+    from .config import PeftConfig
 
 
 MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
@@ -90,11 +90,9 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
 
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
 
-    if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not isinstance(
-        peft_config, PromptLearningConfig
-    ):
+    if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
         return PeftModel(model, peft_config, adapter_name=adapter_name)
-    if isinstance(peft_config, PromptLearningConfig):
+    if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
 
@@ -120,6 +118,7 @@ def create_and_replace(peft_type, peft_config, model, adapter_name):
         optionnal_kwargs = {
             "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
+            "current_key": key,
         }
 
         tuner_cls.create_and_replace(peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs)

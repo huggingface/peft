@@ -23,15 +23,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
+from ..config import PeftConfig
 from ..import_utils import is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
-    PeftConfig,
     PeftType,
     _freeze_adapter,
     _get_submodules,
+    _is_valid_match,
     transpose,
 )
 
@@ -156,13 +157,11 @@ class IA3Model(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
 
-    def _create_new_module(self, ia3_config, adapter_name, target, is_feedforward):
-        kwargs = {
-            "fan_in_fan_out": ia3_config.fan_in_fan_out,
-            "init_ia3_weights": ia3_config.init_ia3_weights,
-        }
+    @staticmethod
+    def _create_new_module(ia3_config, adapter_name, target, **kwargs):
         bias = hasattr(target, "bias") and target.bias is not None
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+        loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
+        is_feedforward = kwargs.pop("is_feedforward", False)
 
         if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
@@ -213,14 +212,41 @@ class IA3Model(torch.nn.Module):
             )
         return new_module
 
-    def _check_target_module_exists(self, ia3_config, key):
+    @staticmethod
+    def _check_target_module_exists(ia3_config, key):
         if isinstance(ia3_config.target_modules, str):
             target_module_found = re.fullmatch(ia3_config.target_modules, key)
         else:
-            target_module_found = any(
-                self._is_valid_match(key, target_key) for target_key in ia3_config.target_modules
-            )
+            target_module_found = any(_is_valid_match(key, target_key) for target_key in ia3_config.target_modules)
         return target_module_found
+
+    @staticmethod
+    def create_and_replace(
+        ia3_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        **optionnal_kwargs,
+    ):
+        loaded_in_8bit = optionnal_kwargs["loaded_in_8bit"]
+        current_key = optionnal_kwargs["current_key"]
+
+        # check if target module is in feedforward_modules
+        if isinstance(ia3_config.feedforward_modules, str):
+            is_feedforward = re.fullmatch(ia3_config.feedforward_modules, current_key)
+        else:
+            is_feedforward = any(current_key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+
+        kwargs = {
+            "fan_in_fan_out": ia3_config.fan_in_fan_out,
+            "init_ia3_weights": ia3_config.init_ia3_weights,
+            "loaded_in_8bit": loaded_in_8bit,
+            "is_feedforward": is_feedforward,
+        }
+
+        new_module = IA3Model._create_new_module(ia3_config, adapter_name, target, **kwargs)
+        IA3Model._replace_module(parent, target_name, new_module, target)
 
     def _find_and_replace(self, adapter_name):
         ia3_config = self.peft_config[adapter_name]
@@ -228,6 +254,13 @@ class IA3Model(torch.nn.Module):
             ia3_config.feedforward_modules = []  # convert to list if None
         self._check_quantization_dependency()
         is_target_modules_in_base_model = False
+        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+
+        kwargs = {
+            "fan_in_fan_out": ia3_config.fan_in_fan_out,
+            "init_ia3_weights": ia3_config.init_ia3_weights,
+            "loaded_in_8bit": loaded_in_8bit,
+        }
 
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
@@ -249,7 +282,9 @@ class IA3Model(torch.nn.Module):
                     ia3_config.init_ia3_weights,
                 )
             else:
-                new_module = self._create_new_module(ia3_config, adapter_name, target, is_feedforward)
+                new_module = self._create_new_module(
+                    ia3_config, adapter_name, target, is_feedforward=is_feedforward, **kwargs
+                )
                 self._replace_module(parent, target_name, new_module, target)
         if not is_target_modules_in_base_model:
             raise ValueError(
@@ -258,18 +293,7 @@ class IA3Model(torch.nn.Module):
             )
 
     @staticmethod
-    def _is_valid_match(key: str, target_key: str):
-        """
-        Helper function to match module names target_key and key. Makes sure that either the key is exactly the
-        target_key or the target_key is a submodule of key
-        """
-        if key.endswith(target_key):
-            if len(key) > len(target_key):
-                return key.endswith("." + target_key)  # must be a sub module
-            return True
-        return False
-
-    def _replace_module(self, parent_module, child_name, new_module, old_module):
+    def _replace_module(parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
         new_module.weight = old_module.weight
         if old_module.bias is not None:

@@ -17,7 +17,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
+# from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
+from .peft_types import PeftType, TaskType
 from .other import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -41,6 +42,7 @@ from .other import (
     _freeze_adapter,
     ModulesToSaveWrapper,
     _prepare_prompt_learning_config,
+    _is_valid_match,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict

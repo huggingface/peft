@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from .config import PeftType, PromptLearningConfig
+from .peft_types import PeftType
 
 
 def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
@@ -59,7 +58,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
-    elif isinstance(config, PromptLearningConfig):
+    elif config.is_prompt_learning:
         to_return = {}
         if config.inference_mode:
             prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
@@ -118,13 +117,13 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
-    elif isinstance(config, PromptLearningConfig) or config.peft_type == PeftType.ADAPTION_PROMPT:
+    elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
 
     load_result = model.load_state_dict(peft_model_state_dict, strict=False)
-    if isinstance(config, PromptLearningConfig):
+    if config.is_prompt_learning:
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
