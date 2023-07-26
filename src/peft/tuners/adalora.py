@@ -226,11 +226,13 @@ class AdaLoraModel(LoraModel):
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 
-        # Calculate the orthogonal regularization
-        orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
-        assert orth_reg_weight > 0
+        if getattr(outputs, "loss", None) is not None:
+            # Calculate the orthogonal regularization
+            orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 
-        if hasattr(outputs, "loss"):
+            if orth_reg_weight <= 0:
+                raise ValueError("orth_reg_weight should be greater than 0. ")
+
             regu_loss = 0
             num_param = 0
             for n, p in self.model.named_parameters():
@@ -345,9 +347,7 @@ class AdaLoraLayer(LoraLayer):
         if lora_dropout > 0.0:
             lora_dropout_layer = nn.Dropout(p=lora_dropout)
         else:
-
-            def lora_dropout_layer(x):
-                return x
+            lora_dropout_layer = nn.Identity()
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
