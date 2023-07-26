@@ -153,7 +153,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
         Creates a new hook based on the old hook. Use it only if you know what you are doing !
         """
         old_hook_cls = getattr(accelerate.hooks, old_hook.__class__.__name__)
-        old_hook_attr = {k: v for k, v in old_hook.__dict__.items()}
+        old_hook_attr = old_hook.__dict__
         filtered_old_hook_attr = {}
         old_hook_init_signature = inspect.signature(old_hook_cls.__init__)
         for k in old_hook_attr.keys():
