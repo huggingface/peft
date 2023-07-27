@@ -61,6 +61,50 @@ class AdaLoraConfig(LoraConfig):
         self.peft_type = PeftType.ADALORA
 
 
+class AdaLoraLayer(LoraLayer):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+    ):
+        super().__init__(in_features, out_features)
+        self.lora_E = nn.ParameterDict({})
+        self.lora_A = nn.ParameterDict({})
+        self.lora_B = nn.ParameterDict({})
+        self.ranknum = nn.ParameterDict({})
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        # Right singular vectors
+        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, self.in_features))}))
+        # Singular values
+        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, 1))}))
+        # Left singular vectors
+        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(self.out_features, r))}))
+        # The current rank
+        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
+        self.ranknum[adapter_name].data.fill_(float(r))
+        self.ranknum[adapter_name].requires_grad = False
+        self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def reset_lora_parameters(self, adapter_name):
+        if adapter_name in self.lora_A.keys():
+            nn.init.zeros_(self.lora_E[adapter_name])
+            nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
+            nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
+
+
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
@@ -92,6 +136,7 @@ class AdaLoraModel(LoraModel):
         self.model = model
         self.peft_config = config
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
+        self.adapter_layer_class = AdaLoraLayer
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
@@ -149,7 +194,7 @@ class AdaLoraModel(LoraModel):
         }
 
         # If it is not a LoraLayer, create a new module, else update it with new adapters
-        if not isinstance(target, LoraLayer):
+        if not isinstance(target, AdaLoraLayer):
             new_module = AdaLoraModel._create_new_module(lora_config, adapter_name, target, **kwargs)
             AdaLoraModel._replace_module(parent, target_name, new_module, target)
         else:
@@ -425,50 +470,6 @@ class AdaLoraModel(LoraModel):
         return peft_config
 
 
-class AdaLoraLayer(LoraLayer):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-    ):
-        super().__init__(in_features, out_features)
-        self.lora_E = nn.ParameterDict({})
-        self.lora_A = nn.ParameterDict({})
-        self.lora_B = nn.ParameterDict({})
-        self.ranknum = nn.ParameterDict({})
-
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
-        # Actual trainable parameters
-        # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, self.in_features))}))
-        # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, 1))}))
-        # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(self.out_features, r))}))
-        # The current rank
-        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
-        self.ranknum[adapter_name].data.fill_(float(r))
-        self.ranknum[adapter_name].requires_grad = False
-        self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
-
-    def reset_lora_parameters(self, adapter_name):
-        if adapter_name in self.lora_A.keys():
-            nn.init.zeros_(self.lora_E[adapter_name])
-            nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
-            nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
-
-
 class SVDLinear(nn.Linear, AdaLoraLayer):
     # SVD-based adaptation by a dense layer
     def __init__(
@@ -495,6 +496,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
+        self.supports_merging = True
 
     def merge(self):
         if self.active_adapter not in self.lora_A.keys():

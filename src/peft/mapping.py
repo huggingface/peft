@@ -43,8 +43,6 @@ from .utils import _get_submodules, _prepare_prompt_learning_config
 if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
-    from .config import PeftConfig
-
 
 MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "SEQ_CLS": PeftModelForSequenceClassification,
@@ -101,9 +99,7 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
 # TODO: docstring and typehints
 def create_and_replace(peft_config, model, adapter_name):
     if not isinstance(peft_config, PeftConfig):
-        raise ValueError(
-            f"peft_config must be an instance of PeftConfig got {type(peft_config)} instead."
-        )
+        raise ValueError(f"peft_config must be an instance of PeftConfig got {type(peft_config)} instead.")
 
     peft_type = peft_config.peft_type
 

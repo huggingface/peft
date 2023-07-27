@@ -21,6 +21,7 @@ class BaseTunerMixin(ABC):
 
     Each `BaseTunerMixin` class needs to be implemented in case the adapter is a plugable adapter.
     """
+    adapter_layer_class = None
 
     @staticmethod
     @abstractmethod
@@ -33,6 +34,27 @@ class BaseTunerMixin(ABC):
         **optionnal_kwargs,
     ):
         ...
+
+    def merge_adapter(self):
+        """
+        This method merges the LoRa layers into the base model.
+        """
+        if not self.adapter_layer_class.supports_merging:
+            raise ValueError(f"{self.__class__.__name__} does not support merging adapter layers")
+        for module in self.model.modules():
+            if isinstance(module, self.adapter_layer_class):
+                module.merge()
+
+    def unmerge_adapter(self):
+        """
+        This method unmerges the LoRa layers from the base model.
+        """
+        if not self.adapter_layer_class.supports_merging:
+            raise ValueError(f"{self.__class__.__name__} does not support merging adapter layers")
+
+        for module in self.model.modules():
+            if isinstance(module, self.adapter_layer_class):
+                module.unmerge()
 
 
 class BaseTunerLayerMixin:
@@ -47,6 +69,7 @@ class BaseTunerLayerMixin:
     """
     _is_plugable = False
     active_adapter = None
+    supports_merging = False
 
     @property
     def peft_is_plugable(self):
@@ -55,3 +78,11 @@ class BaseTunerLayerMixin:
     def __post_init__(self):
         if self.active_adapter is None:
             raise ValueError("active_adapter must be set in the subclass")
+
+    @abstractmethod
+    def merge(self):
+        ...
+
+    @abstractmethod
+    def unmerge(self):
+        ...

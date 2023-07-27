@@ -93,6 +93,41 @@ class IA3Config(PeftConfig):
         self.peft_type = PeftType.IA3
 
 
+class IA3Layer(BaseTunerLayerMixin):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        is_feedforward: bool,
+    ):
+        self.scaling = {}
+        self.ia3_l = nn.ParameterDict({})
+        # Mark the weight as unmerged
+        self.merged = False
+        self.disable_adapters = False
+        self.in_features = in_features
+        self.out_features = out_features
+        self.is_feedforward = is_feedforward
+
+        self._is_plugable = True
+
+    def update_layer(self, adapter_name, init_ia3_weights):
+        # Actual trainable parameters
+        if self.is_feedforward:
+            weight = torch.randn((1, self.in_features))
+        else:
+            weight = torch.randn((self.out_features, 1))
+        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
+        if init_ia3_weights:
+            self.reset_ia3_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def reset_ia3_parameters(self, adapter_name):
+        if adapter_name in self.ia3_l.keys():
+            # initialize learned vector with torch.ones
+            nn.init.constant_(self.ia3_l[adapter_name], 1.0)
+
+
 class IA3Model(torch.nn.Module, BaseTunerMixin):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
@@ -133,6 +168,7 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
         self.forward = self.model.forward
         self.peft_config = config
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
+        self.adapter_layer_class = IA3Layer
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
@@ -411,41 +447,6 @@ def mark_only_ia3_as_trainable(model: nn.Module) -> None:
             p.requires_grad = False
 
 
-class IA3Layer(BaseTunerLayerMixin):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        is_feedforward: bool,
-    ):
-        self.scaling = {}
-        self.ia3_l = nn.ParameterDict({})
-        # Mark the weight as unmerged
-        self.merged = False
-        self.disable_adapters = False
-        self.in_features = in_features
-        self.out_features = out_features
-        self.is_feedforward = is_feedforward
-
-        self._is_plugable = True
-
-    def update_layer(self, adapter_name, init_ia3_weights):
-        # Actual trainable parameters
-        if self.is_feedforward:
-            weight = torch.randn((1, self.in_features))
-        else:
-            weight = torch.randn((self.out_features, 1))
-        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
-        if init_ia3_weights:
-            self.reset_ia3_parameters(adapter_name)
-        self.to(self.weight.device)
-
-    def reset_ia3_parameters(self, adapter_name):
-        if adapter_name in self.ia3_l.keys():
-            # initialize learned vector with torch.ones
-            nn.init.constant_(self.ia3_l[adapter_name], 1.0)
-
-
 class Linear(nn.Linear, IA3Layer):
     # (IA)^3 implemented in a dense layer
     def __init__(
@@ -473,6 +474,7 @@ class Linear(nn.Linear, IA3Layer):
         self.active_adapter = adapter_name
 
         self.is_feedforward = is_feedforward
+        self.supports_merging = True
 
     def merge(self):
         if self.active_adapter not in self.ia3_l.keys():
