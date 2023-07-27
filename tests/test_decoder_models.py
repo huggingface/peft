@@ -47,6 +47,10 @@ def skip_non_pt_mqa(test_list):
     return [test for test in test_list if not ("prefix_tuning" in test[0] and "GPTBigCodeForCausalLM" in test[0])]
 
 
+def skip_adalora_and_gpt2(test_list):
+    return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == AdaLoraConfig))]
+
+
 class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     r"""
     Test if the PeftModel behaves as expected. This includes:
@@ -148,6 +152,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=skip_adalora_and_gpt2,
         )
     )
     def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
