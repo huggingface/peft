@@ -95,7 +95,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
         # enable gradient checkpointing for memory efficiency
         model.gradient_checkpointing_enable()
-
+    else:
+         # check to see if the model has any parameters that are trainable
+        if len([p for p in model.parameters() if p.requires_grad]) == 0:
+            warnings.warn(
+                "This model has no trainable parameters: did you accidentally call prepare_model_for_kbit_training when your model was not quantized?",
+                Warning
+            )
     return model
 
 
