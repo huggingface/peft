@@ -624,7 +624,7 @@ class LoraModel(torch.nn.Module):
                     )
                     target.active_adapter = resetting_active_adapter
 
-    def merge_and_unload(self, progressbar: bool = True):
+    def merge_and_unload(self, progressbar: bool = False):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
