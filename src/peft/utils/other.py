@@ -12,12 +12,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import copy
+import inspect
 import os
 import warnings
 
+import accelerate
 import torch
+from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 
 
 # Add or edit model card to have `library_name: peft`
@@ -135,12 +137,33 @@ class ModulesToSaveWrapper(torch.nn.Module):
         self.modules_to_save = torch.nn.ModuleDict({})
         self.update(adapter_name)
         self.active_adapter = adapter_name
+        self.disable_adapters = False
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
 
+        if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
+            old_hook = self.modules_to_save[adapter_name]._hf_hook
+            new_hook = self._create_new_hook(old_hook)
+            remove_hook_from_module(self.modules_to_save[adapter_name])
+            add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
+
+    def _create_new_hook(self, old_hook):
+        r"""
+        Creates a new hook based on the old hook. Use it only if you know what you are doing !
+        """
+        old_hook_cls = getattr(accelerate.hooks, old_hook.__class__.__name__)
+        old_hook_attr = old_hook.__dict__
+        filtered_old_hook_attr = {}
+        old_hook_init_signature = inspect.signature(old_hook_cls.__init__)
+        for k in old_hook_attr.keys():
+            if k in old_hook_init_signature.parameters:
+                filtered_old_hook_attr[k] = old_hook_attr[k]
+        new_hook = old_hook_cls(**filtered_old_hook_attr)
+        return new_hook
+
     def forward(self, *args, **kwargs):
-        if self.active_adapter not in self.modules_to_save:
+        if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
             return self.original_module(*args, **kwargs)
         return self.modules_to_save[self.active_adapter](*args, **kwargs)
 
@@ -284,6 +307,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
+    "btlm": ["c_proj", "c_attn"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {

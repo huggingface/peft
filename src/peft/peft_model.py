@@ -119,6 +119,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
+        # the `pretraining_tp` is set for some models to simulate Tensor Parallelism during inference to avoid
+        # numerical differences, https://github.com/pytorch/pytorch/issues/76232 - to avoid any unexpected
+        # behavior we disable that in this line.
+        if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
+            self.base_model.config.pretraining_tp = 1
+
     def save_pretrained(
         self,
         save_directory: str,
@@ -383,9 +389,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 prompts = prompt_encoder(prompt_tokens)
             return prompts
 
-    def print_trainable_parameters(self):
-        """
-        Prints the number of trainable parameters in the model.
+    def get_nb_trainable_parameters(self):
+        r"""
+        Returns the number of trainable parameters and number of all parameters in the model.
         """
         trainable_params = 0
         all_param = 0
@@ -395,9 +401,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if num_params == 0 and hasattr(param, "ds_numel"):
                 num_params = param.ds_numel
 
+            # Due to the design of 4bit linear layers from bitsandbytes
+            # one needs to multiply the number of parameters by 2 to get
+            # the correct number of parameters
+            if param.__class__.__name__ == "Params4bit":
+                num_params = num_params * 2
+
             all_param += num_params
             if param.requires_grad:
                 trainable_params += num_params
+
+        return trainable_params, all_param
+
+    def print_trainable_parameters(self):
+        """
+        Prints the number of trainable parameters in the model.
+        """
+        trainable_params, all_param = self.get_nb_trainable_parameters()
+
         print(
             f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param}"
         )

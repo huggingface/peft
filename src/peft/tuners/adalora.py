@@ -80,7 +80,7 @@ class AdaLoraModel(LoraModel):
                 peft_type="ADALORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
                 lora_dropout=0.01,
             )
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> model = AdaLoraModel(config, model)
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> model = AdaLoraModel(model, config, "default")
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
@@ -229,11 +229,13 @@ class AdaLoraModel(LoraModel):
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 
-        # Calculate the orthogonal regularization
-        orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
-        assert orth_reg_weight > 0
-
         if getattr(outputs, "loss", None) is not None:
+            # Calculate the orthogonal regularization
+            orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
+
+            if orth_reg_weight <= 0:
+                raise ValueError("orth_reg_weight should be greater than 0. ")
+
             regu_loss = 0
             num_param = 0
             for n, p in self.model.named_parameters():
