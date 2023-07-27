@@ -18,8 +18,6 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM
 
-from peft import PromptLearningConfig
-
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
@@ -45,15 +43,6 @@ def skip_non_pt_mqa(test_list):
     Skip tests that are prefix tuning for MQA models (not supported yet)
     """
     return [test for test in test_list if not ("prefix_tuning" in test[0] and "GPTBigCodeForCausalLM" in test[0])]
-
-
-def skip_non_prompt_tuning(test_list):
-    """Skip tests that are not prompt tuning and not GPTBigCodeForCausalLM"""
-    return [
-        test
-        for test in test_list
-        if issubclass(test[2], PromptLearningConfig) and ("GPTBigCodeForCausalLM" not in test[0])
-    ]
 
 
 class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
@@ -192,7 +181,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_prompt_tuning)
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa)
     )
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
