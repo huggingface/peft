@@ -272,30 +272,30 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
         self.model = model
         self.forward = self.model.forward
         self.peft_config = config
-        self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
         # transformers models have a .config attribute, whose presence is assumed later on
         if not hasattr(self, "config"):
             self.config = {"model_type": "custom"}
 
         self.adapter_layer_class = LoraLayer
+        self.post_init(adapter_name=adapter_name)
 
-    def add_adapter(self, adapter_name, config=None):
-        if config is not None:
-            model_config = getattr(self.model, "config", {"model_type": "custom"})
-            if hasattr(model_config, "to_dict"):
-                model_config = model_config.to_dict()
-
-            config = self._prepare_lora_config(config, model_config)
-            self.peft_config[adapter_name] = config
-        self._find_and_replace(adapter_name)
-        if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
-            raise ValueError(
-                "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
-            )
-        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
-        if self.peft_config[adapter_name].inference_mode:
-            _freeze_adapter(self.model, adapter_name)
+    def _mark_only_adapters_as_trainable(self, bias: str = "none") -> None:
+        for n, p in self.model.named_parameters():
+            if "lora_" not in n:
+                p.requires_grad = False
+        if bias == "none":
+            return
+        elif bias == "all":
+            for n, p in self.model.named_parameters():
+                if "bias" in n:
+                    p.requires_grad = True
+        elif bias == "lora_only":
+            for m in self.model.modules():
+                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                    m.bias.requires_grad = True
+        else:
+            raise NotImplementedError
 
     def _check_quantization_dependency(self):
         loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
@@ -454,69 +454,6 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
 
         return new_module
 
-    def _find_and_replace(self, adapter_name):
-        lora_config = self.peft_config[adapter_name]
-        self._check_quantization_dependency()
-        is_target_modules_in_base_model = False
-        key_list = [key for key, _ in self.model.named_modules()]
-
-        for key in key_list:
-            if not self._check_target_module_exists(lora_config, key):
-                continue
-
-            is_target_modules_in_base_model = True
-            parent, target, target_name = _get_submodules(self.model, key)
-
-            if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
-                target.update_layer_conv2d(
-                    adapter_name,
-                    lora_config.r,
-                    lora_config.lora_alpha,
-                    lora_config.lora_dropout,
-                    lora_config.init_lora_weights,
-                )
-            elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
-                target.update_layer_embedding(
-                    adapter_name,
-                    lora_config.r,
-                    lora_config.lora_alpha,
-                    lora_config.lora_dropout,
-                    lora_config.init_lora_weights,
-                )
-
-            elif isinstance(target, LoraLayer):
-                target.update_layer(
-                    adapter_name,
-                    lora_config.r,
-                    lora_config.lora_alpha,
-                    lora_config.lora_dropout,
-                    lora_config.init_lora_weights,
-                )
-            else:
-                bias = hasattr(target, "bias") and target.bias is not None
-                kwargs = {
-                    "r": lora_config.r,
-                    "lora_alpha": lora_config.lora_alpha,
-                    "lora_dropout": lora_config.lora_dropout,
-                    "fan_in_fan_out": lora_config.fan_in_fan_out,
-                    "init_lora_weights": lora_config.init_lora_weights,
-                }
-                loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
-                loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-
-                kwargs["loaded_in_8bit"] = loaded_in_8bit
-                kwargs["loaded_in_4bit"] = loaded_in_4bit
-                kwargs["bias"] = bias
-
-                new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
-                self._replace_module(parent, target_name, new_module, target)
-
-        if not is_target_modules_in_base_model:
-            raise ValueError(
-                f"Target modules {lora_config.target_modules} not found in the base model. "
-                f"Please check the target modules and try again."
-            )
-
     @staticmethod
     def _replace_module(parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
@@ -594,7 +531,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                 module.active_adapter = adapter_name
 
     @staticmethod
-    def _prepare_lora_config(peft_config, model_config):
+    def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
@@ -671,7 +608,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
 
         self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
         self._find_and_replace(adapter_name)
-        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
+        self._mark_only_adapters_as_trainable(self.peft_config[adapter_name].bias)
         _freeze_adapter(self.model, adapter_name)
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
@@ -799,25 +736,6 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
-
-
-# had to adapt it for `lora_only` to work
-def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
-    for n, p in model.named_parameters():
-        if "lora_" not in n:
-            p.requires_grad = False
-    if bias == "none":
-        return
-    elif bias == "all":
-        for n, p in model.named_parameters():
-            if "bias" in n:
-                p.requires_grad = True
-    elif bias == "lora_only":
-        for m in model.modules():
-            if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
-                m.bias.requires_grad = True
-    else:
-        raise NotImplementedError
 
 
 class Linear(nn.Linear, LoraLayer):

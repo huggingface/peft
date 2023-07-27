@@ -23,6 +23,26 @@ class BaseTunerMixin(ABC):
     """
     adapter_layer_class = None
 
+    def post_init(self, adapter_name, *args, **kwargs):
+        if not hasattr(self, "peft_config"):
+            raise ValueError("You need to specify a `peft_config` attribute in your class")
+        if self.adapter_layer_class is None:
+            raise ValueError("You need to specify a `adapter_layer_class` attribute in your class")
+        if not isinstance(adapter_name, str):
+            raise ValueError("You need to specify a `adapter_name` attribute in your class")
+        if not hasattr(self, "model"):
+            raise ValueError("You need to specify a `model` attribute in your class")
+
+        self.add_adapter(adapter_name, self.peft_config[adapter_name])
+
+    @abstractmethod
+    def _prepare_adapter_config(self, peft_config, model_config):
+        ...
+
+    @abstractmethod
+    def _mark_only_adapters_as_trainable(self, *args):
+        ...
+
     @staticmethod
     @abstractmethod
     def create_and_replace(
@@ -34,6 +54,30 @@ class BaseTunerMixin(ABC):
         **optionnal_kwargs,
     ):
         ...
+
+    def add_adapter(self, adapter_name, config=None):
+        """
+        This method adds a new adapter to the model.
+        """
+        from ..mapping import create_and_replace
+
+        if config is not None:
+            model_config = getattr(self.model, "config", {"model_type": "custom"})
+            if hasattr(model_config, "to_dict"):
+                model_config = model_config.to_dict()
+
+            config = self._prepare_adapter_config(config, model_config)
+            self.peft_config[adapter_name] = config
+
+        create_and_replace(self.peft_config[adapter_name], self.model, adapter_name)
+
+        # Mark adapters as trainable
+        self._mark_only_adapters_as_trainable(self.peft_config[adapter_name].bias)
+
+        if self.peft_config[adapter_name].inference_mode:
+            for n, p in self.model.named_parameters():
+                if adapter_name in n:
+                    p.requires_grad = False
 
     def merge_adapter(self):
         """
