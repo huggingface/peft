@@ -27,8 +27,6 @@ from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError
-from safetensors.torch import load_file as safe_load_file
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
@@ -57,7 +55,6 @@ from .utils import (
     _set_trainable,
     add_library_to_model_card,
     get_peft_model_state_dict,
-    hub_file_exists,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -536,7 +533,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 peft_config.inference_mode = not is_trainable
             self.add_adapter(adapter_name, peft_config)
 
-        adapters_weights = self._get_peft_state_dict(model_id, **hf_hub_download_kwargs)
+        adapters_weights = self._load_peft_weights(model_id, **hf_hub_download_kwargs)
 
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
@@ -603,55 +600,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @property
     def active_peft_config(self):
         return self.peft_config[self.active_adapter]
-
-    @staticmethod
-    def _get_peft_state_dict(model_id, **hf_hub_download_kwargs):
-        # load weights if any
-        path = (
-            os.path.join(model_id, hf_hub_download_kwargs["subfolder"])
-            if hf_hub_download_kwargs.get("subfolder", None) is not None
-            else model_id
-        )
-
-        if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
-            filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
-            use_safetensors = True
-        elif os.path.exists(os.path.join(path, WEIGHTS_NAME)):
-            filename = os.path.join(path, WEIGHTS_NAME)
-            use_safetensors = False
-        else:
-            has_remote_safetensors_file = hub_file_exists(
-                model_id,
-                SAFETENSORS_WEIGHTS_NAME,
-                revision=hf_hub_download_kwargs.get("revision", None),
-                repo_type=hf_hub_download_kwargs.get("repo_type", None),
-            )
-            use_safetensors = has_remote_safetensors_file
-
-            if has_remote_safetensors_file:
-                # Priority 1: load safetensors weights
-                filename = hf_hub_download(
-                    model_id,
-                    SAFETENSORS_WEIGHTS_NAME,
-                    **hf_hub_download_kwargs,
-                )
-            else:
-                try:
-                    filename = hf_hub_download(model_id, WEIGHTS_NAME, **hf_hub_download_kwargs)
-                except EntryNotFoundError:
-                    raise ValueError(
-                        f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
-                        f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
-                    )
-
-        if use_safetensors:
-            adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            adapters_weights = torch.load(
-                filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            )
-
-        return adapters_weights
 
     def create_or_update_model_card(self, output_dir: str):
         """

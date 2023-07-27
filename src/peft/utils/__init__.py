@@ -45,4 +45,4 @@ from .other import (
     _is_valid_match,
 )
 from .hub_utils import hub_file_exists
-from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
+from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights

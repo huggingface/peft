@@ -12,6 +12,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+
+import torch
+from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import EntryNotFoundError
+from safetensors.torch import load_file as safe_load_file
+
+from .hub_utils import hub_file_exists
+from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME
 from .peft_types import PeftType
 
 
@@ -128,3 +137,60 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
     return load_result
+
+
+def load_peft_weights(model_id, **hf_hub_download_kwargs):
+    r"""
+    A helper method to load the PEFT weights from the HuggingFace Hub or locally
+
+    Args:
+        model_id (`str`):
+            The local path to the adapter weights or the name of the adapter to load from the HuggingFace Hub.
+        hf_hub_download_kwargs (`dict`):
+            Additional arguments to pass to the `hf_hub_download` method when loading from the HuggingFace Hub.
+    """
+    path = (
+        os.path.join(model_id, hf_hub_download_kwargs["subfolder"])
+        if hf_hub_download_kwargs.get("subfolder", None) is not None
+        else model_id
+    )
+
+    if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
+        filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
+        use_safetensors = True
+    elif os.path.exists(os.path.join(path, WEIGHTS_NAME)):
+        filename = os.path.join(path, WEIGHTS_NAME)
+        use_safetensors = False
+    else:
+        has_remote_safetensors_file = hub_file_exists(
+            model_id,
+            SAFETENSORS_WEIGHTS_NAME,
+            revision=hf_hub_download_kwargs.get("revision", None),
+            repo_type=hf_hub_download_kwargs.get("repo_type", None),
+        )
+        use_safetensors = has_remote_safetensors_file
+
+        if has_remote_safetensors_file:
+            # Priority 1: load safetensors weights
+            filename = hf_hub_download(
+                model_id,
+                SAFETENSORS_WEIGHTS_NAME,
+                **hf_hub_download_kwargs,
+            )
+        else:
+            try:
+                filename = hf_hub_download(model_id, WEIGHTS_NAME, **hf_hub_download_kwargs)
+            except EntryNotFoundError:
+                raise ValueError(
+                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
+                    f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
+                )
+
+    if use_safetensors:
+        adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        adapters_weights = torch.load(
+            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+
+    return adapters_weights
