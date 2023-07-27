@@ -460,7 +460,7 @@ class LoraModel(torch.nn.Module):
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = True):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
 
