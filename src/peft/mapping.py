@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict
 
+from .config import PeftConfig
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -98,16 +99,22 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
 
 
 # TODO: docstring and typehints
-def create_and_replace(peft_type, peft_config, model, adapter_name):
+def create_and_replace(peft_config, model, adapter_name):
+    if not isinstance(peft_config, PeftConfig):
+        raise ValueError(
+            f"peft_config must be an instance of PeftConfig got {type(peft_config)} instead."
+        )
+
+    peft_type = peft_config.peft_type
+
     if peft_type not in TUNERS_MAPPING:
         raise ValueError(
             f"Task type {peft_type} is not supported. Supported task types are {list(TUNERS_MAPPING.keys())}"
         )
     tuner_cls = TUNERS_MAPPING[peft_type]
 
-    for _, param in model.named_parameters():
-        # freeze parameters
-        param.requires_grad = False
+    # Freeze the base model
+    model.requires_grad_(False)
 
     is_target_modules_in_base_model = False
     key_list = [key for key, _ in model.named_modules()]
