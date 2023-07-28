@@ -378,7 +378,6 @@ class AdaLoraModel(LoraModel):
         return peft_config
 
 
-
 class SVDLinear(nn.Linear, AdaLoraLayer):
     # SVD-based adaptation by a dense layer
     def __init__(
