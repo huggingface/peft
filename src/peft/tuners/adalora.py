@@ -256,6 +256,7 @@ class AdaLoraModel(LoraModel):
 
         return new_module
 
+    @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
@@ -366,16 +367,6 @@ class AdaLoraModel(LoraModel):
         # Pass the function and do forward propagation
         else:
             return None
-
-    @staticmethod
-    def _prepare_adalora_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
-                model_config["model_type"]
-            ]
-        return peft_config
 
 
 class SVDLinear(nn.Linear, AdaLoraLayer):
