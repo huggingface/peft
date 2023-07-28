@@ -11,6 +11,7 @@ from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     PeftType,
+    _freeze_adapter,
     _get_submodules,
     transpose,
 )
@@ -136,8 +137,31 @@ class AdaLoraModel(LoraModel):
         self.adapter_layer_class = AdaLoraLayer
         self.post_init(adapter_name)
 
-    @staticmethod
+        if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
+            raise ValueError(
+                "AdaLoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
+            )
+        traininable_mode_counter = 0
+        for config in self.peft_config.values():
+            if not config.inference_mode:
+                traininable_mode_counter += 1
+
+        if traininable_mode_counter > 1:
+            raise ValueError(
+                "AdaLoraModel supports only 1 trainable adapter. "
+                "When using multiple adapters, set inference_mode to True for all adapters except the one you want to train."
+            )
+
+        self._mark_only_adapters_as_trainable()
+        if self.peft_config[adapter_name].inference_mode:
+            _freeze_adapter(self.model, adapter_name)
+        else:
+            self.trainable_adapter_name = adapter_name
+            self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
+
+    @classmethod
     def create_and_replace(
+        cls,
         lora_config,
         adapter_name,
         target,
@@ -165,8 +189,8 @@ class AdaLoraModel(LoraModel):
 
         # If it is not a LoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
-            new_module = AdaLoraModel._create_new_module(lora_config, adapter_name, target, **kwargs)
-            AdaLoraModel._replace_module(parent, target_name, new_module, target)
+            new_module = cls._create_new_module(lora_config, adapter_name, target, **kwargs)
+            cls._replace_module(parent, target_name, new_module, target)
         else:
             target.update_layer(
                 adapter_name,

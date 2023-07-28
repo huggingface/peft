@@ -43,9 +43,14 @@ class BaseTunerMixin(ABC):
     def _mark_only_adapters_as_trainable(self, *args):
         ...
 
-    @staticmethod
+    @abstractmethod
+    def _check_target_module_exists(peft_config, key):
+        ...
+
+    @classmethod
     @abstractmethod
     def create_and_replace(
+        cls,
         lora_config,
         adapter_name,
         target,

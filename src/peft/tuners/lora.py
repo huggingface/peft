@@ -327,8 +327,9 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                         target_module_found = False
         return target_module_found
 
-    @staticmethod
+    @classmethod
     def create_and_replace(
+        cls,
         lora_config,
         adapter_name,
         target,
@@ -376,8 +377,8 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                 lora_config.init_lora_weights,
             )
         else:
-            new_module = LoraModel._create_new_module(lora_config, adapter_name, target, **kwargs)
-            LoraModel._replace_module(parent, target_name, new_module, target)
+            new_module = cls._create_new_module(lora_config, adapter_name, target, **kwargs)
+            cls._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -603,8 +604,8 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
         self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
-
         create_and_replace(self.peft_config[adapter_name], self.model, adapter_name)
+
         self._mark_only_adapters_as_trainable()
         # Do we really need that?
         _freeze_adapter(self.model, adapter_name)

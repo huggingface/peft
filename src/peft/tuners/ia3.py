@@ -246,8 +246,9 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
             target_module_found = any(_is_valid_match(key, target_key) for target_key in ia3_config.target_modules)
         return target_module_found
 
-    @staticmethod
+    @classmethod
     def create_and_replace(
+        cls,
         ia3_config,
         adapter_name,
         target,
@@ -277,8 +278,8 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
                 ia3_config.init_ia3_weights,
             )
         else:
-            new_module = IA3Model._create_new_module(ia3_config, adapter_name, target, **kwargs)
-            IA3Model._replace_module(parent, target_name, new_module, target)
+            new_module = cls._create_new_module(ia3_config, adapter_name, target, **kwargs)
+            cls._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
     def _replace_module(parent_module, child_name, new_module, old_module):
