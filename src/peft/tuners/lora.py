@@ -280,7 +280,10 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
         self.adapter_layer_class = LoraLayer
         self.post_init(adapter_name=adapter_name)
 
-    def _mark_only_adapters_as_trainable(self, bias: str = "none") -> None:
+    def _mark_only_adapters_as_trainable(self) -> None:
+        active_adapter = self._get_active_adapter()
+        bias = self.peft_config[active_adapter].bias
+
         for n, p in self.model.named_parameters():
             if "lora_" not in n:
                 p.requires_grad = False
@@ -296,15 +299,6 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                     m.bias.requires_grad = True
         else:
             raise NotImplementedError
-
-    def _check_quantization_dependency(self):
-        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if (loaded_in_4bit or loaded_in_8bit) and not is_bnb_available():
-            raise ImportError(
-                "To use Lora with 8-bit or 4-bit quantization, please install the `bitsandbytes` package. "
-                "You can install it with `pip install bitsandbytes`."
-            )
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
@@ -586,6 +580,8 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
             adapter_name (str): Name of the new adapter.
             combination_type (str): Type of merging. Can be one of [`svd`, `linear`]
         """
+        from ..mapping import create_and_replace
+
         if adapter_name in list(self.peft_config.keys()):
             return
         for adapter in adapters:
@@ -607,9 +603,12 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
         self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
-        self._find_and_replace(adapter_name)
-        self._mark_only_adapters_as_trainable(self.peft_config[adapter_name].bias)
+
+        create_and_replace(self.peft_config[adapter_name], self.model, adapter_name)
+        self._mark_only_adapters_as_trainable()
+        # Do we really need that?
         _freeze_adapter(self.model, adapter_name)
+
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)

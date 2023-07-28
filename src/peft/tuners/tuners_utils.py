@@ -72,7 +72,7 @@ class BaseTunerMixin(ABC):
         create_and_replace(self.peft_config[adapter_name], self.model, adapter_name)
 
         # Mark adapters as trainable
-        self._mark_only_adapters_as_trainable(self.peft_config[adapter_name].bias)
+        self._mark_only_adapters_as_trainable()
 
         if self.peft_config[adapter_name].inference_mode:
             for n, p in self.model.named_parameters():
@@ -111,9 +111,11 @@ class BaseTunerLayerMixin:
         active_adapter (`str`, *optional*):
             The name of the active adapter.
     """
+    # TOOD: remove _is_plugable
     _is_plugable = False
     active_adapter = None
     supports_merging = False
+    _is_peft_tuner_layer = True
 
     @property
     def peft_is_plugable(self):
@@ -123,10 +125,8 @@ class BaseTunerLayerMixin:
         if self.active_adapter is None:
             raise ValueError("active_adapter must be set in the subclass")
 
-    @abstractmethod
     def merge(self):
-        ...
+        raise NotImplementedError
 
-    @abstractmethod
     def unmerge(self):
-        ...
+        raise NotImplementedError

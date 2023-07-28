@@ -30,7 +30,6 @@ from ..utils import (
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     PeftType,
-    _freeze_adapter,
     _get_submodules,
     _is_valid_match,
     transpose,
@@ -167,19 +166,9 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
         self.model = model
         self.forward = self.model.forward
         self.peft_config = config
-        self.add_adapter(adapter_name, self.peft_config[adapter_name])
+
         self.adapter_layer_class = IA3Layer
-
-    def add_adapter(self, adapter_name, config=None):
-        if config is not None:
-            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
-            config = self._prepare_ia3_config(config, model_config)
-            self.peft_config[adapter_name] = config
-        self._find_and_replace(adapter_name)
-
-        mark_only_ia3_as_trainable(self.model)
-        if self.peft_config[adapter_name].inference_mode:
-            _freeze_adapter(self.model, adapter_name)
+        self.post_init(adapter_name)
 
     def _check_quantization_dependency(self):
         loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
@@ -291,50 +280,6 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
             new_module = IA3Model._create_new_module(ia3_config, adapter_name, target, **kwargs)
             IA3Model._replace_module(parent, target_name, new_module, target)
 
-    def _find_and_replace(self, adapter_name):
-        ia3_config = self.peft_config[adapter_name]
-        if not ia3_config.feedforward_modules:
-            ia3_config.feedforward_modules = []  # convert to list if None
-        self._check_quantization_dependency()
-        is_target_modules_in_base_model = False
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-
-        kwargs = {
-            "fan_in_fan_out": ia3_config.fan_in_fan_out,
-            "init_ia3_weights": ia3_config.init_ia3_weights,
-            "loaded_in_8bit": loaded_in_8bit,
-        }
-
-        key_list = [key for key, _ in self.model.named_modules()]
-        for key in key_list:
-            if not self._check_target_module_exists(ia3_config, key):
-                continue
-            # check if target module is in feedforward_modules
-            if isinstance(ia3_config.feedforward_modules, str):
-                is_feedforward = re.fullmatch(ia3_config.feedforward_modules, key)
-            else:
-                is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
-
-            if not is_target_modules_in_base_model:
-                is_target_modules_in_base_model = True
-            parent, target, target_name = _get_submodules(self.model, key)
-
-            if isinstance(target, IA3Layer):
-                target.update_layer(
-                    adapter_name,
-                    ia3_config.init_ia3_weights,
-                )
-            else:
-                new_module = self._create_new_module(
-                    ia3_config, adapter_name, target, is_feedforward=is_feedforward, **kwargs
-                )
-                self._replace_module(parent, target_name, new_module, target)
-        if not is_target_modules_in_base_model:
-            raise ValueError(
-                f"Target modules {ia3_config.target_modules} not found in the base model. "
-                f"Please check the target modules and try again."
-            )
-
     @staticmethod
     def _replace_module(parent_module, child_name, new_module, old_module):
         setattr(parent_module, child_name, new_module)
@@ -387,8 +332,7 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
                     module.unmerge()
                 module.active_adapter = adapter_name
 
-    @staticmethod
-    def _prepare_ia3_config(peft_config, model_config):
+    def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
@@ -400,6 +344,11 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
                 model_config["model_type"]
             ]
         return peft_config
+
+    def _mark_only_adapters_as_trainable(self) -> None:
+        for n, p in self.model.named_parameters():
+            if "ia3_" not in n:
+                p.requires_grad = False
 
     def merge_and_unload(self):
         r"""
@@ -439,12 +388,6 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
-
-
-def mark_only_ia3_as_trainable(model: nn.Module) -> None:
-    for n, p in model.named_parameters():
-        if "ia3_" not in n:
-            p.requires_grad = False
 
 
 class Linear(nn.Linear, IA3Layer):
