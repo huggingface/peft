@@ -36,7 +36,7 @@ from ..utils import (
     _get_submodules,
     transpose,
 )
-from .tuners_utils import BaseTunerLayerMixin, BaseTunerMixin
+from .tuners_utils import BaseTuner, BaseTunerLayerMixin
 
 
 if is_bnb_available():
@@ -135,7 +135,6 @@ class LoraLayer(BaseTunerLayerMixin):
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
-        self._is_plugable = True
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -211,7 +210,7 @@ class LoraLayer(BaseTunerLayerMixin):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
 
-class LoraModel(torch.nn.Module, BaseTunerMixin):
+class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
@@ -268,37 +267,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
     """
 
     def __init__(self, model, config, adapter_name):
-        super().__init__()
-        self.model = model
-        self.forward = self.model.forward
-        self.peft_config = config
-
-        # transformers models have a .config attribute, whose presence is assumed later on
-        if not hasattr(self, "config"):
-            self.config = {"model_type": "custom"}
-
-        self.adapter_layer_class = LoraLayer
-        self.post_init(adapter_name=adapter_name)
-
-    def _mark_only_adapters_as_trainable(self) -> None:
-        active_adapter = self._get_active_adapter()
-        bias = self.peft_config[active_adapter].bias
-
-        for n, p in self.model.named_parameters():
-            if "lora_" not in n:
-                p.requires_grad = False
-        if bias == "none":
-            return
-        elif bias == "all":
-            for n, p in self.model.named_parameters():
-                if "bias" in n:
-                    p.requires_grad = True
-        elif bias == "lora_only":
-            for m in self.model.modules():
-                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
-                    m.bias.requires_grad = True
-        else:
-            raise NotImplementedError
+        super().__init__(model, config, adapter_name, adapter_layer_class=LoraLayer)
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
@@ -327,9 +296,8 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                         target_module_found = False
         return target_module_found
 
-    @classmethod
-    def create_and_replace(
-        cls,
+    def _create_and_replace(
+        self,
         lora_config,
         adapter_name,
         target,
@@ -351,7 +319,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
         kwargs["bias"] = bias
 
         # TODO: better deal with that
-        if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
+        if isinstance(target, self.adapter_layer_class) and isinstance(target, torch.nn.Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
                 lora_config.r,
@@ -359,7 +327,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
-        elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
+        elif isinstance(target, self.adapter_layer_class) and isinstance(target, torch.nn.Embedding):
             target.update_layer_embedding(
                 adapter_name,
                 lora_config.r,
@@ -368,7 +336,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                 lora_config.init_lora_weights,
             )
 
-        elif isinstance(target, LoraLayer):
+        elif isinstance(target, self.adapter_layer_class):
             target.update_layer(
                 adapter_name,
                 lora_config.r,
@@ -377,8 +345,47 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                 lora_config.init_lora_weights,
             )
         else:
-            new_module = cls._create_new_module(lora_config, adapter_name, target, **kwargs)
-            cls._replace_module(parent, target_name, new_module, target)
+            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            self._replace_module(parent, target_name, new_module, target)
+
+    @staticmethod
+    def _replace_module(parent, target_name, new_module, target):
+        setattr(parent, target_name, new_module)
+        new_module.weight = target.weight
+        if hasattr(target, "bias"):
+            if target.bias is not None:
+                new_module.bias = target.bias
+
+        if getattr(target, "state", None) is not None:
+            new_module.state = target.state
+            new_module.to(target.weight.device)
+
+        # dispatch to correct device
+        for name, module in new_module.named_modules():
+            if "lora_" in name:
+                module.to(target.weight.device)
+            if "ranknum" in name:
+                module.to(target.weight.device)
+
+    def _mark_only_adapters_as_trainable(self) -> None:
+        active_adapter = self._get_active_adapter()
+        bias = self.peft_config[active_adapter].bias
+
+        for n, p in self.model.named_parameters():
+            if "lora_" not in n:
+                p.requires_grad = False
+        if bias == "none":
+            return
+        elif bias == "all":
+            for n, p in self.model.named_parameters():
+                if "bias" in n:
+                    p.requires_grad = True
+        elif bias == "lora_only":
+            for m in self.model.modules():
+                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                    m.bias.requires_grad = True
+        else:
+            raise NotImplementedError
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -449,25 +456,6 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
 
         return new_module
 
-    @staticmethod
-    def _replace_module(parent_module, child_name, new_module, old_module):
-        setattr(parent_module, child_name, new_module)
-        new_module.weight = old_module.weight
-        if hasattr(old_module, "bias"):
-            if old_module.bias is not None:
-                new_module.bias = old_module.bias
-
-        if getattr(old_module, "state", None) is not None:
-            new_module.state = old_module.state
-            new_module.to(old_module.weight.device)
-
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if "lora_" in name:
-                module.to(old_module.weight.device)
-            if "ranknum" in name:
-                module.to(old_module.weight.device)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -486,7 +474,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, self.adapter_layer_class):
                 module.disable_adapters = False if enabled else True
             elif isinstance(module, ModulesToSaveWrapper):
                 module.disable_adapters = False if enabled else True
@@ -497,7 +485,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
     def _get_active_adapter(self) -> str:
         active_adapter = None
         for module in self.model.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, self.adapter_layer_class):
                 active_adapter = module.active_adapter
 
         if active_adapter is None:
@@ -519,7 +507,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, self.adapter_layer_class):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -543,7 +531,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, LoraLayer):
+            if isinstance(target, self.adapter_layer_class):
                 if isinstance(target, nn.Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
                 elif isinstance(target, nn.Conv2d):
@@ -581,7 +569,6 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
             adapter_name (str): Name of the new adapter.
             combination_type (str): Type of merging. Can be one of [`svd`, `linear`]
         """
-        from ..mapping import create_and_replace
 
         if adapter_name in list(self.peft_config.keys()):
             return
@@ -604,16 +591,15 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
         self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
-        create_and_replace(self.peft_config[adapter_name], self.model, adapter_name)
+        self.create_and_replace(self.model, adapter_name)
 
-        self._mark_only_adapters_as_trainable()
         # Do we really need that?
         _freeze_adapter(self.model, adapter_name)
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, LoraLayer):
+            if isinstance(target, self.adapter_layer_class):
                 if adapter_name in target.lora_A:
                     target_lora_A = target.lora_A[adapter_name].weight
                     target_lora_B = target.lora_B[adapter_name].weight
@@ -681,7 +667,7 @@ class LoraModel(torch.nn.Module, BaseTunerMixin):
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, LoraLayer):
+            if isinstance(target, self.adapter_layer_class):
                 for attr in [
                     "r",
                     "lora_alpha",

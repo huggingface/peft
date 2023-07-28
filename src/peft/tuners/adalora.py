@@ -20,6 +20,7 @@ from .lora import (
     LoraLayer,
     LoraModel,
 )
+from .tuners_utils import BaseTuner
 
 
 if is_bnb_available():
@@ -82,13 +83,13 @@ class AdaLoraLayer(LoraLayer):
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, self.in_features))}))
+        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
         # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, 1))}))
+        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
         # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(self.out_features, r))}))
+        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
         # The current rank
-        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
+        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(1), requires_grad=False)}))
         self.ranknum[adapter_name].data.fill_(float(r))
         self.ranknum[adapter_name].requires_grad = False
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
@@ -98,7 +99,7 @@ class AdaLoraLayer(LoraLayer):
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
-            nn.init.zeros_(self.lora_E[adapter_name])
+            nn.init.normal_(self.lora_E[adapter_name], mean=0.0, std=0.02)
             nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
             nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
 
@@ -130,12 +131,7 @@ class AdaLoraModel(LoraModel):
     """
 
     def __init__(self, model, config, adapter_name):
-        nn.Module.__init__(self)
-        self.model = model
-        self.peft_config = config
-
-        self.adapter_layer_class = AdaLoraLayer
-        self.post_init(adapter_name)
+        BaseTuner.__init__(self, model, config, adapter_name, adapter_layer_class=AdaLoraLayer)
 
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
             raise ValueError(
@@ -152,16 +148,14 @@ class AdaLoraModel(LoraModel):
                 "When using multiple adapters, set inference_mode to True for all adapters except the one you want to train."
             )
 
-        self._mark_only_adapters_as_trainable()
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
         else:
             self.trainable_adapter_name = adapter_name
             self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
 
-    @classmethod
-    def create_and_replace(
-        cls,
+    def _create_and_replace(
+        self,
         lora_config,
         adapter_name,
         target,
@@ -189,8 +183,8 @@ class AdaLoraModel(LoraModel):
 
         # If it is not a LoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
-            new_module = cls._create_new_module(lora_config, adapter_name, target, **kwargs)
-            cls._replace_module(parent, target_name, new_module, target)
+            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            self._replace_module(parent, target_name, new_module, target)
         else:
             target.update_layer(
                 adapter_name,

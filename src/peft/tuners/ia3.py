@@ -34,7 +34,7 @@ from ..utils import (
     _is_valid_match,
     transpose,
 )
-from .tuners_utils import BaseTunerLayerMixin, BaseTunerMixin
+from .tuners_utils import BaseTuner, BaseTunerLayerMixin
 
 
 if is_bnb_available():
@@ -108,8 +108,6 @@ class IA3Layer(BaseTunerLayerMixin):
         self.out_features = out_features
         self.is_feedforward = is_feedforward
 
-        self._is_plugable = True
-
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
         if self.is_feedforward:
@@ -127,7 +125,7 @@ class IA3Layer(BaseTunerLayerMixin):
             nn.init.constant_(self.ia3_l[adapter_name], 1.0)
 
 
-class IA3Model(torch.nn.Module, BaseTunerMixin):
+class IA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
     transformers model. The method is described in detail in https://arxiv.org/abs/2205.05638
@@ -161,27 +159,8 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
         - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
     """
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__()
-        self.model = model
-        self.forward = self.model.forward
-        self.peft_config = config
-
-        self.adapter_layer_class = IA3Layer
-        self.post_init(adapter_name)
-
-    def _check_quantization_dependency(self):
-        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
-        if loaded_in_4bit:
-            raise NotImplementedError(
-                "4-bit quantization is not supported for IA3 yet, 8-bit quantization can be used instead."
-            )
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if loaded_in_8bit and not is_bnb_available():
-            raise ImportError(
-                "To use (IA)^3 with 8-bit quantization, please install the `bitsandbytes` package. "
-                "You can install it with `pip install bitsandbytes`."
-            )
+    def __init__(self, model, config, adapter_name, adapter_layer_class=IA3Layer):
+        super().__init__(model, config, adapter_name, adapter_layer_class)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
@@ -246,9 +225,13 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
             target_module_found = any(_is_valid_match(key, target_key) for target_key in ia3_config.target_modules)
         return target_module_found
 
-    @classmethod
-    def create_and_replace(
-        cls,
+    def _mark_only_adapters_as_trainable(self) -> None:
+        for n, p in self.model.named_parameters():
+            if "ia3_" not in n:
+                p.requires_grad = False
+
+    def _create_and_replace(
+        self,
         ia3_config,
         adapter_name,
         target,
@@ -278,23 +261,23 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
                 ia3_config.init_ia3_weights,
             )
         else:
-            new_module = cls._create_new_module(ia3_config, adapter_name, target, **kwargs)
-            cls._replace_module(parent, target_name, new_module, target)
+            new_module = self._create_new_module(ia3_config, adapter_name, target, **kwargs)
+            self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _replace_module(parent_module, child_name, new_module, old_module):
-        setattr(parent_module, child_name, new_module)
-        new_module.weight = old_module.weight
-        if old_module.bias is not None:
-            new_module.bias = old_module.bias
-        if getattr(old_module, "state", None) is not None:
-            new_module.state = old_module.state
-            new_module.to(old_module.weight.device)
+    def _replace_module(parent, target_name, new_module, target):
+        setattr(parent, target_name, new_module)
+        new_module.weight = target.weight
+        if target.bias is not None:
+            new_module.bias = target.bias
+        if getattr(target, "state", None) is not None:
+            new_module.state = target.state
+            new_module.to(target.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "ia3_" in name:
-                module.to(old_module.weight.device)
+                module.to(target.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -345,11 +328,6 @@ class IA3Model(torch.nn.Module, BaseTunerMixin):
                 model_config["model_type"]
             ]
         return peft_config
-
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
-            if "ia3_" not in n:
-                p.requires_grad = False
 
     def merge_and_unload(self):
         r"""

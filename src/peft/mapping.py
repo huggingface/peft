@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict
 
+import torch
+
 from .config import PeftConfig
 from .peft_model import (
     PeftModel,
@@ -28,7 +30,6 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .tuners import (
-    TUNERS_MAPPING,
     AdaLoraConfig,
     AdaptionPromptConfig,
     IA3Config,
@@ -37,7 +38,7 @@ from .tuners import (
     PromptEncoderConfig,
     PromptTuningConfig,
 )
-from .utils import _get_submodules, _prepare_prompt_learning_config
+from .utils import _prepare_prompt_learning_config
 
 
 if TYPE_CHECKING:
@@ -96,44 +97,28 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
 
 
-# TODO: docstring and typehints
-def create_and_replace(peft_config, model, adapter_name):
+def create_and_replace(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str):
+    r"""
+    A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
+    methods and only LoRA, AdaLora and IA3 are supported. Make sure to have the correct `target_names` set in the
+    `peft_config` object. The API calls `get_peft_model` under the hood but would be restricted only to non-prompt
+    learning methods.
+
+    Args:
+        (`peft_config`, `PeftConfig`):
+            Configuration object containing the parameters of the Peft model.
+        (`model`, `torch.nn.Module`):
+            The input model where the adapter will be injected.
+        (`adapter_name`, `str`):
+            The name of the adapter to be injected.
+    """
     if not isinstance(peft_config, PeftConfig):
-        raise ValueError(f"peft_config must be an instance of PeftConfig got {type(peft_config)} instead.")
-
-    peft_type = peft_config.peft_type
-
-    if peft_type not in TUNERS_MAPPING:
         raise ValueError(
-            f"Task type {peft_type} is not supported. Supported task types are {list(TUNERS_MAPPING.keys())}"
+            f"create_and_replace expects a `PeftConfig` instance as first argument, got {type(peft_config)} instead."
         )
-    tuner_cls = TUNERS_MAPPING[peft_type]
 
-    # TODO: test that
-    for module in model.modules():
-        if not getattr(module, "_is_peft_tuner_layer", False):
-            module.requires_grad_(False)
+    if peft_config.is_prompt_learning:
+        raise ValueError("`create_and_replace` does not support prompt learning yet.")
 
-    is_target_modules_in_base_model = False
-    key_list = [key for key, _ in model.named_modules()]
-
-    for key in key_list:
-        if not tuner_cls._check_target_module_exists(peft_config, key):
-            continue
-
-        is_target_modules_in_base_model = True
-        parent, target, target_name = _get_submodules(model, key)
-
-        optionnal_kwargs = {
-            "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
-            "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
-            "current_key": key,
-        }
-
-        tuner_cls.create_and_replace(peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs)
-
-    if not is_target_modules_in_base_model:
-        raise ValueError(
-            f"Target modules {peft_config.target_modules} not found in the base model. "
-            f"Please check the target modules and try again."
-        )
+    peft_model = get_peft_model(model, peft_config, adapter_name=adapter_name)
+    return peft_model.base_model.model

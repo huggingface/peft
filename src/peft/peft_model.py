@@ -486,7 +486,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
             self._setup_prompt_encoder(adapter_name)
         else:
-            self.base_model.add_adapter(adapter_name, peft_config)
+            self.create_and_replace(self, adapter_name)
 
         self.set_additional_trainable_modules(peft_config, adapter_name)
 

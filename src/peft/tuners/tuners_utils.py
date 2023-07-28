@@ -14,69 +14,106 @@
 # limitations under the License.
 from abc import ABC, abstractmethod
 
+from torch import nn
 
-class BaseTunerMixin(ABC):
+from ..config import PeftConfig
+from ..utils import _get_submodules
+
+
+class BaseTuner(nn.Module, ABC):
     r"""
-    A base tuner model mixin that provides the common methods and attributes for all tuners.
-
-    Each `BaseTunerMixin` class needs to be implemented in case the adapter is a plugable adapter.
+    A base tuner model that provides the common methods and attributes for all tuners. Each `BaseTuner` class needs to
+    be implemented in case the adapter is a plugable adapter.
     """
-    adapter_layer_class = None
 
-    def post_init(self, adapter_name, *args, **kwargs):
+    def __init__(self, model, peft_config, adapter_name, adapter_layer_class=None):
+        super().__init__()
+        self.pre_init(model, peft_config, adapter_name, adapter_layer_class)
+
+        self.model = model
+        self.forward = self.model.forward
+
+        # Some adapters might be already attached
         if not hasattr(self, "peft_config"):
+            self.peft_config = peft_config
+
+        # transformers models have a .config attribute, whose presence is assumed later on
+        if not hasattr(self, "config"):
+            self.config = {"model_type": "custom"}
+
+        self.adapter_layer_class = adapter_layer_class
+        self.create_and_replace(self.model, adapter_name)
+
+    def pre_init(self, model, config, adapter_name, adapter_layer_class):
+        r"""
+        Runs a set of checks to make sure the passed arguments are correct.
+        """
+        if config is None:
             raise ValueError("You need to specify a `peft_config` attribute in your class")
-        if self.adapter_layer_class is None:
+        if adapter_layer_class is None:
             raise ValueError("You need to specify a `adapter_layer_class` attribute in your class")
         if not isinstance(adapter_name, str):
             raise ValueError("You need to specify a `adapter_name` attribute in your class")
-        if not hasattr(self, "model"):
-            raise ValueError("You need to specify a `model` attribute in your class")
-
-        self.add_adapter(adapter_name, self.peft_config[adapter_name])
+        if not isinstance(model, nn.Module):
+            raise ValueError("The model attribute needs to be a `nn.Module` instance")
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config, model_config):
         ...
 
     @abstractmethod
-    def _mark_only_adapters_as_trainable(self, *args):
-        ...
-
-    @abstractmethod
     def _check_target_module_exists(peft_config, key):
         ...
 
-    @classmethod
     @abstractmethod
-    def create_and_replace(
-        cls,
-        lora_config,
-        adapter_name,
-        target,
-        target_name,
-        parent,
-        **optionnal_kwargs,
-    ):
+    def _create_and_replace(self, peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs):
         ...
 
-    def add_adapter(self, adapter_name, config=None):
-        """
-        This method adds a new adapter to the model.
-        """
-        from ..mapping import create_and_replace
+    @abstractmethod
+    def _mark_only_adapters_as_trainable(self):
+        ...
 
-        if config is not None:
-            model_config = getattr(self.model, "config", {"model_type": "custom"})
-            if hasattr(model_config, "to_dict"):
-                model_config = model_config.to_dict()
+    def create_and_replace(self, model, adapter_name):
+        peft_config = self.peft_config[adapter_name]
 
-            config = self._prepare_adapter_config(config, model_config)
-            self.peft_config[adapter_name] = config
+        if not isinstance(peft_config, PeftConfig):
+            raise ValueError(f"peft_config must be an instance of PeftConfig got {type(peft_config)} instead.")
 
-        create_and_replace(self.peft_config[adapter_name], self.model, adapter_name)
+        # TODO: test that
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayerMixin):
+                module.requires_grad_(False)
 
-        # Mark adapters as trainable
+        is_target_modules_in_base_model = False
+        key_list = [key for key, _ in model.named_modules()]
+
+        model_config = getattr(model, "config", {"model_type": "custom"})
+        if hasattr(model_config, "to_dict"):
+            model_config = model_config.to_dict()
+
+        peft_config = self._prepare_adapter_config(peft_config, model_config)
+
+        for key in key_list:
+            if not self._check_target_module_exists(peft_config, key):
+                continue
+
+            is_target_modules_in_base_model = True
+            parent, target, target_name = _get_submodules(model, key)
+
+            optionnal_kwargs = {
+                "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
+                "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
+                "current_key": key,
+            }
+
+            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs)
+
+        if not is_target_modules_in_base_model:
+            raise ValueError(
+                f"Target modules {peft_config.target_modules} not found in the base model. "
+                f"Please check the target modules and try again."
+            )
+
         self._mark_only_adapters_as_trainable()
 
         if self.peft_config[adapter_name].inference_mode:
@@ -116,19 +153,9 @@ class BaseTunerLayerMixin:
         active_adapter (`str`, *optional*):
             The name of the active adapter.
     """
-    # TOOD: remove _is_plugable
-    _is_plugable = False
     active_adapter = None
     supports_merging = False
     _is_peft_tuner_layer = True
-
-    @property
-    def peft_is_plugable(self):
-        return self._is_plugable
-
-    def __post_init__(self):
-        if self.active_adapter is None:
-            raise ValueError("active_adapter must be set in the subclass")
 
     def merge(self):
         raise NotImplementedError
