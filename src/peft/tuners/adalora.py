@@ -106,7 +106,7 @@ class AdaLoraLayer(LoraLayer):
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
-    https://openreview.net/pdf?id=lq62uWRJjiY
+    https://openreview.net/forum?id=lq62uWRJjiY
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
@@ -366,6 +366,17 @@ class AdaLoraModel(LoraModel):
         # Pass the function and do forward propagation
         else:
             return None
+
+    @staticmethod
+    def _prepare_adalora_config(peft_config, model_config):
+        if peft_config.target_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
+                raise ValueError("Please specify `target_modules` in `peft_config`")
+            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
+                model_config["model_type"]
+            ]
+        return peft_config
+
 
 
 class SVDLinear(nn.Linear, AdaLoraLayer):
