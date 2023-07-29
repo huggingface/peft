@@ -34,3 +34,10 @@ doctest_optionflags = [
     "ELLIPSIS",
     "NUMBER",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--cov=src/peft --cov-report=term-missing"
+markers = [
+    "single_gpu_tests: tests that run on a single GPU",
+    "multi_gpu_tests: tests that run on multiple GPUs",
+]

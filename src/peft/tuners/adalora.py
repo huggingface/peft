@@ -1,4 +1,3 @@
-import importlib
 import re
 import warnings
 from dataclasses import dataclass, field
@@ -9,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
+from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     PeftType,
@@ -22,10 +22,6 @@ from .lora import (
     LoraModel,
     mark_only_lora_as_trainable,
 )
-
-
-def is_bnb_available():
-    return importlib.util.find_spec("bitsandbytes") is not None
 
 
 if is_bnb_available():
@@ -68,7 +64,7 @@ class AdaLoraConfig(LoraConfig):
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
-    https://openreview.net/pdf?id=lq62uWRJjiY
+    https://openreview.net/forum?id=lq62uWRJjiY
 
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
@@ -84,7 +80,7 @@ class AdaLoraModel(LoraModel):
                 peft_type="ADALORA", task_type="SEQ_2_SEQ_LM", r=8, lora_alpha=32, target_modules=["q", "v"],
                 lora_dropout=0.01,
             )
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> model = AdaLoraModel(config, model)
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base") >>> model = AdaLoraModel(model, config, "default")
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
@@ -128,7 +124,9 @@ class AdaLoraModel(LoraModel):
     def _find_and_replace(self, adapter_name):
         lora_config = self.peft_config[adapter_name]
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if loaded_in_8bit and not is_bnb_available():
+        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
+
+        if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
             raise ImportError(
                 "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
@@ -151,7 +149,7 @@ class AdaLoraModel(LoraModel):
                 if not is_target_modules_in_base_model:
                     is_target_modules_in_base_model = True
                 parent, target, target_name = _get_submodules(self.model, key)
-                bias = target.bias is not None
+                bias = hasattr(target, "bias") and target.bias is not None
                 if isinstance(target, LoraLayer):
                     target.update_layer(
                         adapter_name,
@@ -173,6 +171,21 @@ class AdaLoraModel(LoraModel):
                         new_module = SVDLinear8bitLt(
                             adapter_name, target.in_features, target.out_features, bias=bias, **kwargs
                         )
+                    elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+                        fourbit_kwargs = kwargs.copy()
+                        fourbit_kwargs.update(
+                            {
+                                "compute_dtype": target.compute_dtype,
+                                "compress_statistics": target.weight.compress_statistics,
+                                "quant_type": target.weight.quant_type,
+                            }
+                        )
+                        new_module = SVDLinear4bit(
+                            adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
+                        )
+                    elif isinstance(target, (nn.ModuleList, nn.ModuleDict)):
+                        # it's not applicable to replace whole module lists or module dicts
+                        continue
                     else:
                         if isinstance(target, torch.nn.Linear):
                             in_features, out_features = target.in_features, target.out_features
@@ -216,11 +229,13 @@ class AdaLoraModel(LoraModel):
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 
-        # Calculate the orthogonal regularization
-        orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
-        assert orth_reg_weight > 0
+        if getattr(outputs, "loss", None) is not None:
+            # Calculate the orthogonal regularization
+            orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 
-        if hasattr(outputs, "loss"):
+            if orth_reg_weight <= 0:
+                raise ValueError("orth_reg_weight should be greater than 0. ")
+
             regu_loss = 0
             num_param = 0
             for n, p in self.model.named_parameters():
@@ -230,7 +245,10 @@ class AdaLoraModel(LoraModel):
                     I.requires_grad = False
                     num_param += 1
                     regu_loss += torch.norm(para_cov - I, p="fro")
-            regu_loss = regu_loss / num_param
+            if num_param > 0:
+                regu_loss = regu_loss / num_param
+            else:
+                regu_loss = 0
             outputs.loss += orth_reg_weight * regu_loss
         return outputs
 
@@ -311,8 +329,6 @@ class AdaLoraModel(LoraModel):
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
                 model_config["model_type"]
             ]
-        if peft_config.inference_mode:
-            peft_config.merge_weights = True
         return peft_config
 
 
@@ -334,18 +350,16 @@ class AdaLoraLayer(LoraLayer):
         if lora_dropout > 0.0:
             lora_dropout_layer = nn.Dropout(p=lora_dropout)
         else:
-
-            def lora_dropout_layer(x):
-                return x
+            lora_dropout_layer = nn.Identity()
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, self.in_features))}))
+        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
         # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(r, 1))}))
+        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
         # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(self.out_features, r))}))
+        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
         # The current rank
         self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
         self.ranknum[adapter_name].data.fill_(float(r))
@@ -509,7 +523,72 @@ if is_bnb_available():
                         * self.scaling[self.active_adapter]
                         / (self.ranknum[self.active_adapter] + 1e-5)
                     )
-                result += output
+                result = result + output
+            return result
+
+
+if is_bnb_4bit_available():
+
+    class SVDLinear4bit(bnb.nn.Linear4bit, AdaLoraLayer):
+        # Low-rank matrix for SVD-based adaptation
+        def __init__(
+            self,
+            adapter_name,
+            in_features,
+            out_features,
+            r: int = 0,
+            lora_alpha: int = 1,
+            lora_dropout: float = 0.0,
+            **kwargs,
+        ):
+            bnb.nn.Linear4bit.__init__(
+                self,
+                in_features,
+                out_features,
+                bias=kwargs.get("bias", True),
+                compute_dtype=kwargs.get("compute_dtype", torch.float32),
+                compress_statistics=kwargs.get("compress_statistics", True),
+                quant_type=kwargs.get("quant_type", "nf4"),
+            )
+            AdaLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+            # Freezing the pre-trained weight matrix
+            self.weight.requires_grad = False
+
+            init_lora_weights = kwargs.pop("init_lora_weights", True)
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self.active_adapter = adapter_name
+
+        def forward(self, x: torch.Tensor):
+            result = super().forward(x)
+
+            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+                return result
+            elif self.r[self.active_adapter] > 0:
+                if not torch.is_autocast_enabled():
+                    expected_dtype = result.dtype
+
+                    if x.dtype != torch.float32:
+                        x = x.float()
+                    output = (
+                        (
+                            self.lora_dropout[self.active_adapter](x)
+                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                            @ self.lora_B[self.active_adapter].T
+                        ).to(expected_dtype)
+                        * self.scaling[self.active_adapter]
+                        / (self.ranknum[self.active_adapter] + 1e-5)
+                    )
+                else:
+                    output = (
+                        (
+                            self.lora_dropout[self.active_adapter](x)
+                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                            @ self.lora_B[self.active_adapter].T
+                        )
+                        * self.scaling[self.active_adapter]
+                        / (self.ranknum[self.active_adapter] + 1e-5)
+                    )
+                result = result + output
             return result
 
 

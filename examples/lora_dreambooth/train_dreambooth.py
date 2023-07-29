@@ -330,6 +330,18 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
+        "--wandb_key",
+        type=str,
+        default=None,
+        help=("If report to option is set to wandb, api-key for wandb used for login to wandb "),
+    )
+    parser.add_argument(
+        "--wandb_project_name",
+        type=str,
+        default=None,
+        help=("If report to option is set to wandb, project name in wandb for log tracking  "),
+    )
+    parser.add_argument(
         "--mixed_precision",
         type=str,
         default=None,
@@ -569,9 +581,13 @@ def main(args):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
-        logging_dir=logging_dir,
+        project_dir=logging_dir,
     )
+    if args.report_to == "wandb":
+        import wandb
 
+        wandb.login(key=args.wandb_key)
+        wandb.init(project=args.wandb_project_name)
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
     # TODO (patil-suraj): Remove this check when gradient accumulation with two models is enabled in accelerate.
@@ -883,6 +899,8 @@ def main(args):
                 if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                     if step % args.gradient_accumulation_steps == 0:
                         progress_bar.update(1)
+                        if args.report_to == "wandb":
+                            accelerator.print(progress_bar)
                     continue
 
                 with accelerator.accumulate(unet):
@@ -948,6 +966,8 @@ def main(args):
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
+                    if args.report_to == "wandb":
+                        accelerator.print(progress_bar)
                     global_step += 1
 
                     # if global_step % args.checkpointing_steps == 0:

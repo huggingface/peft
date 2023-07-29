@@ -12,10 +12,39 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import copy
+import inspect
+import os
+import warnings
 
+import accelerate
 import torch
+from accelerate.hooks import add_hook_to_module, remove_hook_from_module
+
+
+# Add or edit model card to have `library_name: peft`
+def add_library_to_model_card(output_dir):
+    if os.path.exists(os.path.join(output_dir, "README.md")):
+        with open(os.path.join(output_dir, "README.md"), "r") as f:
+            lines = f.readlines()
+        # check if the first line is `---`
+        if len(lines) > 0 and lines[0].startswith("---"):
+            for i, line in enumerate(lines[1:]):
+                # check if line starts with `library_name`, if yes, update it
+                if line.startswith("library_name"):
+                    lines[i + 1] = "library_name: peft\n"
+                    break
+                elif line.startswith("---"):
+                    # insert `library_name: peft` before the last `---`
+                    lines.insert(i + 1, "library_name: peft\n")
+                    break
+        else:
+            lines = ["---\n", "library_name: peft\n", "---\n"] + lines
+    else:
+        lines = ["---\n", "library_name: peft\n", "---\n"]
+    # write the lines back to README.md
+    with open(os.path.join(output_dir, "README.md"), "w") as f:
+        f.writelines(lines)
 
 
 # needed for prefix-tuning of bloom model
@@ -32,7 +61,7 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -42,7 +71,7 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         model, (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
     """
-    loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
+    loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
 
     for name, param in model.named_parameters():
         # freeze base model's layers
@@ -53,7 +82,7 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
             param.data = param.data.to(torch.float32)
 
-    if loaded_in_8bit and use_gradient_checkpointing:
+    if loaded_in_kbit and use_gradient_checkpointing:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
@@ -68,6 +97,15 @@ def prepare_model_for_int8_training(model, use_gradient_checkpointing=True):
         model.gradient_checkpointing_enable()
 
     return model
+
+
+# For backward compatibility
+def prepare_model_for_int8_training(*args, **kwargs):
+    warnings.warn(
+        "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
+        FutureWarning,
+    )
+    return prepare_model_for_kbit_training(*args, **kwargs)
 
 
 # copied from transformers.models.bart.modeling_bart
@@ -99,12 +137,33 @@ class ModulesToSaveWrapper(torch.nn.Module):
         self.modules_to_save = torch.nn.ModuleDict({})
         self.update(adapter_name)
         self.active_adapter = adapter_name
+        self.disable_adapters = False
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
 
+        if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
+            old_hook = self.modules_to_save[adapter_name]._hf_hook
+            new_hook = self._create_new_hook(old_hook)
+            remove_hook_from_module(self.modules_to_save[adapter_name])
+            add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
+
+    def _create_new_hook(self, old_hook):
+        r"""
+        Creates a new hook based on the old hook. Use it only if you know what you are doing !
+        """
+        old_hook_cls = getattr(accelerate.hooks, old_hook.__class__.__name__)
+        old_hook_attr = old_hook.__dict__
+        filtered_old_hook_attr = {}
+        old_hook_init_signature = inspect.signature(old_hook_cls.__init__)
+        for k in old_hook_attr.keys():
+            if k in old_hook_init_signature.parameters:
+                filtered_old_hook_attr[k] = old_hook_attr[k]
+        new_hook = old_hook_cls(**filtered_old_hook_attr)
+        return new_hook
+
     def forward(self, *args, **kwargs):
-        if self.active_adapter not in self.modules_to_save:
+        if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
             return self.original_module(*args, **kwargs)
         return self.modules_to_save[self.active_adapter](*args, **kwargs)
 
@@ -140,6 +199,48 @@ def _set_adapter(model, adapter_name):
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
             module.active_adapter = adapter_name
+
+
+def _prepare_prompt_learning_config(peft_config, model_config):
+    if peft_config.num_layers is None:
+        if "num_hidden_layers" in model_config:
+            num_layers = model_config["num_hidden_layers"]
+        elif "num_layers" in model_config:
+            num_layers = model_config["num_layers"]
+        elif "n_layer" in model_config:
+            num_layers = model_config["n_layer"]
+        else:
+            raise ValueError("Please specify `num_layers` in `peft_config`")
+        peft_config.num_layers = num_layers
+
+    if peft_config.token_dim is None:
+        if "hidden_size" in model_config:
+            token_dim = model_config["hidden_size"]
+        elif "n_embd" in model_config:
+            token_dim = model_config["n_embd"]
+        elif "d_model" in model_config:
+            token_dim = model_config["d_model"]
+        else:
+            raise ValueError("Please specify `token_dim` in `peft_config`")
+        peft_config.token_dim = token_dim
+
+    if peft_config.num_attention_heads is None:
+        if "num_attention_heads" in model_config:
+            num_attention_heads = model_config["num_attention_heads"]
+        elif "n_head" in model_config:
+            num_attention_heads = model_config["n_head"]
+        elif "num_heads" in model_config:
+            num_attention_heads = model_config["num_heads"]
+        elif "encoder_attention_heads" in model_config:
+            num_attention_heads = model_config["encoder_attention_heads"]
+        else:
+            raise ValueError("Please specify `num_attention_heads` in `peft_config`")
+        peft_config.num_attention_heads = num_attention_heads
+
+    if getattr(peft_config, "encoder_hidden_size", None) is None:
+        setattr(peft_config, "encoder_hidden_size", peft_config.token_dim)
+
+    return peft_config
 
 
 def fsdp_auto_wrap_policy(model):
@@ -201,24 +302,76 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
+    "gpt_bigcode": ["c_attn"],
+    "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+    "btlm": ["c_proj", "c_attn"],
 }
+
+TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
+    "t5": ["k", "v", "wo"],
+    "mt5": ["k", "v", "wi_1"],
+    "gpt2": ["c_attn", "mlp.c_proj"],
+    "bloom": ["query_key_value", "mlp.dense_4h_to_h"],
+    "roberta": ["key", "value", "output.dense"],
+    "opt": ["q_proj", "k_proj", "fc2"],
+    "gptj": ["q_proj", "v_proj", "fc_out"],
+    "gpt_neox": ["query_key_value", "dense_4h_to_h"],
+    "gpt_neo": ["q_proj", "v_proj", "c_proj"],
+    "bart": ["q_proj", "v_proj", "fc2"],
+    "gpt_bigcode": ["c_attn", "mlp.c_proj"],
+    "llama": ["k_proj", "v_proj", "down_proj"],
+    "bert": ["key", "value", "output.dense"],
+    "deberta-v2": ["key_proj", "value_proj", "output.dense"],
+    "deberta": ["in_proj", "output.dense"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+}
+
+TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
+    "t5": ["wo"],
+    "mt5": [],
+    "gpt2": ["mlp.c_proj"],
+    "bloom": ["mlp.dense_4h_to_h"],
+    "roberta": ["output.dense"],
+    "opt": ["fc2"],
+    "gptj": ["fc_out"],
+    "gpt_neox": ["dense_4h_to_h"],
+    "gpt_neo": ["c_proj"],
+    "bart": ["fc2"],
+    "gpt_bigcode": ["mlp.c_proj"],
+    "llama": ["down_proj"],
+    "bert": ["output.dense"],
+    "deberta-v2": ["output.dense"],
+    "deberta": ["output.dense"],
+    "RefinedWeb": ["query_key_value"],
+    "RefinedWebModel": ["query_key_value"],
+    "falcon": ["query_key_value"],
+}
+
+COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
     "mt5": ["q", "k", "v", "o", "wi_0", "wi_1", "wo"],
     "bart": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
-    # "gpt2": ["c_attn"],
-    # "bloom": ["query_key_value"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
     "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
-    # "gptj": ["q_proj", "v_proj"],
-    # "gpt_neox": ["query_key_value"],
-    # "gpt_neo": ["q_proj", "v_proj"],
-    # "bert": ["query", "value"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "llama": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
     "roberta": ["query", "key", "value", "dense"],
     # "xlm-roberta": ["query", "value"],
     # "electra": ["query", "value"],
     "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
-    # "deberta": ["in_proj"],
+    "gpt_bigcode": ["c_attn"],
+    "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
 }
 
@@ -227,4 +380,6 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
+SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
+CLAMP_QUANTILE = 0.99

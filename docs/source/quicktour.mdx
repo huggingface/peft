@@ -104,6 +104,40 @@ Easily load your model for inference using the [`~transformers.PreTrainedModel.f
   'complaint'
 ```
 
+## Easy loading with Auto classes 
+
+If you have saved your adapter locally or on the Hub, you can leverage the `AutoPeftModelForxxx` classes and load any PEFT model with a single line of code:
+
+```diff
+- from peft import PeftConfig, PeftModel
+- from transformers import AutoModelForCausalLM
++ from peft import AutoPeftModelForCausalLM
+
+- peft_config = PeftConfig.from_pretrained("ybelkada/opt-350m-lora") 
+- base_model_path = peft_config.base_model_name_or_path
+- transformers_model = AutoModelForCausalLM.from_pretrained(base_model_path)
+- peft_model = PeftModel.from_pretrained(transformers_model, peft_config)
++ peft_model = AutoPeftModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora")
+```
+
+Currently, supported auto classes are: `AutoPeftModelForCausalLM`, `AutoPeftModelForSequenceClassification`, `AutoPeftModelForSeq2SeqLM`, `AutoPeftModelForTokenClassification`, `AutoPeftModelForQuestionAnswering` and `AutoPeftModelForFeatureExtraction`. For other tasks (e.g. Whisper, StableDiffusion), you can load the model with:
+
+```diff
+- from peft import PeftModel, PeftConfig, AutoPeftModel
++ from peft import AutoPeftModel
+- from transformers import WhisperForConditionalGeneration
+
+- model_id = "smangrul/openai-whisper-large-v2-LORA-colab"
+
+peft_model_id = "smangrul/openai-whisper-large-v2-LORA-colab"
+- peft_config = PeftConfig.from_pretrained(peft_model_id)
+- model = WhisperForConditionalGeneration.from_pretrained(
+-     peft_config.base_model_name_or_path, load_in_8bit=True, device_map="auto"
+- )
+- model = PeftModel.from_pretrained(model, peft_model_id)
++ model = AutoPeftModel.from_pretrained(peft_model_id)
+```
+
 ## Next steps
 
 Now that you've seen how to train a model with one of the 🤗 PEFT methods, we encourage you to try out some of the other methods like prompt tuning. The steps are very similar to the ones shown in this quickstart; prepare a [`PeftConfig`] for a 🤗 PEFT method, and use the `get_peft_model` to create a [`PeftModel`] from the configuration and base model. Then you can train it however you like!

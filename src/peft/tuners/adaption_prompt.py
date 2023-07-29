@@ -483,11 +483,14 @@ class AdaptedAttention(nn.Module):
         # which initializes the tokens with standard normal values.
         # https://github.com/ZrrSkywalker/LLaMA-Adapter/blob/41c3546fe1997ab8a65809dc8d8f9252b19d9faf/llama/model.py#L234
         # (bsz, adapter_len, hidden_size)
+        target_dtype = (
+            model.q_proj.weight.dtype if model.q_proj.weight.dtype not in [torch.int8, torch.uint8] else torch.float32
+        )
         self.adaption_prompt = nn.Parameter(
-            torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
+            torch.empty(1, adapter_len, self.model.hidden_size, device=device, dtype=target_dtype).normal_()
         )
         # Initialize the gate to 0 as this is "zero-init".
-        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device))
+        self.adaption_gate = nn.Parameter(torch.zeros(1, device=device, dtype=target_dtype))
 
     def forward(self, hidden_states=None, **kwargs):
         """
@@ -537,11 +540,15 @@ class AdaptedAttention(nn.Module):
 
         # Compute adapter output
         bsz, num_heads, q_len, head_dim = query_states.shape
+        previous_dtype = query_states.dtype
+        
         # (bsz, num_heads, q_len, adapter_len)
-        scores = torch.matmul(query_states, adapter_k.transpose(2, 3)) / math.sqrt(head_dim)
+        scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
+            self.model.head_dim
+        )
         # Upcast attention to fp32
         # (bsz, num_heads, q_len, adapter_len)
-        scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(previous_dtype)
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
         # (bsz, q_len, hidden_size)
@@ -550,4 +557,4 @@ class AdaptedAttention(nn.Module):
 
         # Add adaption prompt output to original output.
         output = output + adapter_output
-        return organize_adapted_attention_model_outputs(self.model_type, output, None, past_key_value)
+        return organize_adapted_attention_model_outputs(self.model_type, output.to(previous_dtype), None, past_key_value)

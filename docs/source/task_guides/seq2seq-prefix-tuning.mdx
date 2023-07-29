@@ -28,6 +28,7 @@ from peft import get_peft_config, get_peft_model, get_peft_model_state_dict, Pre
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import torch
 import os
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

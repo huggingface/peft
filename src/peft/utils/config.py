@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import enum
+import inspect
 import json
 import os
 from dataclasses import asdict, dataclass, field
@@ -32,6 +33,7 @@ class PeftType(str, enum.Enum):
     ADALORA = "ADALORA"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     ADAPTION_PROMPT_V2 = "ADAPTION_PROMPT_V2"
+    IA3 = "IA3"
 
 
 class TaskType(str, enum.Enum):
@@ -39,6 +41,8 @@ class TaskType(str, enum.Enum):
     SEQ_2_SEQ_LM = "SEQ_2_SEQ_LM"
     CAUSAL_LM = "CAUSAL_LM"
     TOKEN_CLS = "TOKEN_CLS"
+    QUESTION_ANS = "QUESTION_ANS"
+    FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
 
 
 @dataclass
@@ -53,13 +57,12 @@ class PeftConfigMixin(PushToHubMixin):
         peft_type (Union[[`~peft.utils.config.PeftType`], `str`]): The type of Peft method to use.
     """
     peft_type: Optional[PeftType] = field(default=None, metadata={"help": "The type of PEFT model."})
-
-    @property
-    def __dict__(self):
-        return asdict(self)
+    auto_mapping: Optional[dict] = field(
+        default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
+    )
 
     def to_dict(self):
-        return self.__dict__
+        return asdict(self)
 
     def save_pretrained(self, save_directory, **kwargs):
         r"""
@@ -76,9 +79,14 @@ class PeftConfigMixin(PushToHubMixin):
             raise AssertionError(f"Provided path ({save_directory}) should be a directory, not a file")
 
         os.makedirs(save_directory, exist_ok=True)
+        auto_mapping_dict = kwargs.pop("auto_mapping_dict", None)
 
-        output_dict = self.__dict__
+        output_dict = asdict(self)
         output_path = os.path.join(save_directory, CONFIG_NAME)
+
+        # Add auto mapping details for custom models.
+        if auto_mapping_dict is not None:
+            output_dict["auto_mapping"] = auto_mapping_dict
 
         # save it
         with open(output_path, "w") as writer:
@@ -100,17 +108,22 @@ class PeftConfigMixin(PushToHubMixin):
             if subfolder is not None
             else pretrained_model_name_or_path
         )
+
+        hf_hub_download_kwargs, class_kwargs, _ = cls._split_kwargs(kwargs)
+
         if os.path.isfile(os.path.join(path, CONFIG_NAME)):
             config_file = os.path.join(path, CONFIG_NAME)
         else:
             try:
-                config_file = hf_hub_download(pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder)
+                config_file = hf_hub_download(
+                    pretrained_model_name_or_path, CONFIG_NAME, subfolder=subfolder, **hf_hub_download_kwargs
+                )
             except Exception:
                 raise ValueError(f"Can't find '{CONFIG_NAME}' at '{pretrained_model_name_or_path}'")
 
         loaded_attributes = cls.from_json_file(config_file)
 
-        config = cls(**kwargs)
+        config = cls(**class_kwargs)
 
         for key, value in loaded_attributes.items():
             if hasattr(config, key):
@@ -132,6 +145,47 @@ class PeftConfigMixin(PushToHubMixin):
 
         return json_object
 
+    @classmethod
+    def _split_kwargs(cls, kwargs):
+        hf_hub_download_kwargs = {}
+        class_kwargs = {}
+        other_kwargs = {}
+
+        for key, value in kwargs.items():
+            if key in inspect.signature(hf_hub_download).parameters:
+                hf_hub_download_kwargs[key] = value
+            elif key in list(cls.__annotations__):
+                class_kwargs[key] = value
+            else:
+                other_kwargs[key] = value
+
+        return hf_hub_download_kwargs, class_kwargs, other_kwargs
+
+    @classmethod
+    def _get_peft_type(
+        cls,
+        model_id,
+        **hf_hub_download_kwargs,
+    ):
+        subfolder = hf_hub_download_kwargs.get("subfolder", None)
+
+        path = os.path.join(model_id, subfolder) if subfolder is not None else model_id
+
+        if os.path.isfile(os.path.join(path, CONFIG_NAME)):
+            config_file = os.path.join(path, CONFIG_NAME)
+        else:
+            try:
+                config_file = hf_hub_download(
+                    model_id,
+                    CONFIG_NAME,
+                    **hf_hub_download_kwargs,
+                )
+            except Exception:
+                raise ValueError(f"Can't find '{CONFIG_NAME}' at '{model_id}'")
+
+        loaded_attributes = cls.from_json_file(config_file)
+        return loaded_attributes["peft_type"]
+
 
 @dataclass
 class PeftConfig(PeftConfigMixin):
@@ -145,6 +199,7 @@ class PeftConfig(PeftConfigMixin):
     """
 
     base_model_name_or_path: str = field(default=None, metadata={"help": "The name of the base model to use."})
+    revision: str = field(default=None, metadata={"help": "The specific model version to use."})
     peft_type: Union[str, PeftType] = field(default=None, metadata={"help": "Peft type"})
     task_type: Union[str, TaskType] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})
