@@ -17,7 +17,6 @@ import unittest
 
 import pytest
 import torch
-from accelerate.utils import is_xpu_available
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -53,8 +52,6 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.audio_model_id = "openai/whisper-large"
         if torch.cuda.is_available():
             self.device = torch.device("cuda:0")
-        elif is_xpu_available():
-            self.device = torch.device("xpu:0")
 
     def tearDown(self):
         r"""
@@ -64,8 +61,6 @@ class PeftGPUCommonTests(unittest.TestCase):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
         gc.collect()
 
     @require_bitsandbytes

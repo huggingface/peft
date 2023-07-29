@@ -17,7 +17,6 @@ from contextlib import contextmanager
 
 import numpy as np
 import torch
-from accelerate.utils import is_xpu_available
 
 
 def require_torch_gpu(test_case):
@@ -26,8 +25,6 @@ def require_torch_gpu(test_case):
     """
     if not torch.cuda.is_available():
         return unittest.skip("test requires GPU")(test_case)
-    if not is_xpu_available():
-        return unittest.skip("test requires XPU")(test_case)
     else:
         return test_case
 
@@ -38,8 +35,6 @@ def require_torch_multi_gpu(test_case):
     """
     if not torch.cuda.is_available() or torch.cuda.device_count() < 2:
         return unittest.skip("test requires multiple GPUs")(test_case)
-    if not is_xpu_available() or torch.xpu.device_count() < 2:
-        return unittest.skip("test requires multiple XPUs")(test_case)
     else:
         return test_case
 
@@ -69,9 +64,6 @@ def temp_seed(seed: int):
     if torch.cuda.is_available():
         torch_cuda_states = torch.cuda.get_rng_state_all()
         torch.cuda.manual_seed_all(seed)
-    if is_xpu_available():
-        torch_xpu_states = torch.xpu.get_rng_state_all()
-        torch.xpu.manual_seed_all(seed)
 
     try:
         yield
@@ -81,5 +73,3 @@ def temp_seed(seed: int):
         torch.random.set_rng_state(torch_state)
         if torch.cuda.is_available():
             torch.cuda.set_rng_state_all(torch_cuda_states)
-        if is_xpu_available():
-            torch.xpu.set_rng_state_all(torch_xpu_states)

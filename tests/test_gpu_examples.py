@@ -21,7 +21,6 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
-from accelerate.utils import is_xpu_available
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -116,8 +115,6 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        elif is_xpu_available():
-            torch.xpu.empty_cache()
         gc.collect()
 
     @pytest.mark.single_gpu_tests
