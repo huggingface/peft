@@ -21,6 +21,7 @@ from accelerate.utils import is_xpu_available
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
     AutoTokenizer,
     BitsAndBytesConfig,
     LlamaForCausalLM,
@@ -323,3 +324,40 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
         self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_modules_to_save_grad(self):
+        model_id = "bigscience/bloomz-560m"
+        load_in_4bit = True
+
+        model = AutoModelForSequenceClassification.from_pretrained(
+            model_id,
+            load_in_4bit=load_in_4bit,
+            torch_dtype=torch.float32,
+        )
+
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=16,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="SEQ_CLS",
+        )
+
+        peft_model = get_peft_model(model, config)
+
+        lm_head = peft_model.base_model.model.score
+        original_module = lm_head.original_module
+        modules_to_save = lm_head.modules_to_save.default
+
+        inputs = torch.randn((1024))
+        o1 = lm_head(inputs)
+        o1.mean().backward()
+
+        self.assertTrue(modules_to_save.weight.requires_grad is True)
+        self.assertTrue(original_module.weight.grad is None)
+        self.assertTrue(modules_to_save.weight.grad is not None)

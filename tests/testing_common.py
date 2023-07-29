@@ -23,6 +23,7 @@ from accelerate.utils import is_xpu_available
 from diffusers import StableDiffusionPipeline
 
 from peft import (
+    AdaLoraConfig,
     IA3Config,
     LoraConfig,
     PeftModel,
@@ -46,10 +47,12 @@ CONFIG_CLASSES = (
     PromptTuningConfig,
 )
 CONFIG_TESTING_KWARGS = (
+    # IA³
     {
         "target_modules": None,
         "feedforward_modules": None,
     },
+    # LoRA
     {
         "r": 8,
         "lora_alpha": 32,
@@ -57,15 +60,22 @@ CONFIG_TESTING_KWARGS = (
         "lora_dropout": 0.05,
         "bias": "none",
     },
+    # prefix tuning
     {
         "num_virtual_tokens": 10,
     },
+    # prompt encoder
     {
         "num_virtual_tokens": 10,
         "encoder_hidden_size": 32,
     },
+    # prompt tuning
     {
         "num_virtual_tokens": 10,
+    },
+    # AdaLoRA
+    {
+        "target_modules": None,
     },
 )
 
@@ -75,6 +85,7 @@ CLASSES_MAPPING = {
     "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[2]),
     "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[3]),
     "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
+    "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
 }
 
 
@@ -276,6 +287,10 @@ class PeftCommonTester:
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -647,6 +662,10 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -689,7 +708,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA"):
+        if config.peft_type not in ("LORA", "ADALORA"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
         else:
@@ -707,6 +726,10 @@ class PeftCommonTester:
             self.assertTrue(torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4))
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return
+
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
         model = self.transformers_class.from_pretrained(model_id)
