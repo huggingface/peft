@@ -131,11 +131,6 @@ class BaseTuner(nn.Module, ABC):
         """
         peft_config = self.peft_config[adapter_name]
 
-        # TODO: test that
-        for module in model.modules():
-            if isinstance(module, BaseTunerLayer):
-                module.requires_grad_(False)
-
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
 
