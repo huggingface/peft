@@ -112,13 +112,8 @@ def create_and_replace(peft_config: PeftConfig, model: torch.nn.Module, adapter_
         (`adapter_name`, `str`):
             The name of the adapter to be injected.
     """
-    if not isinstance(peft_config, PeftConfig):
-        raise ValueError(
-            f"create_and_replace expects a `PeftConfig` instance as first argument, got {type(peft_config)} instead."
-        )
-
-    if peft_config.is_prompt_learning:
-        raise ValueError("`create_and_replace` does not support prompt learning yet.")
+    if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
+        raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
 
     peft_model = get_peft_model(model, peft_config, adapter_name=adapter_name)
     return peft_model.base_model.model
