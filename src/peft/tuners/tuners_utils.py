@@ -28,7 +28,6 @@ class BaseTuner(nn.Module, ABC):
 
     def __init__(self, model, peft_config, adapter_name, adapter_layer_class=None):
         super().__init__()
-        self.pre_init(model, peft_config, adapter_name, adapter_layer_class)
 
         self.model = model
         self.forward = self.model.forward
@@ -43,19 +42,6 @@ class BaseTuner(nn.Module, ABC):
 
         self.adapter_layer_class = adapter_layer_class
         self.create_and_replace(self.model, adapter_name)
-
-    def pre_init(self, model, config, adapter_name, adapter_layer_class):
-        r"""
-        Runs a set of checks to make sure the passed arguments are correct.
-        """
-        if config is None:
-            raise ValueError("You need to specify a `peft_config` attribute in your class")
-        if adapter_layer_class is None:
-            raise ValueError("You need to specify a `adapter_layer_class` attribute in your class")
-        if not isinstance(adapter_name, str):
-            raise ValueError("You need to specify a `adapter_name` attribute in your class")
-        if not isinstance(model, nn.Module):
-            raise ValueError("The model attribute needs to be a `nn.Module` instance")
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config, model_config):
