@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -19,6 +20,9 @@ from torch import nn
 
 from ..config import PeftConfig
 from ..utils import _get_submodules
+
+
+logger = logging.getLogger(__name__)
 
 
 class BaseTuner(nn.Module, ABC):
@@ -59,9 +63,15 @@ class BaseTuner(nn.Module, ABC):
         self.model = model
         self.forward = self.model.forward
 
-        # Some adapters might be already attached
+        # For advanced developpers, if you want to attach multiple adapters to your
+        # model, just add a `peft_config` attribute to your model.
         if not hasattr(self, "peft_config"):
             self.peft_config = peft_config
+        else:
+            logger.info(
+                "Already found a `peft_config` attribute in the model. This will lead to having multiple adapters"
+                " in the model. Make sure to know what you are doing!"
+            )
 
         # transformers models have a .config attribute, whose presence is assumed later on
         if not hasattr(self, "config"):
