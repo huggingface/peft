@@ -756,7 +756,6 @@ class Linear(nn.Linear, LoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.supports_merging = True
 
     def merge(self):
         if self.active_adapter not in self.lora_A.keys():
@@ -836,7 +835,6 @@ class Embedding(nn.Embedding, LoraLayer):
         nn.Embedding.reset_parameters(self)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
-        self.supports_merging = True
 
     def unmerge(self):
         if not self.merged:
@@ -913,7 +911,6 @@ class Conv2d(nn.Conv2d, LoraLayer):
         nn.Conv2d.reset_parameters(self)
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
-        self.supports_merging = True
 
     def merge(self):
         if self.active_adapter not in self.lora_A.keys():

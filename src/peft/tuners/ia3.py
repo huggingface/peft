@@ -397,7 +397,6 @@ class Linear(nn.Linear, IA3Layer):
         self.active_adapter = adapter_name
 
         self.is_feedforward = is_feedforward
-        self.supports_merging = True
 
     def merge(self):
         if self.active_adapter not in self.ia3_l.keys():
