@@ -515,10 +515,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return hf_hub_download_kwargs, other_kwargs
 
+    def infer_device(self):
+        if torch.cuda.is_available():
+            torch_device = "cuda"
+        elif is_xpu_available():
+            torch_device = "xpu"
+        else:
+            torch_device = "cpu"
+        return torch_device
+
     def load_adapter(self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
+        torch_device = self.infer_device()
 
         if adapter_name not in self.peft_config:
             # load the config
@@ -576,19 +586,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     )
 
         if use_safetensors:
-            if torch.cuda.is_available():
-                adapters_weights = safe_load_file(filename, device="cuda")
-            elif is_xpu_available():
-                adapters_weights = safe_load_file(filename, device="xpu")
-            else:
-                adapters_weights = safe_load_file(filename, device="cpu")
+            adapters_weights = safe_load_file(filename, device=torch_device)
         else:
-            if torch.cuda.is_available():
-                adapters_weights = torch.load(filename, map_location=torch.device("cuda"))
-            elif is_xpu_available():
-                adapters_weights = torch.load(filename, map_location=torch.device("xpu"))
-            else:
-                adapters_weights = torch.load(filename, map_location=torch.device("cpu"))
+            adapters_weights = torch.load(filename, map_location=torch.device(torch_device))
 
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
