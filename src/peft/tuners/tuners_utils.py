@@ -131,9 +131,6 @@ class BaseTuner(nn.Module, ABC):
         """
         peft_config = self.peft_config[adapter_name]
 
-        if not isinstance(peft_config, PeftConfig):
-            raise ValueError(f"peft_config must be an instance of PeftConfig got {type(peft_config)} instead.")
-
         # TODO: test that
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
