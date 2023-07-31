@@ -26,7 +26,7 @@ class BaseTuner(nn.Module, ABC):
     be implemented in case the adapter is a plugable adapter.
     """
 
-    def __init__(self, model, peft_config, adapter_name, adapter_layer_class=None):
+    def __init__(self, model, peft_config, adapter_name, adapter_layer_class):
         super().__init__()
 
         self.model = model
