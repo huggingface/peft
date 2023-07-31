@@ -115,4 +115,5 @@ def create_and_replace(peft_config: PeftConfig, model: torch.nn.Module, adapter_
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
 
     peft_model = get_peft_model(model, peft_config, adapter_name=adapter_name)
+
     return peft_model.base_model.model

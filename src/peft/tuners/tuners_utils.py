@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
+from typing import Any
 
 from torch import nn
 
@@ -108,7 +109,7 @@ class BaseTuner(nn.Module, ABC):
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
-        **optionnal_kwargs: dict,
+        **optionnal_kwargs: Any,
     ) -> None:
         r"""
         Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
