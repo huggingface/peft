@@ -26,3 +26,7 @@ def is_bnb_4bit_available():
     import bitsandbytes as bnb
 
     return hasattr(bnb.nn, "Linear4bit")
+
+
+def is_auto_gptq_available():
+    return importlib.util.find_spec("auto_gptq") is not None
