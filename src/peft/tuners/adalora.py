@@ -59,7 +59,6 @@ class AdaLoraConfig(LoraConfig):
         self.peft_type = PeftType.ADALORA
 
 
-# This class has just been moved above
 class AdaLoraLayer(LoraLayer):
     def __init__(
         self,

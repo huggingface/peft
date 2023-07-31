@@ -92,7 +92,6 @@ class IA3Config(PeftConfig):
         self.peft_type = PeftType.IA3
 
 
-# This class has just been moved above
 class IA3Layer(BaseTunerLayer):
     def __init__(
         self,
