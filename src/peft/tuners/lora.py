@@ -118,6 +118,7 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
 
 
+# This class has just been moved above
 class LoraLayer(BaseTunerLayerMixin):
     def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
