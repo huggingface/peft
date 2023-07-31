@@ -168,10 +168,10 @@ class AdaptionPromptModel(nn.Module):
         # Whether the adapter is enabled.
         self._enabled = True
         self.forward = self.model.forward
-        self._add_adapter(adapter_name, configs[adapter_name])
+        self.add_adapter(adapter_name, configs[adapter_name])
         self._mark_only_adaption_prompts_as_trainable()
 
-    def _add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
+    def add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
         """Add an adapter with the given name and config."""
         config = prepare_config(config, self.model)
         if adapter_name in self._configs:
