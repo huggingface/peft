@@ -105,6 +105,20 @@ class PeftConfigMixin(PushToHubMixin):
 
         loaded_attributes = cls.from_json_file(config_file)
 
+        # TODO: this hack is needed to fix the following issue (on commit 702f937):
+        # if someone saves a default config and loads it back with `PeftConfig` class it yields to
+        # not loading the correct config class.
+
+        # from peft import AdaLoraConfig, PeftConfig
+        # peft_config = AdaLoraConfig()
+        # print(peft_config)
+        # >>> AdaLoraConfig(peft_type=<PeftType.ADALORA: 'ADALORA'>, auto_mapping=None, base_model_name_or_path=None,
+        # revision=None, task_type=None, inference_mode=False, r=8, target_modules=None, lora_alpha=8, lora_dropout=0.0, ...
+        #
+        # peft_config.save_pretrained("./test_config")
+        # peft_config = PeftConfig.from_pretrained("./test_config")
+        # print(peft_config)
+        # >>> PeftConfig(peft_type='ADALORA', auto_mapping=None, base_model_name_or_path=None, revision=None, task_type=None, inference_mode=False)
         if "peft_type" in loaded_attributes:
             peft_type = loaded_attributes["peft_type"]
             config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
