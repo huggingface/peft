@@ -43,22 +43,92 @@ class BaseTuner(nn.Module, ABC):
         self.create_and_replace(self.model, adapter_name)
 
     @abstractmethod
-    def _prepare_adapter_config(self, peft_config, model_config):
+    def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
+        r"""
+        A private method to eventually prepare the adapter config. For transformers based models, if
+        `peft_config.target_modules` is None, we can automatically infer the target modules from the
+        `TRANSFORMERS_MODELS_TO_XXX_TARGET_MODULES_MAPPING`. This method can be further refactored in the future to
+        automatically infer it for all tuner models.
+
+        Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
+
+        Args:
+            peft_config (`str`):
+                The adapter config.
+            model_config (`str`):
+                The transformers model config, that config should contain the `model_type` key.
+        """
         ...
 
     @abstractmethod
-    def _check_target_module_exists(peft_config, key):
+    def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool:
+        r"""
+        A helper private method to check if the passed module's key name matches any of the target modules in the
+        `peft_config.target_modules` list. If it does, return `True`, else return `False`.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The adapter config.
+            key (`str`):
+                The module's key name.
+        """
         ...
 
     @abstractmethod
-    def _create_and_replace(self, peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs):
+    def _create_and_replace(
+        self,
+        peft_config: PeftConfig,
+        adapter_name: str,
+        target: nn.Module,
+        target_name: str,
+        parent: nn.Module,
+        **optionnal_kwargs: dict,
+    ) -> None:
+        r"""
+        Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
+        tuner classes.
+
+        Check `peft.tuners.lora.LoraModel._create_and_replace` for an example.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The adapter config.
+            adapter_name (`str`):
+                The adapter name.
+            target (`nn.Module`):
+                The target module.
+            target_name (`str`):
+                The target module's name.
+            parent (`nn.Module`):
+                The parent module.
+            **optionnal_kwargs (`dict`):
+                The optional keyword arguments to pass to deal with particular cases (e.g. 8bit, 4bit quantization)
+        """
         ...
 
     @abstractmethod
     def _mark_only_adapters_as_trainable(self):
+        r"""
+        A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
+        be overriden for all tuner classes to match the correct key names.
+
+        Check `peft.tuners.lora.LoraModel._mark_only_adapters_as_trainable` for an example.
+        """
         ...
 
-    def create_and_replace(self, model, adapter_name):
+    def create_and_replace(self, model: nn.Module, adapter_name: str):
+        r"""
+        Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
+        hood by `peft.mapping.get_peft_model` if a non-prompt tuning adapter class is passed.
+
+        The corresponding PEFT config is directly retrieved from the `peft_config` attribute of the BaseTuner class.
+
+        Args:
+            model (`nn.Module`):
+                The model to be tuned.
+            adapter_name (`str`):
+                The adapter name.
+        """
         peft_config = self.peft_config[adapter_name]
 
         if not isinstance(peft_config, PeftConfig):
