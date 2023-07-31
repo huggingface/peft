@@ -114,6 +114,11 @@ class AdaptionPromptConfig(PeftConfig):
     def __post_init__(self):
         self.peft_type = PeftType.ADAPTION_PROMPT
 
+    @property
+    def is_adaption_prompt(self) -> bool:
+        """Return True if this is an adaption prompt config."""
+        return True
+
 
 def prepare_config(
     peft_config: AdaptionPromptConfig,
@@ -163,10 +168,10 @@ class AdaptionPromptModel(nn.Module):
         # Whether the adapter is enabled.
         self._enabled = True
         self.forward = self.model.forward
-        self.add_adapter(adapter_name, configs[adapter_name])
+        self._add_adapter(adapter_name, configs[adapter_name])
         self._mark_only_adaption_prompts_as_trainable()
 
-    def add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
+    def _add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
         """Add an adapter with the given name and config."""
         config = prepare_config(config, self.model)
         if adapter_name in self._configs:

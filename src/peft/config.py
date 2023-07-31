@@ -181,6 +181,11 @@ class PeftConfigMixin(PushToHubMixin):
         """
         return False
 
+    @property
+    def is_adaption_prompt(self) -> bool:
+        """Return True if this is an adaption prompt config."""
+        return False
+
 
 @dataclass
 class PeftConfig(PeftConfigMixin):

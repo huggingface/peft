@@ -105,7 +105,6 @@ class BaseTuner(nn.Module, ABC):
                 "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
                 "current_key": key,
             }
-
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs)
 
         if not is_target_modules_in_base_model:
