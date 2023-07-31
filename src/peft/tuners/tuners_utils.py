@@ -22,8 +22,34 @@ from ..utils import _get_submodules
 
 class BaseTuner(nn.Module, ABC):
     r"""
-    A base tuner model that provides the common methods and attributes for all tuners. Each `BaseTuner` class needs to
-    be implemented in case the adapter is a plugable adapter.
+    A base tuner model that provides the common methods and attributes for all tuners that are injectable into a
+    torch.nn.Module
+
+    For adding a new Tuner class, one needs to overwrite the following methods:
+
+    - **_prepare_adapter_config**:
+        A private method to eventually prepare the adapter config, for example in case the field `target_modules` is
+        missing.
+    - **_check_target_module_exists**:
+        A helper private method to check if the passed module's key name matches any of the target modules in the
+        adatper_config.
+    - **_create_and_replace**:
+        A private method to create and replace the target module with the adapter module.
+    - **_check_target_module_exists**:
+        A private helper method to check if the passed module's key name matches any of the target modules in the
+        adatper_config.
+
+    The easiest is to check what is done in the `peft.tuners.lora.LoraModel` class.
+
+    Attributes:
+        model (`torch.nn.Module`):
+            The model to which the adapter tuner layers will be attached.
+        forward (`Callable`):
+            The forward method of the model.
+        peft_config (`dict[str, PeftConfig]`):
+            The adapter configuration object, it should be a dictionary of `str` to `PeftConfig` objects.
+        config (`dict[str, Any]`):
+            The model configuration object, it should be a dictionary of `str` to `Any` objects.
     """
 
     def __init__(self, model, peft_config, adapter_name):
