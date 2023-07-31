@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
-from accelerate.utils import get_balanced_memory, is_xpu_available
+from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
@@ -59,6 +59,7 @@ from .utils import (
     add_library_to_model_card,
     get_peft_model_state_dict,
     hub_file_exists,
+    infer_device,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -515,20 +516,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return hf_hub_download_kwargs, other_kwargs
 
-    def infer_device(self):
-        if torch.cuda.is_available():
-            torch_device = "cuda"
-        elif is_xpu_available():
-            torch_device = "xpu"
-        else:
-            torch_device = "cpu"
-        return torch_device
-
     def load_adapter(self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
-        torch_device = self.infer_device()
+        torch_device = infer_device()
 
         if adapter_name not in self.peft_config:
             # load the config

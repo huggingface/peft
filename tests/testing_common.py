@@ -19,7 +19,6 @@ from collections import OrderedDict
 from dataclasses import replace
 
 import torch
-from accelerate.utils import is_xpu_available
 from diffusers import StableDiffusionPipeline
 
 from peft import (
@@ -33,6 +32,7 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
+    infer_device,
     prepare_model_for_int8_training,
 )
 from peft.tuners.lora import LoraLayer
@@ -164,13 +164,7 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
-    if torch.cuda.is_available():
-        torch_device = "cuda"
-    elif is_xpu_available():
-        torch_device = "xpu"
-    else:
-        torch_device = "cpu"
-
+    torch_device = infer_device()
     transformers_class = None
 
     def prepare_inputs_for_common(self):
