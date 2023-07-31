@@ -100,7 +100,7 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
 def create_and_replace(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str):
     r"""
     A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
-    methods and only LoRA, AdaLora and IA3 are supported. Make sure to have the correct `target_names` set in the
+    methods and adaption prompt. Make sure to have the correct `target_names` set in the
     `peft_config` object. The API calls `get_peft_model` under the hood but would be restricted only to non-prompt
     learning methods.
 
