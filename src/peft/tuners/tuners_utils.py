@@ -140,7 +140,6 @@ class BaseTunerLayerMixin:
     """
     active_adapter = None
     supports_merging = False
-    _is_peft_tuner_layer = True
 
     def merge(self):
         raise NotImplementedError
