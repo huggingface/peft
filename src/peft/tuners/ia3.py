@@ -34,7 +34,7 @@ from ..utils import (
     _is_valid_match,
     transpose,
 )
-from .tuners_utils import BaseTuner, BaseTunerLayerMixin
+from .tuners_utils import BaseTuner, BaseTunerLayer
 
 
 if is_bnb_available():
@@ -93,7 +93,7 @@ class IA3Config(PeftConfig):
 
 
 # This class has just been moved above
-class IA3Layer(BaseTunerLayerMixin):
+class IA3Layer(BaseTunerLayer):
     def __init__(
         self,
         in_features: int,
@@ -160,8 +160,8 @@ class IA3Model(BaseTuner):
         - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
     """
 
-    def __init__(self, model, config, adapter_name, adapter_layer_class=IA3Layer):
-        super().__init__(model, config, adapter_name, adapter_layer_class)
+    def __init__(self, model, config, adapter_name):
+        super().__init__(model, config, adapter_name)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):

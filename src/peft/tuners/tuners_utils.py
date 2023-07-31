@@ -26,7 +26,7 @@ class BaseTuner(nn.Module, ABC):
     be implemented in case the adapter is a plugable adapter.
     """
 
-    def __init__(self, model, peft_config, adapter_name, adapter_layer_class):
+    def __init__(self, model, peft_config, adapter_name):
         super().__init__()
 
         self.model = model
@@ -40,7 +40,6 @@ class BaseTuner(nn.Module, ABC):
         if not hasattr(self, "config"):
             self.config = {"model_type": "custom"}
 
-        self.adapter_layer_class = adapter_layer_class
         self.create_and_replace(self.model, adapter_name)
 
     @abstractmethod
@@ -67,7 +66,7 @@ class BaseTuner(nn.Module, ABC):
 
         # TODO: test that
         for module in model.modules():
-            if isinstance(module, BaseTunerLayerMixin):
+            if isinstance(module, BaseTunerLayer):
                 module.requires_grad_(False)
 
         is_target_modules_in_base_model = False
@@ -110,25 +109,20 @@ class BaseTuner(nn.Module, ABC):
         """
         This method merges the LoRa layers into the base model.
         """
-        if not self.adapter_layer_class.supports_merging:
-            raise ValueError(f"{self.__class__.__name__} does not support merging adapter layers")
         for module in self.model.modules():
-            if isinstance(module, self.adapter_layer_class):
+            if isinstance(module, BaseTunerLayer):
                 module.merge()
 
     def unmerge_adapter(self):
         """
         This method unmerges the LoRa layers from the base model.
         """
-        if not self.adapter_layer_class.supports_merging:
-            raise ValueError(f"{self.__class__.__name__} does not support merging adapter layers")
-
         for module in self.model.modules():
-            if isinstance(module, self.adapter_layer_class):
+            if isinstance(module, BaseTunerLayer):
                 module.unmerge()
 
 
-class BaseTunerLayerMixin:
+class BaseTunerLayer(ABC):
     r"""
     A tuner layer mixin that provides the common methods and attributes for all tuners.
 
@@ -139,7 +133,6 @@ class BaseTunerLayerMixin:
             The name of the active adapter.
     """
     active_adapter = None
-    supports_merging = False
 
     def merge(self):
         raise NotImplementedError

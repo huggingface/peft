@@ -20,7 +20,6 @@ from .lora import (
     LoraLayer,
     LoraModel,
 )
-from .tuners_utils import BaseTuner
 
 
 if is_bnb_available():
@@ -132,7 +131,7 @@ class AdaLoraModel(LoraModel):
     """
 
     def __init__(self, model, config, adapter_name):
-        BaseTuner.__init__(self, model, config, adapter_name, adapter_layer_class=AdaLoraLayer)
+        super().__init__(model, config, adapter_name)
 
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
             raise ValueError(

@@ -36,7 +36,7 @@ from ..utils import (
     _get_submodules,
     transpose,
 )
-from .tuners_utils import BaseTuner, BaseTunerLayerMixin
+from .tuners_utils import BaseTuner, BaseTunerLayer
 
 
 if is_bnb_available():
@@ -119,7 +119,7 @@ class LoraConfig(PeftConfig):
 
 
 # This class has just been moved above
-class LoraLayer(BaseTunerLayerMixin):
+class LoraLayer(BaseTunerLayer):
     def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
         self.lora_alpha = {}
@@ -268,7 +268,7 @@ class LoraModel(BaseTuner):
     """
 
     def __init__(self, model, config, adapter_name):
-        super().__init__(model, config, adapter_name, adapter_layer_class=LoraLayer)
+        super().__init__(model, config, adapter_name)
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
@@ -276,7 +276,7 @@ class LoraModel(BaseTuner):
             target_module_found = re.fullmatch(lora_config.target_modules, key)
         else:
             target_module_found = any(
-                [re.match(f".*\.{target_key}$", key) for target_key in lora_config.target_modules]
+                re.match(f".*\.{target_key}$", key) for target_key in lora_config.target_modules
             ) or any(target_key == key for target_key in lora_config.target_modules)
             is_using_layer_indexes = getattr(lora_config, "layers_to_transform", None) is not None
             layer_indexing_pattern = getattr(lora_config, "layers_pattern", None)
@@ -322,7 +322,7 @@ class LoraModel(BaseTuner):
         kwargs["bias"] = bias
 
         # TODO: better deal with that
-        if isinstance(target, self.adapter_layer_class) and isinstance(target, torch.nn.Conv2d):
+        if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
                 lora_config.r,
@@ -330,7 +330,7 @@ class LoraModel(BaseTuner):
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
-        elif isinstance(target, self.adapter_layer_class) and isinstance(target, torch.nn.Embedding):
+        elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
             target.update_layer_embedding(
                 adapter_name,
                 lora_config.r,
@@ -339,7 +339,7 @@ class LoraModel(BaseTuner):
                 lora_config.init_lora_weights,
             )
 
-        elif isinstance(target, self.adapter_layer_class):
+        elif isinstance(target, LoraLayer):
             target.update_layer(
                 adapter_name,
                 lora_config.r,
@@ -477,7 +477,7 @@ class LoraModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
-            if isinstance(module, self.adapter_layer_class):
+            if isinstance(module, LoraLayer):
                 module.disable_adapters = False if enabled else True
             elif isinstance(module, ModulesToSaveWrapper):
                 module.disable_adapters = False if enabled else True
@@ -488,7 +488,7 @@ class LoraModel(BaseTuner):
     def _get_active_adapter(self) -> str:
         active_adapter = None
         for module in self.model.modules():
-            if isinstance(module, self.adapter_layer_class):
+            if isinstance(module, LoraLayer):
                 active_adapter = module.active_adapter
 
         if active_adapter is None:
@@ -510,7 +510,7 @@ class LoraModel(BaseTuner):
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, self.adapter_layer_class):
+            if isinstance(module, LoraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -534,7 +534,7 @@ class LoraModel(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, self.adapter_layer_class):
+            if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
                 elif isinstance(target, nn.Conv2d):
@@ -602,7 +602,7 @@ class LoraModel(BaseTuner):
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, self.adapter_layer_class):
+            if isinstance(target, LoraLayer):
                 if adapter_name in target.lora_A:
                     target_lora_A = target.lora_A[adapter_name].weight
                     target_lora_B = target.lora_B[adapter_name].weight
@@ -670,7 +670,7 @@ class LoraModel(BaseTuner):
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, self.adapter_layer_class):
+            if isinstance(target, LoraLayer):
                 for attr in [
                     "r",
                     "lora_alpha",
