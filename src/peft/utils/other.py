@@ -72,11 +72,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             The loaded model from `transformers`
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
-    if not loaded_in_kbit:
-        warnings.warn(
-            "You are not quantizing the model, This function is going to freeze all of the base model's parameters. If you are going to train a new LoRA adapter, there may be no parameters with requires_grad=True.",
-            Warning
-        )
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -101,10 +96,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         model.gradient_checkpointing_enable()
     else:
          # check to see if the model has any parameters that are trainable
-        if len([p for p in model.parameters() if p.requires_grad]) == 0:
+        if not any(p.requires_grad for p in model.parameters()):
             warnings.warn(
-                "This model has no trainable parameters: did you accidentally call prepare_model_for_kbit_training when your model was not quantized?",
-                Warning
+                "This model has no trainable parameters: \
+                did you accidentally call prepare_model_for_kbit_training when your model was not quantized?",
             )
     return model
 
