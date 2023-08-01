@@ -55,9 +55,8 @@ from .utils import (
     _set_trainable,
     add_library_to_model_card,
     get_peft_model_state_dict,
-    load_peft_weights,
-    hub_file_exists,
     infer_device,
+    load_peft_weights,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -539,7 +538,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 peft_config.inference_mode = not is_trainable
             self.add_adapter(adapter_name, peft_config)
 
-        adapters_weights = load_peft_weights(model_id, **hf_hub_download_kwargs)
+        adapters_weights = load_peft_weights(model_id, device=torch_device, **hf_hub_download_kwargs)
 
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)

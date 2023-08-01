@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+from typing import Optional
 
 import torch
 from huggingface_hub import hf_hub_download
@@ -139,13 +140,15 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     return load_result
 
 
-def load_peft_weights(model_id, **hf_hub_download_kwargs):
+def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_download_kwargs) -> dict:
     r"""
     A helper method to load the PEFT weights from the HuggingFace Hub or locally
 
     Args:
         model_id (`str`):
             The local path to the adapter weights or the name of the adapter to load from the HuggingFace Hub.
+        device (`str`):
+            The device to load the weights onto.
         hf_hub_download_kwargs (`dict`):
             Additional arguments to pass to the `hf_hub_download` method when loading from the HuggingFace Hub.
     """
@@ -154,6 +157,9 @@ def load_peft_weights(model_id, **hf_hub_download_kwargs):
         if hf_hub_download_kwargs.get("subfolder", None) is not None
         else model_id
     )
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
         filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
@@ -187,10 +193,8 @@ def load_peft_weights(model_id, **hf_hub_download_kwargs):
                 )
 
     if use_safetensors:
-        adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+        adapters_weights = safe_load_file(filename, device=device)
     else:
-        adapters_weights = torch.load(
-            filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
+        adapters_weights = torch.load(filename, map_location=torch.device(device))
 
     return adapters_weights
