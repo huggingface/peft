@@ -32,11 +32,10 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
-    infer_device,
     prepare_model_for_int8_training,
 )
 from peft.tuners.lora import LoraLayer
-from peft.utils import _get_submodules
+from peft.utils import _get_submodules, infer_device
 
 
 CONFIG_CLASSES = (
