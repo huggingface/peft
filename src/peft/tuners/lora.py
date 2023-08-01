@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
 from ..config import PeftConfig
@@ -54,7 +55,8 @@ class LoraConfig(PeftConfig):
         lora_alpha (`int`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
-        For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
+            For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
+            to `True`.
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'. If 'all' or 'lora_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
@@ -523,12 +525,13 @@ class LoraModel(BaseTuner):
             peft_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-        for key in key_list:
+        desc = "Unloading " + ("and merging " if merge else "") + "model"
+        for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
@@ -689,10 +692,13 @@ class LoraModel(BaseTuner):
                     )
                     target.active_adapter = resetting_active_adapter
 
-    def merge_and_unload(self):
+    def merge_and_unload(self, progressbar: bool = False):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
+
+        Args:
+            progressbar (bool): whether to show a progressbar indicating the unload and merge process
 
         Example:
 
@@ -706,7 +712,7 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge()
+        return self._unload_and_optionally_merge(progressbar=progressbar)
 
     def unload(self):
         """

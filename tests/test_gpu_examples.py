@@ -113,7 +113,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         https://github.com/huggingface/transformers/issues/21094
         """
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         gc.collect()
 
     @pytest.mark.single_gpu_tests

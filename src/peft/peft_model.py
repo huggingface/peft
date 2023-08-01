@@ -56,6 +56,8 @@ from .utils import (
     add_library_to_model_card,
     get_peft_model_state_dict,
     load_peft_weights,
+    hub_file_exists,
+    infer_device,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -518,6 +520,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
+        torch_device = infer_device()
 
         if adapter_name not in self.peft_config:
             # load the config
