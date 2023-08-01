@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
-from ..import_utils import is_bnb_4bit_available, is_bnb_available
+from ..import_utils import is_auto_gptq_available, is_bnb_4bit_available, is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     PeftType,
@@ -183,6 +183,9 @@ class AdaLoraModel(LoraModel):
                         new_module = SVDLinear4bit(
                             adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
                         )
+                    elif is_auto_gptq_available() and target.__class__.__name__ == "QuantLinear":
+                        new_module = SVDQuantLinear(adapter_name, target, **kwargs)
+                        target.weight = target.qweight
                     elif isinstance(target, (nn.ModuleList, nn.ModuleDict)):
                         # it's not applicable to replace whole module lists or module dicts
                         continue
@@ -560,6 +563,62 @@ if is_bnb_4bit_available():
 
         def forward(self, x: torch.Tensor):
             result = super().forward(x)
+
+            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+                return result
+            elif self.r[self.active_adapter] > 0:
+                if not torch.is_autocast_enabled():
+                    expected_dtype = result.dtype
+
+                    if x.dtype != torch.float32:
+                        x = x.float()
+                    output = (
+                        (
+                            self.lora_dropout[self.active_adapter](x)
+                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                            @ self.lora_B[self.active_adapter].T
+                        ).to(expected_dtype)
+                        * self.scaling[self.active_adapter]
+                        / (self.ranknum[self.active_adapter] + 1e-5)
+                    )
+                else:
+                    output = (
+                        (
+                            self.lora_dropout[self.active_adapter](x)
+                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                            @ self.lora_B[self.active_adapter].T
+                        )
+                        * self.scaling[self.active_adapter]
+                        / (self.ranknum[self.active_adapter] + 1e-5)
+                    )
+                result = result + output
+            return result
+
+
+if is_auto_gptq_available():
+
+    class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
+        def __init__(
+            self,
+            adapter_name,
+            quant_linear_module,
+            r: int = 0,
+            lora_alpha: int = 1,
+            lora_dropout: float = 0.0,
+            **kwargs,
+        ):
+            torch.nn.Module.__init__(self)
+            AdaLoraLayer.__init__(
+                self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
+            )
+            self.weight = quant_linear_module.qweight
+            self.quant_linear_module = quant_linear_module
+            init_lora_weights = kwargs.pop("init_lora_weights", True)
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self.active_adapter = adapter_name
+
+        def forward(self, x: torch.Tensor):
+            result = self.quant_linear_module(x)
 
             if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
                 return result

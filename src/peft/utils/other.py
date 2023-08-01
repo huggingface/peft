@@ -72,17 +72,19 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             The loaded model from `transformers`
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
+    is_gptq_quantized = getattr(model, "is_gptq_quantized", False)
 
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
 
-    # cast all non INT8 parameters to fp32
-    for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-            param.data = param.data.to(torch.float32)
+    if not is_gptq_quantized:
+        # cast all non INT8 parameters to fp32
+        for param in model.parameters():
+            if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+                param.data = param.data.to(torch.float32)
 
-    if loaded_in_kbit and use_gradient_checkpointing:
+    if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()

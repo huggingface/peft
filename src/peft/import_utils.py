@@ -30,3 +30,7 @@ def is_bnb_4bit_available():
 
 def is_auto_gptq_available():
     return importlib.util.find_spec("auto_gptq") is not None
+
+
+def is_optimum_available():
+    return importlib.util.find_spec("optimum") is not None
