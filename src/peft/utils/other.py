@@ -96,7 +96,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         # enable gradient checkpointing for memory efficiency
         model.gradient_checkpointing_enable()
     else:
-         # check to see if the model has any parameters that are trainable
+        # check to see if the model has any parameters that are trainable
         if not any(p.requires_grad for p in model.parameters()):
             warnings.warn(
                 "This model has no trainable parameters: \
