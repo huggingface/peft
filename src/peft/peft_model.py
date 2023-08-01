@@ -59,6 +59,7 @@ from .utils import (
     add_library_to_model_card,
     get_peft_model_state_dict,
     hub_file_exists,
+    infer_device,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -519,6 +520,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
+        torch_device = infer_device()
 
         if adapter_name not in self.peft_config:
             # load the config
@@ -576,11 +578,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     )
 
         if use_safetensors:
-            adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+            adapters_weights = safe_load_file(filename, device=torch_device)
         else:
-            adapters_weights = torch.load(
-                filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            )
+            adapters_weights = torch.load(filename, map_location=torch.device(torch_device))
 
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
