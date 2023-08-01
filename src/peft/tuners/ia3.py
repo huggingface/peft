@@ -156,7 +156,7 @@ class IA3Model(torch.nn.Module):
                 "You can install it with `pip install bitsandbytes`."
             )
         is_gptq_quantized = getattr(self.model, "is_gptq_quantized", False)
-        if not is_gptq_quantized:
+        if is_gptq_quantized:
             raise NotImplementedError("GPTQ quantization is not supported for IA3 yet.")
 
     def _create_new_module(self, ia3_config, adapter_name, target, is_feedforward):
