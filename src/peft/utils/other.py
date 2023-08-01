@@ -20,6 +20,18 @@ import warnings
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
+from accelerate.utils import is_xpu_available
+
+
+# Get current device name based on available devices
+def infer_device():
+    if torch.cuda.is_available():
+        torch_device = "cuda"
+    elif is_xpu_available():
+        torch_device = "xpu"
+    else:
+        torch_device = "cpu"
+    return torch_device
 
 
 # Add or edit model card to have `library_name: peft`
