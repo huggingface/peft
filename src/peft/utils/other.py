@@ -72,6 +72,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             The loaded model from `transformers`
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
+    
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -99,7 +100,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         if not any(p.requires_grad for p in model.parameters()):
             warnings.warn(
                 "This model has no trainable parameters: \
-                did you accidentally call prepare_model_for_kbit_training when your model was not quantized?",
+                did you accidentally call prepare_model_for_kbit_training when your model was not quantized?"
             )
     return model
 
