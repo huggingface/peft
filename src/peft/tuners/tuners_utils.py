@@ -51,8 +51,10 @@ class BaseTuner(nn.Module, ABC):
             The model to which the adapter tuner layers will be attached.
         forward (`Callable`):
             The forward method of the model.
-        peft_config (`dict[str, PeftConfig]`):
-            The adapter configuration object, it should be a dictionary of `str` to `PeftConfig` objects.
+        peft_config (`Union[`PeftConfig`, dict[str, PeftConfig]]`):
+            The adapter configuration object, it should be a dictionary of `str` to `PeftConfig` objects. One can also
+            pass a PeftConfig object and a new adapter will be created with the default name `adapter` or create a new
+            dictionary with a key `adapter_name` and a value of that peft config.
         config (`dict[str, Any]`):
             The model configuration object, it should be a dictionary of `str` to `Any` objects.
     """
@@ -64,20 +66,24 @@ class BaseTuner(nn.Module, ABC):
         self.forward = self.model.forward
 
         # For advanced developpers, if you want to attach multiple adapters to your
-        # model, just add a `peft_config` attribute to your model.
+        # model, just add a `peft_config` dict attribute to your model.
         if not hasattr(self, "peft_config"):
-            self.peft_config = peft_config
+            self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
         else:
             logger.info(
                 "Already found a `peft_config` attribute in the model. This will lead to having multiple adapters"
                 " in the model. Make sure to know what you are doing!"
             )
+            self.peft_config[adapter_name] = peft_config
 
         # transformers models have a .config attribute, whose presence is assumed later on
         if not hasattr(self, "config"):
             self.config = {"model_type": "custom"}
 
         self.inject_adapter(self.model, adapter_name)
+
+        # Copy the peft_config in the injected model.
+        self.model.peft_config = self.peft_config
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
