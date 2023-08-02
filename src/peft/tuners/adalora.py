@@ -122,6 +122,15 @@ class AdaLoraModel(LoraModel):
             self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
 
     def _find_and_replace(self, adapter_name):
+        if is_auto_gptq_available():
+            from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+            if getattr(self.model, "is_gptq_quantized", False) and hasattr(self.model,"config") and hasattr(self.model.config,"quantization_config") :
+                print(self.model.config.quantization_config)
+                desc_act = self.model.config.quantization_config.desc_act
+                group_size = self.model.config.quantization_config.group_size
+                AutoGPTQQuantLinear = dynamically_import_QuantLinear(use_triton=False, desc_act=desc_act, group_size=group_size)
+            else:
+                AutoGPTQQuantLinear = None  
         lora_config = self.peft_config[adapter_name]
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
@@ -183,7 +192,7 @@ class AdaLoraModel(LoraModel):
                         new_module = SVDLinear4bit(
                             adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
                         )
-                    elif is_auto_gptq_available() and target.__class__.__name__ == "QuantLinear":
+                    elif is_auto_gptq_available() and AutoGPTQQuantLinear is not None and isinstance(target,AutoGPTQQuantLinear):
                         new_module = SVDQuantLinear(adapter_name, target, **kwargs)
                         target.weight = target.qweight
                     elif isinstance(target, (nn.ModuleList, nn.ModuleDict)):
@@ -595,59 +604,58 @@ if is_bnb_4bit_available():
             return result
 
 
-if is_auto_gptq_available():
+class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
+    def __init__(
+        self,
+        adapter_name,
+        quant_linear_module,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        **kwargs,
+    ):
+        torch.nn.Module.__init__(self)
+        AdaLoraLayer.__init__(
+            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
+        )
+        self.quant_linear_module = quant_linear_module
+        self.weight = quant_linear_module.qweight
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.active_adapter = adapter_name
 
-    class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
-        def __init__(
-            self,
-            adapter_name,
-            quant_linear_module,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            **kwargs,
-        ):
-            torch.nn.Module.__init__(self)
-            AdaLoraLayer.__init__(
-                self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
-            )
-            self.quant_linear_module = quant_linear_module
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapter = adapter_name
+    def forward(self, x: torch.Tensor):
+        result = self.quant_linear_module(x)
 
-        def forward(self, x: torch.Tensor):
-            result = self.quant_linear_module(x)
-
-            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
-                return result
-            elif self.r[self.active_adapter] > 0:
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
-
-                    if x.dtype != torch.float32:
-                        x = x.float()
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        ).to(expected_dtype)
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                else:
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        )
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                result = result + output
+        if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
             return result
+        elif self.r[self.active_adapter] > 0:
+            if not torch.is_autocast_enabled():
+                expected_dtype = result.dtype
+
+                if x.dtype != torch.float32:
+                    x = x.float()
+                output = (
+                    (
+                        self.lora_dropout[self.active_adapter](x)
+                        @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                        @ self.lora_B[self.active_adapter].T
+                    ).to(expected_dtype)
+                    * self.scaling[self.active_adapter]
+                    / (self.ranknum[self.active_adapter] + 1e-5)
+                )
+            else:
+                output = (
+                    (
+                        self.lora_dropout[self.active_adapter](x)
+                        @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                        @ self.lora_B[self.active_adapter].T
+                    )
+                    * self.scaling[self.active_adapter]
+                    / (self.ranknum[self.active_adapter] + 1e-5)
+                )
+            result = result + output
+        return result
 
 
 class RankAllocator(object):

@@ -237,6 +237,15 @@ class LoraModel(torch.nn.Module):
         return target_module_found
 
     def _create_new_module(self, lora_config, adapter_name, target):
+        if is_auto_gptq_available():
+            from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+            if getattr(self.model, "is_gptq_quantized", False) and hasattr(self.model,"config") and hasattr(self.model.config,"quantization_config") :
+                print(self.model.config.quantization_config)
+                desc_act = self.model.config.quantization_config.desc_act
+                group_size = self.model.config.quantization_config.group_size
+                AutoGPTQQuantLinear = dynamically_import_QuantLinear(use_triton=False, desc_act=desc_act, group_size=group_size)
+            else:
+                AutoGPTQQuantLinear = None  
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": lora_config.r,
@@ -271,7 +280,7 @@ class LoraModel(torch.nn.Module):
                 }
             )
             new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
-        elif is_auto_gptq_available() and target.__class__.__name__ == "QuantLinear":
+        elif is_auto_gptq_available() and AutoGPTQQuantLinear is not None and isinstance(target,AutoGPTQQuantLinear):
             new_module = QuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
         elif isinstance(target, torch.nn.Embedding):
@@ -1174,55 +1183,53 @@ if is_bnb_available():
                 return result
 
 
-# Ugly solution
-if is_auto_gptq_available():
+class QuantLinear(torch.nn.Module, LoraLayer):
+    def __init__(
+        self,
+        adapter_name,
+        quant_linear_module,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        **kwargs,
+    ):
+        torch.nn.Module.__init__(self)
+        LoraLayer.__init__(
+            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
+        )
+        self.quant_linear_module = quant_linear_module
+        self.weight = quant_linear_module.qweight
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.active_adapter = adapter_name
 
-    class QuantLinear(torch.nn.Module, LoraLayer):
-        def __init__(
-            self,
-            adapter_name,
-            quant_linear_module,
-            r: int = 0,
-            lora_alpha: int = 1,
-            lora_dropout: float = 0.0,
-            **kwargs,
-        ):
-            torch.nn.Module.__init__(self)
-            LoraLayer.__init__(
-                self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
-            )
-            self.quant_linear_module = quant_linear_module
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapter = adapter_name
-
-        def forward(self, x: torch.Tensor):
-            result = self.quant_linear_module(x)
-            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
-                return result
-            elif self.r[self.active_adapter] > 0:
-                result = result.clone()
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
-                    x = x.to(self.lora_A[self.active_adapter].weight.dtype)
-                    output = (
-                        self.lora_B[self.active_adapter](
-                            self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                        ).to(expected_dtype)
-                        * self.scaling[self.active_adapter]
-                    )
-                else:
-                    output = (
-                        self.lora_B[self.active_adapter](
-                            self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                        )
-                        * self.scaling[self.active_adapter]
-                    )
-                result += output
+    def forward(self, x: torch.Tensor):
+        result = self.quant_linear_module(x)
+        if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
             return result
+        elif self.r[self.active_adapter] > 0:
+            result = result.clone()
+            if not torch.is_autocast_enabled():
+                expected_dtype = result.dtype
+                x = x.to(self.lora_A[self.active_adapter].weight.dtype)
+                output = (
+                    self.lora_B[self.active_adapter](
+                        self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                    ).to(expected_dtype)
+                    * self.scaling[self.active_adapter]
+                )
+            else:
+                output = (
+                    self.lora_B[self.active_adapter](
+                        self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                    )
+                    * self.scaling[self.active_adapter]
+                )
+            result += output
+        return result
 
-        # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
-        # def reset_lora_parameters(self, adapter_name):
-        #     if adapter_name in self.lora_A.keys():
-        #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
-        #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)
+    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
+    # def reset_lora_parameters(self, adapter_name):
+    #     if adapter_name in self.lora_A.keys():
+    #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
+    #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)
