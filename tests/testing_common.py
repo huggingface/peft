@@ -35,7 +35,7 @@ from peft import (
     prepare_model_for_int8_training,
 )
 from peft.tuners.lora import LoraLayer
-from peft.utils import _get_submodules
+from peft.utils import _get_submodules, infer_device
 
 
 CONFIG_CLASSES = (
@@ -163,7 +163,7 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch_device = infer_device()
     transformers_class = None
 
     def prepare_inputs_for_common(self):
