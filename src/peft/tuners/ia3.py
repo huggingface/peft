@@ -265,19 +265,19 @@ class IA3Model(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _replace_module(parent, target_name, new_module, target):
-        setattr(parent, target_name, new_module)
-        new_module.weight = target.weight
-        if target.bias is not None:
-            new_module.bias = target.bias
-        if getattr(target, "state", None) is not None:
-            new_module.state = target.state
-            new_module.to(target.weight.device)
+    def _replace_module(parent, child_name, new_module, child):
+        setattr(parent, child_name, new_module)
+        new_module.weight = child.weight
+        if child.bias is not None:
+            new_module.bias = child.bias
+        if getattr(child, "state", None) is not None:
+            new_module.state = child.state
+            new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "ia3_" in name:
-                module.to(target.weight.device)
+                module.to(child.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

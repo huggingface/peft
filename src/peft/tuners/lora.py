@@ -353,23 +353,23 @@ class LoraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _replace_module(parent, target_name, new_module, target):
-        setattr(parent, target_name, new_module)
-        new_module.weight = target.weight
-        if hasattr(target, "bias"):
-            if target.bias is not None:
-                new_module.bias = target.bias
+    def _replace_module(parent, child_name, new_module, child):
+        setattr(parent, child_name, new_module)
+        new_module.weight = child.weight
+        if hasattr(child, "bias"):
+            if child.bias is not None:
+                new_module.bias = child.bias
 
-        if getattr(target, "state", None) is not None:
-            new_module.state = target.state
-            new_module.to(target.weight.device)
+        if getattr(child, "state", None) is not None:
+            new_module.state = child.state
+            new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "lora_" in name:
-                module.to(target.weight.device)
+                module.to(child.weight.device)
             if "ranknum" in name:
-                module.to(target.weight.device)
+                module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         active_adapter = self._get_active_adapter()
