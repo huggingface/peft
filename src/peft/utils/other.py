@@ -16,6 +16,7 @@ import copy
 import inspect
 import os
 import warnings
+from typing import Optional
 
 import accelerate
 import torch
@@ -294,6 +295,22 @@ def fsdp_auto_wrap_policy(model):
 
 def transpose(weight, fan_in_fan_out):
     return weight.T if fan_in_fan_out else weight
+
+
+def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[torch.Tensor]) -> int:
+    """Get the batch size based on either input_ids or input_embeds
+
+    Raises an ValueError if both are None.
+
+    """
+    if (input_ids is None) and (inputs_embeds is None):
+        raise ValueError("You have to provide either input_ids or inputs_embeds")
+
+    if input_ids is not None:
+        batch_size = input_ids.shape[0]
+    else:
+        batch_size = inputs_embeds.shape[0]
+    return batch_size
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
