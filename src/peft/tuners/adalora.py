@@ -124,13 +124,20 @@ class AdaLoraModel(LoraModel):
     def _find_and_replace(self, adapter_name):
         if is_auto_gptq_available():
             from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
-            if getattr(self.model, "is_gptq_quantized", False) and hasattr(self.model,"config") and hasattr(self.model.config,"quantization_config") :
+
+            if (
+                getattr(self.model, "is_gptq_quantized", False)
+                and hasattr(self.model, "config")
+                and hasattr(self.model.config, "quantization_config")
+            ):
                 print(self.model.config.quantization_config)
                 desc_act = self.model.config.quantization_config.desc_act
                 group_size = self.model.config.quantization_config.group_size
-                AutoGPTQQuantLinear = dynamically_import_QuantLinear(use_triton=False, desc_act=desc_act, group_size=group_size)
+                AutoGPTQQuantLinear = dynamically_import_QuantLinear(
+                    use_triton=False, desc_act=desc_act, group_size=group_size
+                )
             else:
-                AutoGPTQQuantLinear = None  
+                AutoGPTQQuantLinear = None
         lora_config = self.peft_config[adapter_name]
         loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
         loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
@@ -192,7 +199,11 @@ class AdaLoraModel(LoraModel):
                         new_module = SVDLinear4bit(
                             adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
                         )
-                    elif is_auto_gptq_available() and AutoGPTQQuantLinear is not None and isinstance(target,AutoGPTQQuantLinear):
+                    elif (
+                        is_auto_gptq_available()
+                        and AutoGPTQQuantLinear is not None
+                        and isinstance(target, AutoGPTQQuantLinear)
+                    ):
                         new_module = SVDQuantLinear(adapter_name, target, **kwargs)
                         target.weight = target.qweight
                     elif isinstance(target, (nn.ModuleList, nn.ModuleDict)):
