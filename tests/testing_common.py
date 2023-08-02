@@ -861,7 +861,7 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        model = get_peft_model(model, config, adapter_name="test-adapter")
+        model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
         dummy_input = self.prepare_inputs_for_testing()
         inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
         # just check that no error is raised
