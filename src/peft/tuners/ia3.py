@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
+from transformers.utils.quantization_config import QuantizationMethod
 
 from ..import_utils import is_bnb_available
 from ..utils import (
@@ -155,7 +156,7 @@ class IA3Model(torch.nn.Module):
                 "To use (IA)^3 with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
-        is_gptq_quantized = getattr(self.model, "is_gptq_quantized", False)
+        is_gptq_quantized = getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ
         if is_gptq_quantized:
             raise NotImplementedError("GPTQ quantization is not supported for IA3 yet.")
 

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
+from transformers.utils.quantization_config import QuantizationMethod
 
 from ..import_utils import is_auto_gptq_available, is_bnb_4bit_available, is_bnb_available
 from ..utils import (
@@ -126,7 +127,7 @@ class AdaLoraModel(LoraModel):
             from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
 
             if (
-                getattr(self.model, "is_gptq_quantized", False)
+                getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ
                 and hasattr(self.model, "config")
                 and hasattr(self.model.config, "quantization_config")
             ):

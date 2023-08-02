@@ -324,7 +324,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if not (
             getattr(model, "is_loaded_in_8bit", False)
             or getattr(model, "is_loaded_in_4bit", False)
-            or getattr(model, "is_gptq_quantized", False)
+            or getattr(model, "is_quantized", False)
         ):
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
