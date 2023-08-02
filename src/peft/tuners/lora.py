@@ -246,7 +246,6 @@ class LoraModel(torch.nn.Module):
                 and hasattr(self.model, "config")
                 and hasattr(self.model.config, "quantization_config")
             ):
-                print(self.model.config.quantization_config)
                 desc_act = self.model.config.quantization_config.desc_act
                 group_size = self.model.config.quantization_config.group_size
                 AutoGPTQQuantLinear = dynamically_import_QuantLinear(
