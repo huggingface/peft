@@ -611,7 +611,6 @@ if is_auto_gptq_available():
             AdaLoraLayer.__init__(
                 self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
             )
-            self.weight = quant_linear_module.qweight
             self.quant_linear_module = quant_linear_module
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
