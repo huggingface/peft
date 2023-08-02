@@ -33,7 +33,7 @@ from .mapping import (
     PEFT_TYPE_TO_CONFIG_MAPPING,
     get_peft_config,
     get_peft_model,
-    create_and_replace,
+    inject_adapter_in_model,
 )
 from .peft_model import (
     PeftModel,

@@ -77,7 +77,7 @@ class BaseTuner(nn.Module, ABC):
         if not hasattr(self, "config"):
             self.config = {"model_type": "custom"}
 
-        self.create_and_replace(self.model, adapter_name)
+        self.inject_adapter(self.model, adapter_name)
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
@@ -153,7 +153,7 @@ class BaseTuner(nn.Module, ABC):
         """
         ...
 
-    def create_and_replace(self, model: nn.Module, adapter_name: str):
+    def inject_adapter(self, model: nn.Module, adapter_name: str):
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
         hood by `peft.mapping.get_peft_model` if a non-prompt tuning adapter class is passed.

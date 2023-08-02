@@ -31,9 +31,12 @@ from .peft_model import (
 )
 from .tuners import (
     AdaLoraConfig,
+    AdaLoraModel,
     AdaptionPromptConfig,
     IA3Config,
+    IA3Model,
     LoraConfig,
+    LoraModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -62,6 +65,12 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "LORA": LoraConfig,
     "ADALORA": AdaLoraConfig,
     "IA3": IA3Config,
+}
+
+PEFT_TYPE_TO_TUNER_MAPPING = {
+    "LORA": LoraModel,
+    "ADALORA": AdaLoraModel,
+    "IA3": IA3Model,
 }
 
 
@@ -97,7 +106,7 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
 
 
-def create_and_replace(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str):
+def inject_adapter_in_model(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str):
     r"""
     A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
     methods and adaption prompt. Make sure to have the correct `target_names` set in the `peft_config` object. The API
@@ -114,6 +123,13 @@ def create_and_replace(peft_config: PeftConfig, model: torch.nn.Module, adapter_
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
 
-    peft_model = get_peft_model(model, peft_config, adapter_name=adapter_name)
+    if peft_config.peft_type not in PEFT_TYPE_TO_TUNER_MAPPING.keys():
+        raise ValueError(
+            f"`inject_adapter_in_model` does not support {peft_config.peft_type} yet. Please use `get_peft_model`."
+        )
 
-    return peft_model.base_model.model
+    tuner_cls = PEFT_TYPE_TO_TUNER_MAPPING[peft_config.peft_type]
+
+    peft_model = tuner_cls(model, peft_config, adapter_name=adapter_name)
+
+    return peft_model.model

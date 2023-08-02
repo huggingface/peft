@@ -596,7 +596,7 @@ class LoraModel(BaseTuner):
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
         self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
-        self.create_and_replace(self.model, adapter_name)
+        self.inject_adapter(self.model, adapter_name)
 
         # Do we really need that?
         _freeze_adapter(self.model, adapter_name)

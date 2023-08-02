@@ -489,7 +489,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         elif peft_config.is_adaption_prompt:
             self.base_model.add_adapter(adapter_name, peft_config)
         else:
-            self.create_and_replace(self, adapter_name)
+            self.inject_adapter(self, adapter_name)
 
         self.set_additional_trainable_modules(peft_config, adapter_name)
 

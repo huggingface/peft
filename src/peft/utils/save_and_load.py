@@ -21,7 +21,7 @@ from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
 from .hub_utils import hub_file_exists
-from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME
+from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
 
@@ -159,7 +159,7 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     )
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = infer_device()
 
     if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
         filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
