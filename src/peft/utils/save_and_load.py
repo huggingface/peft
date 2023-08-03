@@ -79,7 +79,7 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
     else:
         raise NotImplementedError
-    if model.modules_to_save is not None:
+    if getattr(model, "modules_to_save", None) is not None:
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
@@ -98,7 +98,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     """
     config = model.peft_config[adapter_name]
     state_dict = {}
-    if hasattr(model, "modules_to_save") and model.modules_to_save is not None:
+    if getattr(model, "modules_to_save", None) is not None:
         for key, value in peft_model_state_dict.items():
             if any(module_name in key for module_name in model.modules_to_save):
                 for module_name in model.modules_to_save:
