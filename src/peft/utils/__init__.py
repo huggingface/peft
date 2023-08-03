@@ -37,6 +37,7 @@ from .other import (
     prepare_model_for_kbit_training,
     shift_tokens_right,
     transpose,
+    _get_batch_size,
     _get_submodules,
     _set_adapter,
     _freeze_adapter,
