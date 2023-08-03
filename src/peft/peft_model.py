@@ -129,6 +129,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model.config.pretraining_tp = 1
 
         current_signature = signature(self.forward)
+        # Only update signature when the current forward signature only has *args and **kwargs
         if (
             len(current_signature.parameters) == 2
             and "args" in current_signature.parameters
