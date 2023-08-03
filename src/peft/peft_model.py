@@ -138,8 +138,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self._update_forward_signature()
 
     def _update_forward_signature(self):
-        def copy_signature(func, new_signature):
+        def copy_signature(func, new_signature, new_doc):
             func.__signature__ = new_signature
+            func.__doc__ = new_doc
             return func
 
         def new_forward(self, *args, **kwargs):
@@ -150,8 +151,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             parameters=[inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)]
             + list(new_signature.parameters.values())
         )
+        new_doc = self.base_model.forward.__doc__
         # Set the new method's signature to be the same as the old method's
-        new_forward = copy_signature(new_forward, new_signature)
+        new_forward = copy_signature(new_forward, new_signature, new_doc)
         # Replace the old method with the new one
         self.forward = new_forward.__get__(self, PeftModel)
 
