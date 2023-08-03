@@ -20,6 +20,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
+from inspect import signature
 from typing import Any, Dict, List, Optional, Union
 
 import torch
@@ -126,6 +127,32 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # behavior we disable that in this line.
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
+
+        current_signature = signature(self.forward)
+        if (
+            len(current_signature.parameters) == 2
+            and "args" in current_signature.parameters
+            and "kwargs" in current_signature.parameters
+        ):
+            self._update_forward_signature()
+
+    def _update_forward_signature(self):
+        def copy_signature(func, new_signature):
+            func.__signature__ = new_signature
+            return func
+
+        def new_forward(self, *args, **kwargs):
+            return self.get_base_model()(*args, **kwargs)
+
+        new_signature = signature(self.base_model.forward)
+        new_signature = new_signature.replace(
+            parameters=[inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+            + list(new_signature.parameters.values())
+        )
+        # Set the new method's signature to be the same as the old method's
+        new_forward = copy_signature(new_forward, new_signature)
+        # Replace the old method with the new one
+        self.forward = new_forward.__get__(self, PeftModel)
 
     def save_pretrained(
         self,
