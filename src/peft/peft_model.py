@@ -20,6 +20,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
+from functools import update_wrapper
 from inspect import signature
 from typing import Any, Dict, List, Optional, Union
 
@@ -138,24 +139,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self._update_forward_signature()
 
     def _update_forward_signature(self):
-        def copy_signature(func, new_signature, new_doc):
-            func.__signature__ = new_signature
-            func.__doc__ = new_doc
-            return func
-
-        def new_forward(self, *args, **kwargs):
+        def new_forward(*args, **kwargs):
             return self.get_base_model()(*args, **kwargs)
 
-        new_signature = signature(self.base_model.forward)
-        new_signature = new_signature.replace(
-            parameters=[inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)]
-            + list(new_signature.parameters.values())
-        )
-        new_doc = self.base_model.forward.__doc__
-        # Set the new method's signature to be the same as the old method's
-        new_forward = copy_signature(new_forward, new_signature, new_doc)
-        # Replace the old method with the new one
-        self.forward = new_forward.__get__(self, PeftModel)
+        update_wrapper(new_forward, self.base_model.forward, assigned=("__doc__", "__name__", "__annotations__"))
+        self.forward = new_forward
 
     def save_pretrained(
         self,
