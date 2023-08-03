@@ -101,7 +101,7 @@ def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
     value_states = value_states.view(bsz, q_len, model.num_attention_heads, model.head_size).transpose(1, 2)
 
     query_rot = query_states[..., : model.rotary_ndims]
-    query_pass = query_states[..., model.rotary_ndims:]
+    query_pass = query_states[..., model.rotary_ndims :]
 
     seq_len = q_len
     if past_key_value is not None:
@@ -159,7 +159,7 @@ def gptj_compute_query_states(model: nn.Module, **kwargs):
 
     if model.rotary_dim is not None:
         q_rot = query[:, :, :, : model.rotary_dim]
-        q_pass = query[:, :, :, model.rotary_dim:]
+        q_pass = query[:, :, :, model.rotary_dim :]
 
         q_rot = gptj_apply_rotary_pos_emb(q_rot, sin, cos)
 
@@ -207,7 +207,7 @@ def moss_compute_query_states(model: nn.Module, **kwargs):
 
     if model.rotary_dim is not None:
         q_rot = query[:, :, :, : model.rotary_dim]
-        q_pass = query[:, :, :, model.rotary_dim:]
+        q_pass = query[:, :, :, model.rotary_dim :]
 
         q_rot = moss_apply_rotary_pos_emb(q_rot, sin, cos)
 
@@ -223,14 +223,7 @@ def moss_compute_query_states(model: nn.Module, **kwargs):
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
     "ModelTypeConfig",
-    [
-        "compute_query_states",
-        "attention_module",
-        "mlp_module",
-        "k_proj_layer",
-        "v_proj_layer",
-        "o_proj_layer"
-    ]
+    ["compute_query_states", "attention_module", "mlp_module", "k_proj_layer", "v_proj_layer", "o_proj_layer"],
 )
 # Mapping of transformers model types to their specific configuration.
 TRANSFORMERS_MODEL_CONFIG = {
@@ -240,7 +233,7 @@ TRANSFORMERS_MODEL_CONFIG = {
         mlp_module="mlp",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
-        o_proj_layer="o_proj"
+        o_proj_layer="o_proj",
     ),
     "gpt_neox": ModelTypeConfig(
         compute_query_states=gpt_neox_compute_query_states,
@@ -248,7 +241,7 @@ TRANSFORMERS_MODEL_CONFIG = {
         mlp_module="mlp",
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
-        o_proj_layer="dense"
+        o_proj_layer="dense",
     ),
     "gptj": ModelTypeConfig(
         compute_query_states=gptj_compute_query_states,
@@ -256,7 +249,7 @@ TRANSFORMERS_MODEL_CONFIG = {
         mlp_module="mlp",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
-        o_proj_layer="out_proj"
+        o_proj_layer="out_proj",
     ),
     "moss": ModelTypeConfig(
         compute_query_states=moss_compute_query_states,
@@ -264,8 +257,8 @@ TRANSFORMERS_MODEL_CONFIG = {
         mlp_module="mlp",
         k_proj_layer="qkv_proj",
         v_proj_layer="qkv_proj",
-        o_proj_layer="out_proj"
-    )
+        o_proj_layer="out_proj",
+    ),
 }
 
 
@@ -293,18 +286,16 @@ def organize_adapted_attention_model_outputs(model_type: str, attn_output, attn_
 class AdaptionPromptV2Config(PeftConfig):
     """Stores the configuration of an [`AdaptionPromptModel`]."""
 
-    attention_module: str = field(
-        default=None, metadata={"help": "Name of the attention submodules to be adapted."}
-    )
-    mlp_module: str = field(
-        default=None, metadata={"help": "Name of the mlp submodules to be adapted."}
-    )
+    attention_module: str = field(default=None, metadata={"help": "Name of the attention submodules to be adapted."})
+    mlp_module: str = field(default=None, metadata={"help": "Name of the mlp submodules to be adapted."})
     adapter_len: int = field(default=None, metadata={"help": "Number of adapter tokens to insert"})
     adapter_layers: int = field(default=None, metadata={"help": "Number of adapter layers (from the top)"})
     add_bias: bool = field(default=True, metadata={"help": "Whether to add bias"})
     add_scale: bool = field(default=True, metadata={"help": "Whether to add scale"})
     multi_modal: bool = field(default=False, metadata={"help": "Whether used for multi modal training or inference"})
-    supported_modals: Optional[List[str]] = field(default=None, metadata={"help": "Names of modals that are supported"})
+    supported_modals: Optional[List[str]] = field(
+        default=None, metadata={"help": "Names of modals that are supported"}
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAPTION_PROMPT_V2
@@ -313,7 +304,9 @@ class AdaptionPromptV2Config(PeftConfig):
         if self.supported_modals:
             num_modals = len(self.supported_modals)
             if num_modals != len(set(self.supported_modals)):
-                raise ValueError("duplicate modal name found in supported_modals, please make sure each name is unique.")
+                raise ValueError(
+                    "duplicate modal name found in supported_modals, please make sure each name is unique."
+                )
             if num_modals != [modal for modal in self.supported_modals if modal]:
                 raise ValueError("modal name can't be empty string.")
 
@@ -480,7 +473,7 @@ class AdaptionPromptV2Model(nn.Module):
                     adapter_len=config.adapter_len,
                     add_bias=False,
                     add_scale=False,
-                    supported_modals=config.supported_modals
+                    supported_modals=config.supported_modals,
                 )
                 setattr(par, config.attention_module, attn)
             else:
@@ -495,7 +488,7 @@ class AdaptionPromptV2Model(nn.Module):
                     config=self.model.config,
                     model=getattr(par, config.mlp_module),
                     add_bias=config.add_bias,
-                    add_scale=config.add_scale
+                    add_scale=config.add_scale,
                 )
                 setattr(par, config.attention_module, attn)
                 setattr(par, config.mlp_module, mlp)
@@ -539,6 +532,7 @@ class AdaptionPromptV2Model(nn.Module):
 
 class AdaptedLinear(nn.Module):
     """This module wraps nn.Linear module."""
+
     def __init__(self, model: nn.Linear, add_bias, add_scale):
         """
         Initialize object.
@@ -584,7 +578,7 @@ class AdaptedAttention(nn.Module):
         adapter_len: int,
         add_bias: bool,
         add_scale: bool,
-        supported_modals: Optional[List[str]] = None
+        supported_modals: Optional[List[str]] = None,
     ):
         """
         Initialize object.
@@ -609,23 +603,16 @@ class AdaptedAttention(nn.Module):
         if supported_modals:
             self.adaption_prompts = nn.ParameterDict(
                 {
-                    modal: nn.Parameter(
-                        torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
-                    ) for modal in supported_modals
+                    modal: nn.Parameter(torch.empty(1, adapter_len, self.hidden_size, device=device).normal_())
+                    for modal in supported_modals
                 }
             )
             self.adaption_gates = nn.ParameterDict(
-                {
-                    modal: nn.Parameter(torch.zeros(1, device=device)) for modal in supported_modals
-                }
+                {modal: nn.Parameter(torch.zeros(1, device=device)) for modal in supported_modals}
             )
         else:
             self.adaption_prompts = nn.ParameterDict(
-                {
-                    "text": nn.Parameter(
-                        torch.empty(1, adapter_len, self.hidden_size, device=device).normal_()
-                    )
-                }
+                {"text": nn.Parameter(torch.empty(1, adapter_len, self.hidden_size, device=device).normal_())}
             )
             self.adaption_gates = nn.ParameterDict({"text": nn.Parameter(torch.zeros(1, device=device))})
         # Initialize adapted linear
@@ -634,7 +621,10 @@ class AdaptedAttention(nn.Module):
             if isinstance(module, nn.Linear):
                 linear_name_modules.append((name, module))
         self.linears = nn.ModuleDict(
-            {name: AdaptedLinear(module, add_bias=add_bias, add_scale=add_scale) for name, module in linear_name_modules}
+            {
+                name: AdaptedLinear(module, add_bias=add_bias, add_scale=add_scale)
+                for name, module in linear_name_modules
+            }
         )
 
     def _set_adapted_linears(self):
@@ -658,7 +648,9 @@ class AdaptedAttention(nn.Module):
 
         self._set_adapted_linears()
 
-        output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(hidden_states, **kwargs))
+        output, past_key_value = handle_origin_attention_module_outputs(
+            self.model_type, self.model(hidden_states, **kwargs)
+        )
         # Recompute query states.
         compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
         # (bsz, num_heads, q_len, head_dim)
@@ -671,7 +663,7 @@ class AdaptedAttention(nn.Module):
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
         o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
 
-        modal2adapter_kv = dict()
+        modal2adapter_kv = {}
         for modal in self.adaption_prompts:
             adaption_prompt = self.adaption_prompts[modal]
             if k_proj_layer == v_proj_layer:
@@ -681,15 +673,11 @@ class AdaptedAttention(nn.Module):
                 value = getattr(self.model, v_proj_layer)(adaption_prompt)
             # (bsz, num_heads, adapter_len, head_dim)
             adapter_k = (
-                key.view(1, self.adapter_len, self.num_head, self.head_size)
-                .repeat(bsz, 1, 1, 1)
-                .transpose(1, 2)
+                key.view(1, self.adapter_len, self.num_head, self.head_size).repeat(bsz, 1, 1, 1).transpose(1, 2)
             )
             # (bsz, num_heads, adapter_len, head_dim)
             adapter_v = (
-                value.view(1, self.adapter_len, self.num_head, self.head_size)
-                .repeat(bsz, 1, 1, 1)
-                .transpose(1, 2)
+                value.view(1, self.adapter_len, self.num_head, self.head_size).repeat(bsz, 1, 1, 1).transpose(1, 2)
             )
             modal2adapter_kv[modal] = (adapter_k, adapter_v)
 
@@ -716,6 +704,7 @@ class AdaptedAttention(nn.Module):
 
 class AdaptedMLP(nn.Module):
     """This module wraps the original model's mlp module"""
+
     def __init__(self, config, model, add_bias: bool, add_scale: bool):
         """
         Initialize object.
@@ -736,7 +725,10 @@ class AdaptedMLP(nn.Module):
             if isinstance(module, nn.Linear):
                 linear_name_modules.append((name, module))
         self.linears = nn.ModuleDict(
-            {name: AdaptedLinear(module, add_bias=add_bias, add_scale=add_scale) for name, module in linear_name_modules}
+            {
+                name: AdaptedLinear(module, add_bias=add_bias, add_scale=add_scale)
+                for name, module in linear_name_modules
+            }
         )
 
     def _set_adapted_linears(self):

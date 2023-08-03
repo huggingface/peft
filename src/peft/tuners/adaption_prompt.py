@@ -101,7 +101,7 @@ def gpt_neox_compute_query_states(model: nn.Module, **kwargs):
     value_states = value_states.view(bsz, q_len, model.num_attention_heads, model.head_size).transpose(1, 2)
 
     query_rot = query_states[..., : model.rotary_ndims]
-    query_pass = query_states[..., model.rotary_ndims:]
+    query_pass = query_states[..., model.rotary_ndims :]
 
     seq_len = q_len
     if past_key_value is not None:
@@ -159,7 +159,7 @@ def gptj_compute_query_states(model: nn.Module, **kwargs):
 
     if model.rotary_dim is not None:
         q_rot = query[:, :, :, : model.rotary_dim]
-        q_pass = query[:, :, :, model.rotary_dim:]
+        q_pass = query[:, :, :, model.rotary_dim :]
 
         q_rot = gptj_apply_rotary_pos_emb(q_rot, sin, cos)
 
@@ -207,7 +207,7 @@ def moss_compute_query_states(model: nn.Module, **kwargs):
 
     if model.rotary_dim is not None:
         q_rot = query[:, :, :, : model.rotary_dim]
-        q_pass = query[:, :, :, model.rotary_dim:]
+        q_pass = query[:, :, :, model.rotary_dim :]
 
         q_rot = moss_apply_rotary_pos_emb(q_rot, sin, cos)
 
@@ -222,14 +222,7 @@ def moss_compute_query_states(model: nn.Module, **kwargs):
 
 # Contains the config that is specific to a transformers model type.
 ModelTypeConfig = namedtuple(
-    "ModelTypeConfig",
-    [
-        "compute_query_states",
-        "target_modules",
-        "k_proj_layer",
-        "v_proj_layer",
-        "o_proj_layer"
-    ]
+    "ModelTypeConfig", ["compute_query_states", "target_modules", "k_proj_layer", "v_proj_layer", "o_proj_layer"]
 )
 # Mapping of transformers model types to their specific configuration.
 TRANSFORMERS_MODEL_CONFIG = {
@@ -238,29 +231,29 @@ TRANSFORMERS_MODEL_CONFIG = {
         target_modules="self_attn",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
-        o_proj_layer="o_proj"
+        o_proj_layer="o_proj",
     ),
     "gpt_neox": ModelTypeConfig(
         compute_query_states=gpt_neox_compute_query_states,
         target_modules="attention",
         k_proj_layer="query_key_value",
         v_proj_layer="query_key_value",
-        o_proj_layer="dense"
+        o_proj_layer="dense",
     ),
     "gptj": ModelTypeConfig(
         compute_query_states=gptj_compute_query_states,
         target_modules="attn",
         k_proj_layer="k_proj",
         v_proj_layer="v_proj",
-        o_proj_layer="out_proj"
+        o_proj_layer="out_proj",
     ),
     "moss": ModelTypeConfig(
         compute_query_states=moss_compute_query_states,
         target_modules="attn",
         k_proj_layer="qkv_proj",
         v_proj_layer="qkv_proj",
-        o_proj_layer="out_proj"
-    )
+        o_proj_layer="out_proj",
+    ),
 }
 
 
@@ -506,7 +499,9 @@ class AdaptedAttention(nn.Module):
         if kwargs.get("output_attention", False):
             raise NotImplementedError("output_attention is not currently supported.")
 
-        output, past_key_value = handle_origin_attention_module_outputs(self.model_type, self.model(hidden_states, **kwargs))
+        output, past_key_value = handle_origin_attention_module_outputs(
+            self.model_type, self.model(hidden_states, **kwargs)
+        )
         bsz = output.shape[0]
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
@@ -518,17 +513,9 @@ class AdaptedAttention(nn.Module):
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
         # (bsz, num_heads, adapter_len, head_dim)
-        adapter_k = (
-            key.view(1, self.adapter_len, self.num_head, self.head_size)
-            .repeat(bsz, 1, 1, 1)
-            .transpose(1, 2)
-        )
+        adapter_k = key.view(1, self.adapter_len, self.num_head, self.head_size).repeat(bsz, 1, 1, 1).transpose(1, 2)
         # (bsz, num_heads, adapter_len, head_dim)
-        adapter_v = (
-            value.view(1, self.adapter_len, self.num_head, self.head_size)
-            .repeat(bsz, 1, 1, 1)
-            .transpose(1, 2)
-        )
+        adapter_v = value.view(1, self.adapter_len, self.num_head, self.head_size).repeat(bsz, 1, 1, 1).transpose(1, 2)
 
         if "hidden_states" not in kwargs:
             kwargs["hidden_states"] = hidden_states
@@ -541,7 +528,7 @@ class AdaptedAttention(nn.Module):
         # Compute adapter output
         bsz, num_heads, q_len, head_dim = query_states.shape
         previous_dtype = query_states.dtype
-        
+
         # (bsz, num_heads, q_len, adapter_len)
         scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
             self.model.head_dim
@@ -557,4 +544,6 @@ class AdaptedAttention(nn.Module):
 
         # Add adaption prompt output to original output.
         output = output + adapter_output
-        return organize_adapted_attention_model_outputs(self.model_type, output.to(previous_dtype), None, past_key_value)
+        return organize_adapted_attention_model_outputs(
+            self.model_type, output.to(previous_dtype), None, past_key_value
+        )
