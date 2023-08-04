@@ -16,12 +16,15 @@ import copy
 import inspect
 import os
 import warnings
-from typing import Optional
+from functools import update_wrapper
+from types import MethodType
+from typing import Optional, Union
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
+from transformers.utils import PushToHubMixin
 
 
 # Get current device name based on available devices
@@ -311,6 +314,28 @@ def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[t
     else:
         batch_size = inputs_embeds.shape[0]
     return batch_size
+
+
+def default_forward(self, *args, **kwargs):
+    return self.get_base_model()(*args, **kwargs)
+
+
+def update_forward_signature(model) -> Union[torch.nn.Module, PushToHubMixin]:
+    """
+    Updates the forward signature of the PeftModel to include parents class signature
+    """
+    # Only update signature when the current forward signature only has *args and **kwargs
+    current_signature = inspect.signature(model.forward)
+    if (
+        len(current_signature.parameters) == 2
+        and "args" in current_signature.parameters
+        and "kwargs" in current_signature.parameters
+    ):
+        update_wrapper(
+            default_forward, model.parent_class.forward, assigned=("__doc__", "__name__", "__annotations__")
+        )
+        model.forward = MethodType(default_forward, model)
+    return model
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
