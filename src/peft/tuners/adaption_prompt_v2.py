@@ -336,8 +336,7 @@ class AdaptionPromptV2Model(nn.Module):
     The top L attention modules are replaced with Adapted* modules that wrap the original ones.
 
     Notes on the multi-adapter pattern:
-    - We store the states of different adapters by keeping a dictionary of Adapted* modules indexed by adapter
-      name.
+    - We store the states of different adapters by keeping a dictionary of Adapted* modules indexed by adapter name.
     - Every time we switch adapters, we remove the modules of the currently active adapter from the model, store them
       in the dictionary, and replace them with the modules of the new adapter.
     - To avoid duplicated and potentially inconsistent state, the currently active adapter is always removed from the
