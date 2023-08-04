@@ -36,11 +36,13 @@ from .other import (
     prepare_model_for_kbit_training,
     shift_tokens_right,
     transpose,
+    _get_batch_size,
     _get_submodules,
     _set_adapter,
     _freeze_adapter,
     ModulesToSaveWrapper,
     _prepare_prompt_learning_config,
+    infer_device,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict

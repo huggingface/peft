@@ -35,7 +35,7 @@ from peft import (
     prepare_model_for_int8_training,
 )
 from peft.tuners.lora import LoraLayer
-from peft.utils import _get_submodules
+from peft.utils import _get_submodules, infer_device
 
 
 CONFIG_CLASSES = (
@@ -163,7 +163,7 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch_device = infer_device()
     transformers_class = None
 
     def prepare_inputs_for_common(self):
@@ -853,3 +853,16 @@ class PeftCommonTester:
             self.assertTrue(torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6))
 
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
+
+    def _test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/issues/727
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
+        dummy_input = self.prepare_inputs_for_testing()
+        inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
+        # just check that no error is raised
+        model.forward(inputs_embeds=inputs_embeds)

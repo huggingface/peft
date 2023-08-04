@@ -54,12 +54,14 @@ from .utils import (
     PeftType,
     PromptLearningConfig,
     TaskType,
+    _get_batch_size,
     _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
     add_library_to_model_card,
     get_peft_model_state_dict,
     hub_file_exists,
+    infer_device,
     set_peft_model_state_dict,
     shift_tokens_right,
 )
@@ -521,6 +523,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
+        torch_device = infer_device()
 
         if adapter_name not in self.peft_config:
             # load the config
@@ -578,11 +581,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     )
 
         if use_safetensors:
-            adapters_weights = safe_load_file(filename, device="cuda" if torch.cuda.is_available() else "cpu")
+            adapters_weights = safe_load_file(filename, device=torch_device)
         else:
-            adapters_weights = torch.load(
-                filename, map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            )
+            adapters_weights = torch.load(filename, map_location=torch.device(torch_device))
 
         # load the weights into the model
         load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
@@ -771,7 +772,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -818,7 +819,7 @@ class PeftModelForSequenceClassification(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         past_key_values = self.get_prompt(batch_size)
         fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
@@ -957,7 +958,7 @@ class PeftModelForCausalLM(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -981,7 +982,9 @@ class PeftModelForCausalLM(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
-            return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
+            return self.base_model(
+                input_ids=input_ids, inputs_embeds=inputs_embeds, past_key_values=past_key_values, **kwargs
+            )
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1118,7 +1121,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         if decoder_attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(
@@ -1365,7 +1368,7 @@ class PeftModelForTokenClassification(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -1412,7 +1415,7 @@ class PeftModelForTokenClassification(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         past_key_values = self.get_prompt(batch_size)
         fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
@@ -1539,7 +1542,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
@@ -1588,7 +1591,7 @@ class PeftModelForQuestionAnswering(PeftModel):
         return_dict=None,
         **kwargs,
     ):
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         past_key_values = self.get_prompt(batch_size)
         fwd_params = list(inspect.signature(self.base_model.forward).parameters.keys())
         kwargs.update(
@@ -1708,7 +1711,7 @@ class PeftModelForFeatureExtraction(PeftModel):
                 **kwargs,
             )
 
-        batch_size = input_ids.shape[0]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
             # concat prompt attention mask
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
