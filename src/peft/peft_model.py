@@ -22,11 +22,13 @@ from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from inspect import signature
+from types import MethodType
 from typing import Any, Dict, List, Optional, Union
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
-from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
+from accelerate.hooks import (AlignDevicesHook, add_hook_to_module,
+                              remove_hook_from_submodules)
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
@@ -34,39 +36,21 @@ from safetensors.torch import load_file as safe_load_file
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
-from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
+from transformers.modeling_outputs import (QuestionAnsweringModelOutput,
+                                           SequenceClassifierOutput,
+                                           TokenClassifierOutput)
 from transformers.utils import PushToHubMixin
 
 from . import __version__
-from .tuners import (
-    AdaLoraModel,
-    AdaptionPromptModel,
-    IA3Model,
-    LoraModel,
-    PrefixEncoder,
-    PromptEmbedding,
-    PromptEncoder,
-)
-from .utils import (
-    SAFETENSORS_WEIGHTS_NAME,
-    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
-    WEIGHTS_NAME,
-    PeftConfig,
-    PeftType,
-    PromptLearningConfig,
-    TaskType,
-    _get_batch_size,
-    _prepare_prompt_learning_config,
-    _set_adapter,
-    _set_trainable,
-    add_library_to_model_card,
-    get_peft_model_state_dict,
-    hub_file_exists,
-    infer_device,
-    set_peft_model_state_dict,
-    shift_tokens_right,
-)
-
+from .tuners import (AdaLoraModel, AdaptionPromptModel, IA3Model, LoraModel,
+                     PrefixEncoder, PromptEmbedding, PromptEncoder)
+from .utils import (SAFETENSORS_WEIGHTS_NAME,
+                    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+                    WEIGHTS_NAME, PeftConfig, PeftType, PromptLearningConfig,
+                    TaskType, _get_batch_size, _prepare_prompt_learning_config,
+                    _set_adapter, _set_trainable, add_library_to_model_card,
+                    get_peft_model_state_dict, hub_file_exists, infer_device,
+                    set_peft_model_state_dict, shift_tokens_right)
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
@@ -77,6 +61,10 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
     PeftType.IA3: IA3Model,
 }
+
+
+def forward(self, *args, **kwargs):
+    return self.get_base_model()(*args, **kwargs)
 
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
@@ -111,6 +99,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_config = {}
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
+        self.parent_class = type(model)  # Gets the parent class of the orignal model to update signature
         if not isinstance(peft_config, PromptLearningConfig):
             self.peft_config[adapter_name] = peft_config
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
@@ -129,8 +118,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
 
-        current_signature = signature(self.forward)
+    def update_forward_signature(self):
+        """
+        Updates the forward signature of the model to include parents class signature
+        """
         # Only update signature when the current forward signature only has *args and **kwargs
+        current_signature = signature(self.forward)
         if (
             len(current_signature.parameters) == 2
             and "args" in current_signature.parameters
@@ -139,11 +132,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self._update_forward_signature()
 
     def _update_forward_signature(self):
-        def new_forward(*args, **kwargs):
-            return self.get_base_model()(*args, **kwargs)
-
-        update_wrapper(new_forward, self.base_model.forward, assigned=("__doc__", "__name__", "__annotations__"))
-        self.forward = new_forward
+        update_wrapper(forward, self.parent_class.forward, assigned=("__doc__", "__annotations__"))
+        self.forward = MethodType(forward, self)
 
     def save_pretrained(
         self,
@@ -262,7 +252,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific Lora configuration class.
         """
-        from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
+        from .mapping import (MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
+                              PEFT_TYPE_TO_CONFIG_MAPPING)
 
         # load the config
         if config is None:
