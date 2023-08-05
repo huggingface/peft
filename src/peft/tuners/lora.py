@@ -179,7 +179,8 @@ class LoraModel(torch.nn.Module):
         super().__init__()
         self.model = model
         self.forward = self.model.forward
-        self.peft_config = config
+        self.peft_config = {}
+        self.peft_config[adapter_name] = config
         self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
         # transformers models have a .config attribute, whose presence is assumed later on
