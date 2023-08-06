@@ -548,5 +548,7 @@ if is_bnb_available():
                     if self.is_feedforward:
                         result = super().forward(x * self.ia3_l[self.active_adapter].flatten())
                     else:
+                        if result is None:
+                            result = super().forward(x)
                         result = result * self.ia3_l[self.active_adapter].flatten()
             return result
