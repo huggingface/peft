@@ -108,8 +108,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_type = peft_config.peft_type
         if not peft_config.is_prompt_learning:
             self.peft_config[adapter_name] = peft_config
-            cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
-            self.base_model = cls(self.base_model, self.peft_config.copy(), adapter_name)
+            self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
+                self.base_model, self.peft_config, adapter_name
+            )
             self.set_additional_trainable_modules(peft_config, adapter_name)
         else:
             self.add_adapter(adapter_name, peft_config)
@@ -492,12 +493,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             elif peft_config.is_adaption_prompt:
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
-                self.base_model.peft_config[adapter_name] = peft_config
                 self.base_model.inject_adapter(self, adapter_name)
         except Exception:  # somthing went wrong, roll back
             del self.peft_config[adapter_name]
-            if hasattr(self.base_model, "peft_config"):
-                del self.base_model.peft_config[adapter_name]
             raise
 
         self.set_additional_trainable_modules(peft_config, adapter_name)
