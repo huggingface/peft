@@ -22,8 +22,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.utils.config import PeftConfig, PeftType
-from peft.utils.other import _freeze_adapter, _get_submodules
+from ..config import PeftConfig
+from ..utils import PeftType, _freeze_adapter, _get_submodules
 
 
 def llama_rotate_half(x: torch.Tensor) -> torch.Tensor:
@@ -113,6 +113,11 @@ class AdaptionPromptConfig(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAPTION_PROMPT
+
+    @property
+    def is_adaption_prompt(self) -> bool:
+        """Return True if this is an adaption prompt config."""
+        return True
 
 
 def prepare_config(

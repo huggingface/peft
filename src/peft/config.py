@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import enum
 import inspect
 import json
 import os
@@ -22,26 +21,7 @@ from typing import Optional, Union
 from huggingface_hub import hf_hub_download
 from transformers.utils import PushToHubMixin
 
-from .other import CONFIG_NAME
-
-
-class PeftType(str, enum.Enum):
-    PROMPT_TUNING = "PROMPT_TUNING"
-    P_TUNING = "P_TUNING"
-    PREFIX_TUNING = "PREFIX_TUNING"
-    LORA = "LORA"
-    ADALORA = "ADALORA"
-    ADAPTION_PROMPT = "ADAPTION_PROMPT"
-    IA3 = "IA3"
-
-
-class TaskType(str, enum.Enum):
-    SEQ_CLS = "SEQ_CLS"
-    SEQ_2_SEQ_LM = "SEQ_2_SEQ_LM"
-    CAUSAL_LM = "CAUSAL_LM"
-    TOKEN_CLS = "TOKEN_CLS"
-    QUESTION_ANS = "QUESTION_ANS"
-    FEATURE_EXTRACTION = "FEATURE_EXTRACTION"
+from .utils import CONFIG_NAME, PeftType, TaskType
 
 
 @dataclass
@@ -102,6 +82,9 @@ class PeftConfigMixin(PushToHubMixin):
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the child class initialization.
         """
+        # Avoid circular dependency .. TODO: fix this with a larger refactor
+        from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
         path = (
             os.path.join(pretrained_model_name_or_path, subfolder)
             if subfolder is not None
@@ -122,7 +105,27 @@ class PeftConfigMixin(PushToHubMixin):
 
         loaded_attributes = cls.from_json_file(config_file)
 
-        config = cls(**class_kwargs)
+        # TODO: this hack is needed to fix the following issue (on commit 702f937):
+        # if someone saves a default config and loads it back with `PeftConfig` class it yields to
+        # not loading the correct config class.
+
+        # from peft import AdaLoraConfig, PeftConfig
+        # peft_config = AdaLoraConfig()
+        # print(peft_config)
+        # >>> AdaLoraConfig(peft_type=<PeftType.ADALORA: 'ADALORA'>, auto_mapping=None, base_model_name_or_path=None,
+        # revision=None, task_type=None, inference_mode=False, r=8, target_modules=None, lora_alpha=8, lora_dropout=0.0, ...
+        #
+        # peft_config.save_pretrained("./test_config")
+        # peft_config = PeftConfig.from_pretrained("./test_config")
+        # print(peft_config)
+        # >>> PeftConfig(peft_type='ADALORA', auto_mapping=None, base_model_name_or_path=None, revision=None, task_type=None, inference_mode=False)
+        if "peft_type" in loaded_attributes:
+            peft_type = loaded_attributes["peft_type"]
+            config_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+        else:
+            config_cls = cls
+
+        config = config_cls(**class_kwargs)
 
         for key, value in loaded_attributes.items():
             if hasattr(config, key):
@@ -185,6 +188,18 @@ class PeftConfigMixin(PushToHubMixin):
         loaded_attributes = cls.from_json_file(config_file)
         return loaded_attributes["peft_type"]
 
+    @property
+    def is_prompt_learning(self):
+        r"""
+        Utility method to check if the configuration is for prompt learning.
+        """
+        return False
+
+    @property
+    def is_adaption_prompt(self) -> bool:
+        """Return True if this is an adaption prompt config."""
+        return False
+
 
 @dataclass
 class PeftConfig(PeftConfigMixin):
@@ -227,3 +242,10 @@ class PromptLearningConfig(PeftConfig):
     )
     num_attention_heads: Optional[int] = field(default=None, metadata={"help": "Number of attention heads"})
     num_layers: Optional[int] = field(default=None, metadata={"help": "Number of transformer layers"})
+
+    @property
+    def is_prompt_learning(self):
+        r"""
+        Utility method to check if the configuration is for prompt learning.
+        """
+        return True

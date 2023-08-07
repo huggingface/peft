@@ -27,6 +27,7 @@ from transformers import (
     AutoModelForTokenClassification,
 )
 
+from .config import PeftConfig
 from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING
 from .peft_model import (
     PeftModel,
@@ -37,7 +38,6 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .utils import PeftConfig
 
 
 class _BaseAutoPeftModel:
