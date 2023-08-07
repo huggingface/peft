@@ -1,0 +1,17 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": "bigscience/mt0-large",
+  "fan_in_fan_out": false,
+  "feedforward_modules": [],
+  "inference_mode": true,
+  "init_ia3_weights": true,
+  "modules_to_save": null,
+  "peft_type": "IA3",
+  "revision": null,
+  "target_modules": [
+    "k",
+    "v",
+    "wi_1"
+  ],
+  "task_type": "SEQ_2_SEQ_LM"
+}
