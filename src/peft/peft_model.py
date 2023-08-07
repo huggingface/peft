@@ -220,18 +220,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         **kwargs: Any,
     ):
         r"""
-        Instantiate a [`LoraModel`] from a pretrained Lora configuration and weights.
+        Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
+
+        Note that the passed `model` may be modified inplace.
 
         Args:
             model ([`~transformers.PreTrainedModel`]):
                 The model to be adapted. The model should be initialized with the
                 [`~transformers.PreTrainedModel.from_pretrained`] method from the 🤗 Transformers library.
             model_id (`str` or `os.PathLike`):
-                The name of the Lora configuration to use. Can be either:
-                    - A string, the `model id` of a Lora configuration hosted inside a model repo on the Hugging Face
+                The name of the PEFT configuration to use. Can be either:
+                    - A string, the `model id` of a PEFT configuration hosted inside a model repo on the Hugging Face
                       Hub.
-                    - A path to a directory containing a Lora configuration file saved using the `save_pretrained`
-                      method (`./my_lora_config_directory/`).
+                    - A path to a directory containing a PEFT configuration file saved using the `save_pretrained`
+                      method (`./my_peft_config_directory/`).
             adapter_name (`str`, *optional*, defaults to `"default"`):
                 The name of the adapter to be loaded. This is useful for loading multiple adapters.
             is_trainable (`bool`, *optional*, defaults to `False`):
@@ -242,7 +244,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
             kwargs: (`optional`):
-                Additional keyword arguments passed along to the specific Lora configuration class.
+                Additional keyword arguments passed along to the specific PEFT configuration class.
         """
         from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
 
