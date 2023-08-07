@@ -860,12 +860,14 @@ class PeftCommonTester:
         if not issubclass(config_cls, (LoraConfig, AdaLoraConfig)):
             return
 
-        model = self.transformers_class.from_pretrained(model_id)
+        config_kwargs = config_kwargs.copy()
         config_kwargs["bias"] = "all"
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+
+        model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, "adapter0")
         with self.assertRaises(ValueError):
             model.add_adapter("adapter1", replace(config, r=20))
