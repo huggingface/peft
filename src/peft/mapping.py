@@ -33,7 +33,6 @@ from .tuners import (
     AdaLoraConfig,
     AdaLoraModel,
     AdaMixConfig,
-    AdaMixModel,
     AdaptionPromptConfig,
     IA3Config,
     IA3Model,

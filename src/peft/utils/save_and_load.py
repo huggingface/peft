@@ -117,7 +117,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             parameter_prefix = "ia3_"
         elif config.peft_type == PeftType.ADAMIX:
             parameter_prefix = "expert_mixture_"
-        elif config.peft_type == PeftType.LORA:
+        else:
             parameter_prefix = "lora_"
         for k, v in state_dict.items():
             if parameter_prefix in k:

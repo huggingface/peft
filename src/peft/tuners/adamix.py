@@ -22,11 +22,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import PeftConfig
-from ..import_utils import is_bnb_4bit_available, is_bnb_available
+from ..import_utils import is_bnb_available
 from ..utils import (
     TRANSFORMERS_MODELS_TO_ADAMIX_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     PeftType,
+    _freeze_adapter,
     _get_submodules,
 )
 
@@ -37,7 +38,9 @@ class AdaMixConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`AdaMixModel`].
 
     Args:
-        target_modules (`Union[List[str],str]`): The names of the modules to apply AdaMix to. NOTE: This is not actually used, and AdaMix layers are added to each encoder/decoder block. This is left to match other function calls in the repo
+        target_modules (`Union[List[str],str]`):
+            The names of the modules to apply AdaMix to. NOTE: This is not actually used, and AdaMix layers are added
+            to each encoder/decoder block. This is left to match other function calls in the repo
         adapter_dim (`int`):
             The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling
             adapter has shape rxd where d is the hidden_dim of the model
@@ -105,11 +108,7 @@ class AdaMixModel(torch.nn.Module):
         >>> from peft import AdaMixModel, AdaMixConfig
 
         >>> config = AdaMixConfig(
-        ...     task_type="SEQ_2_SEQ_LM",
-        ...     adapter_dim=16,
-        ...     num_experts=4,
-        ...     sharing_down=False,
-        ...     sharing_up=True
+        ...     task_type="SEQ_2_SEQ_LM", adapter_dim=16, num_experts=4, sharing_down=False, sharing_up=True
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
@@ -376,16 +375,12 @@ class ExpertSoup(nn.Module):
         if sharing_down:
             self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, 1)
         else:
-            self.MoA_down = MixtureSoup(
-                nn.Linear(hidden_dim, adapter_dim), adapter_name, num_experts
-            )
+            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, num_experts)
 
         if sharing_up:
             self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, 1)
         else:
-            self.MoA_up = MixtureSoup(
-                nn.Linear(adapter_dim, hidden_dim), adapter_name, num_experts
-            )
+            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, num_experts)
 
         self.two_views = []
         for p in self.parameters():

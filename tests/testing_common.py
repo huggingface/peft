@@ -291,8 +291,8 @@ class PeftCommonTester:
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, AdaLoraConfig):
-            # AdaLora does not support adding more than 1 adapter
+        if issubclass(config_cls, AdaLoraConfig) or issubclass(config_cls, AdaMixConfig):
+            # AdaLora ,AdaMix does not support adding more than 1 adapter
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -528,7 +528,6 @@ class PeftCommonTester:
             logits = output[0]
             self.assertIsNotNone(logits)
 
-
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
             return
@@ -708,8 +707,8 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, AdaLoraConfig):
-            # AdaLora does not support adding more than 1 adapter
+        if issubclass(config_cls, AdaLoraConfig) or issubclass(config_cls, AdaMixConfig):
+            # AdaLora and AdaMix does not support adding more than 1 adapter
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -754,20 +753,14 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-<<<<<<< HEAD
-        if config.peft_type not in ("LORA", "ADALORA"):
-=======
         if config.peft_type in ("ADAMIX"):
             model = model.unload()
             for k, _ in model.named_parameters():
-                if 'adamix' in k:
+                if "adamix" in k:
                     raise KeyError("adamix modules still present after unloading")
-
-        elif config.peft_type not in ("LORA"):
->>>>>>> Resolve issues
+        elif config.peft_type not in ("LORA", "ADALORA"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
-        
         else:
             dummy_input = self.prepare_inputs_for_testing()
             logits_with_lora = model(**dummy_input)[0]
@@ -921,11 +914,16 @@ class PeftCommonTester:
 
     def _test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/issues/727
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
         model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
         dummy_input = self.prepare_inputs_for_testing()
         inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
         # just check that no error is raised
-        model.forward(inputs_embeds=inputs_embeds)        
+        model.forward(inputs_embeds=inputs_embeds)
 
     def _test_output_pair(self, model_id, config_cls, config_kwargs):
         if config_cls not in (AdaMixConfig,):
@@ -936,7 +934,7 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        
+
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
@@ -950,5 +948,5 @@ class PeftCommonTester:
 
         loss = 0
         for i in two_views:
-            loss += (i[0]+i[1]).sum()
+            loss += (i[0] + i[1]).sum()
         loss.backward()
