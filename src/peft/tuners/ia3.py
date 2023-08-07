@@ -160,7 +160,7 @@ class IA3Model(BaseTuner):
         - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
     """
 
-    def __init__(self, model, config: IA3Config, adapter_name: str):
+    def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
 
     @staticmethod

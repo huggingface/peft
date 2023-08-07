@@ -130,7 +130,7 @@ class AdaLoraModel(LoraModel):
         - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
 
-    def __init__(self, model, config: AdaLoraConfig, adapter_name: str):
+    def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
 
         traininable_mode_counter = 0
