@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import copy
 import inspect
 import os
 import warnings
@@ -81,7 +82,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     Args:
         model ([`~transformers.PreTrainedModel`]): The base transformer model used for Peft.
         peft_config ([`PeftConfig`]): The configuration of the Peft model.
-
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     **Attributes**:
         - **base_model** ([`~transformers.PreTrainedModel`]) -- The base transformer model used for Peft.
@@ -108,9 +109,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_type = peft_config.peft_type
         if not peft_config.is_prompt_learning:
             self.peft_config[adapter_name] = peft_config
-            self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
-                self.base_model, self.peft_config, adapter_name
-            )
+            cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
+            self.base_model = cls(self.base_model, copy.copy(peft_config), adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
         else:
             self.add_adapter(adapter_name, peft_config)
@@ -478,19 +478,27 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 f"Cannot combine adapters with different peft types. "
                 f"Found {self.peft_type} and {peft_config.peft_type}."
             )
-        self.peft_config[adapter_name] = peft_config
-        if peft_config.is_prompt_learning:
-            if hasattr(self.config, "to_dict"):
-                dict_config = self.config.to_dict()
-            else:
-                dict_config = self.config
 
-            peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
-            self._setup_prompt_encoder(adapter_name)
-        elif peft_config.is_adaption_prompt:
-            self.base_model.add_adapter(adapter_name, peft_config)
-        else:
-            self.inject_adapter(self, adapter_name)
+        self.peft_config[adapter_name] = peft_config
+        self.base_model.peft_config[adapter_name] = peft_config
+
+        try:
+            if peft_config.is_prompt_learning:
+                if hasattr(self.config, "to_dict"):
+                    dict_config = self.config.to_dict()
+                else:
+                    dict_config = self.config
+
+                peft_config = _prepare_prompt_learning_config(peft_config, dict_config)
+                self._setup_prompt_encoder(adapter_name)
+            elif peft_config.is_adaption_prompt:
+                self.base_model.add_adapter(adapter_name, peft_config)
+            else:
+                self.base_model.inject_adapter(self, adapter_name)
+        except Exception:  # somthing went wrong, roll back
+            del self.peft_config[adapter_name]
+            del self.base_model.peft_config[adapter_name]
+            raise
 
         self.set_additional_trainable_modules(peft_config, adapter_name)
 

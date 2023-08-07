@@ -854,6 +854,26 @@ class PeftCommonTester:
 
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
 
+    def _test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
+        # When trying to add multiple adapters with bias in Lora or AdaLora, an error should be
+        # raised. Also, the peft model should not be left in a half-initialized state.
+        if not issubclass(config_cls, (LoraConfig, AdaLoraConfig)):
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config_kwargs["bias"] = "all"
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, "adapter0")
+        with self.assertRaises(ValueError):
+            model.add_adapter("adapter1", replace(config, r=20))
+
+        # (superficial) test that the model is not left in a half-initialized state when adding an adapter fails
+        self.assertFalse("adapter1" in model.peft_config)
+        self.assertFalse("adapter1" in model.base_model.peft_config)
+
     def _test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         # https://github.com/huggingface/peft/issues/727
         model = self.transformers_class.from_pretrained(model_id)

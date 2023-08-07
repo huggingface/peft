@@ -111,6 +111,7 @@ class AdaLoraModel(LoraModel):
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
         `torch.nn.Module`: The AdaLora model.
@@ -129,13 +130,9 @@ class AdaLoraModel(LoraModel):
         - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
 
-    def __init__(self, model, config, adapter_name):
+    def __init__(self, model, config: AdaLoraConfig, adapter_name: str):
         super().__init__(model, config, adapter_name)
 
-        if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
-            raise ValueError(
-                "AdaLoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
-            )
         traininable_mode_counter = 0
         for config in self.peft_config.values():
             if not config.inference_mode:
@@ -152,6 +149,27 @@ class AdaLoraModel(LoraModel):
         else:
             self.trainable_adapter_name = adapter_name
             self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
+
+    def _check_new_adapter_config(self, config: LoraConfig) -> None:
+        """
+        A helper method to check the config when a new adapter is being added.
+
+        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
+
+        """
+        super()._check_new_adapter_config(config)
+
+        traininable_mode_counter = 0
+        for config_ in self.peft_config.values():
+            if not config_.inference_mode:
+                traininable_mode_counter += 1
+
+        if traininable_mode_counter > 1:
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 trainable adapter. "
+                "When using multiple adapters, set inference_mode to True for all adapters except the one "
+                "you want to train."
+            )
 
     def _create_and_replace(
         self,
