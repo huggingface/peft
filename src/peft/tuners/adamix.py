@@ -30,9 +30,6 @@ from ..utils import (
     _get_submodules,
 )
 
-if is_bnb_available():
-    pass
-
 
 @dataclass
 class AdaMixConfig(PeftConfig):
@@ -40,18 +37,16 @@ class AdaMixConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`AdaMixModel`].
 
     Args:
-        target_modules (`Union[List[str],str]`): The names of the modules to apply AdaMix to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply AdaMix to. NOTE: This is not actually used, and AdaMix layers are added to each encoder/decoder block. This is left to match other function calls in the repo
         adapter_dim (`int`):
             The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling
             adapter has shape rxd where d is the hidden_dim of the model
-        num_expert (`int`): The number of exprts per adapter module
+        num_experts (`int`): The number of exprts per adapter module
         sharing_down (`bool`): If the weights of the downsampling adapters are shared in each layer
         sharing_up (`bool`): If the weights of the upsampling adapters are shared in each layer
         return_two_views (`bool`): If two stochastic forward passes have to be made, and both outputs returned
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.:
-        modules_to_save (`List[str]`):List of modules apart from (IA)^3 layers to be set as trainable
-            and saved in the final checkpoint.
     """
 
     target_modules: Optional[Union[List[str], str]] = field(
@@ -67,7 +62,7 @@ class AdaMixConfig(PeftConfig):
             "help": "The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling adapter has shape rxd where d is the hidden_dim of the model "
         },
     )
-    num_expert: Optional[int] = field(
+    num_experts: Optional[int] = field(
         default=4,
         metadata={"help": "The number of exprts per adapter module"},
     )
@@ -87,22 +82,44 @@ class AdaMixConfig(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    modules_to_save: Optional[List[str]] = field(
-        default=None,
-        metadata={
-            "help": "List of modules apart from (IA)^3 layers to be set as trainable and saved in the final checkpoint. "
-            "For example, in Sequence Classification or Token Classification tasks, "
-            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
-        },
-    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADAMIX
 
 
 class AdaMixModel(torch.nn.Module):
-    # TODO: Modify description
-    """ """
+    """
+    Creates Mixture-of-Adapters model from a pretrained transformers model.
+
+    Args:
+        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
+        config ([`AdaMixConfig`]): The configuration of the AdaMix model.
+
+    Returns:
+        `torch.nn.Module`: The AdaMix model.
+
+    Example:
+
+        ```py
+        >>> from transformers import AutoModelForSeq2SeqLM
+        >>> from peft import AdaMixModel, AdaMixConfig
+
+        >>> config = AdaMixConfig(
+        ...     task_type="SEQ_2_SEQ_LM",
+        ...     adapter_dim=16,
+        ...     num_experts=4,
+        ...     sharing_down=False,
+        ...     sharing_up=True
+        ... )
+
+        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        >>> adamix_model = AdaMixModel(model, config)
+        ```
+
+    **Attributes**:
+        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
+        - **peft_config** ([`AdaMixConfig`]): The configuration of the AdaMix model.
+    """
 
     def __init__(self, model, config, adapter_name):
         super().__init__()
@@ -119,7 +136,7 @@ class AdaMixModel(torch.nn.Module):
         self._find_and_replace(adapter_name)
 
         mark_only_adamix_as_trainable(self.model)
-        if self.peft_config[adapter_name].inference_mode:
+        if not self.training:
             _freeze_adapter(self.model, adapter_name)
 
     def _check_quantization_dependency(self):
@@ -143,11 +160,10 @@ class AdaMixModel(torch.nn.Module):
             self.model.config.hidden_size,
             adapter_name,
             adamix_config.adapter_dim,
-            adamix_config.num_expert,
+            adamix_config.num_experts,
             adamix_config.sharing_down,
             adamix_config.sharing_up,
             adamix_config.return_two_views,
-            adamix_config.inference_mode,
             dtype,
         )
         return new_module
@@ -195,18 +211,6 @@ class AdaMixModel(torch.nn.Module):
             )
 
     @staticmethod
-    def _is_valid_match(key: str, target_key: str):
-        """
-        Helper function to match module names target_key and key. Makes sure that either the key is exactly the
-        target_key or the target_key is a submodule of key
-        """
-        if key.endswith(target_key):
-            if len(key) > len(target_key):
-                return key.endswith("." + target_key)  # must be a sub module
-            return True
-        return False
-
-    @staticmethod
     def composite_forward(f_out, f_in):
         def wrapper(hidden_states, *args, **kwargs):
             tuple_input = False
@@ -232,12 +236,10 @@ class AdaMixModel(torch.nn.Module):
         except AttributeError:
             return getattr(self.model, name)
 
-    def get_peft_config_as_dict(self, inference: bool = False):
+    def get_peft_config_as_dict(self):
         config_dict = {}
         for key, value in self.peft_config.items():
             config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
-            if inference:
-                config["inference_mode"] = True
         config_dict[key] = config
         return config
 
@@ -269,14 +271,11 @@ class AdaMixModel(torch.nn.Module):
             ]
         return peft_config
 
-    def zero_adapters(self):
+    def unload(self):
         r"""
         This method removes the added adapters. This is needed if someone wants to use the base model as a standalone
         model.
         """
-
-        # if getattr(self.model, "is_loaded_in_8bit", False):
-        #     raise ValueError("Cannot merge adamix layers when the model is loaded in 8-bit mode")
 
         key_list = [key for key, _ in self.model.named_modules() if "adamix" in key]
         for key in key_list:
@@ -318,9 +317,8 @@ def mark_only_adamix_as_trainable(model: nn.Module) -> None:
 
 
 class MixtureSoup(nn.Module):
-    def __init__(self, expert, adapter_name, inference_mode=False, num_local_experts=1):
+    def __init__(self, expert, adapter_name, num_local_experts=1):
         super().__init__()
-        self.inference_mode = inference_mode
         self.dict_keys = ["_".join([adapter_name, str(i)]) for i in range(num_local_experts)]
         self.expert_mixture = nn.ModuleDict({})
         for i in self.dict_keys:
@@ -345,10 +343,10 @@ class MixtureSoup(nn.Module):
                     p_name = "bias"
                 self.parameter_dict[p_name] = self.parameter_dict[p_name] + s_param / self.num_local_experts
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x):
         expert_output = None
 
-        if not self.inference_mode:
+        if self.training:
             expert_idx = torch.randint(low=0, high=self.num_local_experts, size=(1,)).item()  # selected expert
             expert_output = self.get_expert_by_idx(expert_idx)(x)
 
@@ -365,30 +363,28 @@ class ExpertSoup(nn.Module):
         hidden_dim,
         adapter_name,
         adapter_dim,
-        num_expert=4,
+        num_experts=4,
         sharing_down=False,
         sharing_up=True,
         return_two_views=False,
-        inference_mode=False,
         dtype=torch.float16,
     ):
         super().__init__()
 
         self.disable_adapters = False
         self.return_two_views = return_two_views
-        self.inference_mode = inference_mode
         if sharing_down:
-            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, 1)
+            self.MoA_down = MixtureSoup(nn.Linear(hidden_dim, adapter_dim), adapter_name, 1)
         else:
             self.MoA_down = MixtureSoup(
-                nn.Linear(hidden_dim, adapter_dim), adapter_name, self.inference_mode, num_expert
+                nn.Linear(hidden_dim, adapter_dim), adapter_name, num_experts
             )
 
         if sharing_up:
-            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, 1)
+            self.MoA_up = MixtureSoup(nn.Linear(adapter_dim, hidden_dim), adapter_name, 1)
         else:
             self.MoA_up = MixtureSoup(
-                nn.Linear(adapter_dim, hidden_dim), adapter_name, self.inference_mode, num_expert
+                nn.Linear(adapter_dim, hidden_dim), adapter_name, num_experts
             )
 
         self.two_views = []

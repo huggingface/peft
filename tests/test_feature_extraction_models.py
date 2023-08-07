@@ -143,6 +143,10 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def _test_inference_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_inference_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
@@ -175,8 +179,14 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     def test_weighted_combination_of_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_weighted_combination_of_adapters(model_id, config_cls, config_kwargs)
 
+<<<<<<< HEAD
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_prompt_tuning)
     )
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
+=======
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_output_pair(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_output_pair(model_id, config_cls, config_kwargs)
+>>>>>>> Resolve issues

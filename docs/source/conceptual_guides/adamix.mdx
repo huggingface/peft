@@ -15,39 +15,26 @@ specific language governing permissions and limitations under the License.
 This conceptual guide gives a brief overview of [AdaMix](https://arxiv.org/abs/2205.12410), a parameter-efficient fine tuning technique.
 
 
-<!--
-To make fine-tuning more efficient, IA3 (Infused Adapter by Inhibiting and Amplifying Inner Activations) 
-rescales inner activations with learned vectors. These learned vectors are injected in the attention and feedforward modules 
-in a typical transformer-based architecture. These learned vectors are the only trainable parameters during fine-tuning, and thus the original 
-weights remain frozen. Dealing with learned vectors (as opposed to learned low-rank updates to a weight matrix like LoRA)
-keeps the number of trainable parameters much smaller. 
+AdaMix is a general PEFT method that tunes a mixture of adaptation modules, given the underlying PEFT method of choice. The new adapter modules are introduced in each Transformer layer while keeping most of the pretrained weights frozen. For instance, AdaMix can leverage a mixture of adapters or a mixture of low rank decomposition matrices like LoRA to improve downstream task performance over the corresponding PEFT methods. Note however, the current implementation of AdaMix does not support this, and only simple linear adapters can be used. Further, AdaMix has computational cost and the number of tunable
+parameters similar to the underlying PEFT method. By only tuning 0.1 − 0.2% of the pretrained model's parameters, AdaMix outperforms SOTA parameter-efficient fine-tuning and full model fine-tuning
 
-Being similar to LoRA, IA3 carries many of the same advantages: 
+## Common AdaMix parameters in PEFT
 
-* IA3 makes fine-tuning more efficient by drastically reducing the number of trainable parameters. (For T0, an IA3 model only has about 0.01% trainable parameters, while even LoRA has > 0.1%)
-* The original pre-trained weights are kept frozen, which means you can have multiple lightweight and portable IA3 models for various downstream tasks built on top of them.
-* Performance of models fine-tuned using IA3 is comparable to the performance of fully fine-tuned models.
-* IA3 does not add any inference latency because adapter weights can be merged with the base model.
-
-In principle, IA3 can be applied to any subset of weight matrices in a neural network to reduce the number of trainable 
-parameters. Following the authors' implementation, IA3 weights are added to the key, value and feedforward layers 
-of a Transformer model. Given the target layers for injecting IA3 parameters, the number of trainable parameters 
-can be determined based on the size of the weight matrices. 
-
-
-## Common IA3 parameters in PEFT
-
-As with other methods supported by PEFT, to fine-tune a model using IA3, you need to:
+As with other methods supported by PEFT, to fine-tune a model using AdaMix, you need to:
 
 1. Instantiate a base model.
-2. Create a configuration (`IA3Config`) where you define IA3-specific parameters.
+2. Create a configuration (`AdaMixConfig`) where you define AdaMix-specific parameters.
 3. Wrap the base model with `get_peft_model()` to get a trainable `PeftModel`.
 4. Train the `PeftModel` as you normally would train the base model.
 
-`IA3Config` allows you to control how IA3 is applied to the base model through the following parameters: 
+`AdaMixConfig` allows you to control how AdaMix is applied to the base model through the following parameters: 
 
-- `target_modules`: The modules (for example, attention blocks) to apply the IA3 vectors.
-- `feedforward_modules`: The list of modules to be treated as feedforward layers in `target_modules`. While learned vectors are multiplied with 
-the output activation for attention blocks, the vectors are multiplied with the input for classic feedforward layers.
-- `modules_to_save`: List of modules apart from IA3 layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
--->
+- `target_modules`: The modules (for example, attention blocks) to apply the AdaMix vectors. NOTE: This is not actually used, and AdaMix layers are added to each encoder/decoder block. This is left to match other function calls in the repo
+- `adapter_dim`: The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling adapter has shape r x d where d is the hidden_dim of the mode
+- `num_experts`: The number of exprts per adapter module
+- `sharing_down`: If the weights of the downsampling adapters are shared in each layer
+- `sharing_up`: If the weights of the downsampling adapters are shared in each layer
+- `return_two_views`: If two stochastic forward passes have to be made
+- `fan_in_fan_out`: Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+- `sharing_down`: If the weights of the downsampling adapters are shared in each layer
+- `sharing_down`: If the weights of the downsampling adapters are shared in each layer

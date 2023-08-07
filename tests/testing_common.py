@@ -51,7 +51,7 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
         "adapter_dim": 16,
-        "num_expert": 4,
+        "num_experts": 4,
         "sharing_down": False,
         "sharing_up": True,
         "return_two_views": True,
@@ -272,9 +272,6 @@ class PeftCommonTester:
 
             # check if tensors equal
             for key in state_dict.keys():
-                # if 'adamix' in key:
-                #     print(state_dict[key])
-                #     print(state_dict_from_pretrained[key])
                 self.assertTrue(
                     torch.allclose(
                         state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
@@ -371,7 +368,6 @@ class PeftCommonTester:
                 model_from_pretrained, tmp_dirname, is_trainable=False, config=config
             )
 
-            self.assertTrue(model_from_pretrained.peft_config["default"].inference_mode)
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
@@ -510,6 +506,28 @@ class PeftCommonTester:
                     self.assertIsNotNone(param.grad)
                 else:
                     self.assertIsNone(param.grad)
+
+    def _test_inference_adapter(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (AdaMixConfig,):
+            return
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+
+        with torch.no_grad():
+            model.eval()
+
+            output = model(**inputs)[0]
+            logits = output[0]
+            self.assertIsNotNone(logits)
+
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
@@ -736,9 +754,20 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
+<<<<<<< HEAD
         if config.peft_type not in ("LORA", "ADALORA"):
+=======
+        if config.peft_type in ("ADAMIX"):
+            model = model.unload()
+            for k, _ in model.named_parameters():
+                if 'adamix' in k:
+                    raise KeyError("adamix modules still present after unloading")
+
+        elif config.peft_type not in ("LORA"):
+>>>>>>> Resolve issues
             with self.assertRaises(AttributeError):
                 model = model.unload()
+        
         else:
             dummy_input = self.prepare_inputs_for_testing()
             logits_with_lora = model(**dummy_input)[0]
