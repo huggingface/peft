@@ -1,4 +1,3 @@
-import re
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional
@@ -20,7 +19,6 @@ from .lora import (
     LoraConfig,
     LoraLayer,
     LoraModel,
-    mark_only_lora_as_trainable,
 )
 
 
@@ -61,6 +59,50 @@ class AdaLoraConfig(LoraConfig):
         self.peft_type = PeftType.ADALORA
 
 
+class AdaLoraLayer(LoraLayer):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+    ):
+        super().__init__(in_features, out_features)
+        self.lora_E = nn.ParameterDict({})
+        self.lora_A = nn.ParameterDict({})
+        self.lora_B = nn.ParameterDict({})
+        self.ranknum = nn.ParameterDict({})
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        # Right singular vectors
+        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
+        # Singular values
+        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
+        # Left singular vectors
+        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
+        # The current rank
+        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(1), requires_grad=False)}))
+        self.ranknum[adapter_name].data.fill_(float(r))
+        self.ranknum[adapter_name].requires_grad = False
+        self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def reset_lora_parameters(self, adapter_name):
+        if adapter_name in self.lora_A.keys():
+            nn.init.normal_(self.lora_E[adapter_name], mean=0.0, std=0.02)
+            nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
+            nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
+
+
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
@@ -88,17 +130,8 @@ class AdaLoraModel(LoraModel):
     """
 
     def __init__(self, model, config, adapter_name):
-        nn.Module.__init__(self)
-        self.model = model
-        self.peft_config = config
-        self.add_adapter(adapter_name, self.peft_config[adapter_name])
+        super().__init__(model, config, adapter_name)
 
-    def add_adapter(self, adapter_name, config=None):
-        if config is not None:
-            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
-            config = self._prepare_adalora_config(config, model_config)
-            self.peft_config[adapter_name] = config
-        self._find_and_replace(adapter_name)
         if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
             raise ValueError(
                 "AdaLoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
@@ -114,110 +147,117 @@ class AdaLoraModel(LoraModel):
                 "When using multiple adapters, set inference_mode to True for all adapters except the one you want to train."
             )
 
-        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
         if self.peft_config[adapter_name].inference_mode:
             _freeze_adapter(self.model, adapter_name)
         else:
             self.trainable_adapter_name = adapter_name
             self.rankallocator = RankAllocator(self.model, self.peft_config[adapter_name], self.trainable_adapter_name)
 
-    def _find_and_replace(self, adapter_name):
-        lora_config = self.peft_config[adapter_name]
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
+    def _create_and_replace(
+        self,
+        lora_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        **optionnal_kwargs,
+    ):
+        loaded_in_8bit = optionnal_kwargs.get("loaded_in_8bit", False)
+        loaded_in_4bit = optionnal_kwargs.get("loaded_in_4bit", False)
 
         if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
             raise ImportError(
                 "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
-        is_target_modules_in_base_model = False
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
+            "loaded_in_8bit": loaded_in_8bit,
+            "loaded_in_4bit": loaded_in_4bit,
         }
-        key_list = [key for key, _ in self.model.named_modules()]
-        for key in key_list:
-            if isinstance(lora_config.target_modules, str):
-                target_module_found = re.fullmatch(lora_config.target_modules, key)
-            else:
-                target_module_found = any(key.endswith(target_key) for target_key in lora_config.target_modules)
-            if target_module_found:
-                if not is_target_modules_in_base_model:
-                    is_target_modules_in_base_model = True
-                parent, target, target_name = _get_submodules(self.model, key)
-                bias = hasattr(target, "bias") and target.bias is not None
-                if isinstance(target, LoraLayer):
-                    target.update_layer(
-                        adapter_name,
-                        lora_config.init_r,
-                        lora_config.lora_alpha,
-                        lora_config.lora_dropout,
-                        lora_config.init_lora_weights,
-                    )
-                else:
-                    if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
-                        kwargs.update(
-                            {
-                                "has_fp16_weights": target.state.has_fp16_weights,
-                                "memory_efficient_backward": target.state.memory_efficient_backward,
-                                "threshold": target.state.threshold,
-                                "index": target.index,
-                            }
-                        )
-                        new_module = SVDLinear8bitLt(
-                            adapter_name, target.in_features, target.out_features, bias=bias, **kwargs
-                        )
-                    elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
-                        fourbit_kwargs = kwargs.copy()
-                        fourbit_kwargs.update(
-                            {
-                                "compute_dtype": target.compute_dtype,
-                                "compress_statistics": target.weight.compress_statistics,
-                                "quant_type": target.weight.quant_type,
-                            }
-                        )
-                        new_module = SVDLinear4bit(
-                            adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
-                        )
-                    elif isinstance(target, (nn.ModuleList, nn.ModuleDict)):
-                        # it's not applicable to replace whole module lists or module dicts
-                        continue
-                    else:
-                        if isinstance(target, torch.nn.Linear):
-                            in_features, out_features = target.in_features, target.out_features
-                            if kwargs["fan_in_fan_out"]:
-                                warnings.warn(
-                                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                                    "Setting fan_in_fan_out to False."
-                                )
-                                kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-                        elif isinstance(target, Conv1D):
-                            in_features, out_features = (
-                                target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                            )
-                            if not kwargs["fan_in_fan_out"]:
-                                warnings.warn(
-                                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                                    "Setting fan_in_fan_out to True."
-                                )
-                                kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
-                        else:
-                            raise ValueError(
-                                f"Target module {target} is not supported. "
-                                f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
-                            )
-                        new_module = SVDLinear(adapter_name, in_features, out_features, bias=bias, **kwargs)
 
-                    self._replace_module(parent, target_name, new_module, target)
-        if not is_target_modules_in_base_model:
-            raise ValueError(
-                f"Target modules {lora_config.target_modules} not found in the base model. "
-                f"Please check the target modules and try again."
+        # If it is not a LoraLayer, create a new module, else update it with new adapters
+        if not isinstance(target, AdaLoraLayer):
+            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            self._replace_module(parent, target_name, new_module, target)
+        else:
+            target.update_layer(
+                adapter_name,
+                lora_config.init_r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
             )
+
+    @staticmethod
+    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        bias = target.bias is not None
+        loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
+        loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
+
+        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+            kwargs.update(
+                {
+                    "has_fp16_weights": target.state.has_fp16_weights,
+                    "memory_efficient_backward": target.state.memory_efficient_backward,
+                    "threshold": target.state.threshold,
+                    "index": target.index,
+                }
+            )
+            new_module = SVDLinear8bitLt(adapter_name, target.in_features, target.out_features, bias=bias, **kwargs)
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(
+                {
+                    "compute_dtype": target.compute_dtype,
+                    "compress_statistics": target.weight.compress_statistics,
+                    "quant_type": target.weight.quant_type,
+                }
+            )
+            new_module = SVDLinear4bit(
+                adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
+            )
+        else:
+            if isinstance(target, torch.nn.Linear):
+                in_features, out_features = target.in_features, target.out_features
+                if kwargs["fan_in_fan_out"]:
+                    warnings.warn(
+                        "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                        "Setting fan_in_fan_out to False."
+                    )
+                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            elif isinstance(target, Conv1D):
+                in_features, out_features = (
+                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
+                )
+                if not kwargs["fan_in_fan_out"]:
+                    warnings.warn(
+                        "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                        "Setting fan_in_fan_out to True."
+                    )
+                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+            else:
+                raise ValueError(
+                    f"Target module {target} is not supported. "
+                    f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
+                )
+            new_module = SVDLinear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+
+        return new_module
+
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        if peft_config.target_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
+                raise ValueError("Please specify `target_modules` in `peft_config`")
+            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
+                model_config["model_type"]
+            ]
+        return peft_config
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -320,60 +360,6 @@ class AdaLoraModel(LoraModel):
         # Pass the function and do forward propagation
         else:
             return None
-
-    @staticmethod
-    def _prepare_adalora_config(peft_config, model_config):
-        if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING[
-                model_config["model_type"]
-            ]
-        return peft_config
-
-
-class AdaLoraLayer(LoraLayer):
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-    ):
-        super().__init__(in_features, out_features)
-        self.lora_E = nn.ParameterDict({})
-        self.lora_A = nn.ParameterDict({})
-        self.lora_B = nn.ParameterDict({})
-        self.ranknum = nn.ParameterDict({})
-
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
-        # Actual trainable parameters
-        # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
-        # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
-        # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
-        # The current rank
-        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.zeros(1), requires_grad=False)}))
-        self.ranknum[adapter_name].data.fill_(float(r))
-        self.ranknum[adapter_name].requires_grad = False
-        self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
-
-    def reset_lora_parameters(self, adapter_name):
-        if adapter_name in self.lora_A.keys():
-            nn.init.zeros_(self.lora_E[adapter_name])
-            nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
-            nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
 
 
 class SVDLinear(nn.Linear, AdaLoraLayer):

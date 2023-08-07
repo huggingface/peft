@@ -20,7 +20,8 @@ from typing import Union
 
 import torch
 
-from ..utils import PeftType, PromptLearningConfig
+from ..config import PromptLearningConfig
+from ..utils import PeftType
 
 
 class PromptEncoderReparameterizationType(str, enum.Enum):
