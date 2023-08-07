@@ -532,6 +532,7 @@ if is_bnb_available():
             self.is_feedforward = is_feedforward
 
         def forward(self, x: torch.Tensor):
+            result = None
             if self.disable_adapters or self.active_adapter not in self.ia3_l.keys():
                 return super().forward(x)
             else:
