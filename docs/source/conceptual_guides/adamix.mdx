@@ -29,7 +29,7 @@ As with other methods supported by PEFT, to fine-tune a model using AdaMix, you 
 
 `AdaMixConfig` allows you to control how AdaMix is applied to the base model through the following parameters: 
 
-- `target_modules`: The modules (for example, attention blocks) to apply the AdaMix vectors. NOTE: This is not actually used, and AdaMix layers are added to each encoder/decoder block. This is left to match other function calls in the repo
+- `target_modules`: The modules (for example, attention blocks) to apply the AdaMix vectors.
 - `adapter_dim`: The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling adapter has shape r x d where d is the hidden_dim of the mode
 - `num_experts`: The number of exprts per adapter module
 - `sharing_down`: If the weights of the downsampling adapters are shared in each layer

@@ -48,6 +48,7 @@ CONFIG_CLASSES = (
     PromptTuningConfig,
 )
 CONFIG_TESTING_KWARGS = (
+    # AdaMix Conf 1
     {
         "target_modules": None,
         "adapter_dim": 16,
@@ -55,6 +56,15 @@ CONFIG_TESTING_KWARGS = (
         "sharing_down": False,
         "sharing_up": True,
         "return_two_views": True,
+    },
+    # AdaMix Conf 2
+    {
+        "target_modules": None,
+        "adapter_dim": 8,
+        "num_experts": 3,
+        "sharing_down": True,
+        "sharing_up": False,
+        "return_two_views": False,
     },
     # IA³
     {
@@ -89,13 +99,14 @@ CONFIG_TESTING_KWARGS = (
 )
 
 CLASSES_MAPPING = {
-    "adamix": (AdaMixConfig, CONFIG_TESTING_KWARGS[0]),
-    "ia3": (IA3Config, CONFIG_TESTING_KWARGS[1]),
-    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[2]),
-    "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[3]),
-    "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[4]),
-    "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[5]),
-    "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[6]),
+    "adamix_1": (AdaMixConfig, CONFIG_TESTING_KWARGS[0]),
+    "adamix_2": (AdaMixConfig, CONFIG_TESTING_KWARGS[1]),
+    "ia3": (IA3Config, CONFIG_TESTING_KWARGS[2]),
+    "lora": (LoraConfig, CONFIG_TESTING_KWARGS[3]),
+    "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[4]),
+    "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[5]),
+    "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[6]),
+    "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[7]),
 }
 
 
@@ -926,7 +937,7 @@ class PeftCommonTester:
         model.forward(inputs_embeds=inputs_embeds)
 
     def _test_output_pair(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (AdaMixConfig,):
+        if config_cls not in (AdaMixConfig,) or not config_cls.return_two_views:
             return
 
         model = self.transformers_class.from_pretrained(model_id)

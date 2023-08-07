@@ -39,8 +39,17 @@ class AdaMixConfig(PeftConfig):
 
     Args:
         target_modules (`Union[List[str],str]`):
-            The names of the modules to apply AdaMix to. NOTE: This is not actually used, and AdaMix layers are added
-            to each encoder/decoder block. This is left to match other function calls in the repo
+            The names of the modules to apply AdaMix to. This should be the name of the class into which you want to
+            add the adapters. For example, if a classs XBlock is passed, then the forward call of this class would be
+            (roughly) changed to
+
+            >>> def forward(self, x, *args, *kwargs): >>> x = self.model(x, *args, **kwargs) >>> return adapter(x)
+
+            where self.model() is the forward call for all layers in your model, and adapter is the newly added
+            adapter. Note that new adapters are added to each instance of XBlock, and the adapters in different blocks
+            do not share weights.
+
+
         adapter_dim (`int`):
             The hidden dim of the adapter (r in the paper). The downsampling adapter has shape dxr and the upsampling
             adapter has shape rxd where d is the hidden_dim of the model
