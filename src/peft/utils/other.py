@@ -320,10 +320,25 @@ def default_forward(self, *args, **kwargs):
     return self.get_base_model()(*args, **kwargs)
 
 
-def update_forward_signature(model) -> Union[torch.nn.Module, PushToHubMixin]:
+def update_forward_signature(model):
     """
     Updates the forward signature of the PeftModel to include parents class signature
+    Args:
+        model (`PeftModel`): model
+    Example:
+
+    ```python
+    >>> from transformers import  WhisperForConditionalGeneration
+    >>> from peft import  get_peft_model, LoraConfig,  update_forward_signature
+
+    >>> model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-tiny.en")
+    >>> peft_config = LoraConfig(r=8, lora_alpha=32, lora_dropout=0.1, target_modules=["q_proj", "v_proj"])
+
+    >>> peft_model = get_peft_model(model, peft_config)
+    >>> update_forward_signature(peft_model)
+    ```
     """
+
     # Only update signature when the current forward signature only has *args and **kwargs
     current_signature = inspect.signature(model.forward)
     if (
@@ -332,10 +347,9 @@ def update_forward_signature(model) -> Union[torch.nn.Module, PushToHubMixin]:
         and "kwargs" in current_signature.parameters
     ):
         update_wrapper(
-            default_forward, model.parent_class.forward, assigned=("__doc__", "__name__", "__annotations__")
+            default_forward, type(model.get_base_model()).forward, assigned=("__doc__", "__name__", "__annotations__")
         )
         model.forward = MethodType(default_forward, model)
-    return model
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {

@@ -113,7 +113,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.peft_config = {}
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
-        self.parent_class = type(model)  # Gets the parent class of the original model to update signature
         if not isinstance(peft_config, PromptLearningConfig):
             self.peft_config[adapter_name] = peft_config
             self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
