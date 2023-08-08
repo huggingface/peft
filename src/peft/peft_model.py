@@ -77,10 +77,6 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
 }
 
 
-def forward(self, *args, **kwargs):
-    return self.get_base_model()(*args, **kwargs)
-
-
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
     Base model encompassing various Peft methods.
