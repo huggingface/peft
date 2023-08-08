@@ -351,6 +351,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
     "btlm": ["c_proj", "c_attn"],
+    "codegen": ["qkv_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
