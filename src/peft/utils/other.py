@@ -299,6 +299,18 @@ def transpose(weight, fan_in_fan_out):
     return weight.T if fan_in_fan_out else weight
 
 
+def _is_valid_match(key: str, target_key: str):
+    """
+    Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
+    or the target_key is a submodule of key
+    """
+    if key.endswith(target_key):
+        if len(key) > len(target_key):
+            return key.endswith("." + target_key)  # must be a sub module
+        return True
+    return False
+
+
 def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[torch.Tensor]) -> int:
     """Get the batch size based on either input_ids or input_embeds
 
@@ -377,6 +389,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
     "btlm": ["c_proj", "c_attn"],
+    "codegen": ["qkv_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {

@@ -25,18 +25,19 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
+from ..config import PeftConfig
 from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
     CLAMP_QUANTILE,
     COMMON_LAYERS_PATTERN,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
-    PeftConfig,
     PeftType,
     _freeze_adapter,
     _get_submodules,
     transpose,
 )
+from .tuners_utils import BaseTuner, BaseTunerLayer
 
 
 if is_bnb_available():
@@ -119,13 +120,106 @@ class LoraConfig(PeftConfig):
         self.peft_type = PeftType.LORA
 
 
-class LoraModel(torch.nn.Module):
+class LoraLayer(BaseTunerLayer):
+    def __init__(self, in_features: int, out_features: int, **kwargs):
+        self.r = {}
+        self.lora_alpha = {}
+        self.scaling = {}
+        self.lora_dropout = nn.ModuleDict({})
+        self.lora_A = nn.ModuleDict({})
+        self.lora_B = nn.ModuleDict({})
+        # For Embedding layer
+        self.lora_embedding_A = nn.ParameterDict({})
+        self.lora_embedding_B = nn.ParameterDict({})
+        # Mark the weight as unmerged
+        self.merged = False
+        self.disable_adapters = False
+        self.in_features = in_features
+        self.out_features = out_features
+        self.kwargs = kwargs
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        if r > 0:
+            self.lora_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)}))
+            self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
+            self.scaling[adapter_name] = lora_alpha / r
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        if r > 0:
+            kernel_size = self.kwargs["kernel_size"]
+            stride = self.kwargs["stride"]
+            padding = self.kwargs["padding"]
+            self.lora_A.update(
+                nn.ModuleDict({adapter_name: nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)})
+            )
+            self.lora_B.update(
+                nn.ModuleDict({adapter_name: nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)})
+            )
+            self.scaling[adapter_name] = lora_alpha / r
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        if r > 0:
+            weight_A = torch.randn((r, self.in_features), dtype=self.weight.dtype, device=self.weight.device)
+            weight_B = torch.randn((self.out_features, r), dtype=self.weight.dtype, device=self.weight.device)
+            self.lora_embedding_A.update(nn.ParameterDict({adapter_name: nn.Parameter(weight_A)}))
+            self.lora_embedding_B.update(nn.ParameterDict({adapter_name: nn.Parameter(weight_B)}))
+            self.scaling[adapter_name] = lora_alpha / r
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name)
+        self.to(self.weight.device)
+
+    def reset_lora_parameters(self, adapter_name):
+        if adapter_name in self.lora_A.keys():
+            # initialize A the same way as the default for nn.Linear and B to zero
+            nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
+            nn.init.zeros_(self.lora_B[adapter_name].weight)
+        if adapter_name in self.lora_embedding_A.keys():
+            # initialize a the same way as the default for nn.linear and b to zero
+            nn.init.zeros_(self.lora_embedding_A[adapter_name])
+            nn.init.normal_(self.lora_embedding_B[adapter_name])
+
+
+class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
 
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
         `torch.nn.Module`: The Lora model.
@@ -175,48 +269,32 @@ class LoraModel(torch.nn.Module):
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
 
-    def __init__(self, model, config, adapter_name):
-        super().__init__()
-        self.model = model
-        self.forward = self.model.forward
-        self.peft_config = config
-        self.add_adapter(adapter_name, self.peft_config[adapter_name])
+    def __init__(self, model, config, adapter_name) -> None:
+        super().__init__(model, config, adapter_name)
 
-        # transformers models have a .config attribute, whose presence is assumed later on
-        if not hasattr(self, "config"):
-            self.config = {"model_type": "custom"}
+    def _check_new_adapter_config(self, config: LoraConfig) -> None:
+        """
+        A helper method to check the config when a new adapter is being added.
 
-    def add_adapter(self, adapter_name, config=None):
-        if config is not None:
-            model_config = getattr(self.model, "config", {"model_type": "custom"})
-            if hasattr(model_config, "to_dict"):
-                model_config = model_config.to_dict()
+        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
-            config = self._prepare_lora_config(config, model_config)
-            self.peft_config[adapter_name] = config
-        self._find_and_replace(adapter_name)
-        if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
+        """
+        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
+        # does not fully correspond to the error message.
+        if (len(self.peft_config) > 1) and (config.bias != "none"):
             raise ValueError(
-                "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
-            )
-        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
-        if self.peft_config[adapter_name].inference_mode:
-            _freeze_adapter(self.model, adapter_name)
-
-    def _check_quantization_dependency(self):
-        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
-        if (loaded_in_4bit or loaded_in_8bit) and not is_bnb_available():
-            raise ImportError(
-                "To use Lora with 8-bit or 4-bit quantization, please install the `bitsandbytes` package. "
-                "You can install it with `pip install bitsandbytes`."
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
             )
 
-    def _check_target_module_exists(self, lora_config, key):
+    @staticmethod
+    def _check_target_module_exists(lora_config, key):
         if isinstance(lora_config.target_modules, str):
             target_module_found = re.fullmatch(lora_config.target_modules, key)
         else:
-            target_module_found = any(key.endswith(target_key) for target_key in lora_config.target_modules)
+            target_module_found = any(
+                re.match(f".*\.{target_key}$", key) for target_key in lora_config.target_modules
+            ) or any(target_key == key for target_key in lora_config.target_modules)
             is_using_layer_indexes = getattr(lora_config, "layers_to_transform", None) is not None
             layer_indexing_pattern = getattr(lora_config, "layers_pattern", None)
 
@@ -238,7 +316,15 @@ class LoraModel(torch.nn.Module):
                         target_module_found = False
         return target_module_found
 
-    def _create_new_module(self, lora_config, adapter_name, target):
+    def _create_and_replace(
+        self,
+        lora_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        **optionnal_kwargs,
+    ):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": lora_config.r,
@@ -247,8 +333,85 @@ class LoraModel(torch.nn.Module):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
         }
-        loaded_in_4bit = getattr(self.model, "is_loaded_in_4bit", False)
-        loaded_in_8bit = getattr(self.model, "is_loaded_in_8bit", False)
+
+        kwargs["loaded_in_8bit"] = optionnal_kwargs.pop("loaded_in_8bit", False)
+        kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
+        kwargs["bias"] = bias
+
+        # TODO: better deal with that
+        if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
+            target.update_layer_conv2d(
+                adapter_name,
+                lora_config.r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+        elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
+            target.update_layer_embedding(
+                adapter_name,
+                lora_config.r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+
+        elif isinstance(target, LoraLayer):
+            target.update_layer(
+                adapter_name,
+                lora_config.r,
+                lora_config.lora_alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
+        else:
+            new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            self._replace_module(parent, target_name, new_module, target)
+
+    @staticmethod
+    def _replace_module(parent, child_name, new_module, child):
+        setattr(parent, child_name, new_module)
+        new_module.weight = child.weight
+        if hasattr(child, "bias"):
+            if child.bias is not None:
+                new_module.bias = child.bias
+
+        if getattr(child, "state", None) is not None:
+            new_module.state = child.state
+            new_module.to(child.weight.device)
+
+        # dispatch to correct device
+        for name, module in new_module.named_modules():
+            if "lora_" in name:
+                module.to(child.weight.device)
+            if "ranknum" in name:
+                module.to(child.weight.device)
+
+    def _mark_only_adapters_as_trainable(self) -> None:
+        active_adapter = self._get_active_adapter()
+        bias = self.peft_config[active_adapter].bias
+
+        for n, p in self.model.named_parameters():
+            if "lora_" not in n:
+                p.requires_grad = False
+        if bias == "none":
+            return
+        elif bias == "all":
+            for n, p in self.model.named_parameters():
+                if "bias" in n:
+                    p.requires_grad = True
+        elif bias == "lora_only":
+            for m in self.model.modules():
+                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                    m.bias.requires_grad = True
+        else:
+            raise NotImplementedError
+
+    @staticmethod
+    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
+        loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
+        bias = kwargs.pop("bias", False)
 
         if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
@@ -313,72 +476,6 @@ class LoraModel(torch.nn.Module):
 
         return new_module
 
-    def _find_and_replace(self, adapter_name):
-        lora_config = self.peft_config[adapter_name]
-        self._check_quantization_dependency()
-        is_target_modules_in_base_model = False
-        key_list = [key for key, _ in self.model.named_modules()]
-
-        for key in key_list:
-            if not self._check_target_module_exists(lora_config, key):
-                continue
-
-            is_target_modules_in_base_model = True
-            parent, target, target_name = _get_submodules(self.model, key)
-
-            if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
-                target.update_layer_conv2d(
-                    adapter_name,
-                    lora_config.r,
-                    lora_config.lora_alpha,
-                    lora_config.lora_dropout,
-                    lora_config.init_lora_weights,
-                )
-            elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
-                target.update_layer_embedding(
-                    adapter_name,
-                    lora_config.r,
-                    lora_config.lora_alpha,
-                    lora_config.lora_dropout,
-                    lora_config.init_lora_weights,
-                )
-
-            elif isinstance(target, LoraLayer):
-                target.update_layer(
-                    adapter_name,
-                    lora_config.r,
-                    lora_config.lora_alpha,
-                    lora_config.lora_dropout,
-                    lora_config.init_lora_weights,
-                )
-            else:
-                new_module = self._create_new_module(lora_config, adapter_name, target)
-                self._replace_module(parent, target_name, new_module, target)
-
-        if not is_target_modules_in_base_model:
-            raise ValueError(
-                f"Target modules {lora_config.target_modules} not found in the base model. "
-                f"Please check the target modules and try again."
-            )
-
-    def _replace_module(self, parent_module, child_name, new_module, old_module):
-        setattr(parent_module, child_name, new_module)
-        new_module.weight = old_module.weight
-        if hasattr(old_module, "bias"):
-            if old_module.bias is not None:
-                new_module.bias = old_module.bias
-
-        if getattr(old_module, "state", None) is not None:
-            new_module.state = old_module.state
-            new_module.to(old_module.weight.device)
-
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if "lora_" in name:
-                module.to(old_module.weight.device)
-            if "ranknum" in name:
-                module.to(old_module.weight.device)
-
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
         try:
@@ -436,24 +533,8 @@ class LoraModel(torch.nn.Module):
                     module.unmerge()
                 module.active_adapter = adapter_name
 
-    def merge_adapter(self):
-        """
-        This method merges the LoRa layers into the base model.
-        """
-        for module in self.model.modules():
-            if isinstance(module, LoraLayer):
-                module.merge()
-
-    def unmerge_adapter(self):
-        """
-        This method unmerges the LoRa layers from the base model.
-        """
-        for module in self.model.modules():
-            if isinstance(module, LoraLayer):
-                module.unmerge()
-
     @staticmethod
-    def _prepare_lora_config(peft_config, model_config):
+    def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
@@ -509,6 +590,7 @@ class LoraModel(torch.nn.Module):
             adapter_name (str): Name of the new adapter.
             combination_type (str): Type of merging. Can be one of [`svd`, `linear`]
         """
+
         if adapter_name in list(self.peft_config.keys()):
             return
         for adapter in adapters:
@@ -530,9 +612,11 @@ class LoraModel(torch.nn.Module):
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
         self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
-        self._find_and_replace(adapter_name)
-        mark_only_lora_as_trainable(self.model, self.peft_config[adapter_name].bias)
+        self.inject_adapter(self.model, adapter_name)
+
+        # Do we really need that?
         _freeze_adapter(self.model, adapter_name)
+
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
@@ -662,117 +746,6 @@ class LoraModel(torch.nn.Module):
 #  Copyright (c) Microsoft Corporation. All rights reserved.
 #  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 #  ------------------------------------------------------------------------------------------
-
-
-# had to adapt it for `lora_only` to work
-def mark_only_lora_as_trainable(model: nn.Module, bias: str = "none") -> None:
-    for n, p in model.named_parameters():
-        if "lora_" not in n:
-            p.requires_grad = False
-    if bias == "none":
-        return
-    elif bias == "all":
-        for n, p in model.named_parameters():
-            if "bias" in n:
-                p.requires_grad = True
-    elif bias == "lora_only":
-        for m in model.modules():
-            if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
-                m.bias.requires_grad = True
-    else:
-        raise NotImplementedError
-
-
-class LoraLayer:
-    def __init__(self, in_features: int, out_features: int, **kwargs):
-        self.r = {}
-        self.lora_alpha = {}
-        self.scaling = {}
-        self.lora_dropout = nn.ModuleDict({})
-        self.lora_A = nn.ModuleDict({})
-        self.lora_B = nn.ModuleDict({})
-        # For Embedding layer
-        self.lora_embedding_A = nn.ParameterDict({})
-        self.lora_embedding_B = nn.ParameterDict({})
-        # Mark the weight as unmerged
-        self.merged = False
-        self.disable_adapters = False
-        self.in_features = in_features
-        self.out_features = out_features
-        self.kwargs = kwargs
-
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
-        # Actual trainable parameters
-        if r > 0:
-            self.lora_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)}))
-            self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
-            self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
-
-    def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
-        # Actual trainable parameters
-        if r > 0:
-            kernel_size = self.kwargs["kernel_size"]
-            stride = self.kwargs["stride"]
-            padding = self.kwargs["padding"]
-            self.lora_A.update(
-                nn.ModuleDict({adapter_name: nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)})
-            )
-            self.lora_B.update(
-                nn.ModuleDict({adapter_name: nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)})
-            )
-            self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
-
-    def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
-        # Actual trainable parameters
-        if r > 0:
-            weight_A = torch.randn((r, self.in_features), dtype=self.weight.dtype, device=self.weight.device)
-            weight_B = torch.randn((self.out_features, r), dtype=self.weight.dtype, device=self.weight.device)
-            self.lora_embedding_A.update(nn.ParameterDict({adapter_name: nn.Parameter(weight_A)}))
-            self.lora_embedding_B.update(nn.ParameterDict({adapter_name: nn.Parameter(weight_B)}))
-            self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
-
-    def reset_lora_parameters(self, adapter_name):
-        if adapter_name in self.lora_A.keys():
-            # initialize A the same way as the default for nn.Linear and B to zero
-            nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
-            nn.init.zeros_(self.lora_B[adapter_name].weight)
-        if adapter_name in self.lora_embedding_A.keys():
-            # initialize a the same way as the default for nn.linear and b to zero
-            nn.init.zeros_(self.lora_embedding_A[adapter_name])
-            nn.init.normal_(self.lora_embedding_B[adapter_name])
 
 
 class Linear(nn.Linear, LoraLayer):

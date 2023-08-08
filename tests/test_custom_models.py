@@ -324,3 +324,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         if bias_warning_was_given:
             # This is bad, there was a warning about the bias when there should not have been any.
             self.fail("There should be no warning when bias is set to 'none'")
+
+    @parameterized.expand(TEST_CASES)
+    def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
