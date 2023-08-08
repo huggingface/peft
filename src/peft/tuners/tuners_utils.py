@@ -12,9 +12,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Union
 
 from torch import nn
 
@@ -59,7 +61,7 @@ class BaseTuner(nn.Module, ABC):
             The model configuration object, it should be a dictionary of `str` to `Any` objects.
     """
 
-    def __init__(self, model, peft_config, adapter_name):
+    def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
         super().__init__()
 
         self.model = model
@@ -74,7 +76,11 @@ class BaseTuner(nn.Module, ABC):
                 "Already found a `peft_config` attribute in the model. This will lead to having multiple adapters"
                 " in the model. Make sure to know what you are doing!"
             )
-            self.peft_config[adapter_name] = peft_config
+            if isinstance(peft_config, PeftConfig):
+                self.peft_config[adapter_name] = peft_config
+            else:
+                # user is adding a dict of PeftConfigs
+                self.peft_config.update(peft_config)
 
         # transformers models have a .config attribute, whose presence is assumed later on
         if not hasattr(self, "config"):
@@ -159,6 +165,15 @@ class BaseTuner(nn.Module, ABC):
         """
         ...
 
+    def _check_new_adapter_config(self, config: PeftConfig) -> None:
+        """
+        A helper method to check the config when a new adapter is being added.
+
+        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
+
+        """
+        pass
+
     def inject_adapter(self, model: nn.Module, adapter_name: str):
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
@@ -173,6 +188,10 @@ class BaseTuner(nn.Module, ABC):
                 The adapter name.
         """
         peft_config = self.peft_config[adapter_name]
+        # Note: If possible, all checks should be performed *at the start of this method*.
+        # This way, we can raise early if something goes wrong, without leaving the model
+        # in a bad (half-initialized) state.
+        self._check_new_adapter_config(peft_config)
 
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
