@@ -18,13 +18,12 @@ import os
 import warnings
 from functools import update_wrapper
 from types import MethodType
-from typing import Optional, Union
+from typing import Optional
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
-from transformers.utils import PushToHubMixin
 
 
 # Get current device name based on available devices
