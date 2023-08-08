@@ -63,7 +63,6 @@ class BaseTuner(nn.Module, ABC):
         super().__init__()
 
         self.model = model
-        self.forward = self.model.forward
 
         # For advanced developpers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
@@ -84,6 +83,9 @@ class BaseTuner(nn.Module, ABC):
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
+
+    def forward(self, *args: Any, **kwargs: Any):
+        return self.model.forward(*args, **kwargs)
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
