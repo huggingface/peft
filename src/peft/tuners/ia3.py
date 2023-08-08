@@ -133,6 +133,7 @@ class IA3Model(BaseTuner):
     Args:
         model ([`~transformers.PreTrainedModel`]): The model to be adapted.
         config ([`IA3Config`]): The configuration of the (IA)^3 model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
         `torch.nn.Module`: The (IA)^3 model.
