@@ -18,7 +18,8 @@ from dataclasses import dataclass, field
 
 import torch
 
-from ..utils import PeftType, PromptLearningConfig
+from ..config import PromptLearningConfig
+from ..utils import PeftType
 
 
 @dataclass

@@ -16,10 +16,25 @@ import copy
 import inspect
 import os
 import warnings
+from typing import Optional
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
+from accelerate.utils import is_npu_available, is_xpu_available
+
+
+# Get current device name based on available devices
+def infer_device():
+    if torch.cuda.is_available():
+        torch_device = "cuda"
+    elif is_xpu_available():
+        torch_device = "xpu"
+    elif is_npu_available():
+        torch_device = "npu"
+    else:
+        torch_device = "cpu"
+    return torch_device
 
 
 # Add or edit model card to have `library_name: peft`
@@ -286,6 +301,34 @@ def transpose(weight, fan_in_fan_out):
     return weight.T if fan_in_fan_out else weight
 
 
+def _is_valid_match(key: str, target_key: str):
+    """
+    Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
+    or the target_key is a submodule of key
+    """
+    if key.endswith(target_key):
+        if len(key) > len(target_key):
+            return key.endswith("." + target_key)  # must be a sub module
+        return True
+    return False
+
+
+def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[torch.Tensor]) -> int:
+    """Get the batch size based on either input_ids or input_embeds
+
+    Raises an ValueError if both are None.
+
+    """
+    if (input_ids is None) and (inputs_embeds is None):
+        raise ValueError("You have to provide either input_ids or inputs_embeds")
+
+    if input_ids is not None:
+        batch_size = input_ids.shape[0]
+    else:
+        batch_size = inputs_embeds.shape[0]
+    return batch_size
+
+
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
     "mt5": ["q", "v"],
@@ -312,6 +355,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
     "btlm": ["c_proj", "c_attn"],
+    "codegen": ["qkv_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
