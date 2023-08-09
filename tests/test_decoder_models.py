@@ -214,6 +214,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
 @require_bitsandbytes
 class PeftDecoderModelTester8bit(PeftDecoderModelTester):
     """Same as PeftDecoderModelTester but with 8bit quantization enabled."""
+
     class AutoModel8bit(AutoModelForCausalLM):
         @classmethod
         def from_pretrained(self, *args, **kwargs):

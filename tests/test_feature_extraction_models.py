@@ -184,6 +184,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
 @require_bitsandbytes
 class PeftFeatureExtractionModelTester8bit(PeftFeatureExtractionModelTester):
     """Same as PeftFeatureExtractionModelTester but with 8bit quantization enabled."""
+
     class AutoModel8bit(AutoModel):
         @classmethod
         def from_pretrained(self, *args, **kwargs):

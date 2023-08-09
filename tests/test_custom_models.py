@@ -23,6 +23,7 @@ from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft import LoraConfig, get_peft_model
+from peft.import_utils import is_bnb_available
 
 from .testing_common import PeftCommonTester
 
@@ -108,7 +109,7 @@ class ModelConv2D(nn.Module):
         return X
 
 
-from peft.import_utils import is_bnb_available
+# TODO: if we cannot fix quantized tests on custom models, all of this can be removed
 if is_bnb_available():
     import bitsandbytes as bnb
 
@@ -120,7 +121,6 @@ if is_bnb_available():
             self.drop = nn.Dropout(0.5)
             self.lin1 = bnb.nn.Linear8bitLt(20, 2)
             self.sm = nn.LogSoftmax(dim=-1)
-            #self.is_loaded_in_8bit = True
 
         def forward(self, X):
             X = X.float()
@@ -131,7 +131,6 @@ if is_bnb_available():
             X = self.sm(X)
             return X
 
-
     class ModelEmbConv1D8bit(nn.Module):
         def __init__(self):
             super().__init__()
@@ -140,7 +139,6 @@ if is_bnb_available():
             self.relu = nn.ReLU()
             self.flat = nn.Flatten()
             self.lin0 = bnb.nn.Linear8bitLt(10, 2)
-            #self.is_loaded_in_8bit = True
 
         def forward(self, X):
             X = self.emb(X)
@@ -150,7 +148,6 @@ if is_bnb_available():
             X = self.lin0(X)
             return X
 
-
     class ModelConv2D8bit(nn.Module):
         def __init__(self):
             super().__init__()
@@ -158,7 +155,6 @@ if is_bnb_available():
             self.relu = nn.ReLU()
             self.flat = nn.Flatten()
             self.lin0 = bnb.nn.Linear8bitLt(10, 2)
-            #self.is_loaded_in_8bit = True
 
         def forward(self, X):
             X = X.float().reshape(2, 5, 3, 3)

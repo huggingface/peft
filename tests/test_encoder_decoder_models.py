@@ -180,6 +180,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
 @require_bitsandbytes
 class PeftEncoderDecoderModelTester8bit(PeftEncoderDecoderModelTester):
     """Same as PeftEncoderDecoderModelTester but with 8bit quantization enabled."""
+
     class AutoModel8bit(AutoModelForSeq2SeqLM):
         @classmethod
         def from_pretrained(self, *args, **kwargs):
