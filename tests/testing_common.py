@@ -846,7 +846,14 @@ class PeftCommonTester:
                 with peft_model.text_encoder.disable_adapter():
                     output_peft_disabled = get_output(peft_model)
             # for SD, very rarely, a pixel can differ
-            self.assertTrue((output_before != output_peft_disabled).float().mean() < 1e-1)
+            # check that difference with enabled adapter is much-much lower than difference with disabled adapter
+            self.assertTrue(
+                (
+                    (output_before != output_peft).float().mean()
+                    / (output_before != output_peft_disabled).float().mean()
+                )
+                < 1e2
+            )
         else:
             with peft_model.disable_adapter():
                 output_peft_disabled = get_output(peft_model)
