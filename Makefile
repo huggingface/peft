@@ -34,5 +34,5 @@ tests_core_single_gpu:
 tests_common_gpu:
 	python -m pytest tests/test_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
 	python -m pytest tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_encoder_decoder.log",)
-    python -m pytest tests/test_feature_extraction_models.py $(if $(IS_GITHUB_CI),--report-log "common_feature_extraction.log",)
-    python -m pytest tests/test_custom_models.py $(if $(IS_GITHUB_CI),--report-log "common_custom.log",)
+	python -m pytest tests/test_feature_extraction_models.py $(if $(IS_GITHUB_CI),--report-log "common_feature_extraction.log",)
+	python -m pytest tests/test_custom_models.py $(if $(IS_GITHUB_CI),--report-log "common_custom.log",)
