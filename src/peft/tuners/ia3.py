@@ -547,6 +547,6 @@ if is_bnb_available():
                 expected_dtype = result.dtype
                 result = result * ia3_scaling
 
-            if requires_conversion:
-                result = result.to(expected_dtype)
+                if requires_conversion:
+                    result = result.to(expected_dtype)
             return result
