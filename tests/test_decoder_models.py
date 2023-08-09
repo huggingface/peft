@@ -21,6 +21,7 @@ from transformers import AutoModelForCausalLM
 from peft import AdaLoraConfig
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
+from .testing_utils import require_bitsandbytes, require_torch_gpu
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -59,6 +60,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     We use parametrized.expand for debugging purposes to test each model individually.
     """
     transformers_class = AutoModelForCausalLM
+    quantization = None
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -206,3 +208,17 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_non_pt_mqa))
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
+
+
+@require_torch_gpu
+@require_bitsandbytes
+class PeftDecoderModelTester8bit(PeftDecoderModelTester):
+    """Same as PeftDecoderModelTester but with 8bit quantization enabled."""
+    class AutoModel8bit(AutoModelForCausalLM):
+        @classmethod
+        def from_pretrained(self, *args, **kwargs):
+            kwargs["load_in_8bit"] = True
+            return super().from_pretrained(*args, **kwargs)
+
+    transformers_class = AutoModel8bit
+    quantization = "int8"

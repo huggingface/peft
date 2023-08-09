@@ -16,6 +16,7 @@ import os
 import pickle
 import tempfile
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import replace
 
 import torch
@@ -166,6 +167,26 @@ class PeftCommonTester:
     torch_device = infer_device()
     transformers_class = None
 
+    def set_model_device(self, model):
+        # model.to("cuda") fails when the model is quantized
+        if getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False):
+            return model
+        return model.to(self.torch_device)
+
+    @contextmanager
+    def autocast(self):
+        # wrap autocast so that it works correctly and without warnings on all devices
+        if self.torch_device == "cpu":
+            yield
+            return
+
+        if self.torch_device == "cuda":
+            with torch.autocast("cuda"):
+                yield
+            return
+
+        raise ValueError(f"Unknown device {self.torch_device}, please implement the correct autocast for it")
+
     def prepare_inputs_for_common(self):
         raise NotImplementedError
 
@@ -197,7 +218,8 @@ class PeftCommonTester:
         self.assertTrue(correctly_converted)
 
     def _test_prepare_for_training(self, model_id, config_cls, config_kwargs):
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id)
+        model = self.set_model_device(model)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -210,8 +232,9 @@ class PeftCommonTester:
         self.assertTrue(not dummy_output.requires_grad)
 
         # load with `prepare_model_for_int8_training`
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id)
         model = prepare_model_for_int8_training(model)
+        model = self.set_model_device(model)
 
         for param in model.parameters():
             self.assertTrue(not param.requires_grad)
@@ -244,7 +267,7 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
@@ -290,7 +313,7 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         new_adapter_config = config_cls(
             base_model_name_or_path=model_id,
@@ -347,7 +370,7 @@ class PeftCommonTester:
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
@@ -373,7 +396,7 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         if config.peft_type not in ("IA3", "LORA"):
             with self.assertRaises(AttributeError):
@@ -381,16 +404,25 @@ class PeftCommonTester:
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
-        logits_unmerged = model(**dummy_input)[0]
+        with self.autocast():
+            logits_unmerged = model(**dummy_input)[0]
+
+        if self.quantization == "int8":
+            with self.assertRaises(ValueError):
+                # unfortunately can't check the error message with unittest
+                model.merge_and_unload()
+            return
 
         model = model.merge_and_unload()
-        logits_merged = model(**dummy_input)[0]
+        with self.autocast():
+            logits_merged = model(**dummy_input)[0]
 
         self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
 
         # For this test to work, init_lora_weights must be False. This ensures that weights are not initialized to
         # the identity transform.
-        transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        transformers_model = self.transformers_class.from_pretrained(model_id)
+        transformers_model = self.set_model_device(transformers_model)
         logits_transformers = transformers_model(**dummy_input)[0]
         self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
 
@@ -399,7 +431,8 @@ class PeftCommonTester:
             # model is a transformers model
             with tempfile.TemporaryDirectory() as tmp_dirname:
                 model.save_pretrained(tmp_dirname)
-                model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
+                model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname)
+                model_from_pretrained = self.set_model_device(model_from_pretrained)
         else:
             # model is not a transformers model
             model_from_pretrained = pickle.loads(pickle.dumps(model))
@@ -414,12 +447,13 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         inputs = self.prepare_inputs_for_testing()
 
         # check if `generate` works
-        _ = model.generate(**inputs)
+        with self.autocast():
+            _ = model.generate(**inputs)
 
         with self.assertRaises(TypeError):
             # check if `generate` raises an error if no positional arguments are passed
@@ -441,7 +475,8 @@ class PeftCommonTester:
         attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
 
         # check if `generate` works
-        _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
+        with self.autocast():
+            _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
 
         with self.assertRaises(TypeError):
             # check if `generate` raises an error if no positional arguments are passed
@@ -472,14 +507,16 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         inputs = self.prepare_inputs_for_testing()
 
         # check if `training` works
-        output = model(**inputs)[0]
-        loss = output.sum()
-        loss.backward()
+        with self.autocast():
+            output = model(**inputs)[0]
+            loss = output.sum()
+            loss.backward()
+
         parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
         for n, param in model.named_parameters():
             if (parameter_prefix in n) or ("modules_to_save" in n):
@@ -497,20 +534,20 @@ class PeftCommonTester:
         )
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         inputs = self.prepare_inputs_for_testing()
 
         # check if `training` works
-        output = model(**inputs)[0]
-        logits = output[0]
+        with self.autocast():
+            output = model(**inputs)[0]
+            logits = output[0]
+            loss = output.sum()
+            loss.backward()
 
-        loss = output.sum()
-        loss.backward()
-
-        # set to eval mode, since things like dropout can affect the output otherwise
-        model.eval()
-        logits = model(**inputs)[0][0]
+            # set to eval mode, since things like dropout can affect the output otherwise
+            model.eval()
+            logits = model(**inputs)[0][0]
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname, safe_serialization=True)
@@ -520,7 +557,8 @@ class PeftCommonTester:
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
 
-            logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
+            with self.autocast():
+                logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
             self.assertTrue(torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4))
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
@@ -534,16 +572,16 @@ class PeftCommonTester:
         )
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         inputs = self.prepare_inputs_for_testing()
 
         # check if `training` works
-        output = model(**inputs)[0]
-        logits = output[0]
-
-        loss = output.sum()
-        loss.backward()
+        with self.autocast():
+            output = model(**inputs)[0]
+            logits = output[0]
+            loss = output.sum()
+            loss.backward()
 
         nb_trainable = 0
 
@@ -593,15 +631,16 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         inputs = self.prepare_inputs_for_testing()
 
         # check if `training` works
-        output = model(**inputs)[0]
+        with self.autocast():
+            output = model(**inputs)[0]
+            loss = output.sum()
+            loss.backward()
 
-        loss = output.sum()
-        loss.backward()
         parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
         for n, param in model.named_parameters():
             if parameter_prefix in n:
@@ -621,7 +660,7 @@ class PeftCommonTester:
         model = self.transformers_class.from_pretrained(model_id)
 
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
@@ -641,14 +680,15 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         inputs = self.prepare_inputs_for_testing()
 
         # check if `training` works
-        output = model(**inputs)[0]
-        loss = output.sum()
-        loss.backward()
+        with self.autocast():
+            output = model(**inputs)[0]
+            loss = output.sum()
+            loss.backward()
 
         # check that prompt encoder has grads
         for param in model.prompt_encoder.parameters():
@@ -668,7 +708,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)
         model.set_adapter(adapter_to_delete)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         if config.peft_type not in ("LORA"):
             with self.assertRaises(AttributeError):
@@ -699,19 +739,27 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
 
         if config.peft_type not in ("LORA", "ADALORA"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
         else:
             dummy_input = self.prepare_inputs_for_testing()
-            logits_with_lora = model(**dummy_input)[0]
+            with self.autocast():
+                logits_with_lora = model(**dummy_input)[0]
 
-            transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            transformers_model = self.transformers_class.from_pretrained(model_id)
+            transformers_model = self.set_model_device(transformers_model)
             logits_transformers = transformers_model(**dummy_input)[0]
 
             model.eval()
+            if self.quantization == "int8":
+                with self.assertRaises(ValueError):
+                    # unfortunately can't check the error message with unittest
+                    model.unload()
+                return
+
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
 
@@ -735,7 +783,14 @@ class PeftCommonTester:
         model = get_peft_model(model, config, adapter_list[0])
         model.add_adapter(adapter_list[1], config)
         model.add_adapter(adapter_list[2], replace(config, r=20))
-        model = model.to(self.torch_device)
+        model = self.set_model_device(model)
+
+        if self.quantization == "int8":
+            # quantized models do not support merging adapters
+            # unfortunately can't check the error message with unittest
+            with self.assertRaises(ValueError):
+                model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
+            return
 
         # test re-weighting single adapter
         model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
@@ -796,24 +851,26 @@ class PeftCommonTester:
             # helper function that works with different model types
             torch.manual_seed(0)
 
-            if hasattr(model, "generate"):
-                # let's check the scores, not the output ids, since the latter can easily be identical even if the
-                # weights are slightly changed
-                output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
-                # take element 0, as output is a tuple
-            else:
-                output = model(**input)
+            with self.autocast():
+                if hasattr(model, "generate"):
+                    # let's check the scores, not the output ids, since the latter can easily be identical even if the
+                    # weights are slightly changed
+                    output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
+                    # take element 0, as output is a tuple
+                else:
+                    output = model(**input)
 
             if hasattr(output, "images"):  # for SD
                 import numpy as np
 
                 img = output.images[0]
-                return torch.from_numpy(np.array(img))
+                output = torch.from_numpy(np.array(img))
 
             return output
 
         # initialize model
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id)
+        model = self.set_model_device(model)
 
         # output from BASE MODEL
         input = self.prepare_inputs_for_testing()
@@ -883,8 +940,10 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
+        model = get_peft_model(model, config, adapter_name="test-adapter")
+        model = self.set_model_device(model)
         dummy_input = self.prepare_inputs_for_testing()
         inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
         # just check that no error is raised
-        model.forward(inputs_embeds=inputs_embeds)
+        with self.autocast():
+            model.forward(inputs_embeds=inputs_embeds)

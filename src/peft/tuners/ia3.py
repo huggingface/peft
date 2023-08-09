@@ -505,5 +505,8 @@ if is_bnb_available():
                     if self.is_feedforward:
                         result = super().forward(x * self.ia3_l[self.active_adapter].flatten())
                     else:
+                        # TODO: remove this line once #794 is merged, since it fixes the same bug
+                        # until then, this line is needed to make some tests pass
+                        result = super().forward(x)
                         result = result * self.ia3_l[self.active_adapter].flatten()
             return result

@@ -590,6 +590,9 @@ class LoraModel(BaseTuner):
             adapter_name (str): Name of the new adapter.
             combination_type (str): Type of merging. Can be one of [`svd`, `linear`]
         """
+        # TODO: this fix should probably move to its own PR
+        if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
+            raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
 
         if adapter_name in list(self.peft_config.keys()):
             return

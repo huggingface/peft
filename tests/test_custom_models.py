@@ -108,6 +108,67 @@ class ModelConv2D(nn.Module):
         return X
 
 
+from peft.import_utils import is_bnb_available
+if is_bnb_available():
+    import bitsandbytes as bnb
+
+    class MLP8bit(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lin0 = bnb.nn.Linear8bitLt(10, 20)
+            self.relu = nn.ReLU()
+            self.drop = nn.Dropout(0.5)
+            self.lin1 = bnb.nn.Linear8bitLt(20, 2)
+            self.sm = nn.LogSoftmax(dim=-1)
+            #self.is_loaded_in_8bit = True
+
+        def forward(self, X):
+            X = X.float()
+            X = self.lin0(X)
+            X = self.relu(X)
+            X = self.drop(X)
+            X = self.lin1(X)
+            X = self.sm(X)
+            return X
+
+
+    class ModelEmbConv1D8bit(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.emb = bnb.nn.StableEmbedding(100, 5)
+            self.conv1d = Conv1D(1, 5)
+            self.relu = nn.ReLU()
+            self.flat = nn.Flatten()
+            self.lin0 = bnb.nn.Linear8bitLt(10, 2)
+            #self.is_loaded_in_8bit = True
+
+        def forward(self, X):
+            X = self.emb(X)
+            X = self.conv1d(X)
+            X = self.relu(X)
+            X = self.flat(X)
+            X = self.lin0(X)
+            return X
+
+
+    class ModelConv2D8bit(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.conv2d = nn.Conv2d(5, 10, 3)
+            self.relu = nn.ReLU()
+            self.flat = nn.Flatten()
+            self.lin0 = bnb.nn.Linear8bitLt(10, 2)
+            #self.is_loaded_in_8bit = True
+
+        def forward(self, X):
+            X = X.float().reshape(2, 5, 3, 3)
+            X = self.conv2d(X)
+            X = self.relu(X)
+            X = self.flat(X)
+            X = self.lin0(X)
+            return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -116,26 +177,41 @@ class MockTransformerWrapper:
     """
 
     @classmethod
-    def from_pretrained(cls, model_id):
+    def from_pretrained(cls, model_id, load_in_8bit=False):
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
-        if model_id == "MLP":
-            return MLP()
+        if not load_in_8bit:
+            if model_id == "MLP":
+                return MLP()
 
-        if model_id == "EmbConv1D":
-            return ModelEmbConv1D()
+            if model_id == "EmbConv1D":
+                return ModelEmbConv1D()
 
-        if model_id == "Conv2d":
-            return ModelConv2D()
+            if model_id == "Conv2d":
+                return ModelConv2D()
+
+        if load_in_8bit:
+            if not is_bnb_available():
+                raise RuntimeError("bitsandbytes is not available, cannot test 8bit models")
+
+            if model_id == "MLP":
+                return MLP8bit()
+
+            if model_id == "EmbConv1D":
+                return ModelEmbConv1D8bit()
+
+            if model_id == "Conv2d":
+                return ModelConv2D8bit()
 
         raise ValueError(f"model_id {model_id} not implemented")
 
 
 class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
-    """TODO"""
+    """Test custom models, i.e. models that are not from transformers"""
 
     transformers_class = MockTransformerWrapper
+    quantization = None
 
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10).to(self.torch_device)
@@ -328,3 +404,19 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+
+# TODO: unfortunately, there are some issues with quantized custom models
+# I assume that transformers does some heavy lifting there which would have to be replicated if we wanted to test
+# quantization on custom models
+
+# class PeftCustomModelTester8bit(PeftCustomModelTester):
+#     r"""Same as PeftDecoderModelTester but with 8bit quantization enabled."""
+#     class AutoModel8bit(MockTransformerWrapper):
+#         @classmethod
+#         def from_pretrained(self, *args, **kwargs):
+#             kwargs["load_in_8bit"] = True
+#             return super().from_pretrained(*args, **kwargs)
+
+#     transformers_class = AutoModel8bit
+#     quantization = "int8"

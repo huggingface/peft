@@ -21,6 +21,7 @@ from transformers import AutoModel
 from peft import PrefixTuningConfig, PromptLearningConfig
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
+from .testing_utils import require_bitsandbytes, require_torch_gpu
 
 
 PEFT_FEATURE_EXTRACTION_MODELS_TO_TEST = [
@@ -65,6 +66,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     We use parametrized.expand for debugging purposes to test each model individually.
     """
     transformers_class = AutoModel
+    quantization = None
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -176,3 +178,17 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
     )
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
+
+
+@require_torch_gpu
+@require_bitsandbytes
+class PeftFeatureExtractionModelTester8bit(PeftFeatureExtractionModelTester):
+    """Same as PeftFeatureExtractionModelTester but with 8bit quantization enabled."""
+    class AutoModel8bit(AutoModel):
+        @classmethod
+        def from_pretrained(self, *args, **kwargs):
+            kwargs["load_in_8bit"] = True
+            return super().from_pretrained(*args, **kwargs)
+
+    transformers_class = AutoModel8bit
+    quantization = "int8"
