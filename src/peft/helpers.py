@@ -6,16 +6,16 @@ from types import MethodType
 
 import torch
 
-from .peft_model import (PeftModel, PeftModelForCausalLM,
-                         PeftModelForSeq2SeqLM, PeftType)
+from .peft_model import PeftModel, PeftModelForCausalLM, PeftModelForSeq2SeqLM, PeftType
 
 
 # Copied from peft.peft_model PeftModel.forward
-def default_forward(self:PeftModel, *args, **kwargs):
+def default_forward(self: PeftModel, *args, **kwargs):
     return self.get_base_model()(*args, **kwargs)
 
+
 # Copied from peft.peft_model PeftModelForCausalLM.generate
-def generate_causal_lm(self:PeftModelForCausalLM, **kwargs):
+def generate_causal_lm(self: PeftModelForCausalLM, **kwargs):
     self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
     if hasattr(self.base_model, "model"):
         self.base_model.model.generation_config = self.generation_config
@@ -30,8 +30,9 @@ def generate_causal_lm(self:PeftModelForCausalLM, **kwargs):
         self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
         return outputs
 
+
 # Copied from peft.peft_model PeftModelForSeq2SeqLM.generate
-def generate_seq2seq(self:PeftModelForSeq2SeqLM, **kwargs):
+def generate_seq2seq(self: PeftModelForSeq2SeqLM, **kwargs):
     peft_config = self.active_peft_config
     self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
     self.base_model._prepare_encoder_decoder_kwargs_for_generation = (
@@ -44,9 +45,7 @@ def generate_seq2seq(self:PeftModelForSeq2SeqLM, **kwargs):
             if "input_ids" not in kwargs:
                 raise ValueError("input_ids must be provided for Peft model generation")
             if kwargs.get("position_ids", None) is not None:
-                warnings.warn(
-                    "Position ids are not supported for parameter efficient tuning. Ignoring position ids."
-                )
+                warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
                 kwargs["position_ids"] = None
             if kwargs.get("token_type_ids", None) is not None:
                 warnings.warn(
@@ -97,7 +96,7 @@ def generate_seq2seq(self:PeftModelForSeq2SeqLM, **kwargs):
         return outputs
 
 
-def update_forward_signature(model:PeftModel):
+def update_forward_signature(model: PeftModel):
     """
     Updates the forward signature of the PeftModel to include parents class signature
     Args:
@@ -127,9 +126,9 @@ def update_forward_signature(model:PeftModel):
             default_forward, type(model.get_base_model()).forward, assigned=("__doc__", "__name__", "__annotations__")
         )
         model.forward = MethodType(default_forward, model)
-        
 
-def update_generate_signature(model:PeftModel):
+
+def update_generate_signature(model: PeftModel):
     """
     Updates the generate signature of a PeftModel with overriding generate to include parents class signature
     Args:
@@ -152,16 +151,21 @@ def update_generate_signature(model:PeftModel):
     """
     if isinstance(model, PeftModelForSeq2SeqLM):
         update_wrapper(
-            generate_seq2seq, type(model.get_base_model()).generate, assigned=("__doc__", "__name__", "__annotations__")
+            generate_seq2seq,
+            type(model.get_base_model()).generate,
+            assigned=("__doc__", "__name__", "__annotations__"),
         )
         model.generate = MethodType(generate_seq2seq, model)
     elif isinstance(model, PeftModelForCausalLM):
         update_wrapper(
-            generate_causal_lm, type(model.get_base_model()).generate, assigned=("__doc__", "__name__", "__annotations__")
+            generate_causal_lm,
+            type(model.get_base_model()).generate,
+            assigned=("__doc__", "__name__", "__annotations__"),
         )
         model.generate = MethodType(generate_causal_lm, model)
-        
-def update_signature(model:PeftModel, method:str = 'all'):
+
+
+def update_signature(model: PeftModel, method: str = "all"):
     """
     Updates the signature of a PeftModel include parents class signature for forward or generate method
     Args:
