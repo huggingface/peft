@@ -325,9 +325,6 @@ def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[t
     return batch_size
 
 
-
-
-
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
     "mt5": ["q", "v"],
