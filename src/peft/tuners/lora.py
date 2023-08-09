@@ -338,8 +338,12 @@ class LoraModel(BaseTuner):
         kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
 
-        if hasattr(self.model, "config") and hasattr(self.model.config, "quantization_config") and getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ:
-            kwargs['gptq_quantization_config'] = self.model.config.quantization_config
+        if (
+            hasattr(self.model, "config")
+            and hasattr(self.model.config, "quantization_config")
+            and getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ
+        ):
+            kwargs["gptq_quantization_config"] = self.model.config.quantization_config
 
         # TODO: better deal with that
         if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
@@ -414,6 +418,7 @@ class LoraModel(BaseTuner):
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
         if is_auto_gptq_available():
             from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+
             gptq_quantization_config = kwargs.pop("gptq_quantization_config", None)
             if gptq_quantization_config is not None:
                 desc_act = gptq_quantization_config.desc_act

@@ -197,8 +197,12 @@ class AdaLoraModel(LoraModel):
             "loaded_in_8bit": loaded_in_8bit,
             "loaded_in_4bit": loaded_in_4bit,
         }
-        if hasattr(self.model, "config") and hasattr(self.model.config, "quantization_config") and getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ:
-            kwargs['gptq_quantization_config'] = self.model.config.quantization_config
+        if (
+            hasattr(self.model, "config")
+            and hasattr(self.model.config, "quantization_config")
+            and getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ
+        ):
+            kwargs["gptq_quantization_config"] = self.model.config.quantization_config
 
         # If it is not a LoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
@@ -217,6 +221,7 @@ class AdaLoraModel(LoraModel):
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
         if is_auto_gptq_available():
             from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+
             gptq_quantization_config = kwargs.pop("gptq_quantization_config", None)
             if gptq_quantization_config is not None:
                 desc_act = gptq_quantization_config.desc_act
@@ -258,7 +263,7 @@ class AdaLoraModel(LoraModel):
             new_module = SVDLinear4bit(
                 adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
             )
-        elif (is_auto_gptq_available() and AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear)):
+        elif is_auto_gptq_available() and AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
             new_module = SVDQuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
         else:
