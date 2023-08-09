@@ -133,8 +133,14 @@ class AdaLoraModel(LoraModel):
             ):
                 desc_act = self.model.config.quantization_config.desc_act
                 group_size = self.model.config.quantization_config.group_size
+                bits = self.model.config.quantization_config.bits
+                disable_exllama = self.model.config.quantization_config.disable_exllama
                 AutoGPTQQuantLinear = dynamically_import_QuantLinear(
-                    use_triton=False, desc_act=desc_act, group_size=group_size
+                    use_triton=False,
+                    desc_act=desc_act,
+                    group_size=group_size,
+                    bits=bits,
+                    disable_exllama=disable_exllama,
                 )
             else:
                 AutoGPTQQuantLinear = None
