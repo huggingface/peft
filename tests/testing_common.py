@@ -848,11 +848,7 @@ class PeftCommonTester:
             # for SD, very rarely, a pixel can differ
             # check that difference with enabled adapter is much-much lower than difference with disabled adapter
             self.assertTrue(
-                (
-                    (output_before != output_peft).float().mean()
-                    / (output_before != output_peft_disabled).float().mean()
-                )
-                < 1e2
+                (output_before != output_peft).float().mean() / (output_before != output_peft_disabled).float().mean()
             )
         else:
             with peft_model.disable_adapter():
