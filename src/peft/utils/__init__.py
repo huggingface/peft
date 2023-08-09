@@ -45,7 +45,6 @@ from .other import (
     _prepare_prompt_learning_config,
     _is_valid_match,
     infer_device,
-    update_forward_signature,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights

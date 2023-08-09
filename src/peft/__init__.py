@@ -72,7 +72,7 @@ from .utils import (
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
     shift_tokens_right,
-    update_forward_signature,
     load_peft_weights,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .helpers import update_forward_signature, update_generate_signature, update_signature
