@@ -83,8 +83,8 @@ def update_signature(model: PeftModel, method: str = "all"):
     """
     Args:
     Updates the signature of a PeftModel include parents class signature for forward or generate method
-        model (`PeftModel`): Peft model to update generate or forward signature
-        method (`str`): method to update signature choose one of "forward", "generate", "all"
+        model (`PeftModel`): Peft model to update generate or forward signature method (`str`): method to update
+        signature choose one of "forward", "generate", "all"
     Example:
      ```python
     >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
