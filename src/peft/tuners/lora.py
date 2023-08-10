@@ -580,21 +580,46 @@ class LoraModel(BaseTuner):
         return self.model
 
     def add_weighted_adapter(
-        self, adapters, weights, adapter_name, combination_type="svd", svd_rank=None, svd_params={}, svd_clamp=None
+        self,
+        adapters,
+        weights,
+        adapter_name,
+        combination_type="svd",
+        svd_rank=None,
+        svd_clamp=None,
+        svd_full_matrices=True,
+        svd_driver=None,
     ):
         """
         This method adds a new adapter by merging the given adapters with the given weights.
 
+        When using the `cat` combination_type you should be aware that rank of the resulting adapter will be equal to
+        the sum of all adapters ranks. So it's possible that the mixed adapter may become too big and result in OOM
+        errors.
+
         Args:
-            adapters (list): List of adapter names to be merged.
-            weights (list): List of weights for each adapter.
-            adapter_name (str): Name of the new adapter.
-            combination_type (str): Type of merging. Can be one of [`svd`, `linear`, `cat`]
-            svd_rank (int): Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
-            svd_params (dict): Additional parameters passed to torch.linalg.svd.
-            svd_clamp (float):
+            adapters (`list`):
+                List of adapter names to be merged.
+            weights (`list`):
+                List of weights for each adapter.
+            adapter_name (`str`):
+                Name of the new adapter.
+            combination_type (`str`):
+                Type of merging. Can be one of [`svd`, `linear`, `cat`]. When using the `cat` combination_type you
+                should be aware that rank of the resulting adapter will be equal to the sum of all adapters ranks. So
+                it's possible that the mixed adapter may become too big and result in OOM errors.
+            svd_rank (`int`, *optional*):
+                Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
+            svd_clamp (`float`, *optional*):
                 A quantile threshold for clamping SVD decomposition output. If None is provided, do not perform
                 clamping. Defaults to None.
+            svd_full_matrices (`bool`, *optional*):
+                Controls whether to compute the full or reduced SVD, and consequently, the shape of the returned
+                tensors U and Vh. Defaults to True.
+            svd_driver (`str`, *optional*):
+                Name of the cuSOLVER method to be used. This keyword argument only works when merging on CUDA. Can be
+                one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
+                documentation. Defaults to None.
         """
 
         if adapter_name in list(self.peft_config.keys()):
@@ -641,7 +666,17 @@ class LoraModel(BaseTuner):
 
                 target_lora_A.data = target_lora_A.data * 0.0
                 target_lora_B.data = target_lora_B.data * 0.0
-                if combination_type == "linear" or combination_type == "cat":
+                if combination_type == "linear":
+                    for adapter, weight in zip(adapters, weights):
+                        if adapter in target.lora_A:
+                            current_adapter_lora_A = target.lora_A[adapter].weight
+                            current_adapter_lora_B = target.lora_B[adapter].weight
+                        elif adapter in target.lora_embedding_A:
+                            current_adapter_lora_A = target.lora_embedding_A[adapter]
+                            current_adapter_lora_B = target.lora_embedding_B[adapter]
+                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
+                        target_lora_B.data += current_adapter_lora_B.data
+                elif combination_type == "cat":
                     loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):
                         if adapter in target.lora_A:
@@ -652,21 +687,32 @@ class LoraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
                         loras_B.append(current_adapter_lora_B.data)
-
-                    if combination_type == "linear":
-                        target_lora_A.data = sum(loras_A)
-                        target_lora_B.data = sum(loras_B)
-                    elif combination_type == "cat":
-                        torch.cat(loras_A, dim=0, out=target_lora_A.data)
-                        torch.cat(loras_B, dim=1, out=target_lora_B.data)
-
+                    torch.cat(loras_A, dim=0, out=target_lora_A.data)
+                    torch.cat(loras_B, dim=1, out=target_lora_B.data)
                 elif combination_type == "svd":
                     target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
-                        adapters, weights, new_rank, target, target_lora_A, target_lora_B, svd_params, svd_clamp
+                        adapters,
+                        weights,
+                        new_rank,
+                        target,
+                        target_lora_A,
+                        target_lora_B,
+                        svd_clamp,
+                        full_matrices=svd_full_matrices,
+                        driver=svd_driver,
                     )
 
     def _svd_weighted_adapter(
-        self, adapters, weights, new_rank, target, target_lora_A, target_lora_B, svd_params={}, svd_clamp=None
+        self,
+        adapters,
+        weights,
+        new_rank,
+        target,
+        target_lora_A,
+        target_lora_B,
+        clamp=None,
+        full_matrices=True,
+        driver=None,
     ):
         delta_weight = weights[0] * target.get_delta_weight(adapters[0])
         for adapter, weight in zip(adapters[1:], weights[1:]):
@@ -682,14 +728,14 @@ class LoraModel(BaseTuner):
             delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
-        U, S, Vh = torch.linalg.svd(delta_weight, **svd_params)
+        U, S, Vh = torch.linalg.svd(delta_weight, full_matrices=full_matrices, driver=driver)
         U = U[:, :new_rank]
         S = S[:new_rank]
         U = U @ torch.diag(S)
         Vh = Vh[:new_rank, :]
-        if svd_clamp is not None:
+        if clamp is not None:
             dist = torch.cat([U.flatten(), Vh.flatten()])
-            hi_val = torch.quantile(dist, svd_clamp)
+            hi_val = torch.quantile(dist, clamp)
             low_val = -hi_val
             U = U.clamp(low_val, hi_val)
             Vh = Vh.clamp(low_val, hi_val)
