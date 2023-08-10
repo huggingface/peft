@@ -28,7 +28,6 @@ from transformers.pytorch_utils import Conv1D
 from ..config import PeftConfig
 from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
-    CLAMP_QUANTILE,
     COMMON_LAYERS_PATTERN,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -581,7 +580,7 @@ class LoraModel(BaseTuner):
         return self.model
 
     def add_weighted_adapter(
-        self, adapters, weights, adapter_name, combination_type="svd", svd_rank=None, svd_params={}, svd_clamp=False
+        self, adapters, weights, adapter_name, combination_type="svd", svd_rank=None, svd_params={}, svd_clamp=None
     ):
         """
         This method adds a new adapter by merging the given adapters with the given weights.
@@ -593,7 +592,9 @@ class LoraModel(BaseTuner):
             combination_type (str): Type of merging. Can be one of [`svd`, `linear`, `cat`]
             svd_rank (int): Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_params (dict): Additional parameters passed to torch.linalg.svd.
-            svd_clamp (bool): Whether to clamp SVD decomposition output. Defaults to False.
+            svd_clamp (float):
+                A quantile threshold for clamping SVD decomposition output. If None is provided, do not perform
+                clamping. Defaults to None.
         """
 
         if adapter_name in list(self.peft_config.keys()):
@@ -665,7 +666,7 @@ class LoraModel(BaseTuner):
                     )
 
     def _svd_weighted_adapter(
-        self, adapters, weights, new_rank, target, target_lora_A, target_lora_B, svd_params={}, svd_clamp=False
+        self, adapters, weights, new_rank, target, target_lora_A, target_lora_B, svd_params={}, svd_clamp=None
     ):
         delta_weight = weights[0] * target.get_delta_weight(adapters[0])
         for adapter, weight in zip(adapters[1:], weights[1:]):
@@ -686,9 +687,9 @@ class LoraModel(BaseTuner):
         S = S[:new_rank]
         U = U @ torch.diag(S)
         Vh = Vh[:new_rank, :]
-        if svd_clamp:
+        if svd_clamp is not None:
             dist = torch.cat([U.flatten(), Vh.flatten()])
-            hi_val = torch.quantile(dist, CLAMP_QUANTILE)
+            hi_val = torch.quantile(dist, svd_clamp)
             low_val = -hi_val
             U = U.clamp(low_val, hi_val)
             Vh = Vh.clamp(low_val, hi_val)
