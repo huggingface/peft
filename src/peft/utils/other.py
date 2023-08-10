@@ -22,6 +22,9 @@ import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
+from transformers.utils.quantization_config import QuantizationMethod
+
+from ..import_utils import is_auto_gptq_available
 
 
 # Get current device name based on available devices
@@ -77,8 +80,6 @@ def bloom_model_postprocess_past_key_value(past_key_values):
 
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
-    from transformers.utils.quantization_config import QuantizationMethod
-
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -327,6 +328,42 @@ def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[t
     else:
         batch_size = inputs_embeds.shape[0]
     return batch_size
+
+
+def get_quantization_config(model: torch.nn.Module, method: QuantizationMethod):
+    """
+    Get the quantization config of the related quantization method
+    """
+    if (
+        hasattr(model, "config")
+        and hasattr(model.config, "quantization_config")
+        and (getattr(model, "quantization_method", None) == method)
+    ):
+        return model.config.quantization_config
+    return None
+
+
+def get_auto_gptq_quant_linear(gptq_quantization_config):
+    """
+    Get the right AutoGPTQQuantLinear class based on the quantization config file
+    """
+    if is_auto_gptq_available():
+        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+
+        if gptq_quantization_config is not None:
+            desc_act = gptq_quantization_config.desc_act
+            group_size = gptq_quantization_config.group_size
+            bits = gptq_quantization_config.bits
+            disable_exllama = gptq_quantization_config.disable_exllama
+            AutoGPTQQuantLinear = dynamically_import_QuantLinear(
+                use_triton=False,
+                desc_act=desc_act,
+                group_size=group_size,
+                bits=bits,
+                disable_exllama=disable_exllama,
+            )
+            return AutoGPTQQuantLinear
+    return None
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {

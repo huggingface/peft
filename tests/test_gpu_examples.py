@@ -535,7 +535,10 @@ class PeftGPTQGPUTests(unittest.TestCase):
     """
 
     def setUp(self):
+        from transformers import GPTQConfig
+
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
+        self.quantization_config = GPTQConfig(bits=4, disable_exllama=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -545,7 +548,6 @@ class PeftGPTQGPUTests(unittest.TestCase):
         """
         gc.collect()
         torch.cuda.empty_cache()
-        gc.collect()
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training(self):
@@ -558,6 +560,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 self.causal_lm_model_id,
                 torch_dtype=torch.float16,
                 device_map="auto",
+                quantization_config=self.quantization_config,
             )
 
             model = prepare_model_for_kbit_training(model)
@@ -607,7 +610,10 @@ class PeftGPTQGPUTests(unittest.TestCase):
         """
 
         model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, torch_dtype=torch.float16, device_map="auto"
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
         )
 
         model = prepare_model_for_kbit_training(model)
@@ -672,6 +678,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 self.causal_lm_model_id,
                 torch_dtype=torch.float16,
                 device_map="auto",
+                quantization_config=self.quantization_config,
             )
 
             self.assertEqual(set(model.hf_device_map.values()), {0, 1})

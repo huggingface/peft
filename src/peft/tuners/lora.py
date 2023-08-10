@@ -27,7 +27,7 @@ from transformers.pytorch_utils import Conv1D
 from transformers.utils.quantization_config import QuantizationMethod
 
 from ..config import PeftConfig
-from ..import_utils import is_auto_gptq_available, is_bnb_4bit_available, is_bnb_available
+from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
     CLAMP_QUANTILE,
     COMMON_LAYERS_PATTERN,
@@ -36,6 +36,8 @@ from ..utils import (
     PeftType,
     _freeze_adapter,
     _get_submodules,
+    get_auto_gptq_quant_linear,
+    get_quantization_config,
     transpose,
 )
 from .tuners_utils import BaseTuner, BaseTunerLayer
@@ -338,12 +340,9 @@ class LoraModel(BaseTuner):
         kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
 
-        if (
-            hasattr(self.model, "config")
-            and hasattr(self.model.config, "quantization_config")
-            and getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ
-        ):
-            kwargs["gptq_quantization_config"] = self.model.config.quantization_config
+        quantization_config = get_quantization_config(self.model, method=QuantizationMethod.GPTQ)
+        if quantization_config is not None:
+            kwargs["gptq_quantization_config"] = quantization_config
 
         # TODO: better deal with that
         if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
@@ -416,24 +415,9 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
-        if is_auto_gptq_available():
-            from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+        gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
+        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
-            gptq_quantization_config = kwargs.pop("gptq_quantization_config", None)
-            if gptq_quantization_config is not None:
-                desc_act = gptq_quantization_config.desc_act
-                group_size = gptq_quantization_config.group_size
-                bits = gptq_quantization_config.bits
-                disable_exllama = gptq_quantization_config.disable_exllama
-                AutoGPTQQuantLinear = dynamically_import_QuantLinear(
-                    use_triton=False,
-                    desc_act=desc_act,
-                    group_size=group_size,
-                    bits=bits,
-                    disable_exllama=disable_exllama,
-                )
-            else:
-                AutoGPTQQuantLinear = None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         bias = kwargs.pop("bias", False)
@@ -461,7 +445,7 @@ class LoraModel(BaseTuner):
                 }
             )
             new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
-        elif is_auto_gptq_available() and AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
             new_module = QuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
         elif isinstance(target, torch.nn.Embedding):
