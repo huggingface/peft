@@ -580,7 +580,9 @@ class LoraModel(BaseTuner):
 
         return self.model
 
-    def add_weighted_adapter(self, adapters, weights, adapter_name, combination_type="svd"):
+    def add_weighted_adapter(
+        self, adapters, weights, adapter_name, combination_type="svd", svd_rank=None, svd_params={}, svd_clamp=False
+    ):
         """
         This method adds a new adapter by merging the given adapters with the given weights.
 
@@ -588,7 +590,10 @@ class LoraModel(BaseTuner):
             adapters (list): List of adapter names to be merged.
             weights (list): List of weights for each adapter.
             adapter_name (str): Name of the new adapter.
-            combination_type (str): Type of merging. Can be one of [`svd`, `linear`]
+            combination_type (str): Type of merging. Can be one of [`svd`, `linear`, `cat`]
+            svd_rank (int): Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
+            svd_params (dict): Additional parameters passed to torch.linalg.svd.
+            svd_clamp (bool): Whether to clamp SVD decomposition output. Defaults to False.
         """
 
         if adapter_name in list(self.peft_config.keys()):
@@ -600,14 +605,19 @@ class LoraModel(BaseTuner):
         # if there is only one adapter, we can only use linear merging
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
-        # new rank is the max of all ranks of the adapters
-        unique_ranks = list({self.peft_config[adapter].r for adapter in adapters})
+        adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
         if combination_type == "linear":
-            if len(unique_ranks) != 1:
+            # all adapters ranks should be same, new rank is just this value
+            if len(set(adapters_ranks)) != 1:
                 raise ValueError("All adapters must have the same r value when using `linear` combination_type")
-            new_rank = unique_ranks[0]
+            new_rank = adapters_ranks[0]
+        elif combination_type == "cat":
+            # adapters ranks may be different, new rank is sum of all ranks
+            # be careful, because output adapter rank may be really big if mixing a lot of adapters
+            new_rank = sum(adapters_ranks)
         elif combination_type == "svd":
-            new_rank = max(unique_ranks)
+            # new rank is the max of all ranks of the adapters if not provided
+            new_rank = svd_rank or max(adapters_ranks)
         else:
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
@@ -630,7 +640,8 @@ class LoraModel(BaseTuner):
 
                 target_lora_A.data = target_lora_A.data * 0.0
                 target_lora_B.data = target_lora_B.data * 0.0
-                if combination_type == "linear":
+                if combination_type == "linear" or combination_type == "cat":
+                    loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):
                         if adapter in target.lora_A:
                             current_adapter_lora_A = target.lora_A[adapter].weight
@@ -638,14 +649,24 @@ class LoraModel(BaseTuner):
                         elif adapter in target.lora_embedding_A:
                             current_adapter_lora_A = target.lora_embedding_A[adapter]
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
-                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data
+                        loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
+                        loras_B.append(current_adapter_lora_B.data)
+
+                    if combination_type == "linear":
+                        target_lora_A.data = sum(loras_A)
+                        target_lora_B.data = sum(loras_B)
+                    elif combination_type == "cat":
+                        torch.cat(loras_A, dim=0, out=target_lora_A.data)
+                        torch.cat(loras_B, dim=1, out=target_lora_B.data)
+
                 elif combination_type == "svd":
                     target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
-                        adapters, weights, new_rank, target, target_lora_A, target_lora_B
+                        adapters, weights, new_rank, target, target_lora_A, target_lora_B, svd_params, svd_clamp
                     )
 
-    def _svd_weighted_adapter(self, adapters, weights, new_rank, target, target_lora_A, target_lora_B):
+    def _svd_weighted_adapter(
+        self, adapters, weights, new_rank, target, target_lora_A, target_lora_B, svd_params={}, svd_clamp=False
+    ):
         delta_weight = weights[0] * target.get_delta_weight(adapters[0])
         for adapter, weight in zip(adapters[1:], weights[1:]):
             delta_weight += weight * target.get_delta_weight(adapter)
@@ -656,20 +677,21 @@ class LoraModel(BaseTuner):
                 delta_weight = delta_weight.flatten(start_dim=1)
             else:
                 delta_weight = delta_weight.squeeze()
-        if target.fan_in_fan_out:
+        if hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out:
             delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
-        U, S, Vh = torch.linalg.svd(delta_weight)
+        U, S, Vh = torch.linalg.svd(delta_weight, **svd_params)
         U = U[:, :new_rank]
         S = S[:new_rank]
         U = U @ torch.diag(S)
         Vh = Vh[:new_rank, :]
-        dist = torch.cat([U.flatten(), Vh.flatten()])
-        hi_val = torch.quantile(dist, CLAMP_QUANTILE)
-        low_val = -hi_val
-        U = U.clamp(low_val, hi_val)
-        Vh = Vh.clamp(low_val, hi_val)
+        if svd_clamp:
+            dist = torch.cat([U.flatten(), Vh.flatten()])
+            hi_val = torch.quantile(dist, CLAMP_QUANTILE)
+            low_val = -hi_val
+            U = U.clamp(low_val, hi_val)
+            Vh = Vh.clamp(low_val, hi_val)
         if conv2d:
             U = U.reshape(target_lora_B.data.shape)
             Vh = Vh.reshape(target_lora_A.data.shape)
