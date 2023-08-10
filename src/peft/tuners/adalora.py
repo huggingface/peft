@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
-from transformers.utils.quantization_config import QuantizationMethod
 
 from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import (
@@ -200,7 +199,7 @@ class AdaLoraModel(LoraModel):
             "loaded_in_4bit": loaded_in_4bit,
         }
 
-        quantization_config = get_quantization_config(self.model, method=QuantizationMethod.GPTQ)
+        quantization_config = get_quantization_config(self.model, method="gptq")
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 

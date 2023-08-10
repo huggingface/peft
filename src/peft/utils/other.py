@@ -22,7 +22,6 @@ import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
-from transformers.utils.quantization_config import QuantizationMethod
 
 from ..import_utils import is_auto_gptq_available
 
@@ -90,8 +89,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             The loaded model from `transformers`
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
-    is_gptq_quantized = getattr(model, "quantization_method", None) == QuantizationMethod.GPTQ
-
+    is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -330,7 +328,7 @@ def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[t
     return batch_size
 
 
-def get_quantization_config(model: torch.nn.Module, method: QuantizationMethod):
+def get_quantization_config(model: torch.nn.Module, method: str):
     """
     Get the quantization config of the related quantization method
     """

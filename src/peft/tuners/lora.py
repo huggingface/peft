@@ -24,7 +24,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
-from transformers.utils.quantization_config import QuantizationMethod
 
 from ..config import PeftConfig
 from ..import_utils import is_bnb_4bit_available, is_bnb_available
@@ -340,7 +339,7 @@ class LoraModel(BaseTuner):
         kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
 
-        quantization_config = get_quantization_config(self.model, method=QuantizationMethod.GPTQ)
+        quantization_config = get_quantization_config(self.model, method="gptq")
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
@@ -556,7 +555,7 @@ class LoraModel(BaseTuner):
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
-        if getattr(self.model, "quantization_method", None) == QuantizationMethod.GPTQ:
+        if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
