@@ -8,14 +8,14 @@ from .peft_model import PeftModel
 
 def update_forward_signature(model: PeftModel):
     """
-    Updates the forward signature of the PeftModel to include parents class signature
     Args:
+    Updates the forward signature of the PeftModel to include parents class signature
         model (`PeftModel`): Peft model to update the forward signature
     Example:
 
     ```python
-    >>> from transformers import  WhisperForConditionalGeneration
-    >>> from peft import  get_peft_model, LoraConfig,  update_forward_signature
+    >>> from transformers import WhisperForConditionalGeneration
+    >>> from peft import get_peft_model, LoraConfig, update_forward_signature
 
     >>> model = WhisperForConditionalGeneration.from_pretrained("openai/whisper-tiny.en")
     >>> peft_config = LoraConfig(r=8, lora_alpha=32, lora_dropout=0.1, target_modules=["q_proj", "v_proj"])
@@ -41,20 +41,22 @@ def update_forward_signature(model: PeftModel):
 
 def update_generate_signature(model: PeftModel):
     """
-    Updates the generate signature of a PeftModel with overriding generate to include parents class signature
     Args:
+    Updates the generate signature of a PeftModel with overriding generate to include parents class signature
         model (`PeftModel`): Peft model to update the generate signature
     Example:
 
     ```python
     >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    >>> from peft import  get_peft_model, LoraConfig, TaskType,  update_generate_signature
+    >>> from peft import get_peft_model, LoraConfig, TaskType, update_generate_signature
 
     >>> model_name_or_path = "bigscience/mt0-large"
     >>> tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     >>> model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 
-    >>> peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+    >>> peft_config = LoraConfig(
+    ...     task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
+    ... )
     >>> peft_model = get_peft_model(model, peft_config)
     >>> update_generate_signature(peft_model)
     >>> help(peft_model.generate)
@@ -79,20 +81,22 @@ def update_generate_signature(model: PeftModel):
 
 def update_signature(model: PeftModel, method: str = "all"):
     """
-    Updates the signature of a PeftModel include parents class signature for forward or generate method
     Args:
+    Updates the signature of a PeftModel include parents class signature for forward or generate method
         model (`PeftModel`): Peft model to update generate or forward signature
         method (`str`): method to update signature choose one of "forward", "generate", "all"
     Example:
      ```python
     >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-    >>> from peft import  get_peft_model, LoraConfig, TaskType,  update_signature
+    >>> from peft import get_peft_model, LoraConfig, TaskType, update_signature
 
     >>> model_name_or_path = "bigscience/mt0-large"
     >>> tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     >>> model = AutoModelForSeq2SeqLM.from_pretrained(model_name_or_path)
 
-    >>> peft_config = LoraConfig(task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+    >>> peft_config = LoraConfig(
+    ...     task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
+    ... )
     >>> peft_model = get_peft_model(model, peft_config)
     >>> update_signature(peft_model)
     >>> help(peft_model.generate)
