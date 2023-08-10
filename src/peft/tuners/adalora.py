@@ -629,7 +629,6 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         self.active_adapter = adapter_name
 
     def forward(self, x: torch.Tensor):
-        print(torch.is_autocast_enabled())
         result = self.quant_linear_module(x)
 
         if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
