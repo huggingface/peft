@@ -35,6 +35,8 @@ from ..utils import (
     PeftType,
     _freeze_adapter,
     _get_submodules,
+    get_auto_gptq_quant_linear,
+    get_quantization_config,
     transpose,
 )
 from .tuners_utils import BaseTuner, BaseTunerLayer
@@ -333,10 +335,13 @@ class LoraModel(BaseTuner):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
         }
-
         kwargs["loaded_in_8bit"] = optionnal_kwargs.pop("loaded_in_8bit", False)
         kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
+
+        quantization_config = get_quantization_config(self.model, method="gptq")
+        if quantization_config is not None:
+            kwargs["gptq_quantization_config"] = quantization_config
 
         # TODO: better deal with that
         if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
@@ -409,6 +414,9 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
+        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         bias = kwargs.pop("bias", False)
@@ -436,6 +444,9 @@ class LoraModel(BaseTuner):
                 }
             )
             new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
+        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+            new_module = QuantLinear(adapter_name, target, **kwargs)
+            target.weight = target.qweight
         elif isinstance(target, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
@@ -544,6 +555,8 @@ class LoraModel(BaseTuner):
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
+        if getattr(self.model, "quantization_method", None) == "gptq":
+            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
@@ -1146,3 +1159,55 @@ if is_bnb_available():
                         )
                     result += output
                 return result
+
+
+class QuantLinear(torch.nn.Module, LoraLayer):
+    def __init__(
+        self,
+        adapter_name,
+        quant_linear_module,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        **kwargs,
+    ):
+        torch.nn.Module.__init__(self)
+        LoraLayer.__init__(
+            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
+        )
+        self.quant_linear_module = quant_linear_module
+        self.weight = quant_linear_module.qweight
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.active_adapter = adapter_name
+
+    def forward(self, x: torch.Tensor):
+        result = self.quant_linear_module(x)
+        if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+            return result
+        elif self.r[self.active_adapter] > 0:
+            result = result.clone()
+            if not torch.is_autocast_enabled():
+                expected_dtype = result.dtype
+                x = x.to(self.lora_A[self.active_adapter].weight.dtype)
+                output = (
+                    self.lora_B[self.active_adapter](
+                        self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                    ).to(expected_dtype)
+                    * self.scaling[self.active_adapter]
+                )
+            else:
+                output = (
+                    self.lora_B[self.active_adapter](
+                        self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
+                    )
+                    * self.scaling[self.active_adapter]
+                )
+            result += output
+        return result
+
+    # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
+    # def reset_lora_parameters(self, adapter_name):
+    #     if adapter_name in self.lora_A.keys():
+    #         torch.nn.init.xavier_uniform_(self.lora_A[adapter_name].weight)
+    #         torch.nn.init.zeros_(self.lora_B[adapter_name].weight)

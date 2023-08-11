@@ -23,6 +23,8 @@ import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
 
+from ..import_utils import is_auto_gptq_available
+
 
 # Get current device name based on available devices
 def infer_device():
@@ -87,17 +89,18 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             The loaded model from `transformers`
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
-
+    is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
 
-    # cast all non INT8 parameters to fp32
-    for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-            param.data = param.data.to(torch.float32)
+    if not is_gptq_quantized:
+        # cast all non INT8 parameters to fp32
+        for param in model.parameters():
+            if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+                param.data = param.data.to(torch.float32)
 
-    if loaded_in_kbit and use_gradient_checkpointing:
+    if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
@@ -323,6 +326,42 @@ def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[t
     else:
         batch_size = inputs_embeds.shape[0]
     return batch_size
+
+
+def get_quantization_config(model: torch.nn.Module, method: str):
+    """
+    Get the quantization config of the related quantization method
+    """
+    if (
+        hasattr(model, "config")
+        and hasattr(model.config, "quantization_config")
+        and (getattr(model, "quantization_method", None) == method)
+    ):
+        return model.config.quantization_config
+    return None
+
+
+def get_auto_gptq_quant_linear(gptq_quantization_config):
+    """
+    Get the right AutoGPTQQuantLinear class based on the quantization config file
+    """
+    if is_auto_gptq_available():
+        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+
+        if gptq_quantization_config is not None:
+            desc_act = gptq_quantization_config.desc_act
+            group_size = gptq_quantization_config.group_size
+            bits = gptq_quantization_config.bits
+            disable_exllama = gptq_quantization_config.disable_exllama
+            AutoGPTQQuantLinear = dynamically_import_QuantLinear(
+                use_triton=False,
+                desc_act=desc_act,
+                group_size=group_size,
+                bits=bits,
+                disable_exllama=disable_exllama,
+            )
+            return AutoGPTQQuantLinear
+    return None
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
