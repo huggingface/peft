@@ -39,7 +39,7 @@ RUN source activate peft && \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft
 
-RUN python3 -m pip install --no-cache-dir bitsandbytes
+RUN python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
 
 # Stage 2
 FROM nvidia/cuda:11.3.1-devel-ubuntu20.04 AS build-image
