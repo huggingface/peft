@@ -553,10 +553,11 @@ class LoraModel(BaseTuner):
         return peft_config
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
-        if merge and getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
-            raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
-        if merge and getattr(self.model, "quantization_method", None) == "gptq":
-            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+        if merge:
+            if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
+                raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
+            if getattr(self.model, "quantization_method", None) == "gptq":
+                raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
