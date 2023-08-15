@@ -78,7 +78,7 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, torch_dtype=torch.float32):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -95,10 +95,10 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         param.requires_grad = False
 
     if not is_gptq_quantized:
-        # cast all non INT8 parameters to fp32
+        # cast all non INT8 parameters to torch_dtype
         for param in model.parameters():
-            if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-                param.data = param.data.to(torch.float32)
+            if param.dtype not in [torch.int8, torch.uint8]:
+                param.data = param.data.to(torch_dtype)
 
     if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
         # For backward compatibility
