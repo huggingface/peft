@@ -18,6 +18,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
+import tqdm
 from torch import nn
 
 from ..config import PeftConfig
@@ -204,7 +205,7 @@ class BaseTuner(nn.Module, ABC):
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
-        for key in key_list:
+        for key in tqdm.tqdm(key_list, desc="Injecting adapter layers"):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
