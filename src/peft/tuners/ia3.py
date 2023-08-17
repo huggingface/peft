@@ -114,7 +114,7 @@ class IA3Layer(BaseTunerLayer):
             weight = torch.randn((1, self.in_features))
         else:
             weight = torch.randn((self.out_features, 1))
-        self.ia3_l.update(nn.ParameterDict({adapter_name: nn.Parameter(weight)}))
+        self.ia3_l[adapter_name] = nn.Parameter(weight)
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
@@ -360,16 +360,6 @@ class IA3Model(BaseTuner):
         return self.model
 
 
-# Below code is based on https://github.com/microsoft/lora/blob/main/loralib/layers.py
-# and modified to work with PyTorch FSDP
-
-
-#  ------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-#  ------------------------------------------------------------------------------------------
-
-
 class Linear(nn.Linear, IA3Layer):
     # (IA)^3 implemented in a dense layer
     def __init__(
@@ -380,7 +370,7 @@ class Linear(nn.Linear, IA3Layer):
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
         **kwargs,
-    ):
+    ) -> None:
         init_ia3_weights = kwargs.pop("init_ia3_weights", True)
 
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
@@ -398,7 +388,7 @@ class Linear(nn.Linear, IA3Layer):
 
         self.is_feedforward = is_feedforward
 
-    def merge(self):
+    def merge(self) -> None:
         if self.active_adapter not in self.ia3_l.keys():
             return
         if self.merged:
@@ -411,7 +401,7 @@ class Linear(nn.Linear, IA3Layer):
 
         self.merged = True
 
-    def unmerge(self):
+    def unmerge(self) -> None:
         if self.active_adapter not in self.ia3_l.keys():
             return
         if not self.merged:
@@ -426,33 +416,35 @@ class Linear(nn.Linear, IA3Layer):
 
         self.merged = False
 
-    def forward(self, x: torch.Tensor):
-        previous_dtype = x.dtype
+    def _linear(self, input: torch.Tensor) -> torch.Tensor:
+        return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.active_adapter not in self.ia3_l.keys():
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            return self._linear(x)
+
+        previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-        elif not self.merged:
-            if self.is_feedforward:
-                x = x.to(self.ia3_l[self.active_adapter].dtype)
-                interm = x * self.ia3_l[self.active_adapter].flatten()
-                result = F.linear(
-                    interm.to(self.weight.dtype),
-                    transpose(self.weight, self.fan_in_fan_out),
-                    bias=self.bias,
-                )
-            else:
-                result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-                result = result.to(self.ia3_l[self.active_adapter].dtype) * self.ia3_l[self.active_adapter].flatten()
+            result = self._linear(x)
+        elif self.merged:
+            result = self._linear(x)
         else:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            dtype = self.ia3_l[self.active_adapter].dtype
+            ia3_scaling = self.ia3_l[self.active_adapter].flatten()
+            if self.is_feedforward:
+                x = x.to(dtype)
+                # FIXME self.weight.dtype can be != self.ia3_l[self.active_adapter].dtype
+                # e.g. bf16 vs fp32. Is that okay?
+                interm = (x * ia3_scaling).to(self.weight.dtype)
+                result = self._linear(interm)
+            else:
+                result = self._linear(x)
+                result = result.to(dtype) * ia3_scaling
 
         result = result.to(previous_dtype)
-
         return result
 
 
@@ -467,7 +459,7 @@ if is_bnb_available():
             out_features,
             is_feedforward,
             **kwargs,
-        ):
+        ) -> None:
             bnb.nn.Linear8bitLt.__init__(
                 self,
                 in_features,
@@ -488,7 +480,7 @@ if is_bnb_available():
             self.active_adapter = adapter_name
             self.is_feedforward = is_feedforward
 
-        def forward(self, x: torch.Tensor):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             if self.disable_adapters or (self.active_adapter not in self.ia3_l.keys()):
                 return super().forward(x)
 
@@ -499,11 +491,13 @@ if is_bnb_available():
             ia3_scaling = self.ia3_l[self.active_adapter].flatten()
             if self.is_feedforward:
                 result = super().forward(x * ia3_scaling)
+                expected_dtype = result.dtype
             else:
                 result = super().forward(x)
                 expected_dtype = result.dtype
                 result = result * ia3_scaling
 
-                if requires_conversion:
-                    result = result.to(expected_dtype)
+            if requires_conversion:
+                result = result.to(expected_dtype)
+
             return result

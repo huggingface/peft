@@ -81,16 +81,16 @@ class AdaLoraLayer(LoraLayer):
         else:
             lora_dropout_layer = nn.Identity()
 
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        self.lora_dropout[adapter_name] = lora_dropout_layer
         # Actual trainable parameters
         # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
+        self.lora_A[adapter_name] = nn.Parameter(torch.randn(r, self.in_features))
         # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
+        self.lora_E[adapter_name] = nn.Parameter(torch.randn(r, 1))
         # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
+        self.lora_B[adapter_name] = nn.Parameter(torch.randn(self.out_features, r))
         # The current rank
-        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(1), requires_grad=False)}))
+        self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
         self.ranknum[adapter_name].data.fill_(float(r))
         self.ranknum[adapter_name].requires_grad = False
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
@@ -403,7 +403,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
         **kwargs,
-    ):
+    ) -> None:
         init_lora_weights = kwargs.pop("init_lora_weights", True)
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         AdaLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
@@ -418,7 +418,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
-    def merge(self):
+    def merge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():
             return
         if self.merged:
@@ -436,7 +436,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             )
             self.merged = True
 
-    def unmerge(self):
+    def unmerge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():
             return
         if not self.merged:
@@ -453,26 +453,31 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             )
             self.merged = False
 
-    def forward(self, x: torch.Tensor):
+    def _linear(self, input: torch.Tensor) -> torch.Tensor:
+        return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.active_adapter not in self.lora_A.keys():
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            return self._linear(x)
+
+        # FIXME: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-        elif self.r[self.active_adapter] > 0 and not self.merged:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-            result += (
-                (
-                    self.lora_dropout[self.active_adapter](x)
-                    @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                    @ self.lora_B[self.active_adapter].T
-                )
-                * self.scaling[self.active_adapter]
-                / (self.ranknum[self.active_adapter] + 1e-5)
-            )
+            result = self._linear(x)
+        elif (self.r[self.active_adapter] == 0) or self.merged:
+            result = self._linear(x)
         else:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            lora_A = self.lora_A[self.active_adapter]
+            lora_B = self.lora_B[self.active_adapter]
+            lora_E = self.lora_E[self.active_adapter]
+            dropout = self.lora_dropout[self.active_adapter]
+            scaling = self.scaling[self.active_adapter]
+            ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            result = self._linear(x)
+            result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
+
         return result
 
 
@@ -489,7 +494,7 @@ if is_bnb_available():
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             **kwargs,
-        ):
+        ) -> None:
             bnb.nn.Linear8bitLt.__init__(
                 self,
                 in_features,
@@ -508,37 +513,34 @@ if is_bnb_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
-        def forward(self, x: torch.Tensor):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)
 
-            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+            if (
+                self.disable_adapters
+                or (self.active_adapter not in self.lora_A.keys())
+                or (self.r[self.active_adapter] == 0)
+            ):
                 return result
-            elif self.r[self.active_adapter] > 0:
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
 
-                    if x.dtype != torch.float32:
-                        x = x.float()
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        ).to(expected_dtype)
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                else:
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        )
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                result = result + output
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = result.dtype
+                if x.dtype != torch.float32:
+                    x = x.float()
+
+            lora_A = self.lora_A[self.active_adapter]
+            lora_B = self.lora_B[self.active_adapter]
+            lora_E = self.lora_E[self.active_adapter]
+            dropout = self.lora_dropout[self.active_adapter]
+            scaling = self.scaling[self.active_adapter]
+            ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
+            if requires_conversion:
+                output = output.to(expected_dtype)
+            output = output * scaling / ranknum
+            result = result + output
             return result
 
 
@@ -555,7 +557,7 @@ if is_bnb_4bit_available():
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             **kwargs,
-        ):
+        ) -> None:
             bnb.nn.Linear4bit.__init__(
                 self,
                 in_features,
@@ -573,37 +575,35 @@ if is_bnb_4bit_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
-        def forward(self, x: torch.Tensor):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)
 
-            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+            if (
+                self.disable_adapters
+                or (self.active_adapter not in self.lora_A.keys())
+                or (self.r[self.active_adapter] == 0)
+            ):
                 return result
-            elif self.r[self.active_adapter] > 0:
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
 
-                    if x.dtype != torch.float32:
-                        x = x.float()
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        ).to(expected_dtype)
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                else:
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        )
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                result = result + output
+            # FIXME: is it correct that we don't clone here but we clone in lora Linear4bit?
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = result.dtype
+                if x.dtype != torch.float32:
+                    x = x.float()
+
+            lora_A = self.lora_A[self.active_adapter]
+            lora_B = self.lora_B[self.active_adapter]
+            lora_E = self.lora_E[self.active_adapter]
+            dropout = self.lora_dropout[self.active_adapter]
+            scaling = self.scaling[self.active_adapter]
+            ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
+            if requires_conversion:
+                output = output.to(expected_dtype)
+            output = output * scaling / ranknum
+            result = result + output
             return result
 
 
@@ -616,7 +616,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         **kwargs,
-    ):
+    ) -> None:
         torch.nn.Module.__init__(self)
         AdaLoraLayer.__init__(
             self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
@@ -627,37 +627,36 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.quant_linear_module(x)
 
-        if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+        if (
+            self.disable_adapters
+            or (self.active_adapter not in self.lora_A.keys())
+            or (self.r[self.active_adapter] == 0)
+        ):
             return result
-        elif self.r[self.active_adapter] > 0:
-            if not torch.is_autocast_enabled():
-                expected_dtype = result.dtype
 
-                if x.dtype != torch.float32:
-                    x = x.float()
-                output = (
-                    (
-                        self.lora_dropout[self.active_adapter](x)
-                        @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                        @ self.lora_B[self.active_adapter].T
-                    )
-                    * self.scaling[self.active_adapter]
-                    / (self.ranknum[self.active_adapter] + 1e-5)
-                ).to(expected_dtype)
-            else:
-                output = (
-                    (
-                        self.lora_dropout[self.active_adapter](x)
-                        @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                        @ self.lora_B[self.active_adapter].T
-                    )
-                    * self.scaling[self.active_adapter]
-                    / (self.ranknum[self.active_adapter] + 1e-5)
-                )
-            result = result + output
+        requires_conversion = not torch.is_autocast_enabled()
+        if requires_conversion:
+            expected_dtype = result.dtype
+            if x.dtype != torch.float32:
+                x = x.float()
+
+        lora_A = self.lora_A[self.active_adapter]
+        lora_B = self.lora_B[self.active_adapter]
+        lora_E = self.lora_E[self.active_adapter]
+        dropout = self.lora_dropout[self.active_adapter]
+        scaling = self.scaling[self.active_adapter]
+        ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+        output = (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
+        # FIXME: here, the dtype conversion is applied on the *whole
+        # expression*, not the intermediate result, unlike for SVDLinear8bitLT
+        # and SVDLinear4bit, is that correct?
+        if requires_conversion:
+            output = output.to(expected_dtype)
+        result = result + output
         return result
 
 
