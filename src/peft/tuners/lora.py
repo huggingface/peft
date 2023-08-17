@@ -475,8 +475,8 @@ class LoraModel(BaseTuner):
                     kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
             else:
                 raise ValueError(
-                    f"Target module {target} is not supported. "
-                    f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
+                    f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                    "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
 
