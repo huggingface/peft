@@ -970,7 +970,7 @@ class Embedding(nn.Embedding, LoraLayer):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.lora_A.keys():
+        if self.active_adapter not in self.lora_embedding_A.keys():
             return self._embed(x)
 
         # FIXME: no dtype conversion here, unlike in Linear, is that correct?
