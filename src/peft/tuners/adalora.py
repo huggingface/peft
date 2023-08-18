@@ -585,7 +585,13 @@ if is_bnb_4bit_available():
             ):
                 return result
 
-            # FIXME: is it correct that we don't clone here but we clone in lora Linear4bit?
+            # As per Tim Dettmers, for 4bit, we need to defensively clone here.
+            # The reason is that in some cases, an error can occur that backprop
+            # does not work on a manipulated view. This issue may be solved with
+            # newer PyTorch versions but this would need extensive testing to be
+            # sure.
+            result = result.clone()
+
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
