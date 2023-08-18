@@ -357,7 +357,7 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 
 ## 🤗 PEFT as a utility library
 
-Inject trainable adapters on any `torch` model using `inject_adapter_in_model` method:
+Inject trainable adapters on any `torch` model using `inject_adapter_in_model` method. Note the method will make no further change to the model.
 
 ```python
 import torch 
@@ -385,7 +385,7 @@ lora_config = LoraConfig(
 )
 
 model = DummyModel()
-model = inject_adapter_in_model(lora_config, model, "default")
+model = inject_adapter_in_model(lora_config, model)
 
 dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
 dummy_outputs = model(dummy_inputs)

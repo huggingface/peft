@@ -47,7 +47,7 @@ class TestPeft(unittest.TestCase):
             target_modules=["linear"],
         )
 
-        self.model = inject_adapter_in_model(lora_config, self.model, "default")
+        self.model = inject_adapter_in_model(lora_config, self.model)
 
     def test_inject_adapter_in_model(self):
         dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])

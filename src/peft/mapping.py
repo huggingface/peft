@@ -106,7 +106,7 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
 
 
-def inject_adapter_in_model(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str):
+def inject_adapter_in_model(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default"):
     r"""
     A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
     methods and adaption prompt. Make sure to have the correct `target_names` set in the `peft_config` object. The API
@@ -117,8 +117,8 @@ def inject_adapter_in_model(peft_config: PeftConfig, model: torch.nn.Module, ada
             Configuration object containing the parameters of the Peft model.
         model (`torch.nn.Module`):
             The input model where the adapter will be injected.
-        adapter_name (`str`):
-            The name of the adapter to be injected.
+        adapter_name (`str`, `optional`, defaults to `"default"`):
+            The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
     """
     if peft_config.is_prompt_learning or peft_config.is_adaption_prompt:
         raise ValueError("`create_and_replace` does not support prompt learning and adaption prompt yet.")
