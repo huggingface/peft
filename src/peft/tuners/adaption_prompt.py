@@ -458,7 +458,7 @@ class AdaptedAttention(nn.Module):
         Initialize object.
 
         Args:
-            config: Base model's cnfig.
+            config: Base model's config.
             model: The original transformer attention module that is being wrapped.
             adapter_len: The length of the adaption prompt to insert.
         """
