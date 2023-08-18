@@ -197,7 +197,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             )
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -239,7 +239,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
-    @pytest.mark.single_gpu_tests
+    @pytest.mark.multi_gpu_tests
     def test_causal_lm_training_mutli_gpu_4bit(self):
         r"""
         Test the CausalLM training on a multi-GPU device with 4bit base model. The test would simply fail if the
