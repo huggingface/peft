@@ -186,8 +186,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         r"""
         Test the CausalLM training on a single GPU device. This test is a converted version of
         https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
-        `opt-6.7b` on `english_quotes` dataset in few steps using 4bit base model. The test would simply fail if the adapters are not set
-        correctly.
+        `opt-6.7b` on `english_quotes` dataset in few steps using 4bit base model. The test would simply fail if the
+        adapters are not set correctly.
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
@@ -240,10 +240,10 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_mutli_gpu(self):
+    def test_causal_lm_training_mutli_gpu_4bit(self):
         r"""
-        Test the CausalLM training on a multi-GPU device with 4bit base model. The test would simply fail if the adapters are not set
-        correctly.
+        Test the CausalLM training on a multi-GPU device with 4bit base model. The test would simply fail if the
+        adapters are not set correctly.
         """
 
         with tempfile.TemporaryDirectory() as tmp_dir:
