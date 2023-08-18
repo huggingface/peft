@@ -973,7 +973,7 @@ class Embedding(nn.Embedding, LoraLayer):
         if self.active_adapter not in self.lora_embedding_A.keys():
             return self._embed(x)
 
-        # FIXME: no dtype conversion here, unlike in Linear, is that correct?
+        # TODO: no dtype conversion here, unlike in Linear, is that correct?
         if self.disable_adapters:
             if (self.r[self.active_adapter] > 0) and self.merged:
                 self.unmerge()
@@ -1204,8 +1204,13 @@ if is_bnb_4bit_available():
             ):
                 return result
 
-            # FIXME: is it correct that we clone here but not for int8?
+            # As per Tim Dettmers, for 4bit, we need to defensively clone here.
+            # The reason is that in some cases, an error can occur that backprop
+            # does not work on a manipulated view. This issue may be solved with
+            # newer PyTorch versions but this would need extensive testing to be
+            # sure.
             result = result.clone()
+
             lora_A = self.lora_A[self.active_adapter]
             lora_B = self.lora_B[self.active_adapter]
             dropout = self.lora_dropout[self.active_adapter]
@@ -1255,7 +1260,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         ):
             return result
 
-        # FIXME: is it correct that we clone here but not for int8?
+        # TODO: is cloning really needed here?
         result = result.clone()
 
         lora_A = self.lora_A[self.active_adapter]

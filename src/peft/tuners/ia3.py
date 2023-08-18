@@ -436,7 +436,7 @@ class Linear(nn.Linear, IA3Layer):
             ia3_scaling = self.ia3_l[self.active_adapter].flatten()
             if self.is_feedforward:
                 x = x.to(dtype)
-                # FIXME self.weight.dtype can be != self.ia3_l[self.active_adapter].dtype
+                # TODO: self.weight.dtype can be != self.ia3_l[self.active_adapter].dtype
                 # e.g. bf16 vs fp32. Is that okay?
                 interm = (x * ia3_scaling).to(self.weight.dtype)
                 result = self._linear(interm)

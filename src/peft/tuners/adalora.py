@@ -460,7 +460,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         if self.active_adapter not in self.lora_A.keys():
             return self._linear(x)
 
-        # FIXME: SVDLinear does not convert dtype, unlike lora linear, is that correct?
+        # TODO: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
@@ -651,9 +651,9 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         ranknum = self.ranknum[self.active_adapter] + 1e-5
 
         output = (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
-        # FIXME: here, the dtype conversion is applied on the *whole
-        # expression*, not the intermediate result, unlike for SVDLinear8bitLT
-        # and SVDLinear4bit, is that correct?
+        # TODO: here, the dtype conversion is applied on the *whole expression*,
+        # not the intermediate result, unlike for SVDLinear8bitLT and
+        # SVDLinear4bit, is that correct?
         if requires_conversion:
             output = output.to(expected_dtype)
         result = result + output
