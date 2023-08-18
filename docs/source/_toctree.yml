@@ -32,6 +32,8 @@
   sections:
   - local: developer_guides/custom_models
     title: Working with custom models
+  - local: developer_guides/low_level_api
+    title: PEFT low level API
 
 - title: 🤗 Accelerate integrations
   sections:

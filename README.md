@@ -355,6 +355,42 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 
 2. When using ZeRO3 with zero3_init_flag=True, if you find the gpu memory increase with training steps. we might need to update deepspeed after [deepspeed commit 42858a9891422abc](https://github.com/microsoft/DeepSpeed/commit/42858a9891422abcecaa12c1bd432d28d33eb0d4) . The related issue is [[BUG] Peft Training with Zero.Init() and Zero3 will increase GPU memory every forward step ](https://github.com/microsoft/DeepSpeed/issues/3002)
 
+## 🤗 PEFT as a utility library
+
+Inject trainable adapters on any `torch` model using `inject_adapter_in_model` method:
+
+```python
+import torch 
+from peft import inject_adapter_in_model, LoraConfig
+
+class DummyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding = torch.nn.Embedding(10, 10)
+        self.linear = torch.nn.Linear(10, 10)
+        self.lm_head = torch.nn.Linear(10, 10)
+    
+    def forward(self, input_ids):
+        x = self.embedding(input_ids)
+        x = self.linear(x)
+        x = self.lm_head(x)
+        return x
+
+lora_config = LoraConfig(
+    lora_alpha=16,
+    lora_dropout=0.1,
+    r=64,
+    bias="none",
+    target_modules=["linear"],
+)
+
+model = DummyModel()
+model = inject_adapter_in_model(lora_config, model, "default")
+
+dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
+dummy_outputs = model(dummy_inputs)
+```
+
 ## Backlog:
 - [x] Add tests
 - [x] Multi Adapter training and inference support
