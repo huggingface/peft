@@ -1260,9 +1260,6 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         ):
             return result
 
-        # TODO: is cloning really needed here?
-        result = result.clone()
-
         lora_A = self.lora_A[self.active_adapter]
         lora_B = self.lora_B[self.active_adapter]
         dropout = self.lora_dropout[self.active_adapter]
