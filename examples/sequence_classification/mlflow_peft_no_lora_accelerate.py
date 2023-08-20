@@ -19,12 +19,12 @@ from peft.utils.other import fsdp_auto_wrap_policy
 import mlflow
 import time
 import os
-
+logging_steps = 100
 # mlflow init
-mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-if (not mlflow_uri):
-    mlflow_uri = "http://127.0.0.1:5001"
-    mlflow.set_tracking_uri(mlflow_uri)
+# mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+# if (not mlflow_uri):
+#     mlflow_uri = "http://127.0.0.1:5001"
+#     mlflow.set_tracking_uri(mlflow_uri)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
@@ -43,6 +43,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
+        default='roberta-large',
         help="Path to pretrained model or model identifier from huggingface.co/models.",
         required=True,
     )
@@ -68,7 +69,7 @@ def parse_args():
     parser.add_argument(
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
-    parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
+    parser.add_argument("--output_dir", type=str, default='outputs', help="Where to store the final model.")
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--peft_type",
@@ -172,9 +173,9 @@ def main():
     )
 
     # mlflow initial
-    experiment_id = mlflow.create_experiment('peft_no_lora_seq_cls-{}'.format(args.model_name_or_path))
-    experiment = mlflow.get_experiment(experiment_id)
-    mlflow_runner = mlflow.start_run(run_name=args.model_name_or_path, experiment_id=experiment.experiment_id)
+    # experiment_id = mlflow.create_experiment('peft_no_lora_seq_cls-{}'.format(args.model_name_or_path))
+    # experiment = mlflow.get_experiment(experiment_id)
+    # mlflow_runner = mlflow.start_run(run_name=args.model_name_or_path, experiment_id=experiment.experiment_id)
 
 
     if getattr(accelerator.state, "fsdp_plugin", None) is not None:
@@ -185,56 +186,60 @@ def main():
         model, train_dataloader, eval_dataloader, optimizer, lr_scheduler = accelerator.prepare(
             model, train_dataloader, eval_dataloader, optimizer, lr_scheduler
         )
+    mlflow.start_run()
+    start_time = time.time()
+    for epoch in range(args.num_train_epochs):
+        model.train()
+        total_loss = 0
+        interval_start_time = time.time()  # Start time for the epoch
+        for step, batch in enumerate(tqdm(train_dataloader)):
+            outputs = model(**batch)
+            loss = outputs.loss
+            total_loss += loss.detach().float()
+            accelerator.backward(loss)
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
 
-    with mlflow_runner:
-        for epoch in range(args.num_train_epochs):
-            model.train()
-            total_loss = 0
-            start_time = time.time()  # Start time for the epoch
-            for step, batch in enumerate(tqdm(train_dataloader)):
-                outputs = model(**batch)
-                loss = outputs.loss
-                total_loss += loss.detach().float()
-                accelerator.backward(loss)
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
+        end_time = time.time()  # End time for the epoch
+        interval_elapsed_time = time.time() - interval_start_time
+        # interval_start_time = time.time()
+        interval_throughput = (logging_steps*args.per_device_train_batch_size) / interval_elapsed_time
+        # Calculate metrics
+        epoch_runtime = end_time - start_time
+        samples_per_second = len(train_dataloader.dataset) / epoch_runtime
+        steps_per_second = len(train_dataloader) / epoch_runtime
+        avg_loss = total_loss / len(train_dataloader)
 
-            end_time = time.time()  # End time for the epoch
+        # Log metrics for the epoch
+        mlflow.log_metric('loss', avg_loss, step=step)
+        mlflow.log_metric('total_loss', total_loss)
+        mlflow.log_metric('train_runtime', epoch_runtime)
+        mlflow.log_metric('train_samples_per_second', samples_per_second)
+        mlflow.log_metric('train_steps_per_second', steps_per_second)
+        mlflow.log_metric('throughput', interval_throughput, step=step)
+        mlflow.log_metric('lr', args.learning_rate , step=step)
 
-            # Calculate metrics
-            epoch_runtime = end_time - start_time
-            samples_per_second = len(train_dataloader.dataset) / epoch_runtime
-            steps_per_second = len(train_dataloader) / epoch_runtime
-            avg_loss = total_loss / len(train_dataloader)
+    mlflow.end_run()
 
-            # Log metrics for the epoch
-            mlflow.log_metric('loss', avg_loss)
-            mlflow.log_metric('total_loss', total_loss)
-            mlflow.log_metric('train_runtime', epoch_runtime)
-            mlflow.log_metric('train_samples_per_second', samples_per_second)
-            mlflow.log_metric('train_steps_per_second', steps_per_second)
-
-        mlflow.end_run()
-
-        model.eval()
-        samples_seen = 0
-        for step, batch in enumerate(tqdm(eval_dataloader)):
-            with torch.no_grad():
-                outputs = model(**batch)
-            predictions = outputs.logits.argmax(dim=-1)
-            predictions, references = accelerator.gather((predictions, batch["labels"]))
-            # If we are in a multiprocess environment, the last batch has duplicates
-            if accelerator.num_processes > 1:
-                if step == len(eval_dataloader) - 1:
-                    predictions = predictions[: len(eval_dataloader.dataset) - samples_seen]
-                    references = references[: len(eval_dataloader.dataset) - samples_seen]
-                else:
-                    samples_seen += references.shape[0]
-            metric.add_batch(
-                predictions=predictions,
-                references=references,
-            )
+    model.eval()
+    samples_seen = 0
+    for step, batch in enumerate(tqdm(eval_dataloader)):
+        with torch.no_grad():
+            outputs = model(**batch)
+        predictions = outputs.logits.argmax(dim=-1)
+        predictions, references = accelerator.gather((predictions, batch["labels"]))
+        # If we are in a multiprocess environment, the last batch has duplicates
+        if accelerator.num_processes > 1:
+            if step == len(eval_dataloader) - 1:
+                predictions = predictions[: len(eval_dataloader.dataset) - samples_seen]
+                references = references[: len(eval_dataloader.dataset) - samples_seen]
+            else:
+                samples_seen += references.shape[0]
+        metric.add_batch(
+            predictions=predictions,
+            references=references,
+        )
         eval_metric = metric.compute()
         accelerator.print(f"epoch {epoch}:", eval_metric)
 
@@ -246,4 +251,5 @@ def main():
 
 
 if __name__ == "__main__":
+    args = parse_args()
     main()
