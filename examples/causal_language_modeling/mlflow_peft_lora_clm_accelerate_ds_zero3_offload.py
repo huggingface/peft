@@ -258,7 +258,7 @@ def main(args):
         with TorchTracemalloc() as tracemalloc:
             model.train()
             total_loss = 0
-            # start_time = time.time()  # Start time for the epoch
+            interval_start_time = time.time()  # Start time for the epoch
             for step, batch in enumerate(tqdm(train_dataloader)):
                 outputs = model(**batch)
                 loss = outputs.loss
@@ -271,13 +271,13 @@ def main(args):
             end_time = time.time()  # End time for the epoch
 
             # Calculate metrics
-            epoch_runtime = end_time - start_time
+            epoch_runtime = end_time - interval_start_time
             samples_per_second = len(train_dataloader) / epoch_runtime
             steps_per_second = len(train_dataloader) / epoch_runtime
             avg_loss = total_loss / len(train_dataloader)
             # 
             interval_elapsed_time = time.time() - interval_start_time
-            interval_start_time = time.time()
+            # interval_start_time = time.time()
             interval_throughput = (logging_steps*batch_size) / interval_elapsed_time                  
             # mlflow.log_metric('loss', loss.detach().item(), step=step)
             mlflow.log_metric('throughput', interval_throughput, step=step)
