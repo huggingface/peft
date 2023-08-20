@@ -22,6 +22,7 @@ import torch
 from diffusers import StableDiffusionPipeline
 
 from peft import (
+    AdaLoraConfig,
     IA3Config,
     LoraConfig,
     PeftModel,
@@ -34,7 +35,7 @@ from peft import (
     prepare_model_for_int8_training,
 )
 from peft.tuners.lora import LoraLayer
-from peft.utils import _get_submodules
+from peft.utils import _get_submodules, infer_device
 
 
 CONFIG_CLASSES = (
@@ -45,10 +46,12 @@ CONFIG_CLASSES = (
     PromptTuningConfig,
 )
 CONFIG_TESTING_KWARGS = (
+    # IA³
     {
         "target_modules": None,
         "feedforward_modules": None,
     },
+    # LoRA
     {
         "r": 8,
         "lora_alpha": 32,
@@ -56,15 +59,22 @@ CONFIG_TESTING_KWARGS = (
         "lora_dropout": 0.05,
         "bias": "none",
     },
+    # prefix tuning
     {
         "num_virtual_tokens": 10,
     },
+    # prompt encoder
     {
         "num_virtual_tokens": 10,
         "encoder_hidden_size": 32,
     },
+    # prompt tuning
     {
         "num_virtual_tokens": 10,
+    },
+    # AdaLoRA
+    {
+        "target_modules": None,
     },
 )
 
@@ -74,6 +84,7 @@ CLASSES_MAPPING = {
     "prefix_tuning": (PrefixTuningConfig, CONFIG_TESTING_KWARGS[2]),
     "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[3]),
     "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
+    "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
 }
 
 
@@ -152,7 +163,7 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
-    torch_device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch_device = infer_device()
     transformers_class = None
 
     def prepare_inputs_for_common(self):
@@ -269,6 +280,10 @@ class PeftCommonTester:
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -640,6 +655,10 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -682,7 +701,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA"):
+        if config.peft_type not in ("LORA", "ADALORA"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
         else:
@@ -700,6 +719,10 @@ class PeftCommonTester:
             self.assertTrue(torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4))
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return
+
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
         model = self.transformers_class.from_pretrained(model_id)
@@ -720,6 +743,11 @@ class PeftCommonTester:
         # test svd re-weighting with multiple adapters
         model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
 
+        # test cat re-weighting with multiple adapters
+        model.add_weighted_adapter(
+            adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
+        )
+
         # test linear re-weighting with multiple adapters
         model.add_weighted_adapter(
             adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
@@ -736,6 +764,7 @@ class PeftCommonTester:
         new_adapters = [
             "single_adapter_reweighting",
             "multi_adapter_svd_reweighting",
+            "multi_adapter_cat_reweighting",
             "multi_adapter_linear_reweighting",
         ]
         for new_adapter in new_adapters:
@@ -756,6 +785,8 @@ class PeftCommonTester:
                         self.assertTrue(target.r[adapter_name] == 20)
                     elif "linear" in adapter_name:
                         self.assertTrue(target.r[adapter_name] == 8)
+                    elif "cat" in adapter_name:
+                        self.assertTrue(target.r[adapter_name] == 28)
 
         for adapter_name in new_adapters:
             # ensuring new adapters pass the forward loop
@@ -830,3 +861,38 @@ class PeftCommonTester:
             self.assertTrue(torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6))
 
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
+
+    def _test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
+        # When trying to add multiple adapters with bias in Lora or AdaLora, an error should be
+        # raised. Also, the peft model should not be left in a half-initialized state.
+        if not issubclass(config_cls, (LoraConfig, AdaLoraConfig)):
+            return
+
+        config_kwargs = config_kwargs.copy()
+        config_kwargs["bias"] = "all"
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config, "adapter0")
+        with self.assertRaises(ValueError):
+            model.add_adapter("adapter1", replace(config, r=20))
+
+        # (superficial) test that the model is not left in a half-initialized state when adding an adapter fails
+        self.assertFalse("adapter1" in model.peft_config)
+        self.assertFalse("adapter1" in model.base_model.peft_config)
+
+    def _test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
+        # https://github.com/huggingface/peft/issues/727
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config, adapter_name="test-adapter").to(self.torch_device)
+        dummy_input = self.prepare_inputs_for_testing()
+        inputs_embeds = model.get_input_embeddings()(dummy_input["input_ids"])
+        # just check that no error is raised
+        model.forward(inputs_embeds=inputs_embeds)

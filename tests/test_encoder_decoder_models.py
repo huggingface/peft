@@ -125,11 +125,16 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
@@ -159,6 +164,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },

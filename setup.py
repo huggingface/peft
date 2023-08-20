@@ -44,6 +44,7 @@ setup(
         "pyyaml",
         "torch>=1.13.0",
         "transformers",
+        "tqdm",
         "accelerate",
         "safetensors",
     ],

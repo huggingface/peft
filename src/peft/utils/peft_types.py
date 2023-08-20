@@ -16,19 +16,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import enum
 
-from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
-from .lora import LoraConfig, LoraModel
-from .ia3 import IA3Config, IA3Model
-from .adalora import AdaLoraConfig, AdaLoraModel
-from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
-from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
-from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
-from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 
-# Mapping of tuners that support direct plugging
-TUNERS_MAPPING = {
-    "LORA": LoraModel,
-    "IA3": IA3Model,
-    "ADALORA": AdaLoraModel,
-}
+class PeftType(str, enum.Enum):
+    PROMPT_TUNING = "PROMPT_TUNING"
+    MULTITASK_PROMPT_TUNING = "MULTITASK_PROMPT_TUNING"
+    P_TUNING = "P_TUNING"
+    PREFIX_TUNING = "PREFIX_TUNING"
+    LORA = "LORA"
+    ADALORA = "ADALORA"
+    ADAPTION_PROMPT = "ADAPTION_PROMPT"
+    IA3 = "IA3"
+
+
+class TaskType(str, enum.Enum):
+    SEQ_CLS = "SEQ_CLS"
+    SEQ_2_SEQ_LM = "SEQ_2_SEQ_LM"
+    CAUSAL_LM = "CAUSAL_LM"
+    TOKEN_CLS = "TOKEN_CLS"
+    QUESTION_ANS = "QUESTION_ANS"
+    FEATURE_EXTRACTION = "FEATURE_EXTRACTION"

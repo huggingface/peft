@@ -28,7 +28,13 @@ from .auto import (
     AutoPeftModelForQuestionAnswering,
     AutoPeftModelForFeatureExtraction,
 )
-from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING, get_peft_config, get_peft_model
+from .mapping import (
+    MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
+    PEFT_TYPE_TO_CONFIG_MAPPING,
+    get_peft_config,
+    get_peft_model,
+    inject_adapter_in_model,
+)
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -60,9 +66,7 @@ from .tuners import (
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
-    PeftConfig,
     PeftType,
-    PromptLearningConfig,
     TaskType,
     bloom_model_postprocess_past_key_value,
     get_peft_model_state_dict,
@@ -70,4 +74,6 @@ from .utils import (
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
     shift_tokens_right,
+    load_peft_weights,
 )
+from .config import PeftConfig, PromptLearningConfig

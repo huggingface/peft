@@ -12,12 +12,31 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 import copy
+import inspect
 import os
 import warnings
+from typing import Optional
 
+import accelerate
 import torch
+from accelerate.hooks import add_hook_to_module, remove_hook_from_module
+from accelerate.utils import is_npu_available, is_xpu_available
+
+from ..import_utils import is_auto_gptq_available
+
+
+# Get current device name based on available devices
+def infer_device():
+    if torch.cuda.is_available():
+        torch_device = "cuda"
+    elif is_xpu_available():
+        torch_device = "xpu"
+    elif is_npu_available():
+        torch_device = "npu"
+    else:
+        torch_device = "cpu"
+    return torch_device
 
 
 # Add or edit model card to have `library_name: peft`
@@ -70,17 +89,18 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
             The loaded model from `transformers`
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
-
+    is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
 
-    # cast all non INT8 parameters to fp32
-    for param in model.parameters():
-        if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
-            param.data = param.data.to(torch.float32)
+    if not is_gptq_quantized:
+        # cast all non INT8 parameters to fp32
+        for param in model.parameters():
+            if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+                param.data = param.data.to(torch.float32)
 
-    if loaded_in_kbit and use_gradient_checkpointing:
+    if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
         # For backward compatibility
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
@@ -139,6 +159,26 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
+
+        if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
+            old_hook = self.modules_to_save[adapter_name]._hf_hook
+            new_hook = self._create_new_hook(old_hook)
+            remove_hook_from_module(self.modules_to_save[adapter_name])
+            add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
+
+    def _create_new_hook(self, old_hook):
+        r"""
+        Creates a new hook based on the old hook. Use it only if you know what you are doing !
+        """
+        old_hook_cls = getattr(accelerate.hooks, old_hook.__class__.__name__)
+        old_hook_attr = old_hook.__dict__
+        filtered_old_hook_attr = {}
+        old_hook_init_signature = inspect.signature(old_hook_cls.__init__)
+        for k in old_hook_attr.keys():
+            if k in old_hook_init_signature.parameters:
+                filtered_old_hook_attr[k] = old_hook_attr[k]
+        new_hook = old_hook_cls(**filtered_old_hook_attr)
+        return new_hook
 
     def forward(self, *args, **kwargs):
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
@@ -260,6 +300,70 @@ def transpose(weight, fan_in_fan_out):
     return weight.T if fan_in_fan_out else weight
 
 
+def _is_valid_match(key: str, target_key: str):
+    """
+    Helper function to match module names target_key and key. Makes sure that either the key is exactly the target_key
+    or the target_key is a submodule of key
+    """
+    if key.endswith(target_key):
+        if len(key) > len(target_key):
+            return key.endswith("." + target_key)  # must be a sub module
+        return True
+    return False
+
+
+def _get_batch_size(input_ids: Optional[torch.Tensor], inputs_embeds: Optional[torch.Tensor]) -> int:
+    """Get the batch size based on either input_ids or input_embeds
+
+    Raises an ValueError if both are None.
+
+    """
+    if (input_ids is None) and (inputs_embeds is None):
+        raise ValueError("You have to provide either input_ids or inputs_embeds")
+
+    if input_ids is not None:
+        batch_size = input_ids.shape[0]
+    else:
+        batch_size = inputs_embeds.shape[0]
+    return batch_size
+
+
+def get_quantization_config(model: torch.nn.Module, method: str):
+    """
+    Get the quantization config of the related quantization method
+    """
+    if (
+        hasattr(model, "config")
+        and hasattr(model.config, "quantization_config")
+        and (getattr(model, "quantization_method", None) == method)
+    ):
+        return model.config.quantization_config
+    return None
+
+
+def get_auto_gptq_quant_linear(gptq_quantization_config):
+    """
+    Get the right AutoGPTQQuantLinear class based on the quantization config file
+    """
+    if is_auto_gptq_available():
+        from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
+
+        if gptq_quantization_config is not None:
+            desc_act = gptq_quantization_config.desc_act
+            group_size = gptq_quantization_config.group_size
+            bits = gptq_quantization_config.bits
+            disable_exllama = gptq_quantization_config.disable_exllama
+            AutoGPTQQuantLinear = dynamically_import_QuantLinear(
+                use_triton=False,
+                desc_act=desc_act,
+                group_size=group_size,
+                bits=bits,
+                disable_exllama=disable_exllama,
+            )
+            return AutoGPTQQuantLinear
+    return None
+
+
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
     "mt5": ["q", "v"],
@@ -285,6 +389,8 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
+    "btlm": ["c_proj", "c_attn"],
+    "codegen": ["qkv_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
@@ -335,18 +441,20 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "k", "v", "o", "wi", "wo"],
     "mt5": ["q", "k", "v", "o", "wi_0", "wi_1", "wo"],
     "bart": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
-    # "gpt2": ["c_attn"],
-    # "bloom": ["query_key_value"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
     "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
-    # "gptj": ["q_proj", "v_proj"],
-    # "gpt_neox": ["query_key_value"],
-    # "gpt_neo": ["q_proj", "v_proj"],
-    # "bert": ["query", "value"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "llama": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
     "roberta": ["query", "key", "value", "dense"],
     # "xlm-roberta": ["query", "value"],
     # "electra": ["query", "value"],
     "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
-    # "deberta": ["in_proj"],
+    "gpt_bigcode": ["c_attn"],
+    "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
 }
 
@@ -357,4 +465,3 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
-CLAMP_QUANTILE = 0.99

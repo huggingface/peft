@@ -17,7 +17,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
+# from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
+from .peft_types import PeftType, TaskType
 from .other import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -28,7 +29,6 @@ from .other import (
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
-    CLAMP_QUANTILE,
     _set_trainable,
     add_library_to_model_card,
     bloom_model_postprocess_past_key_value,
@@ -36,11 +36,16 @@ from .other import (
     prepare_model_for_kbit_training,
     shift_tokens_right,
     transpose,
+    _get_batch_size,
     _get_submodules,
     _set_adapter,
     _freeze_adapter,
     ModulesToSaveWrapper,
     _prepare_prompt_learning_config,
+    _is_valid_match,
+    infer_device,
+    get_auto_gptq_quant_linear,
+    get_quantization_config,
 )
 from .hub_utils import hub_file_exists
-from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict
+from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights
