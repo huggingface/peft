@@ -41,7 +41,9 @@ class MultitaskPromptTuningInit(str, enum.Enum):
 class MultitaskPromptTuningConfig(PromptTuningConfig):
     prompt_tuning_init: Union[MultitaskPromptTuningInit, str] = field(
         default=MultitaskPromptTuningInit.RANDOM,
-        metadata={"help": "How to initialize the prompt tuning parameters"},
+        metadata={
+            "help": "How to initialize the prompt tuning parameters. Can be one of TEXT, RANDOM, AVERAGE_SOURCE_TASKS, EXACT_SOURCE_TASK, ONLY_SOURCE_SHARED."
+        },
     )
     prompt_tuning_init_state_dict_path: Optional[str] = field(
         default=None,
