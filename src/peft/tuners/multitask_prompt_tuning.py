@@ -20,12 +20,14 @@ from typing import Optional, Union
 
 import torch
 
-from ..utils import PeftType
+from ..utils import PeftType, TaskType
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig
 
 
 class MultitaskPromptTuningInit(str, enum.Enum):
+    # initialize prompt with text
     TEXT = "TEXT"
+    # initialize prompt with random matrix
     RANDOM = "RANDOM"
     # average the prefix and column matrices obtained during source training
     AVERAGE_SOURCE_TASKS = "AVERAGE_SOURCE_TASKS"
@@ -43,7 +45,9 @@ class MultitaskPromptTuningConfig(PromptTuningConfig):
     )
     prompt_tuning_init_state_dict_path: Optional[str] = field(
         default=None,
-        metadata={"help": "The path of source state dict"},
+        metadata={
+            "help": "The path of source state dict. This is required when training the downstream target prompt from the pretrained source prompt"
+        },
     )
     prompt_tuning_init_task: Optional[int] = field(default=0, metadata={"help": "source task id for initialization"})
     num_ranks: Optional[int] = field(default=1, metadata={"help": "ranks"})
@@ -60,7 +64,11 @@ class MultitaskPromptEmbedding(PromptEmbedding):
         self.num_tasks = config.num_tasks
         self.num_ranks = config.num_ranks
         self.num_virtual_tokens = config.num_virtual_tokens
+
         self.num_transformer_submodules = config.num_transformer_submodules
+        if self.num_transformer_submodules is None:
+            self.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
+
         self.token_dim = config.token_dim
 
         total_virtual_tokens = self.num_virtual_tokens * self.num_transformer_submodules
@@ -92,7 +100,7 @@ class MultitaskPromptEmbedding(PromptEmbedding):
 
             state_dict: dict = torch.load(
                 config.prompt_tuning_init_state_dict_path,
-                map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                map_location=word_embeddings.device,
             )
 
         if config.prompt_tuning_init in [

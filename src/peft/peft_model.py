@@ -359,7 +359,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return prompt_embeddings[0].detach().cpu()
 
-    def get_prompt(self, batch_size: int, task_ids: torch.Tensor = None):
+    def get_prompt(self, batch_size: int, task_ids: Optional[torch.Tensor] = None):
         """
         Returns the virtual prompts to use for Peft. Only applicable when `peft_config.peft_type != PeftType.LORA`.
         """
@@ -732,10 +732,10 @@ class PeftModelForSequenceClassification(PeftModel):
         attention_mask=None,
         inputs_embeds=None,
         labels=None,
-        task_ids=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -907,10 +907,10 @@ class PeftModelForCausalLM(PeftModel):
         attention_mask=None,
         inputs_embeds=None,
         labels=None,
-        task_ids=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
@@ -1081,10 +1081,10 @@ class PeftModelForSeq2SeqLM(PeftModel):
         decoder_attention_mask=None,
         decoder_inputs_embeds=None,
         labels=None,
-        task_ids=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
@@ -1334,10 +1334,10 @@ class PeftModelForTokenClassification(PeftModel):
         attention_mask=None,
         inputs_embeds=None,
         labels=None,
-        task_ids=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
