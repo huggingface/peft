@@ -398,6 +398,10 @@ dummy_outputs = model(dummy_inputs)
 - [x] Integrate`(IA)^3`, `AdaptionPrompt`
 - [ ] Explore and possibly integrate methods like `Bottleneck Adapters`,  ...
 
+## Contributing
+
+If you would like to make a contribution to PEFT, please check out our [contributing guide](https://huggingface.co/docs/peft/developer_guides/custom_models).
+
 ## Citing 🤗 PEFT
 
 If you use 🤗 PEFT in your publication, please cite it by using the following BibTeX entry.
