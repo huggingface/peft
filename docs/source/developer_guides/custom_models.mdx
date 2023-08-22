@@ -16,7 +16,7 @@ Some fine-tuning techniques, such as prompt tuning, are specific to language mod
 assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like
 [LoRA](./conceptual_guides/lora) - are not restricted to specific model types.
 
-In this guide, we will see how LoRA can be applied to a multilayer perception and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
+In this guide, we will see how LoRA can be applied to a multilayer perceptron and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
 
 ## Multilayer perceptron
 
@@ -91,7 +91,7 @@ With that, we can create our PEFT model and check the fraction of parameters tra
 from peft import get_peft_model
 
 model = MLP()
-peft_model = get_peft_model(module, config)
+peft_model = get_peft_model(model, config)
 peft_model.print_trainable_parameters()
 # prints trainable params: 56,164 || all params: 4,100,164 || trainable%: 1.369798866581922
 ```
