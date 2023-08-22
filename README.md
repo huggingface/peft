@@ -400,7 +400,7 @@ dummy_outputs = model(dummy_inputs)
 
 ## Contributing
 
-If you would like to make a contribution to PEFT, please check out our [contributing guide](https://huggingface.co/docs/peft/developer_guides/custom_models).
+If you would like to contribute to PEFT, please check out our [contributing guide](https://huggingface.co/docs/peft/developer_guides/contributing).
 
 ## Citing 🤗 PEFT
 

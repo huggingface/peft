@@ -22,22 +22,21 @@ If you are new to creating a pull request, follow [these instructions from GitHu
 
 ## Running tests and code quality checks
 
-Regardless of the type of contribution (unless it’s only about the docs), you should run tests and code quality checks to ensure that your contribution doesn’t break anything and follows the standards of the project.
+Regardless of the type of contribution (unless it’s only about the docs), you should run tests and code quality checks before creating a PR to ensure that your contribution doesn’t break anything and follows the standards of the project.
 
-We provide a Makefile to facilitate those steps. Run
+We provide a Makefile to facilitate those steps. Run the code below for the unit test:
 
 ```sh
 make test
 ```
 
-for the unit tests and either one of
+Run one of the following to either check or check and fix code quality and style:
 
 ```sh
 make quality  # just check
 make style  # check and fix
 ```
 
-before creating a PR.
 
 Running all the tests can take a couple of minutes. Therefore, during development, it can be useful to run only those tests specific to your change:
 
@@ -67,13 +66,13 @@ Ideally, when a bugfix is provided, it should be accompanied by a test for this 
 
 New parameter-efficient fine-tuning methods are developed all the time. If you would like to add a new, promising method to PEFT, please follow these steps.
 
-### Requirements
+**Requirements**
 
 1. Please add a link to the source (usually a paper) of the method.
 2. Some evidence should be provided that there is general interest in using the method. We will not add new methods that are freshly published but without evidence that there is demand for it.
 3. Ideally, we want to not only add the implementation of the new method, but also examples (notebooks, scripts), documentation, and an extensive test suite that proves that the method works with a variety of tasks. However, this can be very daunting. Therefore, it is also acceptable to only provide the implementation and at least one working example. Documentation and tests can be added in follow up PRs.
 
-### Steps
+**Steps**
 
 Before you start to implement the new method, please open an issue on GitHub with your proposal. That way, the maintainers can give you some early feedback.
 
@@ -87,4 +86,4 @@ It is best if you first open an issue on GitHub with a proposal to add the new f
 
 New features should generally be accompanied by tests and documentation or examples. Without the latter, users will have a hard time discovering your cool new feature.
 
-Changes to the code should be implemented in a backwards compatible way, i.e. existing code should continue to work the same way after the feature is merged.
+Changes to the code should be implemented in a backward-compatible way. For example, existing code should continue to work the same way after the feature is merged.
