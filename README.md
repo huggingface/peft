@@ -391,13 +391,6 @@ dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
 dummy_outputs = model(dummy_inputs)
 ```
 
-## Backlog:
-- [x] Add tests
-- [x] Multi Adapter training and inference support
-- [x] Add more use cases and examples
-- [x] Integrate`(IA)^3`, `AdaptionPrompt`
-- [ ] Explore and possibly integrate methods like `Bottleneck Adapters`,  ...
-
 ## Contributing
 
 If you would like to contribute to PEFT, please check out our [contributing guide](https://huggingface.co/docs/peft/developer_guides/contributing).
