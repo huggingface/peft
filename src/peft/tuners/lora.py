@@ -553,8 +553,6 @@ class LoraModel(BaseTuner):
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
-            if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
-                raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
@@ -576,6 +574,29 @@ class LoraModel(BaseTuner):
                         stride=target.stride,
                         padding=target.padding,
                         dilation=target.dilation,
+                    )
+                elif is_bnb_available() and isinstance(target, bnb.nn.Linear8bitLt):
+                    bias = target.bias is not None
+                    new_module = bnb.nn.Linear8bitLt(
+                        target.in_features,
+                        target.out_features,
+                        bias,
+                        target.state.has_fp16_weights,
+                        target.state.memory_efficient_backward,
+                        target.state.threshold,
+                        target.index,
+                        target.weight.device,
+                    )
+                elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+                    bias = target.bias is not None
+                    new_module = bnb.nn.Linear4bit(
+                        target.in_features,
+                        target.out_features,
+                        bias,
+                        target.compute_dtype,
+                        target.weight.compress_statistics,
+                        target.weight.quant_type,
+                        target.weight.device,
                     )
                 else:
                     bias = target.bias is not None
@@ -1145,6 +1166,50 @@ if is_bnb_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
+        def merge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if self.merged:
+                warnings.warn("Already merged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = (
+                    self.weight.CB.to(lora_data.dtype, copy=True).mul_(self.weight.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                    + lora_data
+                )
+                self.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
+                ).to(self.weight.device)
+                self.merged = True
+
+        def unmerge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = (
+                    self.weight.CB.to(lora_data.dtype, copy=True).mul_(self.weight.SCB.unsqueeze(1).mul(1.0 / 127.0))
+                    - lora_data
+                )
+                self.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
+                ).to(self.weight.device)
+                self.merged = False
+
+        def get_delta_weight(self, adapter):
+            return (
+                transpose(
+                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                    False,
+                )
+                * self.scaling[adapter]
+            )
+
         def forward(self, x: torch.Tensor):
             result = super().forward(x)
 
@@ -1203,6 +1268,45 @@ if is_bnb_available():
                 init_lora_weights = kwargs.pop("init_lora_weights", True)
                 self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
                 self.active_adapter = adapter_name
+
+            def merge(self):
+                if self.active_adapter not in self.lora_A.keys():
+                    return
+                if self.merged:
+                    warnings.warn("Already merged. Nothing to do.")
+                    return
+                if self.r[self.active_adapter] > 0:
+                    kwargs = self.weight.__dict__
+                    lora_data = self.get_delta_weight(self.active_adapter)
+                    w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
+                    self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                        self.weight.device
+                    )
+                    self.merged = True
+
+            def unmerge(self):
+                if self.active_adapter not in self.lora_A.keys():
+                    return
+                if not self.merged:
+                    warnings.warn("Already unmerged. Nothing to do.")
+                    return
+                if self.r[self.active_adapter] > 0:
+                    kwargs = self.weight.__dict__
+                    lora_data = self.get_delta_weight(self.active_adapter)
+                    w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
+                    self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                        self.weight.device
+                    )
+                    self.merged = False
+
+            def get_delta_weight(self, adapter):
+                return (
+                    transpose(
+                        self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                        False,
+                    )
+                    * self.scaling[adapter]
+                )
 
             def forward(self, x: torch.Tensor):
                 result = super().forward(x)
