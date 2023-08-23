@@ -101,6 +101,11 @@ def parse_args():
         help="Batch size (per device) for the evaluation dataloader.",
     )
     parser.add_argument(
+        "--multi_gpu",
+        action="store_true",
+        help="Enable changes needed for multi-GPU distributed training",
+    )
+    parser.add_argument(
         "--buffer_size",
         type=int,
         default=5000,
@@ -326,11 +331,18 @@ def save_model_hook(models, weights, output_dir):
         weights.pop()
 
 
+def get_base_model(model):
+    if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        return model.module
+    else:
+        return model
+
+
 def load_model_hook(models, input_dir):
     while len(models) > 0:
         model = models.pop()
         # pop models so that they are not loaded again
-        PeftModel.from_pretrained(model.base_model.model, input_dir)
+        PeftModel.from_pretrained(get_base_model(model).model, input_dir)
 
 
 @dataclass
@@ -538,7 +550,18 @@ def main():
     metric = evaluate.load("wer")
 
     # model
-    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, load_in_8bit=True)
+    if args.multi_gpu:
+        device_index = Accelerator().process_index
+        device_map = {"": device_index}
+        model = WhisperForConditionalGeneration.from_pretrained(
+            args.model_name_or_path, load_in_8bit=True, device_map=device_map
+        )
+        setattr(model, "model_parallel", True)
+        setattr(model, "is_parallelizable", True)
+        print(f"device map {model.hf_device_map.values()}")
+    else:
+        model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, load_in_8bit=True)
+
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
     if len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:
@@ -621,7 +644,7 @@ def main():
     # Note here that the max steps is adjusted by the accelerator's num_processes
     args.max_train_steps = math.ceil(args.max_train_steps / accelerator.num_processes)
     if args.use_peft and args.use_adalora:
-        model.base_model.peft_config["default"].total_step = args.max_train_steps
+        get_base_model(model).peft_config["default"].total_step = args.max_train_steps
         # model.base_model.peft_config.total_step = args.max_train_steps
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -684,7 +707,7 @@ def main():
                 # Note that this requires parameter gradients.
                 # Hence being called before optimizer.zero_grad().
                 if args.use_peft and args.use_adalora:
-                    model.update_and_allocate(global_step)
+                    get_base_model(model).update_and_allocate(global_step)
 
                 optimizer.zero_grad()
                 global_step += 1
