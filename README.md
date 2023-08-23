@@ -67,7 +67,7 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 
 Performance of PEFT-LoRA tuned [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) on [`ought/raft/twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints) leaderboard. 
 A point to note is that we didn't try to squeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B [mt0-xxl](https://huggingface.co/bigscience/mt0-xxl) model.
-So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) model.
+So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final additional checkpoint size is just `19MB` in comparison to `11GB` size of the backbone [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) model, but one still has to load the original full size model.
 
 |   Submission Name        | Accuracy |
 | --------- | ---- |
@@ -355,12 +355,45 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 
 2. When using ZeRO3 with zero3_init_flag=True, if you find the gpu memory increase with training steps. we might need to update deepspeed after [deepspeed commit 42858a9891422abc](https://github.com/microsoft/DeepSpeed/commit/42858a9891422abcecaa12c1bd432d28d33eb0d4) . The related issue is [[BUG] Peft Training with Zero.Init() and Zero3 will increase GPU memory every forward step ](https://github.com/microsoft/DeepSpeed/issues/3002)
 
-## Backlog:
-- [x] Add tests
-- [x] Multi Adapter training and inference support
-- [x] Add more use cases and examples
-- [x] Integrate`(IA)^3`, `AdaptionPrompt`
-- [ ] Explore and possibly integrate methods like `Bottleneck Adapters`,  ...
+## 🤗 PEFT as a utility library
+
+Inject trainable adapters on any `torch` model using `inject_adapter_in_model` method. Note the method will make no further change to the model.
+
+```python
+import torch 
+from peft import inject_adapter_in_model, LoraConfig
+
+class DummyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embedding = torch.nn.Embedding(10, 10)
+        self.linear = torch.nn.Linear(10, 10)
+        self.lm_head = torch.nn.Linear(10, 10)
+    
+    def forward(self, input_ids):
+        x = self.embedding(input_ids)
+        x = self.linear(x)
+        x = self.lm_head(x)
+        return x
+
+lora_config = LoraConfig(
+    lora_alpha=16,
+    lora_dropout=0.1,
+    r=64,
+    bias="none",
+    target_modules=["linear"],
+)
+
+model = DummyModel()
+model = inject_adapter_in_model(lora_config, model)
+
+dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
+dummy_outputs = model(dummy_inputs)
+```
+
+## Contributing
+
+If you would like to contribute to PEFT, please check out our [contributing guide](https://huggingface.co/docs/peft/developer_guides/contributing).
 
 ## Citing 🤗 PEFT
 

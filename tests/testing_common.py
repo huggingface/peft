@@ -798,6 +798,11 @@ class PeftCommonTester:
         # test svd re-weighting with multiple adapters
         model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
 
+        # test cat re-weighting with multiple adapters
+        model.add_weighted_adapter(
+            adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
+        )
+
         # test linear re-weighting with multiple adapters
         model.add_weighted_adapter(
             adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
@@ -814,6 +819,7 @@ class PeftCommonTester:
         new_adapters = [
             "single_adapter_reweighting",
             "multi_adapter_svd_reweighting",
+            "multi_adapter_cat_reweighting",
             "multi_adapter_linear_reweighting",
         ]
         for new_adapter in new_adapters:
@@ -834,6 +840,8 @@ class PeftCommonTester:
                         self.assertTrue(target.r[adapter_name] == 20)
                     elif "linear" in adapter_name:
                         self.assertTrue(target.r[adapter_name] == 8)
+                    elif "cat" in adapter_name:
+                        self.assertTrue(target.r[adapter_name] == 28)
 
         for adapter_name in new_adapters:
             # ensuring new adapters pass the forward loop
