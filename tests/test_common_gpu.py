@@ -34,6 +34,7 @@ from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torc
 
 
 if is_bnb_available():
+    import bitsandbytes as bnb
     from peft.tuners.lora import Linear8bitLt
 
     if is_bnb_4bit_available():
@@ -356,3 +357,45 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.assertTrue(modules_to_save.weight.requires_grad is True)
         self.assertTrue(original_module.weight.grad is None)
         self.assertTrue(modules_to_save.weight.grad is not None)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_merge_lora(self):
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_8bit=True,
+        )
+        config = LoraConfig(
+            r=8,
+        )
+        model = get_peft_model(model, config)
+        model.merge_and_unload("default")
+        self.assertTrue(isinstance(model, PeftModel))
+        self.assertTrue(
+            isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear8bitLt)
+        )
+        self.assertTrue(
+            isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear8bitLt)
+        )
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_merge_lora(self):
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+        )
+        config = LoraConfig(
+            r=8,
+        )
+        model = get_peft_model(model, config)
+        model.merge_and_unload("default")
+        self.assertTrue(isinstance(model, PeftModel))
+        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit))
+        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit))
