@@ -260,8 +260,8 @@ class BaseTunerLayer(ABC):
     """
     active_adapter = None
 
-    def merge(self):
+    def merge(self) -> None:
         raise NotImplementedError
 
-    def unmerge(self):
+    def unmerge(self) -> None:
         raise NotImplementedError
