@@ -13,6 +13,8 @@ from ..utils import (
     PeftType,
     _freeze_adapter,
     _get_submodules,
+    get_auto_gptq_quant_linear,
+    get_quantization_config,
     transpose,
 )
 from .lora import (
@@ -79,16 +81,16 @@ class AdaLoraLayer(LoraLayer):
         else:
             lora_dropout_layer = nn.Identity()
 
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        self.lora_dropout[adapter_name] = lora_dropout_layer
         # Actual trainable parameters
         # Right singular vectors
-        self.lora_A.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, self.in_features))}))
+        self.lora_A[adapter_name] = nn.Parameter(torch.randn(r, self.in_features))
         # Singular values
-        self.lora_E.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(r, 1))}))
+        self.lora_E[adapter_name] = nn.Parameter(torch.randn(r, 1))
         # Left singular vectors
-        self.lora_B.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(self.out_features, r))}))
+        self.lora_B[adapter_name] = nn.Parameter(torch.randn(self.out_features, r))
         # The current rank
-        self.ranknum.update(nn.ParameterDict({adapter_name: nn.Parameter(torch.randn(1), requires_grad=False)}))
+        self.ranknum[adapter_name] = nn.Parameter(torch.randn(1), requires_grad=False)
         self.ranknum[adapter_name].data.fill_(float(r))
         self.ranknum[adapter_name].requires_grad = False
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
@@ -182,7 +184,6 @@ class AdaLoraModel(LoraModel):
     ):
         loaded_in_8bit = optionnal_kwargs.get("loaded_in_8bit", False)
         loaded_in_4bit = optionnal_kwargs.get("loaded_in_4bit", False)
-
         if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
             raise ImportError(
                 "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
@@ -197,6 +198,10 @@ class AdaLoraModel(LoraModel):
             "loaded_in_8bit": loaded_in_8bit,
             "loaded_in_4bit": loaded_in_4bit,
         }
+
+        quantization_config = get_quantization_config(self.model, method="gptq")
+        if quantization_config is not None:
+            kwargs["gptq_quantization_config"] = quantization_config
 
         # If it is not a LoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
@@ -213,6 +218,9 @@ class AdaLoraModel(LoraModel):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
+        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+
         bias = target.bias is not None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
@@ -239,6 +247,9 @@ class AdaLoraModel(LoraModel):
             new_module = SVDLinear4bit(
                 adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
             )
+        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+            new_module = SVDQuantLinear(adapter_name, target, **kwargs)
+            target.weight = target.qweight
         else:
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
@@ -392,7 +403,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
         **kwargs,
-    ):
+    ) -> None:
         init_lora_weights = kwargs.pop("init_lora_weights", True)
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         AdaLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
@@ -407,7 +418,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
-    def merge(self):
+    def merge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():
             return
         if self.merged:
@@ -425,7 +436,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             )
             self.merged = True
 
-    def unmerge(self):
+    def unmerge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():
             return
         if not self.merged:
@@ -442,26 +453,31 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             )
             self.merged = False
 
-    def forward(self, x: torch.Tensor):
+    def _linear(self, input: torch.Tensor) -> torch.Tensor:
+        return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.active_adapter not in self.lora_A.keys():
-            return F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            return self._linear(x)
+
+        # TODO: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
             if self.r[self.active_adapter] > 0 and self.merged:
                 self.unmerge()
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-        elif self.r[self.active_adapter] > 0 and not self.merged:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-            result += (
-                (
-                    self.lora_dropout[self.active_adapter](x)
-                    @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                    @ self.lora_B[self.active_adapter].T
-                )
-                * self.scaling[self.active_adapter]
-                / (self.ranknum[self.active_adapter] + 1e-5)
-            )
+            result = self._linear(x)
+        elif (self.r[self.active_adapter] == 0) or self.merged:
+            result = self._linear(x)
         else:
-            result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
+            lora_A = self.lora_A[self.active_adapter]
+            lora_B = self.lora_B[self.active_adapter]
+            lora_E = self.lora_E[self.active_adapter]
+            dropout = self.lora_dropout[self.active_adapter]
+            scaling = self.scaling[self.active_adapter]
+            ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            result = self._linear(x)
+            result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
+
         return result
 
 
@@ -478,7 +494,7 @@ if is_bnb_available():
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             **kwargs,
-        ):
+        ) -> None:
             bnb.nn.Linear8bitLt.__init__(
                 self,
                 in_features,
@@ -497,37 +513,34 @@ if is_bnb_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
-        def forward(self, x: torch.Tensor):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)
 
-            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+            if (
+                self.disable_adapters
+                or (self.active_adapter not in self.lora_A.keys())
+                or (self.r[self.active_adapter] == 0)
+            ):
                 return result
-            elif self.r[self.active_adapter] > 0:
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
 
-                    if x.dtype != torch.float32:
-                        x = x.float()
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        ).to(expected_dtype)
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                else:
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        )
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                result = result + output
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = result.dtype
+                if x.dtype != torch.float32:
+                    x = x.float()
+
+            lora_A = self.lora_A[self.active_adapter]
+            lora_B = self.lora_B[self.active_adapter]
+            lora_E = self.lora_E[self.active_adapter]
+            dropout = self.lora_dropout[self.active_adapter]
+            scaling = self.scaling[self.active_adapter]
+            ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
+            if requires_conversion:
+                output = output.to(expected_dtype)
+            output = output * scaling / ranknum
+            result = result + output
             return result
 
 
@@ -544,7 +557,7 @@ if is_bnb_4bit_available():
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             **kwargs,
-        ):
+        ) -> None:
             bnb.nn.Linear4bit.__init__(
                 self,
                 in_features,
@@ -562,38 +575,95 @@ if is_bnb_4bit_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
-        def forward(self, x: torch.Tensor):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)
 
-            if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+            if (
+                self.disable_adapters
+                or (self.active_adapter not in self.lora_A.keys())
+                or (self.r[self.active_adapter] == 0)
+            ):
                 return result
-            elif self.r[self.active_adapter] > 0:
-                if not torch.is_autocast_enabled():
-                    expected_dtype = result.dtype
 
-                    if x.dtype != torch.float32:
-                        x = x.float()
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        ).to(expected_dtype)
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                else:
-                    output = (
-                        (
-                            self.lora_dropout[self.active_adapter](x)
-                            @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
-                            @ self.lora_B[self.active_adapter].T
-                        )
-                        * self.scaling[self.active_adapter]
-                        / (self.ranknum[self.active_adapter] + 1e-5)
-                    )
-                result = result + output
+            # As per Tim Dettmers, for 4bit, we need to defensively clone here.
+            # The reason is that in some cases, an error can occur that backprop
+            # does not work on a manipulated view. This issue may be solved with
+            # newer PyTorch versions but this would need extensive testing to be
+            # sure.
+            result = result.clone()
+
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = result.dtype
+                if x.dtype != torch.float32:
+                    x = x.float()
+
+            lora_A = self.lora_A[self.active_adapter]
+            lora_B = self.lora_B[self.active_adapter]
+            lora_E = self.lora_E[self.active_adapter]
+            dropout = self.lora_dropout[self.active_adapter]
+            scaling = self.scaling[self.active_adapter]
+            ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
+            if requires_conversion:
+                output = output.to(expected_dtype)
+            output = output * scaling / ranknum
+            result = result + output
             return result
+
+
+class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
+    def __init__(
+        self,
+        adapter_name,
+        quant_linear_module,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        **kwargs,
+    ) -> None:
+        torch.nn.Module.__init__(self)
+        AdaLoraLayer.__init__(
+            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
+        )
+        self.quant_linear_module = quant_linear_module
+        self.weight = quant_linear_module.qweight
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.active_adapter = adapter_name
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        result = self.quant_linear_module(x)
+
+        if (
+            self.disable_adapters
+            or (self.active_adapter not in self.lora_A.keys())
+            or (self.r[self.active_adapter] == 0)
+        ):
+            return result
+
+        requires_conversion = not torch.is_autocast_enabled()
+        if requires_conversion:
+            expected_dtype = result.dtype
+            if x.dtype != torch.float32:
+                x = x.float()
+
+        lora_A = self.lora_A[self.active_adapter]
+        lora_B = self.lora_B[self.active_adapter]
+        lora_E = self.lora_E[self.active_adapter]
+        dropout = self.lora_dropout[self.active_adapter]
+        scaling = self.scaling[self.active_adapter]
+        ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+        output = (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
+        # TODO: here, the dtype conversion is applied on the *whole expression*,
+        # not the intermediate result, unlike for SVDLinear8bitLT and
+        # SVDLinear4bit, is that correct?
+        if requires_conversion:
+            output = output.to(expected_dtype)
+        result = result + output
+        return result
 
 
 class RankAllocator(object):

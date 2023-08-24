@@ -22,7 +22,7 @@ extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "param
 
 setup(
     name="peft",
-    version="0.5.0.dev0",
+    version="0.6.0.dev0",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),
