@@ -16,7 +16,7 @@ import inspect
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Optional, Union
+from typing import Dict, Optional, Union
 
 from huggingface_hub import hf_hub_download
 from transformers.utils import PushToHubMixin
@@ -40,10 +40,10 @@ class PeftConfigMixin(PushToHubMixin):
         default=None, metadata={"help": "An auto mapping dict to help retrieve the base model class if needed."}
     )
 
-    def to_dict(self):
+    def to_dict(self) -> Dict:
         return asdict(self)
 
-    def save_pretrained(self, save_directory, **kwargs):
+    def save_pretrained(self, save_directory: str, **kwargs) -> None:
         r"""
         This method saves the configuration of your adapter model in a directory.
 
@@ -72,7 +72,7 @@ class PeftConfigMixin(PushToHubMixin):
             writer.write(json.dumps(output_dict, indent=2, sort_keys=True))
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, subfolder=None, **kwargs):
+    def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs):
         r"""
         This method loads the configuration of your adapter model from a directory.
 
@@ -134,7 +134,7 @@ class PeftConfigMixin(PushToHubMixin):
         return config
 
     @classmethod
-    def from_json_file(cls, path_json_file, **kwargs):
+    def from_json_file(cls, path_json_file: str, **kwargs):
         r"""
         Loads a configuration file from a json file.
 
@@ -166,7 +166,7 @@ class PeftConfigMixin(PushToHubMixin):
     @classmethod
     def _get_peft_type(
         cls,
-        model_id,
+        model_id: str,
         **hf_hub_download_kwargs,
     ):
         subfolder = hf_hub_download_kwargs.get("subfolder", None)
@@ -189,7 +189,7 @@ class PeftConfigMixin(PushToHubMixin):
         return loaded_attributes["peft_type"]
 
     @property
-    def is_prompt_learning(self):
+    def is_prompt_learning(self) -> bool:
         r"""
         Utility method to check if the configuration is for prompt learning.
         """
@@ -244,7 +244,7 @@ class PromptLearningConfig(PeftConfig):
     num_layers: Optional[int] = field(default=None, metadata={"help": "Number of transformer layers"})
 
     @property
-    def is_prompt_learning(self):
+    def is_prompt_learning(self) -> bool:
         r"""
         Utility method to check if the configuration is for prompt learning.
         """

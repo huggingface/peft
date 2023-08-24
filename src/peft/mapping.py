@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
 
-MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
+MODEL_TYPE_TO_PEFT_MODEL_MAPPING: Dict[str, PeftModel] = {
     "SEQ_CLS": PeftModelForSequenceClassification,
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
@@ -57,7 +57,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING = {
     "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
 }
 
-PEFT_TYPE_TO_CONFIG_MAPPING = {
+PEFT_TYPE_TO_CONFIG_MAPPING: Dict[str, PeftConfig] = {
     "ADAPTION_PROMPT": AdaptionPromptConfig,
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
@@ -74,7 +74,7 @@ PEFT_TYPE_TO_TUNER_MAPPING = {
 }
 
 
-def get_peft_config(config_dict: Dict[str, Any]):
+def get_peft_config(config_dict: Dict[str, Any]) -> PeftConfig:
     """
     Returns a Peft config object from a dictionary.
 
@@ -106,7 +106,9 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
 
 
-def inject_adapter_in_model(peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default"):
+def inject_adapter_in_model(
+    peft_config: PeftConfig, model: torch.nn.Module, adapter_name: str = "default"
+) -> torch.nn.Module:
     r"""
     A simple API to create and inject adapter in-place into a model. Currently the API does not support prompt learning
     methods and adaption prompt. Make sure to have the correct `target_names` set in the `peft_config` object. The API
