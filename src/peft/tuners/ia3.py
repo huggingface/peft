@@ -47,14 +47,16 @@ class IA3Config(PeftConfig):
     This is the configuration class to store the configuration of a [`IA3Model`].
 
     Args:
-        target_modules (`Union[List[str],str]`): The names of the modules to apply (IA)^3 to.
-        feedforward_modules (`Union[List[str],str]`): The names of the modules to be treated as feedforward modules,
-            as in the original paper.
-        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
-            For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
-        modules_to_save (`List[str]`): List of modules apart from (IA)^3 layers to be set as trainable
-            and saved in the final checkpoint.
-        init_ia3_weights (`bool`): Whether to initialize the vectors in the (IA)^3 layers, defaults to `True`.
+        target_modules (`Union[List[str],str]`):
+            The names of the modules to apply (IA)^3 to.
+        feedforward_modules (`Union[List[str],str]`):
+            The names of the modules to be treated as feedforward modules, as in the original paper.
+        fan_in_fan_out (`bool`):
+            Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
+        modules_to_save (`List[str]`):
+            List of modules apart from (IA)^3 layers to be set as trainable and saved in the final checkpoint.
+        init_ia3_weights (`bool`):
+            Whether to initialize the vectors in the (IA)^3 layers, defaults to `True`.
     """
 
     target_modules: Optional[Union[List[str], str]] = field(
