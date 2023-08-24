@@ -15,21 +15,21 @@
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
-from .config import LoraConfig
-from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
-from .model import LoraModel
+from .config import AdaLoraConfig
+from .gptq import SVDQuantLinear
+from .layer import AdaLoraLayer, RankAllocator, SVDLinear
+from .model import AdaLoraModel
 
 
-__all__ = ["LoraConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
+__all__ = ["AdaLoraConfig", "AdaLoraLayer", "AdaLoraModel", "SVDLinear", "RankAllocator", "SVDQuantLinear"]
 
 
 if is_bnb_available():
-    from .bnb import Linear8bitLt
+    from .bnb import SVDLinear8bitLt
 
-    __all__ += ["Linear8bitLt"]
+    __all__ += ["SVDLinear8bitLt"]
 
 if is_bnb_4bit_available():
-    from .bnb import Linear4bit
+    from .bnb import SVDLinear4bit
 
-    __all__ += ["Linear4bit"]
+    __all__ += ["SVDLinear4bit"]

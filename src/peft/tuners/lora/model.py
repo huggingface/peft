@@ -30,20 +30,22 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    get_auto_gptq_quant_linear,
     get_quantization_config,
 )
 
 from .config import LoraConfig
+from .gptq import QuantLinear
 from .layer import Conv2d, Embedding, Linear, LoraLayer
 
 
 if is_bnb_available():
     import bitsandbytes as bnb
 
-    from .layer import Linear8bitLt
+    from .bnb import Linear8bitLt
 
-    if is_bnb_4bit_available():
-        from .layer import Linear4bit
+if is_bnb_4bit_available():
+    from .bnb import Linear4bit
 
 
 class LoraModel(BaseTuner):

@@ -13,23 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.import_utils import is_bnb_available
 
-from .config import LoraConfig
-from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
-from .model import LoraModel
+from .config import IA3Config
+from .layer import IA3Layer, Linear
+from .model import IA3Model
 
 
-__all__ = ["LoraConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
+__all__ = ["IA3Config", "IA3Layer", "IA3Model", "Linear"]
 
 
 if is_bnb_available():
     from .bnb import Linear8bitLt
 
     __all__ += ["Linear8bitLt"]
-
-if is_bnb_4bit_available():
-    from .bnb import Linear4bit
-
-    __all__ += ["Linear4bit"]
