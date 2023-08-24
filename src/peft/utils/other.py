@@ -20,8 +20,9 @@ from typing import Optional
 
 import accelerate
 import torch
+import torch_mlu
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
-from accelerate.utils import is_npu_available, is_xpu_available
+from accelerate.utils import is_xpu_available
 
 
 # Get current device name based on available devices
@@ -30,8 +31,8 @@ def infer_device():
         torch_device = "cuda"
     elif is_xpu_available():
         torch_device = "xpu"
-    elif is_npu_available():
-        torch_device = "npu"
+    elif torch.mlu.is_available():
+        torch_device = "mlu"
     else:
         torch_device = "cpu"
     return torch_device
