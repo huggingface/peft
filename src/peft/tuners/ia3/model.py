@@ -18,7 +18,6 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 
-import bitsandbytes as bnb
 import torch
 from transformers.pytorch_utils import Conv1D
 
@@ -36,6 +35,8 @@ from .layer import IA3Layer, Linear
 
 
 if is_bnb_available():
+    import bitsandbytes as bnb
+
     from .bnb import Linear8bitLt
 
 

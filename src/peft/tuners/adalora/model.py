@@ -15,7 +15,6 @@
 
 import warnings
 
-import bitsandbytes as bnb
 import torch
 from transformers.pytorch_utils import Conv1D
 
@@ -34,6 +33,8 @@ from .layer import AdaLoraLayer, RankAllocator, SVDLinear
 
 
 if is_bnb_available():
+    import bitsandbytes as bnb
+
     from .bnb import SVDLinear8bitLt
 if is_bnb_4bit_available():
     from .bnb import SVDLinear4bit
