@@ -1174,13 +1174,17 @@ if is_bnb_available():
                 return
             if self.r[self.active_adapter] > 0:
                 lora_data = self.get_delta_weight(self.active_adapter)
+                if self.weight.SCB is not None:
+                    SCB = self.weight.SCB
+                else:
+                    SCB = self.state.SCB
                 w_data = (
-                    self.weight.CB.to(lora_data.dtype, copy=True).mul_(self.weight.SCB.unsqueeze(1).mul(1.0 / 127.0))
-                    + lora_data
+                    self.weight.data.to(lora_data.dtype, copy=True).mul_(SCB.unsqueeze(1).mul(1.0 / 127.0)) + lora_data
                 )
                 self.weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
                 ).to(self.weight.device)
+                self.state.reset_grads()
                 self.merged = True
 
         def unmerge(self):
@@ -1190,15 +1194,18 @@ if is_bnb_available():
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
             if self.r[self.active_adapter] > 0:
-                kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)
+                if self.weight.SCB is not None:
+                    SCB = self.weight.SCB
+                else:
+                    SCB = self.state.SCB
                 w_data = (
-                    self.weight.CB.to(lora_data.dtype, copy=True).mul_(self.weight.SCB.unsqueeze(1).mul(1.0 / 127.0))
-                    - lora_data
+                    self.weight.data.to(lora_data.dtype, copy=True).mul_(SCB.unsqueeze(1).mul(1.0 / 127.0)) - lora_data
                 )
                 self.weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
                 ).to(self.weight.device)
+                self.state.reset_grads()
                 self.merged = False
 
         def get_delta_weight(self, adapter):
