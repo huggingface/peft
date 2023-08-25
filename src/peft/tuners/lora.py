@@ -1264,8 +1264,46 @@ if is_bnb_4bit_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
+        def merge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if self.merged:
+                warnings.warn("Already merged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                    self.weight.device
+                )
+                self.merged = True
+
+        def unmerge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                    self.weight.device
+                )
+                self.merged = False
+
+        def get_delta_weight(self, adapter):
+            return (
+                transpose(
+                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                    False,
+                )
+                * self.scaling[adapter]
+            )
+
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            # note: logic differs from default Linear because merging is not supported
             result = super().forward(x)
 
             if (
@@ -1273,87 +1311,6 @@ if is_bnb_4bit_available():
                 or (self.active_adapter not in self.lora_A.keys())
                 or (self.r[self.active_adapter] == 0)
             ):
-                bnb.nn.Linear4bit.__init__(
-                    self,
-                    in_features,
-                    out_features,
-                    bias=kwargs.get("bias", True),
-                    compute_dtype=kwargs.get("compute_dtype", torch.float32),
-                    compress_statistics=kwargs.get("compress_statistics", True),
-                    quant_type=kwargs.get("quant_type", "nf4"),
-                )
-                LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
-
-                # Freezing the pre-trained weight matrix
-                self.weight.requires_grad = False
-
-                init_lora_weights = kwargs.pop("init_lora_weights", True)
-                self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-                self.active_adapter = adapter_name
-
-            def merge(self):
-                if self.active_adapter not in self.lora_A.keys():
-                    return
-                if self.merged:
-                    warnings.warn("Already merged. Nothing to do.")
-                    return
-                if self.r[self.active_adapter] > 0:
-                    kwargs = self.weight.__dict__
-                    lora_data = self.get_delta_weight(self.active_adapter)
-                    w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
-                    self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                        self.weight.device
-                    )
-                    self.merged = True
-
-            def unmerge(self):
-                if self.active_adapter not in self.lora_A.keys():
-                    return
-                if not self.merged:
-                    warnings.warn("Already unmerged. Nothing to do.")
-                    return
-                if self.r[self.active_adapter] > 0:
-                    kwargs = self.weight.__dict__
-                    lora_data = self.get_delta_weight(self.active_adapter)
-                    w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
-                    self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                        self.weight.device
-                    )
-                    self.merged = False
-
-            def get_delta_weight(self, adapter):
-                return (
-                    transpose(
-                        self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
-                        False,
-                    )
-                    * self.scaling[adapter]
-                )
-
-            def forward(self, x: torch.Tensor):
-                result = super().forward(x)
-
-                if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
-                    return result
-                elif self.r[self.active_adapter] > 0:
-                    result = result.clone()
-                    if not torch.is_autocast_enabled():
-                        expected_dtype = result.dtype
-                        x = x.to(self.lora_A[self.active_adapter].weight.dtype)
-                        output = (
-                            self.lora_B[self.active_adapter](
-                                self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                            ).to(expected_dtype)
-                            * self.scaling[self.active_adapter]
-                        )
-                    else:
-                        output = (
-                            self.lora_B[self.active_adapter](
-                                self.lora_A[self.active_adapter](self.lora_dropout[self.active_adapter](x))
-                            )
-                            * self.scaling[self.active_adapter]
-                        )
-                    result += output
                 return result
 
             # As per Tim Dettmers, for 4bit, we need to defensively clone here.
