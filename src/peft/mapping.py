@@ -37,6 +37,7 @@ from .tuners import (
     IA3Model,
     LoraConfig,
     LoraModel,
+    MultitaskPromptTuningConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -65,6 +66,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING = {
     "LORA": LoraConfig,
     "ADALORA": AdaLoraConfig,
     "IA3": IA3Config,
+    "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {

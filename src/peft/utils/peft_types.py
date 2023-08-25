@@ -21,6 +21,7 @@ import enum
 
 class PeftType(str, enum.Enum):
     PROMPT_TUNING = "PROMPT_TUNING"
+    MULTITASK_PROMPT_TUNING = "MULTITASK_PROMPT_TUNING"
     P_TUNING = "P_TUNING"
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
