@@ -35,6 +35,7 @@ from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torc
 
 if is_bnb_available():
     import bitsandbytes as bnb
+
     from peft.tuners.lora import Linear8bitLt
 
     if is_bnb_4bit_available():
