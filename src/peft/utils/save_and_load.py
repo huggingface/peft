@@ -70,10 +70,15 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
     elif config.is_prompt_learning:
         to_return = {}
-        if config.inference_mode:
+        if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
+            to_return["prefix_task_cols"] = model.prompt_encoder[adapter_name].prefix_task_cols
+            to_return["prefix_task_rows"] = model.prompt_encoder[adapter_name].prefix_task_rows
             prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
         else:
-            prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
+            if config.inference_mode:
+                prompt_embeddings = model.prompt_encoder[adapter_name].embedding.weight
+            else:
+                prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
     elif config.peft_type == PeftType.IA3:
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
@@ -137,6 +142,9 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True
         )
+
+    if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
+        model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)
     return load_result
 
 
