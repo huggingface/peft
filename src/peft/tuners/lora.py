@@ -1274,9 +1274,7 @@ if is_bnb_4bit_available():
                 kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
-                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    self.weight.device
-                )
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
                 self.merged = True
 
         def unmerge(self):
@@ -1289,9 +1287,7 @@ if is_bnb_4bit_available():
                 kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
-                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    self.weight.device
-                )
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
                 self.merged = False
 
         def get_delta_weight(self, adapter):
