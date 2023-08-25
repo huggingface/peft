@@ -30,7 +30,8 @@ Supported methods:
 3. P-Tuning: [GPT Understands, Too](https://arxiv.org/abs/2103.10385)
 4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/abs/2104.08691)
 5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://arxiv.org/abs/2303.10512)  
-6. $(IA)^3$ : [Infused Adapter by Inhibiting and Amplifying Inner Activations](https://arxiv.org/abs/2205.05638)
+6. $(IA)^3$: [Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning](https://arxiv.org/abs/2205.05638)
+7. MultiTask Prompt Tuning: [Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning](https://arxiv.org/abs/2303.02861)
 
 ## Getting started
 
@@ -67,7 +68,7 @@ Hardware: Single A100 80GB GPU with CPU RAM above 64GB
 
 Performance of PEFT-LoRA tuned [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) on [`ought/raft/twitter_complaints`](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints) leaderboard. 
 A point to note is that we didn't try to squeeze performance by playing around with input instruction templates, LoRA hyperparams and other training related hyperparams. Also, we didn't use the larger 13B [mt0-xxl](https://huggingface.co/bigscience/mt0-xxl) model.
-So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final checkpoint size is just `19MB` in comparison to `11GB` size of the backbone [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) model.
+So, we are already seeing comparable performance to SoTA with parameter efficient tuning. Also, the final additional checkpoint size is just `19MB` in comparison to `11GB` size of the backbone [`bigscience/T0_3B`](https://huggingface.co/bigscience/T0_3B) model, but one still has to load the original full size model.
 
 |   Submission Name        | Accuracy |
 | --------- | ---- |
@@ -391,12 +392,9 @@ dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
 dummy_outputs = model(dummy_inputs)
 ```
 
-## Backlog:
-- [x] Add tests
-- [x] Multi Adapter training and inference support
-- [x] Add more use cases and examples
-- [x] Integrate`(IA)^3`, `AdaptionPrompt`
-- [ ] Explore and possibly integrate methods like `Bottleneck Adapters`,  ...
+## Contributing
+
+If you would like to contribute to PEFT, please check out our [contributing guide](https://huggingface.co/docs/peft/developer_guides/contributing).
 
 ## Citing 🤗 PEFT
 
