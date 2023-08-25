@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import PromptTuningConfig, PromptTuningInit
-from .model import PromptEmbedding
+from .config import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
+from .model import MultitaskPromptEmbedding
 
 
-__all__ = ["PromptTuningConfig", "PromptEmbedding", "PromptTuningInit"]
+__all__ = ["MultitaskPromptTuningConfig", "MultitaskPromptTuningInit", "MultitaskPromptEmbedding"]
