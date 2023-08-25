@@ -1159,6 +1159,9 @@ if is_bnb_available():
                 warnings.warn("Already merged. Nothing to do.")
                 return
             if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Merge lora module to 8-bit linear may get different generations due to rounding errors."
+                )
                 lora_data = self.get_delta_weight(self.active_adapter)
                 if self.weight.SCB is not None:
                     SCB = self.weight.SCB
@@ -1180,6 +1183,9 @@ if is_bnb_available():
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
             if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
+                )
                 lora_data = self.get_delta_weight(self.active_adapter)
                 if self.weight.SCB is not None:
                     SCB = self.weight.SCB
@@ -1271,6 +1277,9 @@ if is_bnb_4bit_available():
                 warnings.warn("Already merged. Nothing to do.")
                 return
             if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
+                )
                 kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
@@ -1284,6 +1293,9 @@ if is_bnb_4bit_available():
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
             if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                )
                 kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
