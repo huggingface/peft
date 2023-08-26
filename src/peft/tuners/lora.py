@@ -549,6 +549,8 @@ class LoraModel(BaseTuner):
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
+            if getattr(self.model, "is_loaded_in_8bit", False):
+                raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
@@ -1152,64 +1154,8 @@ if is_bnb_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
-        def merge(self):
-            if self.active_adapter not in self.lora_A.keys():
-                return
-            if self.merged:
-                warnings.warn("Already merged. Nothing to do.")
-                return
-            if self.r[self.active_adapter] > 0:
-                warnings.warn(
-                    "Merge lora module to 8-bit linear may get different generations due to rounding errors."
-                )
-                lora_data = self.get_delta_weight(self.active_adapter)
-                if self.weight.SCB is not None:
-                    SCB = self.weight.SCB
-                else:
-                    SCB = self.state.SCB
-                w_data = (
-                    self.weight.data.to(lora_data.dtype, copy=True).mul_(SCB.unsqueeze(1).mul(1.0 / 127.0)) + lora_data
-                )
-                self.weight = bnb.nn.Int8Params(
-                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
-                ).to(self.weight.device)
-                self.state.reset_grads()
-                self.merged = True
-
-        def unmerge(self):
-            if self.active_adapter not in self.lora_A.keys():
-                return
-            if not self.merged:
-                warnings.warn("Already unmerged. Nothing to do.")
-                return
-            if self.r[self.active_adapter] > 0:
-                warnings.warn(
-                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
-                )
-                lora_data = self.get_delta_weight(self.active_adapter)
-                if self.weight.SCB is not None:
-                    SCB = self.weight.SCB
-                else:
-                    SCB = self.state.SCB
-                w_data = (
-                    self.weight.data.to(lora_data.dtype, copy=True).mul_(SCB.unsqueeze(1).mul(1.0 / 127.0)) - lora_data
-                )
-                self.weight = bnb.nn.Int8Params(
-                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
-                ).to(self.weight.device)
-                self.state.reset_grads()
-                self.merged = False
-
-        def get_delta_weight(self, adapter):
-            return (
-                transpose(
-                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
-                    False,
-                )
-                * self.scaling[adapter]
-            )
-
         def forward(self, x: torch.Tensor) -> torch.Tensor:
+            # note: logic differs from default Linear because merging is not supported
             result = super().forward(x)
 
             if (
