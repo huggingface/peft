@@ -137,6 +137,10 @@ class LoraConfig(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
+        if self.rank_pattern is None:
+            self.rank_pattern = {}
+        if self.alpha_pattern is None:
+            self.alpha_pattern = {}
 
 
 class LoraLayer(BaseTunerLayer):
