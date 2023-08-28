@@ -13,10 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
+
 import bitsandbytes as bnb
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.utils.other import transpose
 
 from .layer import LoraLayer
 
@@ -115,37 +118,83 @@ if is_bnb_4bit_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
+        def merge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if self.merged:
+                warnings.warn("Already merged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
+                )
+                # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                self.merged = True
+
+        def unmerge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                )
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                self.merged = False
+
+        def get_delta_weight(self, adapter):
+            return (
+                transpose(
+                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                    False,
+                )
+                * self.scaling[adapter]
+            )
+
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            # note: logic differs from default Linear because merging is not supported
-            result = super().forward(x)
+            if self.active_adapter not in self.lora_A.keys():
+                return super().forward(x)
 
-            if (
-                self.disable_adapters
-                or (self.active_adapter not in self.lora_A.keys())
-                or (self.r[self.active_adapter] == 0)
-            ):
-                return result
+            if self.disable_adapters:
+                if (self.r[self.active_adapter] > 0) and self.merged:
+                    self.unmerge()
+                result = super().forward(x)
+            elif (self.r[self.active_adapter] == 0) or self.merged:
+                result = super().forward(x)
+            else:
+                lora_A = self.lora_A[self.active_adapter]
+                lora_B = self.lora_B[self.active_adapter]
+                dropout = self.lora_dropout[self.active_adapter]
+                scaling = self.scaling[self.active_adapter]
 
-            # As per Tim Dettmers, for 4bit, we need to defensively clone here.
-            # The reason is that in some cases, an error can occur that backprop
-            # does not work on a manipulated view. This issue may be solved with
-            # newer PyTorch versions but this would need extensive testing to be
-            # sure.
-            result = result.clone()
+                result = super().forward(x)
+                # As per Tim Dettmers, for 4bit, we need to defensively clone here.
+                # The reason is that in some cases, an error can occur that backprop
+                # does not work on a manipulated view. This issue may be solved with
+                # newer PyTorch versions but this would need extensive testing to be
+                # sure.
+                result = result.clone()
 
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    x = x.to(lora_A.weight.dtype)
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
                 x = x.to(lora_A.weight.dtype)
+                result += lora_B(lora_A(dropout(x))) * scaling
+                output = lora_B(lora_A(dropout(x)))
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                output = output * scaling
+                result += output
 
-            output = lora_B(lora_A(dropout(x)))
-            if requires_conversion:
-                output = output.to(expected_dtype)
-            output = output * scaling
-            result += output
             return result

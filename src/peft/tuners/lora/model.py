@@ -388,7 +388,7 @@ class LoraModel(BaseTuner):
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
-            if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
+            if getattr(self.model, "is_loaded_in_8bit", False):
                 raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
@@ -411,6 +411,17 @@ class LoraModel(BaseTuner):
                         stride=target.stride,
                         padding=target.padding,
                         dilation=target.dilation,
+                    )
+                elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+                    bias = target.bias is not None
+                    new_module = bnb.nn.Linear4bit(
+                        target.in_features,
+                        target.out_features,
+                        bias=bias,
+                        compute_dtype=target.compute_dtype,
+                        compress_statistics=target.weight.compress_statistics,
+                        quant_type=target.weight.quant_type,
+                        device=target.weight.device,
                     )
                 else:
                     bias = target.bias is not None
