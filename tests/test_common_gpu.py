@@ -34,6 +34,8 @@ from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torc
 
 
 if is_bnb_available():
+    import bitsandbytes as bnb
+
     from peft.tuners.lora import Linear8bitLt
 
     if is_bnb_4bit_available():
@@ -356,3 +358,37 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.assertTrue(modules_to_save.weight.requires_grad is True)
         self.assertTrue(original_module.weight.grad is None)
         self.assertTrue(modules_to_save.weight.grad is not None)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_merge_lora(self):
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config)
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        with torch.inference_mode():
+            out_before_merge = model.generate(random_input, max_new_tokens=1)
+
+        model.merge_and_unload("default")
+        with torch.inference_mode():
+            out_after_merge = model.generate(random_input, max_new_tokens=1)
+
+        self.assertTrue(torch.equal(out_before_merge, out_after_merge))
+        self.assertTrue(isinstance(model, PeftModel))
+        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit))
+        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit))
