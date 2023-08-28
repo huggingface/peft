@@ -573,18 +573,6 @@ class LoraModel(BaseTuner):
                         padding=target.padding,
                         dilation=target.dilation,
                     )
-                elif is_bnb_available() and isinstance(target, bnb.nn.Linear8bitLt):
-                    bias = target.bias is not None
-                    new_module = bnb.nn.Linear8bitLt(
-                        target.in_features,
-                        target.out_features,
-                        bias=bias,
-                        has_fp16_weights=target.state.has_fp16_weights,
-                        memory_efficient_backward=target.state.memory_efficient_backward,
-                        threshold=target.state.threshold,
-                        index=target.index,
-                        device=target.weight.device,
-                    )
                 elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
                     bias = target.bias is not None
                     new_module = bnb.nn.Linear4bit(
