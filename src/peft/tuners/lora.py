@@ -116,6 +116,24 @@ class LoraConfig(PeftConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
+    rank_pattern: Optional[dict] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The mapping from layer names to ranks which are different from the default rank specified by `r`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+            )
+        },
+    )
+    alpha_pattern: Optional[dict] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The mapping from layer names to alphas which are different from the default alpha specified by `lora_alpha`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
@@ -322,10 +340,13 @@ class LoraModel(BaseTuner):
         parent,
         **optionnal_kwargs,
     ):
+        layer_name = f"{target.__name__}"
+        r = lora_config.rank_pattern.get(layer_name, None) or lora_config.r
+        alpha = lora_config.alpha_pattern.get(layer_name, None) or lora_config.lora_alpha
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
-            "r": lora_config.r,
-            "lora_alpha": lora_config.lora_alpha,
+            "r": r,
+            "lora_alpha": alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
@@ -342,16 +363,16 @@ class LoraModel(BaseTuner):
         if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
-                lora_config.r,
-                lora_config.lora_alpha,
+                r,
+                alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
         elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
             target.update_layer_embedding(
                 adapter_name,
-                lora_config.r,
-                lora_config.lora_alpha,
+                r,
+                alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
@@ -359,8 +380,8 @@ class LoraModel(BaseTuner):
         elif isinstance(target, LoraLayer):
             target.update_layer(
                 adapter_name,
-                lora_config.r,
-                lora_config.lora_alpha,
+                r,
+                alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
