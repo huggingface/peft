@@ -1214,6 +1214,7 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
+                # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
