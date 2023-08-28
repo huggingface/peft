@@ -345,8 +345,8 @@ class LoraModel(BaseTuner):
         **optionnal_kwargs,
     ):
         current_key = optionnal_kwargs["current_key"]
-        r = lora_config.rank_pattern.get(current_key, None) or lora_config.r
-        alpha = lora_config.alpha_pattern.get(current_key, None) or lora_config.lora_alpha
+        r = lora_config.rank_pattern.get(current_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(current_key, lora_config.lora_alpha)
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
