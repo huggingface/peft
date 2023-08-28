@@ -549,7 +549,7 @@ class LoraModel(BaseTuner):
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
-            if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
+            if getattr(self.model, "is_loaded_in_8bit", False):
                 raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
@@ -572,6 +572,17 @@ class LoraModel(BaseTuner):
                         stride=target.stride,
                         padding=target.padding,
                         dilation=target.dilation,
+                    )
+                elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+                    bias = target.bias is not None
+                    new_module = bnb.nn.Linear4bit(
+                        target.in_features,
+                        target.out_features,
+                        bias=bias,
+                        compute_dtype=target.compute_dtype,
+                        compress_statistics=target.weight.compress_statistics,
+                        quant_type=target.weight.quant_type,
+                        device=target.weight.device,
                     )
                 else:
                     bias = target.bias is not None
@@ -1193,8 +1204,49 @@ if is_bnb_4bit_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
+        def merge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if self.merged:
+                warnings.warn("Already merged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
+                )
+                # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                self.merged = True
+
+        def unmerge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                )
+                kwargs = self.weight.__dict__
+                lora_data = self.get_delta_weight(self.active_adapter)
+                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
+                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                self.merged = False
+
+        def get_delta_weight(self, adapter):
+            return (
+                transpose(
+                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                    False,
+                )
+                * self.scaling[adapter]
+            )
+
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            # note: logic differs from default Linear because merging is not supported
             result = super().forward(x)
 
             if (
