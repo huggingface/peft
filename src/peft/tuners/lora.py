@@ -549,8 +549,6 @@ class LoraModel(BaseTuner):
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
-            if getattr(self.model, "is_loaded_in_8bit", False):
-                raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
@@ -572,6 +570,18 @@ class LoraModel(BaseTuner):
                         stride=target.stride,
                         padding=target.padding,
                         dilation=target.dilation,
+                    )
+                elif is_bnb_available() and isinstance(target, bnb.nn.Linear8bitLt):
+                    bias = target.bias is not None
+                    new_module = bnb.nn.Linear8bitLt(
+                        target.in_features,
+                        target.out_features,
+                        bias=bias,
+                        has_fp16_weights=target.state.has_fp16_weights,
+                        memory_efficient_backward=target.state.memory_efficient_backward,
+                        threshold=target.state.threshold,
+                        index=target.index,
+                        device=target.weight.device,
                     )
                 elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
                     bias = target.bias is not None
@@ -1142,8 +1152,79 @@ if is_bnb_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.active_adapter = adapter_name
 
+        def merge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if self.merged:
+                warnings.warn("Already merged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Merge lora module to 8-bit linear may get different generations due to rounding errors."
+                )
+                lora_data = self.get_delta_weight(self.active_adapter)
+
+                if self.state.SCB is None:
+                    self.state.SCB = self.weight.SCB
+                # Dequantize the result of identify matrix and int8 weight because bitsandbytes only have this method.
+                im = torch.eye(self.weight.data.shape[-1]).contiguous().half().to(self.weight.device)
+                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+                im, Sim = bnb.functional.transform(im, "col32")
+
+                if self.state.CxB is None:
+                    self.state.CxB, self.state.SB = bnb.functional.transform(
+                        self.weight.data, to_order=self.state.formatB
+                    )
+                out32, Sout32 = bnb.functional.igemmlt(im, self.state.CxB, Sim, self.state.SB)
+                output = bnb.functional.mm_dequant(out32, Sout32, SCim, self.state.SCB, bias=None).t()
+                w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
+                self.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
+                ).to(self.weight.device)
+                self.state.reset_grads()
+                self.merged = True
+
+        def unmerge(self):
+            if self.active_adapter not in self.lora_A.keys():
+                return
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
+                )
+                lora_data = self.get_delta_weight(self.active_adapter)
+
+                if self.state.SCB is None:
+                    self.state.SCB = self.weight.SCB
+                im = torch.eye(self.weight.data.shape[-1]).contiguous().half().to(self.weight.device)
+                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+                im, Sim = bnb.functional.transform(im, "col32")
+
+                if self.state.CxB is None:
+                    self.state.CxB, self.state.SB = bnb.functional.transform(
+                        self.weight.data, to_order=self.state.formatB
+                    )
+                out32, Sout32 = bnb.functional.igemmlt(im, self.state.CxB, Sim, self.state.SB)
+                output = bnb.functional.mm_dequant(out32, Sout32, SCim, self.state.SCB, bias=None).t()
+                w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
+                self.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
+                ).to(self.weight.device)
+                self.state.reset_grads()
+                self.merged = False
+
+        def get_delta_weight(self, adapter):
+            return (
+                transpose(
+                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                    False,
+                )
+                * self.scaling[adapter]
+            )
+
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            # note: logic differs from default Linear because merging is not supported
             result = super().forward(x)
 
             if (
