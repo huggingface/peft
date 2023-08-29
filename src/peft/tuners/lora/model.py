@@ -159,9 +159,9 @@ class LoraModel(BaseTuner):
         target,
         target_name,
         parent,
-        **optionnal_kwargs,
+        **optional_kwargs,
     ):
-        current_key = optionnal_kwargs["current_key"]
+        current_key = optional_kwargs["current_key"]
         r = lora_config.rank_pattern.get(current_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(current_key, lora_config.lora_alpha)
         bias = hasattr(target, "bias") and target.bias is not None
@@ -172,8 +172,8 @@ class LoraModel(BaseTuner):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
         }
-        kwargs["loaded_in_8bit"] = optionnal_kwargs.pop("loaded_in_8bit", False)
-        kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
+        kwargs["loaded_in_8bit"] = optional_kwargs.pop("loaded_in_8bit", False)
+        kwargs["loaded_in_4bit"] = optional_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
 
         quantization_config = get_quantization_config(self.model, method="gptq")

@@ -91,6 +91,24 @@ class LoraConfig(PeftConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
+    rank_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names to ranks which are different from the default rank specified by `r`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+            )
+        },
+    )
+    alpha_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names to alphas which are different from the default alpha specified by `lora_alpha`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
