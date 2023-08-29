@@ -1293,7 +1293,8 @@ if is_bnb_4bit_available():
                 return
             if self.r[self.active_adapter] > 0:
                 warnings.warn(
-                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Merge lora module to 4-bit linear may get different generations due to rounding errors. \n\
+                    You would better to use torch.inference_mode for inference due to the gradient issue."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 kwargs = self.weight.__dict__
@@ -1310,7 +1311,8 @@ if is_bnb_4bit_available():
                 return
             if self.r[self.active_adapter] > 0:
                 warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
+                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors. \n\
+                    You would better to use torch.inference_mode for inference due to the gradient issue."
                 )
                 kwargs = self.weight.__dict__
                 lora_data = self.get_delta_weight(self.active_adapter)

@@ -365,7 +365,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_8bit_merge_lora(self):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
-            "/home/bitsandbytes/hf_home/hub/models--facebook--opt-125m/snapshots/3d2b5f275bdf882b8775f902e1bfdb790e2cfc32/",
+            "facebook/opt-125m",
             load_in_8bit=True,
         )
         config = LoraConfig(
