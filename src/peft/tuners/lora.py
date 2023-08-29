@@ -1160,7 +1160,8 @@ if is_bnb_available():
                 return
             if self.r[self.active_adapter] > 0:
                 warnings.warn(
-                    "Merge lora module to 8-bit linear may get different generations due to rounding errors."
+                    "Merge lora module to 8-bit linear may get different generations due to rounding errors. \n\
+                    You would better to use torch.inference_mode for inference due to the gradient issue."
                 )
                 lora_data = self.get_delta_weight(self.active_adapter)
 
@@ -1192,7 +1193,8 @@ if is_bnb_available():
                 return
             if self.r[self.active_adapter] > 0:
                 warnings.warn(
-                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
+                    "Unmerge lora module to 8-bit linear may get different generations due to rounding errors. \n\
+                    You would better to use torch.inference_mode for inference due to the gradient issue."
                 )
                 lora_data = self.get_delta_weight(self.active_adapter)
 
