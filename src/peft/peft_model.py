@@ -1109,7 +1109,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(
                 decoder_attention_mask.device
             )
-            decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
+            if peft_config.peft_type not in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
+                decoder_attention_mask = torch.cat((prefix_attention_mask, decoder_attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")

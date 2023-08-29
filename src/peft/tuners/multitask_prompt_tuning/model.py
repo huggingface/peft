@@ -1,5 +1,3 @@
-"""This code is adapted for the paper: https://arxiv.org/abs/2303.02861 and constitutes the work done at MIT-IBM Watson
-Research Lab."""
 # coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
@@ -14,49 +12,17 @@ Research Lab."""
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import enum
-from dataclasses import dataclass, field
-from typing import Optional, Union
 
 import torch
 
-from ..utils import PeftType, TaskType
-from .prompt_tuning import PromptEmbedding, PromptTuningConfig
+from peft.tuners.prompt_tuning import PromptEmbedding
+from peft.utils import TaskType
+
+from .config import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 
 
-class MultitaskPromptTuningInit(str, enum.Enum):
-    # initialize prompt with text
-    TEXT = "TEXT"
-    # initialize prompt with random matrix
-    RANDOM = "RANDOM"
-    # average the prefix and column matrices obtained during source training
-    AVERAGE_SOURCE_TASKS = "AVERAGE_SOURCE_TASKS"
-    # pick prefix and column matrices for a particular task obtained during source training
-    EXACT_SOURCE_TASK = "EXACT_SOURCE_TASK"
-    # only use the prompt embeddings trained during source training
-    ONLY_SOURCE_SHARED = "ONLY_SOURCE_SHARED"
-
-
-@dataclass
-class MultitaskPromptTuningConfig(PromptTuningConfig):
-    prompt_tuning_init: Union[MultitaskPromptTuningInit, str] = field(
-        default=MultitaskPromptTuningInit.RANDOM,
-        metadata={
-            "help": "How to initialize the prompt tuning parameters. Can be one of TEXT, RANDOM, AVERAGE_SOURCE_TASKS, EXACT_SOURCE_TASK, ONLY_SOURCE_SHARED."
-        },
-    )
-    prompt_tuning_init_state_dict_path: Optional[str] = field(
-        default=None,
-        metadata={
-            "help": "The path of source state dict. This is required when training the downstream target prompt from the pretrained source prompt"
-        },
-    )
-    prompt_tuning_init_task: Optional[int] = field(default=0, metadata={"help": "source task id for initialization"})
-    num_ranks: Optional[int] = field(default=1, metadata={"help": "ranks"})
-    num_tasks: Optional[int] = field(default=1, metadata={"help": "number of tasks"})
-
-    def __post_init__(self):
-        self.peft_type = PeftType.MULTITASK_PROMPT_TUNING
+# This code is adapted for the paper: https://arxiv.org/abs/2303.02861 and
+# constitutes the work done at MIT-IBM Watson Research Lab.
 
 
 class MultitaskPromptEmbedding(PromptEmbedding):
@@ -97,7 +63,8 @@ class MultitaskPromptEmbedding(PromptEmbedding):
         ]:
             if config.prompt_tuning_init_state_dict_path is None:
                 raise ValueError(
-                    f"prompt_tuning_init_state_dict_path needs to be specified with {config.prompt_tuning_init} init method"
+                    f"prompt_tuning_init_state_dict_path needs to be specified with {config.prompt_tuning_init} "
+                    "init method"
                 )
 
             state_dict: dict = torch.load(
