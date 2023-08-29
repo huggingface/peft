@@ -59,7 +59,8 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
+        if self.weight.device.type != "meta":
+            self.to(self.weight.device)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -139,7 +140,8 @@ class Linear(nn.Linear, LoraLayer):
     ) -> None:
         init_lora_weights = kwargs.pop("init_lora_weights", True)
 
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
+        kwargs_for_init = {**kwargs, "device": torch.device("meta")}  # copy of kwargs with updated device
+        nn.Linear.__init__(self, in_features, out_features, **kwargs_for_init)
         LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
@@ -148,7 +150,6 @@ class Linear(nn.Linear, LoraLayer):
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
 
-        nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
