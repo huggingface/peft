@@ -152,7 +152,6 @@ if is_bnb_available():
                     if x.dtype != torch.float32:
                         x = x.float()
 
-                x = x.to(lora_A.weight.dtype)
                 output = lora_B(lora_A(dropout(x)))
                 if requires_conversion:
                     output = output.to(expected_dtype)
