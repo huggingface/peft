@@ -129,31 +129,36 @@ if is_bnb_available():
             )
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            result = super().forward(x)
+            if self.active_adapter not in self.lora_A.keys():
+                return super().forward(x)
 
-            if (
-                self.disable_adapters
-                or (self.active_adapter not in self.lora_A.keys())
-                or (self.r[self.active_adapter] == 0)
-            ):
-                return result
+            if self.disable_adapters:
+                if (self.r[self.active_adapter] > 0) and self.merged:
+                    self.unmerge()
+                result = super().forward(x)
+            elif (self.r[self.active_adapter] == 0) or self.merged:
+                result = super().forward(x)
+            else:
+                lora_A = self.lora_A[self.active_adapter]
+                lora_B = self.lora_B[self.active_adapter]
+                dropout = self.lora_dropout[self.active_adapter]
+                scaling = self.scaling[self.active_adapter]
 
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
+                result = super().forward(x)
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                if x.dtype != torch.float32:
-                    x = x.float()
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    if x.dtype != torch.float32:
+                        x = x.float()
 
-            output = lora_B(lora_A(dropout(x)))
-            if requires_conversion:
-                output = output.to(expected_dtype)
-            output = output * scaling
-            result += output
+                x = x.to(lora_A.weight.dtype)
+                output = lora_B(lora_A(dropout(x)))
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                output = output * scaling
+                result += output
+
             return result
 
 
