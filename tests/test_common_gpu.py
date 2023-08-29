@@ -17,6 +17,7 @@ import unittest
 
 import pytest
 import torch
+import torch.nn.functional as F
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -374,21 +375,71 @@ class PeftGPUCommonTests(unittest.TestCase):
             quantization_config=bnb_config,
             torch_dtype=torch.float32,
         )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
         config = LoraConfig(
             r=8,
             init_lora_weights=False,
         )
         model = get_peft_model(model, config)
 
-        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         with torch.inference_mode():
-            out_before_merge = model.generate(random_input, max_new_tokens=1)
+            out_before_merge = F.softmax(model(random_input).logits, dim=-1)
 
         model.merge_and_unload("default")
         with torch.inference_mode():
-            out_after_merge = model.generate(random_input, max_new_tokens=1)
+            out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        self.assertTrue(torch.equal(out_before_merge, out_after_merge))
+        # tolerances are pretty high because some deviations are expected with quantization
+        atol = 0.01
+        rtol = 10
+        self.assertFalse(torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol))
+        self.assertTrue(isinstance(model, PeftModel))
+        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit))
+        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit))
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_merge_and_disable_lora(self):
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config)
+
+        with torch.inference_mode():
+            out_before = F.softmax(model(random_input).logits, dim=-1)
+
+        model.merge_adapter()
+        with model.disable_adapter():
+            with torch.inference_mode():
+                out_after = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 0.01
+        rtol = 10
+        self.assertFalse(torch.allclose(out_base, out_before, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(out_base, out_after, atol=atol, rtol=rtol))
         self.assertTrue(isinstance(model, PeftModel))
         self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit))
         self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit))
