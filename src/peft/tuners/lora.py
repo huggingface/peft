@@ -635,9 +635,6 @@ class LoraModel(BaseTuner):
                 one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
                 documentation. Defaults to None.
         """
-        # TODO: this fix should probably move to its own PR
-        if getattr(self.model, "is_loaded_in_8bit", False) or getattr(self.model, "is_loaded_in_4bit", False):
-            raise ValueError("Cannot merge LORA layers when the model is loaded in 8-bit mode")
 
         if adapter_name in list(self.peft_config.keys()):
             return
