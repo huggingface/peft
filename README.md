@@ -30,7 +30,8 @@ Supported methods:
 3. P-Tuning: [GPT Understands, Too](https://arxiv.org/abs/2103.10385)
 4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/abs/2104.08691)
 5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://arxiv.org/abs/2303.10512)  
-6. $(IA)^3$ : [Infused Adapter by Inhibiting and Amplifying Inner Activations](https://arxiv.org/abs/2205.05638)
+6. $(IA)^3$: [Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning](https://arxiv.org/abs/2205.05638)
+7. MultiTask Prompt Tuning: [Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning](https://arxiv.org/abs/2303.02861)
 
 ## Getting started
 
@@ -390,13 +391,6 @@ model = inject_adapter_in_model(lora_config, model)
 dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
 dummy_outputs = model(dummy_inputs)
 ```
-
-## Backlog:
-- [x] Add tests
-- [x] Multi Adapter training and inference support
-- [x] Add more use cases and examples
-- [x] Integrate`(IA)^3`, `AdaptionPrompt`
-- [ ] Explore and possibly integrate methods like `Bottleneck Adapters`,  ...
 
 ## Contributing
 
