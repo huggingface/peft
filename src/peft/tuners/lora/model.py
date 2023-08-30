@@ -210,10 +210,10 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _replace_module(parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
+        # TODO: need to set requires grad?
         new_module.weight = child.weight
         if hasattr(child, "bias"):
-            if child.bias is not None:
-                new_module.bias = child.bias
+            new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
             new_module.state = child.state
