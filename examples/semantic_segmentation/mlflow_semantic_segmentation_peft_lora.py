@@ -13,11 +13,6 @@ from huggingface_hub import cached_download, hf_hub_url
 import mlflow
 import os
 
-# mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-# if (not mlflow_uri):
-#     mlflow_uri = "http://127.0.0.1:5001"
-#     mlflow.set_tracking_uri(mlflow_uri)
-
 # Argument parsing
 parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint", type=str, default="nvidia/mit-b0", help="Checkpoint for the model")
