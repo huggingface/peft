@@ -189,8 +189,6 @@ if is_bnb_4bit_available():
                     expected_dtype = result.dtype
                     x = x.to(lora_A.weight.dtype)
 
-                x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
                 output = lora_B(lora_A(dropout(x)))
                 if requires_conversion:
                     output = output.to(expected_dtype)
