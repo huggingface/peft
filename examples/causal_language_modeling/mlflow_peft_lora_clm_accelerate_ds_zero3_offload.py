@@ -2,6 +2,7 @@ import gc
 import os
 import sys
 import threading
+import argparse
 
 import numpy as np
 import psutil
@@ -22,10 +23,10 @@ from peft import LoraConfig, TaskType, get_peft_model
 import mlflow
 import time
 
-mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-if (not mlflow_uri):
-    mlflow_uri = "http://127.0.0.1:5001"
-    mlflow.set_tracking_uri(mlflow_uri)
+# mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+# if (not mlflow_uri):
+#     mlflow_uri = "http://127.0.0.1:5001"
+#     mlflow.set_tracking_uri(mlflow_uri)
 
 def levenshtein_distance(str1, str2):
     # TC: O(N^2)
@@ -112,22 +113,23 @@ class TorchTracemalloc:
         # print(f"delta used/peak {self.used:4d}/{self.peaked:4d}")
 
 
-def main():
+def main(args):
     accelerator = Accelerator()
-    model_name_or_path = "bigscience/bloomz-7b1"
-    dataset_name = "twitter_complaints"
-    peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
-    text_column = "Tweet text"
-    label_column = "text_label"
-    lr = 3e-3
-    num_epochs = 20
-    batch_size = 8
-    seed = 42
-    max_length = 64
-    do_test = False
+    model_name_or_path = args.model_name_or_path
+    dataset_name = args.dataset_name
+    text_column = args.text_column
+    label_column = args.label_column
+    lr = args.lr
+    num_epochs = args.num_epochs
+    batch_size = args.batch_size
+    seed = args.seed
+    max_length = args.max_length
+    do_test = args.do_test
+    cache_dir = args.cache_dir
     set_seed(seed)
 
-    dataset = load_dataset("ought/raft", dataset_name)
+    peft_config = LoraConfig(task_type=TaskType.CAUSAL_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1)
+    dataset = load_dataset("ought/raft", dataset_name, cache_dir=cache_dir)
     classes = [k.replace("_", " ") for k in dataset["train"].features["Label"].names]
     dataset = dataset.map(
         lambda x: {"text_label": [classes[label] for label in x["Label"]]},
@@ -196,9 +198,9 @@ def main():
     train_dataset = processed_datasets["train"]
 
     # mlflow initial
-    experiment_id = mlflow.create_experiment('casual-language-modeling-{}'.format(model_name_or_path))
-    experiment = mlflow.get_experiment(experiment_id)
-    mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
+    # experiment_id = mlflow.create_experiment('casual-language-modeling-{}'.format(model_name_or_path))
+    # experiment = mlflow.get_experiment(experiment_id)
+    # mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
 
 
     with accelerator.main_process_first():
@@ -244,114 +246,130 @@ def main():
         model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler
     )
     accelerator.print(model)
-
+    accelerator.print(f"  Num examples = {len(dataset)}")
+    accelerator.print(f"  Num Epochs = {num_epochs}")
+    accelerator.print(f"  Num batch sizes = {batch_size}")
     is_ds_zero_3 = False
     if getattr(accelerator.state, "deepspeed_plugin", None):
         is_ds_zero_3 = accelerator.state.deepspeed_plugin.zero_stage == 3
 
 
-    with mlflow_runner:
-        for epoch in range(num_epochs):
-            with TorchTracemalloc() as tracemalloc:
-                model.train()
-                total_loss = 0
-                start_time = time.time()  # Start time for the epoch
-                for step, batch in enumerate(tqdm(train_dataloader)):
-                    outputs = model(**batch)
-                    loss = outputs.loss
-                    total_loss += loss.detach().float()
-                    accelerator.backward(loss)
-                    optimizer.step()
-                    lr_scheduler.step()
-                    optimizer.zero_grad()
-                    
-                end_time = time.time()  # End time for the epoch
+    # with mlflow_runner:
+    mlflow.start_run()
+    elapsed = 0
+    for epoch in range(num_epochs):
+        with TorchTracemalloc() as tracemalloc:
+            model.train()
+            total_loss = 0
+            start_time = time.time()  # Start time for the epoch
+            for step, batch in enumerate(tqdm(train_dataloader)):
+                start_time_step = time.time()
+                outputs = model(**batch)
+                loss = outputs.loss
+                total_loss += loss.detach().float()
+                accelerator.backward(loss)
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
 
-                # Calculate metrics
-                epoch_runtime = end_time - start_time
-                samples_per_second = len(train_dataloader) / epoch_runtime
-                steps_per_second = len(train_dataloader) / epoch_runtime
-                avg_loss = total_loss / len(train_dataloader)
+                elapsed += time.time() - start_time_step
+                total_steps = epoch * len(train_dataloader) + step + 1
+                if total_steps % args.log_interval == 0:
+                    thoughput = total_steps * args.batch_size / elapsed
+                    mlflow.log_metric('throughput', thoughput, step=total_steps)
+                    mlflow.log_metric('loss', loss, step=total_steps)
+                    mlflow.log_metric('lr', lr_scheduler.get_last_lr()[0], step=total_steps)
+                
+            end_time = time.time()  # End time for the epoch
 
-                # Log metrics for the epoch
-                mlflow.log_metric('loss', avg_loss)
-                mlflow.log_metric('total_loss', total_loss)
-                mlflow.log_metric('train_runtime', epoch_runtime)
-                mlflow.log_metric('train_samples_per_second', samples_per_second)
-                mlflow.log_metric('train_steps_per_second', steps_per_second)
-            
-            mlflow.end_run()
+            # Calculate metrics
+            epoch_runtime = end_time - start_time
+            avg_throughput = len(train_dataloader) * args.batch_size / epoch_runtime
+            # samples_per_second = len(train_dataloader) / epoch_runtime
+            # steps_per_second = len(train_dataloader) / epoch_runtime
+            # avg_loss = total_loss / len(train_dataloader)
+
+            # Log metrics for the epoch
+            mlflow.log_metric('epoch_time', epoch_runtime)
+            mlflow.log_metric('avg_throughput', avg_throughput)
+            # mlflow.log_metric('loss', avg_loss)
+            # mlflow.log_metric('total_loss', total_loss)
+            # mlflow.log_metric('train_runtime', epoch_runtime)
+            # mlflow.log_metric('train_samples_per_second', samples_per_second)
+            # mlflow.log_metric('train_steps_per_second', steps_per_second)
+        
+        mlflow.end_run()
 
 
-            # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-            accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
-            accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
-            accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
-            accelerator.print(
-                "GPU Total Peak Memory consumed during the train (max): {}".format(
-                    tracemalloc.peaked + b2mb(tracemalloc.begin)
-                )
+        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
+        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
+        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
+        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
+        accelerator.print(
+            "GPU Total Peak Memory consumed during the train (max): {}".format(
+                tracemalloc.peaked + b2mb(tracemalloc.begin)
             )
+        )
 
-            accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-            accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-            accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
-            accelerator.print(
-                "CPU Total Peak Memory consumed during the train (max): {}".format(
-                    tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
-                )
+        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
+        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
+        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
+        accelerator.print(
+            "CPU Total Peak Memory consumed during the train (max): {}".format(
+                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
             )
-            train_epoch_loss = total_loss / len(train_dataloader)
-            train_ppl = torch.exp(train_epoch_loss)
-            accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
+        )
+        train_epoch_loss = total_loss / len(train_dataloader)
+        train_ppl = torch.exp(train_epoch_loss)
+        accelerator.print(f"{epoch=}: {train_ppl=} {train_epoch_loss=}")
 
-            model.eval()
-            eval_preds = []
-            with TorchTracemalloc() as tracemalloc:
-                for _, batch in enumerate(tqdm(eval_dataloader)):
-                    batch = {k: v for k, v in batch.items() if k != "labels"}
-                    with torch.no_grad():
-                        outputs = accelerator.unwrap_model(model).generate(
-                            **batch, synced_gpus=is_ds_zero_3, max_new_tokens=10
-                        )  # synced_gpus=True for DS-stage 3
-                    outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
-                    preds = accelerator.gather_for_metrics(outputs)
-                    preds = preds[:, max_length:].detach().cpu().numpy()
-                    eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
+        model.eval()
+        eval_preds = []
+        with TorchTracemalloc() as tracemalloc:
+            for _, batch in enumerate(tqdm(eval_dataloader)):
+                batch = {k: v for k, v in batch.items() if k != "labels"}
+                with torch.no_grad():
+                    outputs = accelerator.unwrap_model(model).generate(
+                        **batch, synced_gpus=is_ds_zero_3, max_new_tokens=10
+                    )  # synced_gpus=True for DS-stage 3
+                outputs = accelerator.pad_across_processes(outputs, dim=1, pad_index=tokenizer.pad_token_id)
+                preds = accelerator.gather_for_metrics(outputs)
+                preds = preds[:, max_length:].detach().cpu().numpy()
+                eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
-            # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-            accelerator.print("GPU Memory before entering the eval : {}".format(b2mb(tracemalloc.begin)))
-            accelerator.print("GPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.used))
-            accelerator.print("GPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.peaked))
-            accelerator.print(
-                "GPU Total Peak Memory consumed during the eval (max): {}".format(
-                    tracemalloc.peaked + b2mb(tracemalloc.begin)
-                )
+        # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
+        accelerator.print("GPU Memory before entering the eval : {}".format(b2mb(tracemalloc.begin)))
+        accelerator.print("GPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.used))
+        accelerator.print("GPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.peaked))
+        accelerator.print(
+            "GPU Total Peak Memory consumed during the eval (max): {}".format(
+                tracemalloc.peaked + b2mb(tracemalloc.begin)
             )
+        )
 
-            accelerator.print("CPU Memory before entering the eval : {}".format(b2mb(tracemalloc.cpu_begin)))
-            accelerator.print("CPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.cpu_used))
-            accelerator.print("CPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.cpu_peaked))
-            accelerator.print(
-                "CPU Total Peak Memory consumed during the eval (max): {}".format(
-                    tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
-                )
+        accelerator.print("CPU Memory before entering the eval : {}".format(b2mb(tracemalloc.cpu_begin)))
+        accelerator.print("CPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.cpu_used))
+        accelerator.print("CPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.cpu_peaked))
+        accelerator.print(
+            "CPU Total Peak Memory consumed during the eval (max): {}".format(
+                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
             )
+        )
 
-            correct = 0
-            total = 0
-            assert len(eval_preds) == len(
-                dataset["train"][label_column]
-            ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
-            for pred, true in zip(eval_preds, dataset["train"][label_column]):
-                if pred.strip() == true.strip():
-                    correct += 1
-                total += 1
-            accuracy = correct / total * 100
-            accelerator.print(f"{accuracy=}")
-            accelerator.print(f"{eval_preds[:10]=}")
-            accelerator.print(f"{dataset['train'][label_column][:10]=}")
-
+        correct = 0
+        total = 0
+        assert len(eval_preds) == len(
+            dataset["train"][label_column]
+        ), f"{len(eval_preds)} != {len(dataset['train'][label_column])}"
+        for pred, true in zip(eval_preds, dataset["train"][label_column]):
+            if pred.strip() == true.strip():
+                correct += 1
+            total += 1
+        accuracy = correct / total * 100
+        accelerator.print(f"{accuracy=}")
+        accelerator.print(f"{eval_preds[:10]=}")
+        accelerator.print(f"{dataset['train'][label_column][:10]=}")
+    
     if do_test:
         model.eval()
         test_preds = []
@@ -386,4 +404,18 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Indexing elasticsearch documents.')
+    parser.add_argument('--model_name_or_path', type=str, default='bigscience/bloomz-7b1', help='Path to pretrained model or model identifier from huggingface.co/models.')
+    parser.add_argument('--dataset_name', type=str, default='twitter_complaints', help='The name of the Dataset (from the HuggingFace hub) to train on.')
+    parser.add_argument('--text_column', type=str, default="Tweet text", help='text column.')
+    parser.add_argument('--label_column', type=str, default="text_label", help='label column.')
+    parser.add_argument('--lr', type=float, default=3e-3, help='learning rate .')
+    parser.add_argument('--num_epochs', type=int, default=1, help='number of epochs .')
+    parser.add_argument('--batch_size', type=int, default=2, help='training batch size .')
+    parser.add_argument('--seed', type=int, default=None, help='A seed for reproducible training.')
+    parser.add_argument('--max_length', type=int, default=64, help='model max length.')
+    parser.add_argument('--do_test', type=bool, default=False, help='do test.')
+    parser.add_argument('--log_interval', type=int, default=None, help='log interval.')
+    parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+    args = parser.parse_args()
+    main(args)
