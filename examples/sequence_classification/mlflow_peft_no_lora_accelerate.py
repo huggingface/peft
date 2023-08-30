@@ -20,11 +20,6 @@ import mlflow
 import time
 import os
 logging_steps = 100
-# mlflow init
-# mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-# if (not mlflow_uri):
-#     mlflow_uri = "http://127.0.0.1:5001"
-#     mlflow.set_tracking_uri(mlflow_uri)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
@@ -171,12 +166,6 @@ def main():
         num_warmup_steps=args.num_warmup_steps,
         num_training_steps=(len(train_dataloader) * args.num_train_epochs),
     )
-
-    # mlflow initial
-    # experiment_id = mlflow.create_experiment('peft_no_lora_seq_cls-{}'.format(args.model_name_or_path))
-    # experiment = mlflow.get_experiment(experiment_id)
-    # mlflow_runner = mlflow.start_run(run_name=args.model_name_or_path, experiment_id=experiment.experiment_id)
-
 
     if getattr(accelerator.state, "fsdp_plugin", None) is not None:
         train_dataloader, eval_dataloader, optimizer, lr_scheduler = accelerator.prepare(
