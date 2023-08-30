@@ -134,7 +134,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     ):
         r"""
         This function saves the adapter model and the adapter configuration files to a directory, so that it can be
-        reloaded using the [`LoraModel.from_pretrained`] class method, and also used by the [`LoraModel.push_to_hub`]
+        reloaded using the [`PeftModel.from_pretrained`] class method, and also used by the [`PeftModel.push_to_hub`]
         method.
 
         Args:
