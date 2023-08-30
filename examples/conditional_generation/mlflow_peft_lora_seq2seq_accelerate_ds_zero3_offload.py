@@ -104,8 +104,7 @@ class TorchTracemalloc:
 
 def main(args):
     accelerator = Accelerator()
-    # model_name_or_path = "bigscience/T0_3B"
-    # model_name_or_path = "facebook/bart-large"
+   
     model_name_or_path = args.model_name_or_path
     dataset_name = "twitter_complaints"
     peft_config = LoraConfig(
@@ -131,15 +130,6 @@ def main(args):
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     target_max_length = max([len(tokenizer(class_label)["input_ids"]) for class_label in classes])
-
-    # mlflow initial
-    # mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-    # if (not mlflow_uri):
-    #     mlflow_uri = "http://127.0.0.1:5001"
-    #     mlflow.set_tracking_uri(mlflow_uri)
-    # experiment_id = mlflow.create_experiment('conditional_generation-{}'.format(model_name_or_path))
-    # experiment = mlflow.get_experiment(experiment_id)
-    # mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
 
     def preprocess_function(examples):
         inputs = examples[text_column]
