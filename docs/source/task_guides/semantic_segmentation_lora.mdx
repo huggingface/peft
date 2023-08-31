@@ -180,7 +180,7 @@ def compute_metrics(eval_pred):
             references=labels,
             num_labels=len(id2label),
             ignore_index=0,
-            reduce_labels=image_processor.reduce_labels,
+            reduce_labels=image_processor.do_reduce_labels,
         )
 
         per_category_accuracy = metrics.pop("per_category_accuracy").tolist()
