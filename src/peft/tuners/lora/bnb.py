@@ -75,8 +75,9 @@ if is_bnb_available():
             requires_conversion = not torch.is_autocast_enabled()
             if requires_conversion:
                 expected_dtype = result.dtype
-                if x.dtype != torch.float32:
-                    x = x.float()
+                compute_dtype = lora_A.weight.dtype
+                if x.dtype != compute_dtype:
+                    x = x.to(compute_dtype)
 
             output = lora_B(lora_A(dropout(x)))
             if requires_conversion:
