@@ -13,11 +13,6 @@ from huggingface_hub import cached_download, hf_hub_url
 import mlflow
 import os
 
-mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-if (not mlflow_uri):
-    mlflow_uri = "http://127.0.0.1:5001"
-    mlflow.set_tracking_uri(mlflow_uri)
-
 # Argument parsing
 parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint", type=str, default="nvidia/mit-b0", help="Checkpoint for the model")
@@ -166,15 +161,15 @@ trainer = Trainer(
     compute_metrics=compute_metrics,
 )
 
-with mlflow_runner:
-    train_results =  trainer.train()
-    trainer.log_metrics("train", train_results.metrics)
-    trainer.save_metrics("train", train_results.metrics)
-    trainer.save_model()
-    trainer.save_state()
+mlflow.start_run()
+train_results =  trainer.train()
+trainer.log_metrics("train", train_results.metrics)
+trainer.save_metrics("train", train_results.metrics)
+trainer.save_model()
+trainer.save_state()
 
-    mlflow.log_metric('loss', train_results.metrics["train_loss"])
-    mlflow.log_metric('runtime', train_results.metrics["train_runtime"])
-    mlflow.log_metric('samples_per_second', train_results.metrics["train_samples_per_second"])
-    mlflow.log_metric('steps_per_second', train_results.metrics["train_steps_per_second"])
-    mlflow.end_run()
+mlflow.log_metric('loss', train_results.metrics["train_loss"])
+mlflow.log_metric('runtime', train_results.metrics["train_runtime"])
+mlflow.log_metric('samples_per_second', train_results.metrics["train_samples_per_second"])
+mlflow.log_metric('steps_per_second', train_results.metrics["train_steps_per_second"])
+mlflow.end_run()
