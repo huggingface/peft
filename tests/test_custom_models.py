@@ -372,6 +372,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
 class TestRepr(unittest.TestCase):
     """Tests related to the repr of adapted models"""
+
     def test_repr_lora(self):
         config = LoraConfig(target_modules=["lin0"])
         model = get_peft_model(MLP(), config)
