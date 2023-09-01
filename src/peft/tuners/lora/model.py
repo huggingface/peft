@@ -210,7 +210,8 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _replace_module(parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
-        # TODO: need to set requires grad?
+        # It's not necessary to set requires_grad here, as that is handled by
+        # _mark_only_adapters_as_trainable
         new_module.weight = child.weight
         if hasattr(child, "bias"):
             new_module.bias = child.bias
