@@ -363,3 +363,137 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+
+class DdpParamsToIgnoreTester(unittest.TestCase):
+    """Tests that the _params_and_buffers_to_ignore property works as expected.
+
+    # See issue #899.
+
+    This is not specifically tied to custom models, it's just easy to test here and testing it on all types of models
+    would be overkill.
+
+    """
+    def test_ddp_params_and_buffers_to_ignore_modules_to_save_none(self):
+        config = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config)
+
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = set()
+        assert params_and_buffers_to_ignore == expected
+
+    def test_ddp_params_and_buffers_to_ignore_modules_to_save_default(self):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {"base_model.model.lin1.original_module.weight", "base_model.model.lin1.original_module.bias"}
+        self.assertEqual(params_and_buffers_to_ignore, expected)
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))
+
+    def test_ddp_params_and_buffers_to_ignore_modules_to_save_deactivated_adapter(self):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+
+        with peft_model.disable_adapter():
+            params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {
+            "base_model.model.lin1.modules_to_save.default.weight", "base_model.model.lin1.modules_to_save.default.bias"
+        }
+        # we check for subset because we're not interested in checking the ignored lora layers in this test
+        self.assertTrue(expected.issubset(params_and_buffers_to_ignore))
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))
+
+    def test_ddp_params_and_buffers_to_ignore_modules_to_save_multiple_modules_to_save(self):
+        config = LoraConfig(target_modules=["emb"], modules_to_save=["conv1d", "lin0"])
+        peft_model = get_peft_model(ModelEmbConv1D(), config)
+
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {
+            "base_model.model.conv1d.original_module.weight",
+            "base_model.model.conv1d.original_module.bias",
+            "base_model.model.lin0.original_module.weight",
+            "base_model.model.lin0.original_module.bias",
+        }
+        self.assertEqual(params_and_buffers_to_ignore, expected)
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))
+
+    def test_ddp_params_and_buffers_to_ignore_multiple_lora_adapters_different_targets(self):
+        # When having multiple LoRA layers on different targets, the inactive one should be ignored.
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # set config0 as active
+        peft_model.set_adapter("default")
+
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {
+            "base_model.model.lin1.lora_A.adapter1.weight",
+            "base_model.model.lin1.lora_B.adapter1.weight",
+        }
+        self.assertEqual(params_and_buffers_to_ignore, expected)
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        }
+        self.assertEqual(params_and_buffers_to_ignore, expected)
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))
+
+    def test_ddp_params_and_buffers_to_ignore_multiple_lora_adapters_same_targets(self):
+        # When having multiple LoRA layers on the same target, the inactive one should be ignored. This is similar to
+        # the previous test, only that adapter1 is also applied to lin0.
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # set config0 as active
+        peft_model.set_adapter("default")
+
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {
+            "base_model.model.lin0.lora_A.adapter1.weight",
+            "base_model.model.lin0.lora_B.adapter1.weight",
+        }
+        self.assertEqual(params_and_buffers_to_ignore, expected)
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
+        expected = {
+            "base_model.model.lin0.lora_A.default.weight",
+            "base_model.model.lin0.lora_B.default.weight",
+        }
+        self.assertEqual(params_and_buffers_to_ignore, expected)
+
+        # check that those parameters indeed exist on the model
+        existing_params = set(peft_model.state_dict().keys())
+        self.assertTrue(params_and_buffers_to_ignore.issubset(existing_params))

@@ -723,7 +723,7 @@ class PeftCommonTester:
             # AdaLora does not support adding more than 1 adapter
             return
 
-        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
+        adapter_list = ["adapter_1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(

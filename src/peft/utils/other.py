@@ -12,6 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import copy
 import inspect
 import os
@@ -156,6 +158,18 @@ class ModulesToSaveWrapper(torch.nn.Module):
         self.update(adapter_name)
         self.active_adapter = adapter_name
         self.disable_adapters = False
+
+    @property
+    def _ddp_params_and_buffers_to_ignore(self) -> set[str]:
+        # Parameters to ignore when applying DDP
+        # See issue 899.
+        if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
+            names = set()
+            for adapter_name, adapter in self.modules_to_save.items():
+                names |= {f"modules_to_save.{adapter_name}.{name}" for name, _ in adapter.named_parameters()}
+        else:
+            names = {f"original_module.{name}" for name, _ in self.original_module.named_parameters()}
+        return names
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))

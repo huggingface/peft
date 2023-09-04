@@ -125,6 +125,23 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
 
+    @property
+    def _ddp_params_and_buffers_to_ignore(self) -> set[str]:
+        # Add an attribute _ddp_params_and_buffers_to_ignore. This is sometimes required for DDP, as we may
+        # want to ignore certain parameters to avoid the error "Parameters which did not receive grad for rank X".
+        # See issue 899.
+        ddp_params_and_buffers_to_ignore = set()
+        for name, module in self.named_modules():
+            if module is self:
+                # avoid infinite recursion
+                continue
+
+            module_params_and_buffers_to_ignore = getattr(module, "_ddp_params_and_buffers_to_ignore", [])
+            for param_name in module_params_and_buffers_to_ignore:
+                ddp_params_and_buffers_to_ignore.add(f"{name}.{param_name}")
+
+        return ddp_params_and_buffers_to_ignore
+
     def save_pretrained(
         self,
         save_directory: str,

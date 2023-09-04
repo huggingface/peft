@@ -112,6 +112,31 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
+    @property
+    def _ddp_params_and_buffers_to_ignore(self) -> set[str]:
+        # Parameters to ignore when applying DDP
+        # See issue 899.
+        ddp_params_and_buffers_to_ignore: set[str] = set()
+
+        inactive_adapters = set(self.lora_A) | set(self.lora_B) | set(self.lora_embedding_A) | set(self.lora_embedding_B)
+        if not self.disable_adapters:
+            # there is an active adapter, it should not be ignored
+            inactive_adapters -= {self.active_adapter}
+
+        def iter_params(adapter_name, lora_module):
+            # helper function to iterate through all params of given adapter and sub-module
+            module_dict = getattr(self, lora_module)
+            if adapter_name in module_dict:
+                for param_name, _ in module_dict[adapter_name].named_parameters():
+                    yield f"{lora_module}.{adapter_name}.{param_name}"
+
+        for inactive_adapter in inactive_adapters:
+            ddp_params_and_buffers_to_ignore |= set(iter_params(inactive_adapter, "lora_A"))
+            ddp_params_and_buffers_to_ignore |= set(iter_params(inactive_adapter, "lora_B"))
+            ddp_params_and_buffers_to_ignore |= set(iter_params(inactive_adapter, "lora_embedding_A"))
+            ddp_params_and_buffers_to_ignore |= set(iter_params(inactive_adapter, "lora_embedding_B"))
+
+        return ddp_params_and_buffers_to_ignore
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
