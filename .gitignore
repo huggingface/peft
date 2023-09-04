@@ -2,7 +2,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+#
+*vit*
 # C extensions
 *.so
 
@@ -139,3 +140,6 @@ dmypy.json
 
 # More test things
 wandb
+
+mlruns/
+outputs/
