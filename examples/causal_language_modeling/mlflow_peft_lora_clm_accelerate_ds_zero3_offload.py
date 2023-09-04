@@ -202,7 +202,6 @@ def main(args):
     # experiment = mlflow.get_experiment(experiment_id)
     # mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
 
-
     with accelerator.main_process_first():
         processed_datasets = dataset.map(
             test_preprocess_function,
