@@ -118,7 +118,9 @@ class LoraLayer(BaseTunerLayer):
         # See issue 899.
         ddp_params_and_buffers_to_ignore: set[str] = set()
 
-        inactive_adapters = set(self.lora_A) | set(self.lora_B) | set(self.lora_embedding_A) | set(self.lora_embedding_B)
+        inactive_adapters = (
+            set(self.lora_A) | set(self.lora_B) | set(self.lora_embedding_A) | set(self.lora_embedding_B)
+        )
         if not self.disable_adapters:
             # there is an active adapter, it should not be ignored
             inactive_adapters -= {self.active_adapter}
@@ -137,6 +139,7 @@ class LoraLayer(BaseTunerLayer):
             ddp_params_and_buffers_to_ignore |= set(iter_params(inactive_adapter, "lora_embedding_B"))
 
         return ddp_params_and_buffers_to_ignore
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP

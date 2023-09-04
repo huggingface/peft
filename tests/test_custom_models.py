@@ -374,6 +374,7 @@ class DdpParamsToIgnoreTester(unittest.TestCase):
     would be overkill.
 
     """
+
     def test_ddp_params_and_buffers_to_ignore_modules_to_save_none(self):
         config = LoraConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config)
@@ -401,7 +402,8 @@ class DdpParamsToIgnoreTester(unittest.TestCase):
         with peft_model.disable_adapter():
             params_and_buffers_to_ignore = peft_model._ddp_params_and_buffers_to_ignore
         expected = {
-            "base_model.model.lin1.modules_to_save.default.weight", "base_model.model.lin1.modules_to_save.default.bias"
+            "base_model.model.lin1.modules_to_save.default.weight",
+            "base_model.model.lin1.modules_to_save.default.bias",
         }
         # we check for subset because we're not interested in checking the ignored lora layers in this test
         self.assertTrue(expected.issubset(params_and_buffers_to_ignore))
