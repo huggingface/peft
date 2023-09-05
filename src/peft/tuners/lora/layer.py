@@ -185,9 +185,9 @@ class Linear(nn.Linear, LoraLayer):
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        if kwargs.get("adapter_indices", None) is not None:
-            return self.multi_batched_forward(x, **kwargs)
+    def forward(self, x: torch.Tensor, adapter_names=None) -> torch.Tensor:
+        if adapter_names is not None:
+            return self.multi_batched_forward(x, adapter_names)
         return self.single_batched_forward(x)
 
     def single_batched_forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -215,23 +215,20 @@ class Linear(nn.Linear, LoraLayer):
         result = result.to(previous_dtype)
         return result
 
-    def multi_batched_forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        id_to_adapter_dict = kwargs["id_to_adapter_dict"]
-        num_adapters = len(id_to_adapter_dict)
-        sub_batch_indices_list = [
-            torch.eq(kwargs["adapter_indices"], i).nonzero(as_tuple=True)[0] for i in range(num_adapters)
-        ]
+    def multi_batched_forward(self, x: torch.Tensor, adapter_names) -> torch.Tensor:
+        unique_adapters = set(adapter_names)
+        len(unique_adapters)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
         final_output = self._linear(x)
 
         if self.merged:
             self.unmerge()
-        for i in range(num_adapters):
-            # i==0 is the base module.
-            if i == 0 or self.disable_adapters:
+        for i, active_adapter in enumerate(unique_adapters):
+            if active_adapter == "base":
                 continue
-
-            # choosing the adapter and related lora modules
-            active_adapter = id_to_adapter_dict[i]
             previous_dtype = x.dtype
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]

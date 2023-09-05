@@ -16,6 +16,7 @@ import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from functools import partial
 from typing import Any
 
 import torch
@@ -667,70 +668,59 @@ class LoraModel(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def _adapter_names_to_ids(self):
-        adapter_names = ["base"] + list(self.peft_config.keys())
-        return {adapter_name: index for index, adapter_name in enumerate(adapter_names)}
-
-    def get_adapter_indices(self, adapter_names, return_tensor=True):
-        """
-        Args:
-        adapter_names (list[str]): List of adapter names. To use the base model the adapter name will be `base`
-
-        Returns:
-            list[int]: List of indices of the adapters to be used.
-        """
-        if getattr(self, "adapter_to_id_dict", None) is None:
-            self.set_adapter_to_id_dict()
-        adapter_ids = [self.adapter_to_id_dict[adapter_name] for adapter_name in adapter_names]
-        if return_tensor:
-            return torch.tensor(adapter_ids)
-        return adapter_ids
-
-    def set_adapter_to_id_dict(self):
-        self.adapter_to_id_dict = self._adapter_names_to_ids()
-        self.id_to_adapter_dict = {index: adapter_name for adapter_name, index in self.adapter_to_id_dict.items()}
-
     def forward(self, *args: Any, **kwargs: Any):
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is None:
+            return super().forward(*args, **kwargs)
         hook_handles = []
-        if kwargs.get("adapter_indices", None) is not None:
-            adapter_indices = kwargs["adapter_indices"]
-
-            def add_adapter_indices(module, args, kw_args):
-                kw_args["adapter_indices"] = adapter_indices
-                kw_args["id_to_adapter_dict"] = self.id_to_adapter_dict
+        if kwargs.get("adapter_names", None) is not None:
+            if self.training:
+                raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
 
             key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
             for key in key_list:
                 _, target, _ = _get_submodules(self.model, key)
                 if isinstance(target, LoraLayer):
-                    handle = target.register_forward_pre_hook(add_adapter_indices, with_kwargs=True)
+                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                    handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
                     target.adapter_indices = kwargs["adapter_indices"]
             del kwargs["adapter_indices"]
 
-        outputs = self.model.forward(*args, **kwargs)
-        for handle in hook_handles:
-            handle.remove()
+        try:
+            outputs = super().forward(*args, **kwargs)
+        finally:
+            for handle in hook_handles:
+                handle.remove()
         return outputs
 
     def generate(self, **kwargs: Any):
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is None:
+            return super().forward(**kwargs)
         hook_handles = []
-        if kwargs.get("adapter_indices", None) is not None:
-            adapter_indices = kwargs["adapter_indices"]
-
-            def add_adapter_indices(module, args, kw_args):
-                kw_args["adapter_indices"] = adapter_indices
-                kw_args["id_to_adapter_dict"] = self.id_to_adapter_dict
+        if kwargs.get("adapter_names", None) is not None:
+            if self.training:
+                raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
 
             key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
             for key in key_list:
                 _, target, _ = _get_submodules(self.model, key)
                 if isinstance(target, LoraLayer):
-                    handle = target.register_forward_pre_hook(add_adapter_indices, with_kwargs=True)
+                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                    handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
+                    target.adapter_indices = kwargs["adapter_indices"]
             del kwargs["adapter_indices"]
 
-        outputs = self.model.generate(**kwargs)
-        for handle in hook_handles:
-            handle.remove()
+        try:
+            outputs = super().generate(**kwargs)
+        finally:
+            for handle in hook_handles:
+                handle.remove()
         return outputs
+
+
+def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
+    kwargs["adapter_names"] = adapter_names
+    return args, kwargs
