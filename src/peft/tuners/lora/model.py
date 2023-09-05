@@ -16,6 +16,7 @@ import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from functools import partial
 from typing import Any
 
 import torch
@@ -667,48 +668,72 @@ class LoraModel(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def _adapter_names_to_ids(self):
-        adapter_names = ["base"] + list(self.peft_config.keys())
-        return {adapter_name: index for index, adapter_name in enumerate(adapter_names)}
+    # def _adapter_names_to_ids(self):
+    #     adapter_names = ["base"] + list(self.peft_config.keys())
+    #     return {adapter_name: index for index, adapter_name in enumerate(adapter_names)}
 
-    def get_adapter_indices(self, adapter_names, return_tensor=True):
-        """
-        Args:
-        adapter_names (list[str]): List of adapter names. To use the base model the adapter name will be `base`
+    # def get_adapter_indices(self, adapter_names, return_tensor=True):
+    #     """
+    #     Args:
+    #     adapter_names (list[str]): List of adapter names. To use the base model the adapter name will be `base`
 
-        Returns:
-            list[int]: List of indices of the adapters to be used.
-        """
-        if getattr(self, "adapter_to_id_dict", None) is None:
-            self.set_adapter_to_id_dict()
-        adapter_ids = [self.adapter_to_id_dict[adapter_name] for adapter_name in adapter_names]
-        if return_tensor:
-            return torch.tensor(adapter_ids)
-        return adapter_ids
+    #     Returns:
+    #         list[int]: List of indices of the adapters to be used.
+    #     """
+    #     if getattr(self, "adapter_to_id_dict", None) is None:
+    #         self.set_adapter_to_id_dict()
+    #     adapter_ids = [self.adapter_to_id_dict[adapter_name] for adapter_name in adapter_names]
+    #     if return_tensor:
+    #         return torch.tensor(adapter_ids)
+    #     return adapter_ids
 
-    def set_adapter_to_id_dict(self):
-        self.adapter_to_id_dict = self._adapter_names_to_ids()
-        self.id_to_adapter_dict = {index: adapter_name for adapter_name, index in self.adapter_to_id_dict.items()}
+    # def set_adapter_to_id_dict(self):
+    #     self.adapter_to_id_dict = self._adapter_names_to_ids()
+    #     self.id_to_adapter_dict = {index: adapter_name for adapter_name, index in self.adapter_to_id_dict.items()}
 
     def forward(self, *args: Any, **kwargs: Any):
-        if kwargs.get("adapter_indices", None) is not None:
-            key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(self.model, key)
-                if isinstance(target, LoraLayer):
-                    target.id_to_adapter_dict = self.id_to_adapter_dict
-                    target.adapter_indices = kwargs["adapter_indices"]
+        adapter_indices = kwargs.pop("adapter_indices", None)
+        if adapter_indices is None:
+            return super().forward(*args, **kwargs)
 
-        return self.model.forward(*args, **kwargs)
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        handles = []
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, Linear):  # TODO: add support for other layer types
+                pre_forward = partial(_pre_forward, adapter_indices=adapter_indices)
+                handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                handles.append(handle)
 
-    def generate(self, **kwargs: Any):
-        if kwargs.get("adapter_indices", None) is not None:
-            key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(self.model, key)
-                if isinstance(target, LoraLayer):
-                    target.id_to_adapter_dict = self.id_to_adapter_dict
-                    target.adapter_indices = kwargs["adapter_indices"]
-            del kwargs["adapter_indices"]
+        try:
+            output = super().forward(*args, **kwargs)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return output
 
-        return self.model.generate(**kwargs)
+    def generate(self, *args: Any, **kwargs: Any):
+        adapter_indices = kwargs.pop("adapter_indices", None)
+        if adapter_indices is None:
+            return super().generate(*args, **kwargs)
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        handles = []
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, Linear):  # TODO: add support for other layer types
+                pre_forward = partial(_pre_forward, adapter_indices=adapter_indices)
+                handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                handles.append(handle)
+
+        try:
+            output = super().generate(*args, **kwargs)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return output
+
+
+def _pre_forward(target, args, kwargs, adapter_indices):
+    kwargs["adapter_indices"] = adapter_indices
+    return args, kwargs

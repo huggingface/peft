@@ -187,9 +187,10 @@ class Linear(nn.Linear, LoraLayer):
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.adapter_indices is not None:
-            return self.multi_batched_forward(x)
+    def forward(self, x: torch.Tensor, adapter_indices=None) -> torch.Tensor:
+        # note: adapter_indices can be added by a pre-forward hook
+        if adapter_indices is not None:
+            return self.multi_batched_forward(x, adapter_indices)
         return self.single_batched_forward(x)
 
     def single_batched_forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -212,41 +213,39 @@ class Linear(nn.Linear, LoraLayer):
 
             result = self._linear(x)
             x = x.to(lora_A.weight.dtype)
-            result += lora_B(lora_A(dropout(x))) * scaling
+            foo = lora_B(lora_A(dropout(x))) * scaling
+            result += foo
 
         result = result.to(previous_dtype)
         return result
 
-    def multi_batched_forward(self, x: torch.Tensor) -> torch.Tensor:
-        num_adapters = len(self.id_to_adapter_dict)
-        sub_batch_indices_list = [
-            torch.eq(self.adapter_indices, i).nonzero(as_tuple=True)[0] for i in range(num_adapters)
-        ]
+    def multi_batched_forward(self, x: torch.Tensor, adapter_indices: torch.Tensor) -> torch.Tensor:
         final_output = self._linear(x)
+        if self.disable_adapters:
+            return final_output
+
+        id_to_adapter_dict = dict(enumerate(self.lora_A, start=1))  # 0 is base
+        num_adapters = len(id_to_adapter_dict)
+        sub_batch_indices_list = [
+            torch.eq(adapter_indices, i).nonzero(as_tuple=True)[0] for i in range(num_adapters + 1)
+        ]
 
         if self.merged:
             self.unmerge()
-        for i in range(num_adapters):
-            # i==0 is the base module.
-            if i == 0 or self.disable_adapters:
-                continue
 
+        for i, active_adapter in id_to_adapter_dict.items():
             # choosing the adapter and related lora modules
-            active_adapter = self.id_to_adapter_dict[i]
             previous_dtype = x.dtype
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
-            # getting the sub-batch, passing it ot LoRA layers
+            # getting the sub-batch, passing it to LoRA layers
             # and updating the corresponding indices of the linear layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
             lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
             final_output[sub_batch_indices_list[i]] += lora_output.to(previous_dtype)
-
-        # reset the `self.id_to_adapter_dict` and `self.adapter_indices`
-        self.id_to_adapter_dict = self.adapter_indices = None
 
         return final_output
 

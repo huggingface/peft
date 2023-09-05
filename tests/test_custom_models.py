@@ -363,3 +363,30 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    def test_mixed_adapter_lora(self):
+        # TODO
+        X = self.prepare_inputs_for_testing()
+        base_model = MLP().to(self.torch_device).eval()
+        output_base = base_model(**X)
+
+        config0 = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0)
+        output0 = peft_model(**X)
+        # sanity check, outputs are not the same
+        self.assertFalse(torch.allclose(output_base, output0))
+
+        config1 = LoraConfig(target_modules=["lin0"], r=16, init_lora_weights=False)
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.set_adapter("adapter1")
+        output1 = peft_model(**X)
+        # sanity check, outputs are not the same
+        self.assertFalse(torch.allclose(output_base, output1))
+
+        # set adapter_indices so that it alternates between 0 (base), lora 1, and lora 2
+        X["adapter_indices"] = (torch.arange(len(X["X"])) % 3).to(self.torch_device)
+        output_mixed = peft_model.forward(**X)
+
+        self.assertTrue(torch.allclose(output_base[::3], output_mixed[::3]))
+        self.assertTrue(torch.allclose(output0[1::3], output_mixed[1::3]))
+        self.assertTrue(torch.allclose(output1[2::3], output_mixed[2::3]))
