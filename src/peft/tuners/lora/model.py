@@ -672,20 +672,17 @@ class LoraModel(BaseTuner):
         adapter_names = kwargs.pop("adapter_names", None)
         if adapter_names is None:
             return super().forward(*args, **kwargs)
-        hook_handles = []
-        if kwargs.get("adapter_names", None) is not None:
-            if self.training:
-                raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
 
-            key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(self.model, key)
-                if isinstance(target, LoraLayer):
-                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
-                    handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                    hook_handles.append(handle)
-                    target.adapter_indices = kwargs["adapter_indices"]
-            del kwargs["adapter_indices"]
+        if self.training:
+            raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
+        hook_handles = []
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, LoraLayer):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
 
         try:
             outputs = self.model.forward(*args, **kwargs)
@@ -698,20 +695,17 @@ class LoraModel(BaseTuner):
         adapter_names = kwargs.pop("adapter_names", None)
         if adapter_names is None:
             return super().forward(**kwargs)
-        hook_handles = []
-        if kwargs.get("adapter_names", None) is not None:
-            if self.training:
-                raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
 
-            key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(self.model, key)
-                if isinstance(target, LoraLayer):
-                    pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
-                    handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                    hook_handles.append(handle)
-                    target.adapter_indices = kwargs["adapter_indices"]
-            del kwargs["adapter_indices"]
+        if self.training:
+            raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
+        hook_handles = []
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, LoraLayer):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
 
         try:
             outputs = self.model.generate(**kwargs)

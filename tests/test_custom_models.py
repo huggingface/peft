@@ -394,6 +394,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # set adapter_indices so that it alternates between 0 (base), lora 1, and lora 2
         adapters = ["base", "adapter1", "adapter2"]
         X["adapter_names"] = [adapters[i % 3] for i in (range(len(X["X"])))]
+        peft_model.eval()
         output_mixed = peft_model.forward(**X)
         self.assertTrue(torch.allclose(output_base[::3], output_mixed[::3]))
         self.assertTrue(torch.allclose(output0[1::3], output_mixed[1::3]))
