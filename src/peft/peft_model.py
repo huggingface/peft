@@ -618,8 +618,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} not found.")
         self.active_adapter = adapter_name
-        if not self.peft_config[adapter_name].is_prompt_learning:
-            self.base_model.set_adapter(adapter_name)
+        # TODO: should add check which model can set adapter
+        self.base_model.set_adapter(adapter_name)
         _set_adapter(self, adapter_name)
 
     @property

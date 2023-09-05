@@ -26,7 +26,7 @@ from peft.utils.other import transpose
 
 
 class LoraLayer(BaseTunerLayer):
-    def __init__(self, in_features: int, out_features: int, **kwargs):
+    def __init__(self, in_features: int, out_features: int, adapter_name: str, **kwargs):
         self.r = {}
         self.lora_alpha = {}
         self.scaling = {}
@@ -38,10 +38,22 @@ class LoraLayer(BaseTunerLayer):
         self.lora_embedding_B = nn.ParameterDict({})
         # Mark the weight as unmerged
         self.merged = False
-        self.disable_adapters = False
+        self._disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
+
+        self._active_adapter = adapter_name
+
+    @property
+    def disable_adapters(self) -> bool:
+        # use a property to ensure that disable_adapters is not set directly, instead use the enable_adapters method
+        return self._disable_adapters
+
+    @property
+    def active_adapter(self) -> str:
+        # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
+        return self._active_adapter
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -60,6 +72,7 @@ class LoraLayer(BaseTunerLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
+        self.set_adapter(self.active_adapter)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -112,6 +125,41 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
+    def enable_adapters(self, enabled: bool):
+        """Toggle the enabling and disabling of adapters
+
+        Takes care of setting the requires_grad flag for the adapter weights.
+
+        Args:
+            enabled (bool): True to enable adapters, False to disable adapters
+        """
+        if enabled:
+            self.set_adapter(self.active_adapter)
+            self._disable_adapters = False
+        else:
+            self.lora_A.requires_grad_(False)
+            self.lora_B.requires_grad_(False)
+            self.lora_embedding_A.requires_grad_(False)
+            self.lora_embedding_B.requires_grad_(False)
+            self._disable_adapters = True
+
+    def set_adapter(self, adapter_name: str):
+        """Set the active adapter
+
+        Args:
+            adapter_name (str): The name of the adapter to set as active
+        """
+        # deactivate grads on the inactive adapter and activate grads on the active adapter
+        for layer_name in ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"):
+            module_dict = getattr(self, layer_name)
+            for key, layer in module_dict.items():
+                if key == adapter_name:
+                    layer.requires_grad_(True)
+                else:
+                    layer.requires_grad_(False)
+
+        self._active_adapter = adapter_name
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -140,7 +188,7 @@ class Linear(nn.Linear, LoraLayer):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
 
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+        LoraLayer.__init__(self, in_features=in_features, out_features=out_features, adapter_name=adapter_name)
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
 
@@ -150,7 +198,6 @@ class Linear(nn.Linear, LoraLayer):
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self) -> None:
@@ -226,13 +273,12 @@ class Embedding(nn.Embedding, LoraLayer):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
 
         nn.Embedding.__init__(self, num_embeddings, embedding_dim, **kwargs)
-        LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
+        LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim, adapter_name=adapter_name)
 
         self.weight.requires_grad = False
 
         nn.Embedding.reset_parameters(self)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -313,13 +359,13 @@ class Conv2d(nn.Conv2d, LoraLayer):
             kernel_size=kernel_size,
             stride=stride,
             padding=padding,
+            adapter_name=adapter_name,
         )
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
 
         nn.Conv2d.reset_parameters(self)
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
 
     def merge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():

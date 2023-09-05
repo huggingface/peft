@@ -81,6 +81,8 @@ class BaseTuner(nn.Module, ABC):
                 # user is adding a dict of PeftConfigs
                 self.peft_config.update(peft_config)
 
+        self.active_adapter = adapter_name
+
         # transformers models have a .config attribute, whose presence is assumed later on
         if not hasattr(self, "config"):
             self.config = {"model_type": "custom"}
