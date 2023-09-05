@@ -671,7 +671,7 @@ class LoraModel(BaseTuner):
     def forward(self, *args: Any, **kwargs: Any):
         adapter_names = kwargs.pop("adapter_names", None)
         if adapter_names is None:
-            return super().forward(*args, **kwargs)
+            return self.model.forward(*args, **kwargs)
 
         if self.training:
             raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
@@ -694,7 +694,7 @@ class LoraModel(BaseTuner):
     def generate(self, **kwargs: Any):
         adapter_names = kwargs.pop("adapter_names", None)
         if adapter_names is None:
-            return super().forward(**kwargs)
+            return self.model.generate(**kwargs)
 
         if self.training:
             raise ValueError("Multiple LoRAs in the same batch isn't supported during training")
