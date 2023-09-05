@@ -691,14 +691,15 @@ class LoraModel(BaseTuner):
         self.id_to_adapter_dict = {index: adapter_name for adapter_name, index in self.adapter_to_id_dict.items()}
 
     def forward(self, *args: Any, **kwargs: Any):
+        hook_handles = []
         if kwargs.get("adapter_indices", None) is not None:
+            adapter_indices = kwargs["adapter_indices"]
 
             def add_adapter_indices(module, args, kw_args):
-                kw_args["adapter_indices"] = kwargs["adapter_indices"]
+                kw_args["adapter_indices"] = adapter_indices
                 kw_args["id_to_adapter_dict"] = self.id_to_adapter_dict
 
             key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-            hook_handles = []
             for key in key_list:
                 _, target, _ = _get_submodules(self.model, key)
                 if isinstance(target, LoraLayer):
@@ -713,20 +714,20 @@ class LoraModel(BaseTuner):
         return outputs
 
     def generate(self, **kwargs: Any):
+        hook_handles = []
         if kwargs.get("adapter_indices", None) is not None:
+            adapter_indices = kwargs["adapter_indices"]
 
             def add_adapter_indices(module, args, kw_args):
-                kw_args["adapter_indices"] = kwargs["adapter_indices"]
+                kw_args["adapter_indices"] = adapter_indices
                 kw_args["id_to_adapter_dict"] = self.id_to_adapter_dict
 
             key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
-            hook_handles = []
             for key in key_list:
                 _, target, _ = _get_submodules(self.model, key)
                 if isinstance(target, LoraLayer):
                     handle = target.register_forward_pre_hook(add_adapter_indices, with_kwargs=True)
                     hook_handles.append(handle)
-                    target.adapter_indices = kwargs["adapter_indices"]
             del kwargs["adapter_indices"]
 
         outputs = self.model.generate(**kwargs)
