@@ -245,6 +245,9 @@ class Linear(nn.Linear, LoraLayer):
             lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
             final_output[sub_batch_indices_list[i]] += lora_output.to(previous_dtype)
 
+        # reset the `self.id_to_adapter_dict` and `self.adapter_indices`
+        self.id_to_adapter_dict = self.adapter_indices = None
+
         return final_output
 
 
