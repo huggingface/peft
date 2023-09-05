@@ -365,7 +365,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
     def test_mixed_adapter_lora(self):
-        # TODO
+        # This is a test to check that we can have mixed adapters in a single batch. The test works by creating the
+        # outputs for the base model, adapter 0, and adapter 1 separately. Then, we create an output with mixed
+        # adapters, where the sample [0, 3, 6] are for the base model, [1, 4, 7] for adapter 0, and [2, 5, 8] for
+        # adapter 1. Finally, we check that the outputs of the mixed batch are correct for the corresponding indices.
         X = self.prepare_inputs_for_testing()
         base_model = MLP().to(self.torch_device).eval()
         output_base = base_model(**X)
