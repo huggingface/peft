@@ -211,8 +211,7 @@ class Linear(nn.Linear, LoraLayer):
 
             result = self._linear(x)
             x = x.to(lora_A.weight.dtype)
-            foo = lora_B(lora_A(dropout(x))) * scaling
-            result += foo
+            result += lora_B(lora_A(dropout(x))) * scaling
 
         result = result.to(previous_dtype)
         return result
