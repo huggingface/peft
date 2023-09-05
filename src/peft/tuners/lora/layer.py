@@ -222,7 +222,7 @@ class Linear(nn.Linear, LoraLayer):
         sub_batch_indices_list = [
             torch.eq(self.adapter_indices, i).nonzero(as_tuple=True)[0] for i in range(num_adapters)
         ]
-        final_output = torch.zeros_like(x)
+        final_output = torch.zeros_like(x.shape[:-1] + [self.out_features])
 
         for i in range(num_adapters):
             self.active_adapter = self.id_to_adapter_dict[i]
