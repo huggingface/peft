@@ -700,3 +700,15 @@ class LoraModel(BaseTuner):
                     target.adapter_indices = kwargs["adapter_indices"]
 
         return self.model.forward(*args, **kwargs)
+
+    def generate(self, **kwargs: Any):
+        if kwargs.get("adapter_indices", None) is not None:
+            key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+            for key in key_list:
+                _, target, _ = _get_submodules(self.model, key)
+                if isinstance(target, LoraLayer):
+                    target.id_to_adapter_dict = self.id_to_adapter_dict
+                    target.adapter_indices = kwargs["adapter_indices"]
+            del kwargs["adapter_indices"]
+
+        return self.model.generate(**kwargs)
