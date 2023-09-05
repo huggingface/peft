@@ -245,7 +245,7 @@ def main(args):
         model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler
     )
     accelerator.print(model)
-    accelerator.print(f"  Num examples = {len(dataset)}")
+    accelerator.print(f"  Num examples = {len(train_dataset)}")
     accelerator.print(f"  Num Epochs = {num_epochs}")
     accelerator.print(f"  Num batch sizes = {batch_size}")
     is_ds_zero_3 = False
@@ -283,20 +283,21 @@ def main(args):
 
             # Calculate metrics
             epoch_runtime = end_time - start_time
-            avg_throughput = len(train_dataloader) * args.batch_size / epoch_runtime
+            
             # samples_per_second = len(train_dataloader) / epoch_runtime
             # steps_per_second = len(train_dataloader) / epoch_runtime
             # avg_loss = total_loss / len(train_dataloader)
 
             # Log metrics for the epoch
             mlflow.log_metric('epoch_time', epoch_runtime)
-            mlflow.log_metric('avg_throughput', avg_throughput)
             # mlflow.log_metric('loss', avg_loss)
             # mlflow.log_metric('total_loss', total_loss)
             # mlflow.log_metric('train_runtime', epoch_runtime)
             # mlflow.log_metric('train_samples_per_second', samples_per_second)
             # mlflow.log_metric('train_steps_per_second', steps_per_second)
         
+        avg_throughput = len(train_dataloader) * args.batch_size / (time.time()-start_time)
+        mlflow.log_metric('avg_throughput', avg_throughput)
         mlflow.end_run()
 
 
@@ -411,10 +412,10 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=3e-3, help='learning rate .')
     parser.add_argument('--num_epochs', type=int, default=1, help='number of epochs .')
     parser.add_argument('--batch_size', type=int, default=2, help='training batch size .')
-    parser.add_argument('--seed', type=int, default=None, help='A seed for reproducible training.')
+    parser.add_argument('--seed', type=int, default=42, help='A seed for reproducible training.')
     parser.add_argument('--max_length', type=int, default=64, help='model max length.')
     parser.add_argument('--do_test', type=bool, default=False, help='do test.')
-    parser.add_argument('--log_interval', type=int, default=None, help='log interval.')
+    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     args = parser.parse_args()
     main(args)
