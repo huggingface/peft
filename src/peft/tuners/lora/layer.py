@@ -222,11 +222,28 @@ class Linear(nn.Linear, LoraLayer):
         sub_batch_indices_list = [
             torch.eq(self.adapter_indices, i).nonzero(as_tuple=True)[0] for i in range(num_adapters)
         ]
-        final_output = torch.zeros_like(x.shape[:-1] + [self.out_features])
+        final_output = self._linear(x)
 
+        if self.merged:
+            self.unmerge()
         for i in range(num_adapters):
-            self.active_adapter = self.id_to_adapter_dict[i]
-            final_output[sub_batch_indices_list[i]] = self.single_batched_forward(x[sub_batch_indices_list[i]])
+            # i==0 is the base module.
+            if i == 0 or self.disable_adapters:
+                continue
+
+            # choosing the adapter and related lora modules
+            active_adapter = self.id_to_adapter_dict[i]
+            previous_dtype = x.dtype
+            lora_A = self.lora_A[active_adapter]
+            lora_B = self.lora_B[active_adapter]
+            dropout = self.lora_dropout[active_adapter]
+            scaling = self.scaling[active_adapter]
+
+            # getting the sub-batch, passing it ot LoRA layers
+            # and updating the corresponding indices of the linear layer output
+            sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
+            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
+            final_output[sub_batch_indices_list[i]] += lora_output.to(previous_dtype)
 
         return final_output
 
