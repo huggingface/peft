@@ -42,8 +42,6 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
-        self.id_to_adapter_dict = None
-        self.adapter_indices = None
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -187,9 +185,9 @@ class Linear(nn.Linear, LoraLayer):
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.adapter_indices is not None:
-            return self.multi_batched_forward(x)
+    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        if kwargs.get("adapter_indices", None) is not None:
+            return self.multi_batched_forward(x, **kwargs)
         return self.single_batched_forward(x)
 
     def single_batched_forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -217,10 +215,11 @@ class Linear(nn.Linear, LoraLayer):
         result = result.to(previous_dtype)
         return result
 
-    def multi_batched_forward(self, x: torch.Tensor) -> torch.Tensor:
-        num_adapters = len(self.id_to_adapter_dict)
+    def multi_batched_forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        id_to_adapter_dict = kwargs["id_to_adapter_dict"]
+        num_adapters = len(id_to_adapter_dict)
         sub_batch_indices_list = [
-            torch.eq(self.adapter_indices, i).nonzero(as_tuple=True)[0] for i in range(num_adapters)
+            torch.eq(kwargs["adapter_indices"], i).nonzero(as_tuple=True)[0] for i in range(num_adapters)
         ]
         final_output = self._linear(x)
 
@@ -232,7 +231,7 @@ class Linear(nn.Linear, LoraLayer):
                 continue
 
             # choosing the adapter and related lora modules
-            active_adapter = self.id_to_adapter_dict[i]
+            active_adapter = id_to_adapter_dict[i]
             previous_dtype = x.dtype
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
