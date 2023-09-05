@@ -688,7 +688,7 @@ class LoraModel(BaseTuner):
             del kwargs["adapter_indices"]
 
         try:
-            outputs = super().forward(*args, **kwargs)
+            outputs = self.model.forward(*args, **kwargs)
         finally:
             for handle in hook_handles:
                 handle.remove()
@@ -714,7 +714,7 @@ class LoraModel(BaseTuner):
             del kwargs["adapter_indices"]
 
         try:
-            outputs = super().generate(**kwargs)
+            outputs = self.model.generate(**kwargs)
         finally:
             for handle in hook_handles:
                 handle.remove()

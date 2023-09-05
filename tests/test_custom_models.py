@@ -377,22 +377,23 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         output_base = base_model(**X)
 
         config0 = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
-        peft_model = get_peft_model(base_model, config0)
+        peft_model = get_peft_model(base_model, config0, "adapter1")
         output0 = peft_model(**X)
 
         # sanity check, outputs are not the same
         self.assertFalse(torch.allclose(output_base, output0))
 
         config1 = LoraConfig(target_modules=["lin0"], r=16, init_lora_weights=False)
-        peft_model.add_adapter("adapter1", config1)
-        peft_model.set_adapter("adapter1")
+        peft_model.add_adapter("adapter2", config1)
+        peft_model.set_adapter("adapter2")
         output1 = peft_model(**X)
 
         # sanity check, outputs are not the same
         self.assertFalse(torch.allclose(output_base, output1))
 
         # set adapter_indices so that it alternates between 0 (base), lora 1, and lora 2
-        X["adapter_indices"] = (torch.arange(len(X["X"])) % 3).to(self.torch_device)
+        adapters = ["base", "adapter1", "adapter2"]
+        X["adapter_names"] = [adapters[i % 3] for i in (range(len(X["X"])))]
         output_mixed = peft_model.forward(**X)
         self.assertTrue(torch.allclose(output_base[::3], output_mixed[::3]))
         self.assertTrue(torch.allclose(output0[1::3], output_mixed[1::3]))
