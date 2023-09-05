@@ -16,6 +16,7 @@ import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from typing import Any
 
 import torch
 from torch import nn
@@ -665,3 +666,37 @@ class LoraModel(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def _adapter_names_to_ids(self):
+        adapter_names = ["base"] + list(self.peft_config.keys())
+        return {adapter_name: index for index, adapter_name in enumerate(adapter_names)}
+
+    def get_adapter_indices(self, adapter_names, return_tensor=True):
+        """
+        Args:
+        adapter_names (list[str]): List of adapter names. To use the base model the adapter name will be `base`
+
+        Returns:
+            list[int]: List of indices of the adapters to be used.
+        """
+        if getattr(self, "adapter_to_id_dict", None) is None:
+            self.set_adapter_to_id_dict()
+        adapter_ids = [self.adapter_to_id_dict[adapter_name] for adapter_name in adapter_names]
+        if return_tensor:
+            return torch.tensor(adapter_ids)
+        return adapter_ids
+
+    def set_adapter_to_id_dict(self):
+        self.adapter_to_id_dict = self._adapter_names_to_ids()
+        self.id_to_adapter_dict = {index: adapter_name for adapter_name, index in self.adapter_to_id_dict.items()}
+
+    def forward(self, *args: Any, **kwargs: Any):
+        if kwargs.get("adapter_indices", None) is not None:
+            key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+            for key in key_list:
+                _, target, _ = _get_submodules(self.model, key)
+                if isinstance(target, LoraLayer):
+                    target.id_to_adapter_dict = self.id_to_adapter_dict
+                    target.adapter_indices = kwargs["adapter_indices"]
+
+        return self.model.forward(*args, **kwargs)
