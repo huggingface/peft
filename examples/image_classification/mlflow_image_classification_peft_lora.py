@@ -23,6 +23,7 @@ sys.path.append('../')
 parser = argparse.ArgumentParser(description="Image Classification with LoRA")
 parser.add_argument("--model_checkpoint", type=str, default="google/vit-base-patch16-224-in21k",
                     help="The model checkpoint to use")
+parser.add_argument('--dataset_name', type=str, default='food101', help='The name of the Dataset (from the HuggingFace hub) to train on.')
 parser.add_argument("--batch_size", type=int, default=128,
                     help="Batch size for training and evaluation")
 parser.add_argument("--learning_rate", type=float, default=5e-3,
@@ -32,6 +33,7 @@ parser.add_argument("--num_train_epochs", type=int, default=5,
 parser.add_argument("--logging_steps", type=int, default=10,
                     help="Log metrics every X steps")
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
+parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
 
 args = parser.parse_args()
 
@@ -42,7 +44,7 @@ args = parser.parse_args()
 #     mlflow.set_tracking_uri(mlflow_uri)
 
 # Load dataset
-dataset = load_dataset("food101", split="train[:5000]")
+dataset = load_dataset(args.dataset_name, split="train[:5000]", cache_dir=args.cache_dir)
 labels = dataset.features["label"].names
 label2id, id2label = dict(), dict()
 for i, label in enumerate(labels):

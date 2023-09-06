@@ -258,10 +258,10 @@ def main(args):
     elapsed = 0
     epoch_runtime_list = []
     for epoch in range(num_epochs):
+        start_time = time.time()  # Start time for the epoch
         with TorchTracemalloc() as tracemalloc:
             model.train()
             total_loss = 0
-            start_time = time.time()  # Start time for the epoch
             for step, batch in enumerate(tqdm(train_dataloader)):
                 start_time_step = time.time()
                 outputs = model(**batch)
@@ -285,18 +285,9 @@ def main(args):
             # Calculate metrics
             epoch_runtime = end_time - start_time
             epoch_runtime_list.append(epoch_runtime)
-            # samples_per_second = len(train_dataloader) / epoch_runtime
-            # steps_per_second = len(train_dataloader) / epoch_runtime
-            # avg_loss = total_loss / len(train_dataloader)
 
             # Log metrics for the epoch
-            mlflow.log_metric('epoch_time', epoch_runtime, step=epoch)
-            # mlflow.log_metric('loss', avg_loss)
-            # mlflow.log_metric('total_loss', total_loss)
-            # mlflow.log_metric('train_runtime', epoch_runtime)
-            # mlflow.log_metric('train_samples_per_second', samples_per_second)
-            # mlflow.log_metric('train_steps_per_second', steps_per_second)
-        
+            mlflow.log_metric('epoch_time', epoch_runtime, step=epoch)        
         
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
         accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))

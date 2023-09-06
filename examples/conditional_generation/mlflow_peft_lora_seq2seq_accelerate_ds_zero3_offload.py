@@ -106,7 +106,7 @@ def main(args):
     accelerator = Accelerator()
    
     model_name_or_path = args.model_name_or_path
-    dataset_name = "twitter_complaints"
+    dataset_name = args.dataset_name
     peft_config = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=8, lora_alpha=32, lora_dropout=0.1
     )
@@ -120,7 +120,7 @@ def main(args):
     do_test = False
     set_seed(seed)
 
-    dataset = load_dataset("ought/raft", dataset_name)
+    dataset = load_dataset("ought/raft", dataset_name, cache_dir=args.cache_dir)
     classes = [k.replace("_", " ") for k in dataset["train"].features["Label"].names]
     dataset = dataset.map(
         lambda x: {"text_label": [classes[label] for label in x["Label"]]},
@@ -191,15 +191,17 @@ def main(args):
     if getattr(accelerator.state, "deepspeed_plugin", None):
         is_ds_zero_3 = accelerator.state.deepspeed_plugin.zero_stage == 3
 
-
     mlflow.start_run()
-    start_time = time.time()
+    elapsed = 0
+    epoch_runtime_list = []
     for epoch in range(num_epochs):
+        start_time = time.time()
         with TorchTracemalloc() as tracemalloc:
             model.train()
             total_loss = 0
             interval_start_time = time.time()  # Start time for the epoch
             for step, batch in enumerate(tqdm(train_dataloader)):
+                start_time_step = time.time()
                 outputs = model(**batch)
                 loss = outputs.loss
                 total_loss += loss.detach().float()
@@ -207,31 +209,21 @@ def main(args):
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
-
+                elapsed += time.time() - start_time_step
+                total_steps = epoch * len(train_dataloader) + step + 1
+                if total_steps % args.log_interval == 0:
+                    thoughput = total_steps * args.batch_size / elapsed
+                    mlflow.log_metric('throughput', thoughput, step=total_steps)
+                    mlflow.log_metric('loss', loss, step=total_steps)
+                    mlflow.log_metric('lr', lr_scheduler.get_last_lr()[0], step=total_steps)
             end_time = time.time()  # End time for the epoch
 
             # Calculate metrics
-            epoch_runtime = end_time - interval_start_time
-            samples_per_second = len(train_dataloader) / epoch_runtime
-            steps_per_second = len(train_dataloader) / epoch_runtime
-            avg_loss = total_loss / len(train_dataloader)
+            epoch_runtime = end_time - start_time
+            epoch_runtime_list.append(epoch_runtime)
 
             # Log metrics for the epoch
-            interval_elapsed_time = time.time() - interval_start_time
-            interval_throughput = (logging_steps*batch_size) / interval_elapsed_time                  
-            mlflow.log_metric('throughput', interval_throughput, step=step)
-            mlflow.log_metric('lr', lr, step=step)
-
-            mlflow.log_metric('loss', avg_loss)
-            mlflow.log_metric('total_loss', total_loss)
-            mlflow.log_metric('train_runtime', epoch_runtime)
-            mlflow.log_metric('train_samples_per_second', samples_per_second)
-            mlflow.log_metric('train_steps_per_second', steps_per_second)
-
-        mlflow.log_metric('loss', avg_loss)  # Log final loss for the epoch
-        mlflow.log_metric('total_loss', total_loss)  # Log final total loss for the epoch
-
-        mlflow.end_run()
+            mlflow.log_metric('epoch_time', epoch_runtime, step=epoch)   
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
         accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
@@ -300,8 +292,10 @@ def main(args):
         accelerator.print(f"{accuracy=}")
         accelerator.print(f"{eval_preds[:10]=}")
         accelerator.print(f"{dataset['train'][label_column][:10]=}")
-    mlflow.end_run()
 
+    avg_throughput = len(train_dataloader) * args.batch_size*num_epochs / sum(epoch_runtime_list)
+    mlflow.log_metric('avg_throughput', avg_throughput)
+    mlflow.end_run()
     if do_test:
         model.eval()
         test_preds = []
@@ -338,9 +332,11 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Sequence-to-Sequence Model Training Script")
     parser.add_argument("--model_name_or_path", type=str, default="facebook/bart-large", help="Pretrained model name or path")
+    parser.add_argument('--dataset_name', type=str, default='twitter_complaints', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
-    parser.add_argument("--num_epochs", type=int, default=5, help="Number of training epochs")
+    parser.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
-
+    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     args = parser.parse_args()
     main(args)
