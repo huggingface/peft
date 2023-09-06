@@ -256,6 +256,7 @@ def main(args):
     # with mlflow_runner:
     mlflow.start_run()
     elapsed = 0
+    epoch_runtime_list = []
     for epoch in range(num_epochs):
         with TorchTracemalloc() as tracemalloc:
             model.train()
@@ -283,24 +284,20 @@ def main(args):
 
             # Calculate metrics
             epoch_runtime = end_time - start_time
-            
+            epoch_runtime_list.append(epoch_runtime)
             # samples_per_second = len(train_dataloader) / epoch_runtime
             # steps_per_second = len(train_dataloader) / epoch_runtime
             # avg_loss = total_loss / len(train_dataloader)
 
             # Log metrics for the epoch
-            mlflow.log_metric('epoch_time', epoch_runtime)
+            mlflow.log_metric('epoch_time', epoch_runtime, step=epoch)
             # mlflow.log_metric('loss', avg_loss)
             # mlflow.log_metric('total_loss', total_loss)
             # mlflow.log_metric('train_runtime', epoch_runtime)
             # mlflow.log_metric('train_samples_per_second', samples_per_second)
             # mlflow.log_metric('train_steps_per_second', steps_per_second)
         
-        avg_throughput = len(train_dataloader) * args.batch_size / (time.time()-start_time)
-        mlflow.log_metric('avg_throughput', avg_throughput)
-        mlflow.end_run()
-
-
+        
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
         accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
         accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
@@ -370,6 +367,9 @@ def main(args):
         accelerator.print(f"{eval_preds[:10]=}")
         accelerator.print(f"{dataset['train'][label_column][:10]=}")
     
+    avg_throughput = len(train_dataloader) * args.batch_size*num_epochs / sum(epoch_runtime_list)
+    mlflow.log_metric('avg_throughput', avg_throughput)
+    mlflow.end_run()
     if do_test:
         model.eval()
         test_preds = []

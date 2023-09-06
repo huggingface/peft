@@ -17,6 +17,8 @@ from peft import LoraConfig, get_peft_model
 import mlflow
 import os
 
+import sys
+sys.path.append('../')
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Image Classification with LoRA")
 parser.add_argument("--model_checkpoint", type=str, default="google/vit-base-patch16-224-in21k",
@@ -27,15 +29,17 @@ parser.add_argument("--learning_rate", type=float, default=5e-3,
                     help="Learning rate for training")
 parser.add_argument("--num_train_epochs", type=int, default=5,
                     help="Number of training epochs")
+parser.add_argument("--logging_steps", type=int, default=10,
+                    help="Log metrics every X steps")
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
 
 args = parser.parse_args()
 
 # mlflow init
-mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-if (not mlflow_uri):
-    mlflow_uri = "http://127.0.0.1:5001"
-    mlflow.set_tracking_uri(mlflow_uri)
+# mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+# if (not mlflow_uri):
+#     mlflow_uri = "http://127.0.0.1:5001"
+#     mlflow.set_tracking_uri(mlflow_uri)
 
 # Load dataset
 dataset = load_dataset("food101", split="train[:5000]")
@@ -123,7 +127,7 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=args.batch_size,
     fp16=True,
     num_train_epochs=args.num_train_epochs,
-    logging_steps=10,
+    logging_steps=args.logging_steps,
     load_best_model_at_end=True,
     metric_for_best_model="accuracy",
     push_to_hub=False,
@@ -131,9 +135,9 @@ training_args = TrainingArguments(
 )
 
 # mlflow initial
-experiment_id = mlflow.create_experiment('image_classification-{}'.format(model_name))
-experiment = mlflow.get_experiment(experiment_id)
-mlflow_runner = mlflow.start_run(run_name=model_name, experiment_id=experiment.experiment_id)
+# experiment_id = mlflow.create_experiment('image_classification-{}'.format(model_name))
+# experiment = mlflow.get_experiment(experiment_id)
+# mlflow_runner = mlflow.start_run(run_name=model_name, experiment_id=experiment.experiment_id)
 
 # Compute evaluation metrics
 metric = evaluate.load("accuracy")
@@ -155,22 +159,29 @@ trainer = Trainer(
     eval_dataset=val_ds,
     tokenizer=image_processor,
     compute_metrics=compute_metrics,
-    data_collator=collate_fn,
+    data_collator=collate_fn
 )
 
 # Train the model
-with mlflow_runner:
-    train_results = trainer.train()
-    trainer.log_metrics("train", train_results.metrics)
-    trainer.save_metrics("train", train_results.metrics)
-    trainer.save_model()
-    trainer.save_state()
+mlflow.start_run()
+train_results = trainer.train()
+trainer.log_metrics("train", train_results.metrics)
+trainer.save_metrics("train", train_results.metrics)
+trainer.save_model()
+trainer.save_state()
+for metric_dict in trainer.state.log_history:
+    if 'loss' in metric_dict:
+        mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])
+        mlflow.log_metric('lr', metric_dict['learning_rate'], step=metric_dict['step'])
 
-    mlflow.log_metric('loss', train_results.metrics["train_loss"])
-    mlflow.log_metric('runtime', train_results.metrics["train_runtime"])
-    mlflow.log_metric('samples_per_second', train_results.metrics["train_samples_per_second"])
-    mlflow.log_metric('steps_per_second', train_results.metrics["train_steps_per_second"])
-    mlflow.end_run()
+mlflow.log_metric('epoch', train_results.metrics["epoch"])
+mlflow.log_metric('train_locondass', train_results.metrics["train_loss"])
+mlflow.log_metric('train_runtime', train_results.metrics["train_runtime"])
+mlflow.log_metric('throughput', train_results.metrics["train_samples_per_second"])
+mlflow.log_metric('steps_per_second', train_results.metrics["train_steps_per_second"])
+epoch_time = train_results.metrics["train_runtime"] / train_results.metrics["epoch"]
+mlflow.log_metric('epoch_time', epoch_time)
+mlflow.end_run()
 
 # Evaluate the model on the validation set
 trainer.evaluate(val_ds)
