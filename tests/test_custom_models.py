@@ -168,11 +168,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        # for embeddings, even with init_lora_weights=False, the LoRA embeddings weights are still initialized to
-        # perform the identity transform, thus the test would fail.
-        if config_kwargs["target_modules"] == ["emb"]:
-            return
-
         config_kwargs = config_kwargs.copy()
         config_kwargs["init_lora_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)

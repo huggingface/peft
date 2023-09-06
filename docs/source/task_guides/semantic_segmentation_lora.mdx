@@ -80,14 +80,14 @@ num_labels = len(id2label)
 ## Prepare datasets for training and evaluation
 
 Next, load the SegFormer image processor to prepare the images and annotations for the model. This dataset uses the 
-zero-index as the background class, so make sure to set `reduce_labels=True` to subtract one from all labels since the 
+zero-index as the background class, so make sure to set `do_reduce_labels=True` to subtract one from all labels since the
 background class is not among the 150 classes. 
 
 ```python
 from transformers import AutoImageProcessor
 
 checkpoint = "nvidia/mit-b0"
-image_processor = AutoImageProcessor.from_pretrained(checkpoint, reduce_labels=True)
+image_processor = AutoImageProcessor.from_pretrained(checkpoint, do_reduce_labels=True)
 ```
 
 Add a function to apply data augmentation to the images, so that the model is more robust against overfitting. Here we use the 
@@ -180,7 +180,7 @@ def compute_metrics(eval_pred):
             references=labels,
             num_labels=len(id2label),
             ignore_index=0,
-            reduce_labels=image_processor.reduce_labels,
+            reduce_labels=image_processor.do_reduce_labels,
         )
 
         per_category_accuracy = metrics.pop("per_category_accuracy").tolist()

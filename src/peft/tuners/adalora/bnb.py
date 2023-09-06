@@ -132,18 +132,19 @@ if is_bnb_4bit_available():
             # sure.
             result = result.clone()
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                if x.dtype != torch.float32:
-                    x = x.float()
-
             lora_A = self.lora_A[self.active_adapter]
             lora_B = self.lora_B[self.active_adapter]
             lora_E = self.lora_E[self.active_adapter]
             dropout = self.lora_dropout[self.active_adapter]
             scaling = self.scaling[self.active_adapter]
             ranknum = self.ranknum[self.active_adapter] + 1e-5
+
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = result.dtype
+                compute_dtype = lora_A.weight.dtype
+                if x.dtype != compute_dtype:
+                    x = x.to(compute_dtype)
 
             output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
             if requires_conversion:
