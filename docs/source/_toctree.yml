@@ -6,6 +6,8 @@
     title: Quicktour
   - local: install
     title: Installation
+  - local: common_issues
+    title: Common issues
 
 - title: Task guides
   sections:
