@@ -14,22 +14,22 @@ specific language governing permissions and limitations under the License.
 
 If you encounter any issue when using PEFT, please check the following list of common issues and their solutions.
 
-## I used or modified an existing example but it does not work
+## Examples don't work
 
-Please ensure that the versions of packages you use are up-to-date. Examples often rely on the most recent versions being used. In particular, check the version of the following packages:
+Examples often rely on the most recent package versions, so please ensure they're up-to-date. In particular, check the version of the following packages:
 
 - `peft`
 - `transformers`
 - `accelerate`
 - `torch`
 
-In general, you can update the version of your package by running this command inside your Python environment:
+In general, you can update the package version by running this command inside your Python environment:
 
 ```bash
 python -m pip install -U <package_name>
 ```
 
-Especially for PEFT, it may be useful to install the package from source:
+Installing PEFT from source is useful for keeping up with the latest developments:
 
 ```bash
 python -m pip install git+https://github.com/huggingface/peft
@@ -43,7 +43,7 @@ There can be several reasons for this. Please check one of the proposed solution
 
 If your model outputs are not exactly the same as previously, there could be an issue with random elements. For example, when the model uses dropout, please ensure that it is in `.eval()` mode. If you use `.generate()` on a language model, there could be random sampling, so obtaining the same result requires a random seed to be set. Finally, if you used quantization and merged the weights, small deviations are expected due to rounding errors.
 
-### Correctly loading the model
+### Incorrectly loaded model
 
 Please ensure that you load the model correctly. The loading code should look like this:
 
@@ -57,11 +57,13 @@ peft_model = PeftModel.from_pretrained(base_model, peft_model_id)
 
 A common mistake we see is users trying to load a _trained_ model using `get_peft_model`, which is incorrect.
 
-### Use of models with randomly initialized layers
+### Randomly initialized layers
 
-For some tasks, it is important to correctly configure `modules_to_save` in the config to take into account randomly initialized layers. As an example, if you use LoRA to fine-tune a language model for sequence classification, this is necessary. The reason for that is that transformers adds a classification head on top of the model, which is randomly initialized. Therefore, if you do not add this layer to `modules_to_save`, the classification head will not be saved. Then, next time you load the model, you get a _different_ randomly initialized classification head, resulting in completely different results.
+For some tasks, it is important to correctly configure `modules_to_save` in the config to account for randomly initialized layers. 
 
-In PEFT, we try to correctly guess the `modules_to_save` if you provide the `task_type` argument in the config. This should work for transformers models that follow the standard naming scheme. Still, we cannot guarantee that all models do so, which is why users should always double check.
+As an example, this is necessary if you use LoRA to fine-tune a language model for sequence classification because 🤗 Transformers adds a randomly initialized classification head on top of the model. If you do not add this layer to `modules_to_save`, the classification head won't be saved. The next time you load the model, you'll get a _different_ randomly initialized classification head, resulting in completely different results.
+
+In PEFT, we try to correctly guess the `modules_to_save` if you provide the `task_type` argument in the config. This should work for transformers models that follow the standard naming scheme. It is always a good idea to double check though because we can't guarantee all models follow the naming scheme.
 
 When you load a transformers model that has randomly initialized layers, you should see a warning along the lines of:
 
