@@ -136,11 +136,6 @@ training_args = TrainingArguments(
     label_names=["labels"],
 )
 
-# mlflow initial
-# experiment_id = mlflow.create_experiment('image_classification-{}'.format(model_name))
-# experiment = mlflow.get_experiment(experiment_id)
-# mlflow_runner = mlflow.start_run(run_name=model_name, experiment_id=experiment.experiment_id)
-
 # Compute evaluation metrics
 metric = evaluate.load("accuracy")
 def compute_metrics(eval_pred):
@@ -177,7 +172,7 @@ for metric_dict in trainer.state.log_history:
         mlflow.log_metric('lr', metric_dict['learning_rate'], step=metric_dict['step'])
 
 mlflow.log_metric('epoch', train_results.metrics["epoch"])
-mlflow.log_metric('train_locondass', train_results.metrics["train_loss"])
+mlflow.log_metric('train_loss', train_results.metrics["train_loss"])
 mlflow.log_metric('train_runtime', train_results.metrics["train_runtime"])
 mlflow.log_metric('throughput', train_results.metrics["train_samples_per_second"])
 mlflow.log_metric('steps_per_second', train_results.metrics["train_steps_per_second"])
