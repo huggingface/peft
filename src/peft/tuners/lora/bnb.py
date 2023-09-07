@@ -71,6 +71,7 @@ if is_bnb_available():
                 if self.state.SCB is None:
                     self.state.SCB = self.weight.SCB
                 # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
+                # dequantization directly
                 im = torch.eye(self.weight.data.shape[-1]).contiguous().half().to(self.weight.device)
                 im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
                 im, Sim = bnb.functional.transform(im, "col32")

@@ -381,7 +381,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_before_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        model.merge_and_unload("default")
+        model.merge_and_unload()
         with torch.inference_mode():
             out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 
@@ -466,7 +466,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_before_merge = F.softmax(model(random_input).logits, dim=-1)
 
-        model.merge_and_unload("default")
+        model.merge_and_unload()
         with torch.inference_mode():
             out_after_merge = F.softmax(model(random_input).logits, dim=-1)
 
