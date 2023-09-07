@@ -51,7 +51,7 @@ class LoraLayer(BaseTunerLayer):
         # Instead of this approach, it would be possible to bypass the __init__ of the class but that runs the risk of
         # omitting important logic inside that __init__.
         kwargs = kwargs.copy()
-        final_device = kwargs.pop('device', 'cpu')
+        final_device = kwargs.pop("device", "cpu")
         cls.__init__(self, *args, device="meta", **kwargs)
         self.to_empty(device=final_device)
 
