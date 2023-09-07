@@ -78,6 +78,17 @@ def bloom_model_postprocess_past_key_value(past_key_values):
     return tuple(zip(keys, values))
 
 
+# needed for prefix-tuning of StarCoder models
+def starcoder_model_postprocess_past_key_value(past_key_values):
+    result = []
+    for k in past_key_values:
+        k = k[:, :, 0]
+        k = k.permute([1, 2, 0, 3])
+        k = k.reshape(*k.shape[:-2], -1)
+        result.append(k)
+    return tuple(result)
+
+
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
@@ -460,6 +471,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
 
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
     "bloom": bloom_model_postprocess_past_key_value,
+    "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
