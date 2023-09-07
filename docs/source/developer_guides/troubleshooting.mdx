@@ -10,7 +10,7 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Common issues encountered when using PEFT
+# Troubleshooting
 
 If you encounter any issue when using PEFT, please check the following list of common issues and their solutions.
 
@@ -35,17 +35,23 @@ Installing PEFT from source is useful for keeping up with the latest development
 python -m pip install git+https://github.com/huggingface/peft
 ```
 
-## I successfully trained a model but when I load it, I get bad results
+## Bad results from a loaded PEFT model
 
-There can be several reasons for this. Please check one of the proposed solutions below.
+There can be several reasons for getting a poor result from a loaded PEFT model, which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
+
+When opening an issue, it helps a lot if you provide a minimal code example that reproduces the issue. Also, please report if the loaded model performs at the same level as the model did before fine-tuning, if it performs at a random level, or if it is only slightly worse than expected. This information helps us identify the problem more quickly.
 
 ### Random deviations
 
-If your model outputs are not exactly the same as previously, there could be an issue with random elements. For example, when the model uses dropout, please ensure that it is in `.eval()` mode. If you use `.generate()` on a language model, there could be random sampling, so obtaining the same result requires a random seed to be set. Finally, if you used quantization and merged the weights, small deviations are expected due to rounding errors.
+If your model outputs are not exactly the same as previous runs, there could be an issue with random elements. For example:
+
+1. please ensure it is in `.eval()` mode, which is important, for instance, if the model uses dropout
+2. if you use [`~transformers.GenerationMixin.generate`] on a language model, there could be random sampling, so obtaining the same result requires setting a random seed
+3. if you used quantization and merged the weights, small deviations are expected due to rounding errors
 
 ### Incorrectly loaded model
 
-Please ensure that you load the model correctly. The loading code should look like this:
+Please ensure that you load the model correctly. A common error is trying to load a _trained_ model with `get_peft_model`, which is incorrect. Instead, the loading code should look like this:
 
 ```python
 from peft import PeftModel, PeftConfig
@@ -54,8 +60,6 @@ base_model = ...  # to load the base model, use the same code as when you traine
 config = PeftConfig.from_pretrained(peft_model_id)
 peft_model = PeftModel.from_pretrained(base_model, peft_model_id)
 ```
-
-A common mistake we see is users trying to load a _trained_ model using `get_peft_model`, which is incorrect.
 
 ### Randomly initialized layers
 
@@ -73,7 +77,3 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 ```
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
-
-### None of the above helped
-
-If you checked all of the previous points and still have issues with loading your model, please check the issues on GitHub at https://github.com/huggingface/peft/issues and open a new one if none match your problem. As always when opening an issue, it helps a lot if you provide a minimal code example that reproduces the issue. Also, please report if the loaded model performs at the same level as the model did before fine-tuning, if it performs at a random level, or if it is only slightly worse than expected. This information helps us identify the problem more quickly.
