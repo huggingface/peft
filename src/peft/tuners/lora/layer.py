@@ -43,6 +43,18 @@ class LoraLayer(BaseTunerLayer):
         self.out_features = out_features
         self.kwargs = kwargs
 
+    def _init_empty_weights(self, cls, *args, **kwargs) -> None:
+        # A helper method that allows to initialize the layer of the given class without spending time to initialize the
+        # model weights. The implementation is inspired by
+        # https://pytorch.org/docs/stable/generated/torch.nn.utils.skip_init.html but this function cannot be used
+        # directly.
+        # Instead of this approach, it would be possible to bypass the __init__ of the class but that runs the risk of
+        # omitting important logic inside that __init__.
+        kwargs = kwargs.copy()
+        final_device = kwargs.pop('device', 'cpu')
+        cls.__init__(self, *args, device="meta", **kwargs)
+        self.to_empty(device=final_device)
+
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -63,7 +75,7 @@ class LoraLayer(BaseTunerLayer):
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
-            self.to(weight.device)
+            self.to(weight.device, dtype=weight.dtype)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -84,7 +96,11 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
+
+        weight = getattr(self, "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            self.to(self.weight.device, dtype=weight.dtype)
 
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -97,14 +113,18 @@ class LoraLayer(BaseTunerLayer):
         self.lora_dropout[adapter_name] = lora_dropout_layer
         # Actual trainable parameters
         if r > 0:
-            weight_A = torch.randn((r, self.in_features), dtype=self.weight.dtype, device=self.weight.device)
-            weight_B = torch.randn((self.out_features, r), dtype=self.weight.dtype, device=self.weight.device)
+            weight_A = torch.randn((r, self.in_features))
+            weight_B = torch.randn((self.out_features, r))
             self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
             self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
+
+        weight = getattr(self, "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            self.to(self.weight.device, dtype=weight.dtype)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -145,6 +165,8 @@ class Linear(nn.Linear, LoraLayer):
         # this gets the init from nn.Linear's super perspective, i.e.
         # nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
+        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
+        # added robustness is not big enough for Linear.
 
         LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
         # Freezing the pre-trained weight matrix
@@ -226,13 +248,8 @@ class Embedding(nn.Embedding, LoraLayer):
         **kwargs,
     ) -> None:
         init_lora_weights = kwargs.pop("init_lora_weights", True)
-
-        nn.Embedding.__init__(self, num_embeddings, embedding_dim, **kwargs)
+        self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
         LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
-
-        self.weight.requires_grad = False
-
-        nn.Embedding.reset_parameters(self)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
@@ -306,8 +323,8 @@ class Conv2d(nn.Conv2d, LoraLayer):
         **kwargs,
     ) -> None:
         init_lora_weights = kwargs.pop("init_lora_weights", True)
+        self._init_empty_weights(nn.Conv2d, in_channels, out_channels, kernel_size, stride=stride, padding=padding)
 
-        nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size, stride, padding)
         LoraLayer.__init__(
             self,
             in_features=in_channels,
@@ -316,10 +333,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
             stride=stride,
             padding=padding,
         )
-        # Freezing the pre-trained weight matrix
-        self.weight.requires_grad = False
 
-        nn.Conv2d.reset_parameters(self)
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
 
