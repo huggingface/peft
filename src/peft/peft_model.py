@@ -510,7 +510,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 f"Found {self.peft_type} and {peft_config.peft_type}."
             )
 
-
         try:
             if peft_config.is_prompt_learning:
                 self.peft_config[adapter_name] = peft_config
