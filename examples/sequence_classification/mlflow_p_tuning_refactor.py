@@ -21,6 +21,16 @@ import numpy as np
 import mlflow
 import os
 
+
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
+
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     predictions = np.argmax(predictions, axis=1)
@@ -77,6 +87,7 @@ if __name__ == "__main__":
     peft_config = PromptEncoderConfig(task_type="SEQ_CLS", num_virtual_tokens=20, encoder_hidden_size=128)
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
     model = get_peft_model(model, peft_config)
+
     training_args = TrainingArguments(
         output_dir=output,
         learning_rate=lr,
@@ -93,6 +104,9 @@ per_device_train_batch_size=batch_size,
     experiment_id = mlflow.create_experiment('p_tuning_seq_cls-{}'.format(model_name_or_path))
     experiment = mlflow.get_experiment(experiment_id)
     mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
+
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
 
     trainer = Trainer(
         model=model,

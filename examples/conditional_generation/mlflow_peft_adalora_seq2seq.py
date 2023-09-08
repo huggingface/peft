@@ -10,6 +10,14 @@ from peft import AdaLoraConfig, PeftConfig, PeftModel, TaskType, get_peft_model
 import mlflow
 import time
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -54,6 +62,8 @@ experiment_id = mlflow.create_experiment('conditional_generation-{}'.format(mode
 experiment = mlflow.get_experiment(experiment_id)
 mlflow_runner = mlflow.start_run(run_name=model_name_or_path, experiment_id=experiment.experiment_id)
 
+num_params = get_num_parameters(model)
+mlflow.log_param('num_params', num_params)
 
 # loading dataset
 dataset = load_dataset("financial_phrasebank", "sentences_allagree")

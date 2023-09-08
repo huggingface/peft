@@ -41,6 +41,13 @@ num_labels = len(id2label)
 image_processor = AutoImageProcessor.from_pretrained(args.checkpoint, reduce_labels=True)
 jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
 
 def handle_grayscale_image(image):
     np_image = np.array(image)
@@ -138,6 +145,8 @@ model_name = args.checkpoint.split("/")[-1]
 experiment_id = mlflow.create_experiment('semantic_segmentation-{}'.format(model_name))
 experiment = mlflow.get_experiment(experiment_id)
 mlflow_runner = mlflow.start_run(run_name=model_name, experiment_id=experiment.experiment_id)
+num_params = get_num_parameters(model)
+mlflow.log_param('num_params', num_params)
 
 training_args = TrainingArguments(
     output_dir=args.output_dir,
