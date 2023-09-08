@@ -101,21 +101,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
     def __init__(self, model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default"):
         super().__init__()
-        self.base_model = model
-        self.config = getattr(self.base_model, "config", {"model_type": "custom"})
         self.modules_to_save = None
-        self.peft_config = {}
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
-        if not peft_config.is_prompt_learning:
-            self.peft_config[adapter_name] = peft_config
-            self.base_model = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type](
-                self.base_model, self.peft_config, adapter_name
-            )
-            self.set_additional_trainable_modules(peft_config, adapter_name)
-        else:
-            self.add_adapter(adapter_name, peft_config)
 
+        self._is_prompt_learning = peft_config.is_prompt_learning
+        if self._is_prompt_learning:
+            self._peft_config = {adapter_name: peft_config}
+            self.base_model = model
+            self.add_adapter(adapter_name, peft_config)
+        else:
+            self._peft_config = None
+            cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
+            self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
+            self.set_additional_trainable_modules(peft_config, adapter_name)
+
+        self.config = getattr(self.base_model, "config", {"model_type": "custom"})
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
@@ -124,6 +125,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # behavior we disable that in this line.
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
+
+    @property
+    def peft_config(self) -> Dict[str, PeftConfig]:
+        if self._is_prompt_learning:
+            return self._peft_config
+        return self.base_model.peft_config
+
+    @peft_config.setter
+    def peft_config(self, value: Dict[str, PeftConfig]):
+        if self._is_prompt_learning:
+            self._peft_config = value
+        else:
+            self.base_model.peft_config = value
 
     def save_pretrained(
         self,
