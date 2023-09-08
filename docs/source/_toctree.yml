@@ -36,6 +36,8 @@
     title: PEFT low level API
   - local: developer_guides/contributing
     title: Contributing to PEFT
+  - local: developer_guides/troubleshooting
+    title: Troubleshooting
 
 - title: 🤗 Accelerate integrations
   sections:
