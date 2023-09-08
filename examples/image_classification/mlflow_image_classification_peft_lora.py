@@ -63,6 +63,14 @@ val_transforms = Compose([
     normalize,
 ])
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
 # Preprocess functions for train and val datasets
 def preprocess_train(example_batch):
     example_batch["pixel_values"] = [train_transforms(image.convert("RGB")) for image in example_batch["image"]]
@@ -134,6 +142,9 @@ training_args = TrainingArguments(
 experiment_id = mlflow.create_experiment('image_classification-{}'.format(model_name))
 experiment = mlflow.get_experiment(experiment_id)
 mlflow_runner = mlflow.start_run(run_name=model_name, experiment_id=experiment.experiment_id)
+
+num_params = get_num_parameters(lora_model)
+mlflow.log_param('num_params', num_params)
 
 # Compute evaluation metrics
 metric = evaluate.load("accuracy")
