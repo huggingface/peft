@@ -510,10 +510,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 f"Found {self.peft_type} and {peft_config.peft_type}."
             )
 
-        self.peft_config[adapter_name] = peft_config
 
         try:
             if peft_config.is_prompt_learning:
+                self.peft_config[adapter_name] = peft_config
                 if hasattr(self.config, "to_dict"):
                     dict_config = self.config.to_dict()
                 else:
@@ -524,9 +524,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             elif peft_config.is_adaption_prompt:
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
+                self.peft_config[adapter_name] = peft_config
                 self.base_model.inject_adapter(self, adapter_name)
         except Exception:  # somthing went wrong, roll back
-            del self.peft_config[adapter_name]
+            if adapter_name in self.peft_config:
+                del self.peft_config[adapter_name]
             raise
 
         self.set_additional_trainable_modules(peft_config, adapter_name)

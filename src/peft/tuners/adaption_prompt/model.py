@@ -45,7 +45,7 @@ class AdaptionPromptModel(nn.Module):
         super().__init__()
         self.model = model
         # Store adapter configs by name.
-        self._configs: Dict[str, AdaptionPromptConfig] = {}
+        self.peft_config: Dict[str, AdaptionPromptConfig] = {}
         # Store lists of the parents of the affected attention modules by adapter name.
         # We keep references to the parents so we can swap the adapters in-and-out of the model.
         self._parents: Dict[str, List[nn.Module]] = {}
@@ -62,7 +62,7 @@ class AdaptionPromptModel(nn.Module):
     def add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
         """Add an adapter with the given name and config."""
         config = prepare_config(config, self.model)
-        if adapter_name in self._configs:
+        if adapter_name in self.peft_config:
             raise ValueError(f"Adapter with name '{adapter_name}' already exists.")
 
         parents = []
@@ -87,7 +87,7 @@ class AdaptionPromptModel(nn.Module):
         if self._active_adapter is not None and self._enabled:
             self._remove_adapted_attentions(self._active_adapter)
         self._active_adapter = adapter_name
-        self._configs[adapter_name] = config
+        self.peft_config[adapter_name] = config
         self._create_adapted_attentions(config, parents)
         if not self._enabled:
             self._remove_adapted_attentions(self._active_adapter)
@@ -99,7 +99,7 @@ class AdaptionPromptModel(nn.Module):
         """Set the model to use the adapter with the given name."""
         if self._active_adapter == adapter_name:
             return
-        if adapter_name not in self._configs:
+        if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter with name '{adapter_name}' does not exist.")
 
         if self._enabled:
@@ -132,13 +132,13 @@ class AdaptionPromptModel(nn.Module):
         """Replace LlamaAttention modules with cached AdaptedAttention modules."""
         cached = self._cached_adapters[adapter_name]
         del self._cached_adapters[adapter_name]
-        config = self._configs[adapter_name]
+        config = self.peft_config[adapter_name]
         for i, par in enumerate(self._parents[adapter_name]):
             setattr(par, config.target_modules, cached[i])
 
     def _remove_adapted_attentions(self, adapter_name: str) -> None:
         """Remove AdaptedAttention modules from the model and store them in the cache."""
-        config = self._configs[adapter_name]
+        config = self.peft_config[adapter_name]
         adapted_attentions = []
         for par in self._parents[adapter_name]:
             attn = getattr(par, config.target_modules)
