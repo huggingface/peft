@@ -45,7 +45,7 @@ setup(
         "torch>=1.13.0",
         "transformers",
         "tqdm",
-        "accelerate>=0.22.0",
+        "accelerate>=0.21.0",
         "safetensors",
     ],
     extras_require=extras,
