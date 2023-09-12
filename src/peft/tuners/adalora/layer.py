@@ -24,6 +24,10 @@ from peft.utils import transpose
 
 
 class AdaLoraLayer(LoraLayer):
+    # List all names of layers that may contain adapter weights
+    # Note: ranknum doesn't need to be included as it is not an nn.Module
+    adapter_layer_names = ["lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B"]
+
     def __init__(
         self,
         in_features: int,
@@ -59,6 +63,7 @@ class AdaLoraLayer(LoraLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
         self.to(self.weight.device)
+        self.set_adapter(self.active_adapter)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -92,7 +97,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():

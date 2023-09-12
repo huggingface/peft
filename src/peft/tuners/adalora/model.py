@@ -141,6 +141,9 @@ class AdaLoraModel(LoraModel):
         # If it is not a LoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            if adapter_name != self.active_adapter:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
         else:
             target.update_layer(

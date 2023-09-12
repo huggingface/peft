@@ -52,6 +52,7 @@ class IA3Layer(BaseTunerLayer):
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
+        self.set_adapter(self.active_adapter)
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
