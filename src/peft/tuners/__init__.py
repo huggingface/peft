@@ -17,18 +17,65 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
-from .lora import LoraConfig, LoraModel
-from .ia3 import IA3Config, IA3Model
-from .adalora import AdaLoraConfig, AdaLoraModel
-from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
-from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
-from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
-from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
+from typing import TYPE_CHECKING
 
-# Mapping of tuners that support direct plugging
-TUNERS_MAPPING = {
-    "LORA": LoraModel,
-    "IA3": IA3Model,
-    "ADALORA": AdaLoraModel,
+from ..import_utils import _LazyModule
+
+_import_structure = {
+    "adaption_prompt": [
+        "AdaptionPromptConfig",
+        "AdaptionPromptModel",
+    ],
+    "lora": [
+        "LoraConfig",
+        "LoraModel",
+    ],
+    "ia3": [
+        "IA3Config",
+        "IA3Model",
+    ],
+    "adalora": [
+        "AdaLoraConfig",
+        "AdaLoraModel",
+    ],
+    "p_tuning": [
+        "PromptEncoder",
+        "PromptEncoderConfig",
+        "PromptEncoderReparameterizationType",
+    ],
+    "prefix_tuning": [
+        "PrefixEncoder",
+        "PrefixTuningConfig",
+    ],
+    "prompt_tuning": [
+        "PromptEmbedding",
+        "PromptTuningConfig",
+        "PromptTuningInit",
+    ],
+    "multitask_prompt_tuning": [
+        "MultitaskPromptEmbedding",
+        "MultitaskPromptTuningConfig",
+        "MultitaskPromptTuningInit",
+    ],
 }
+
+if TYPE_CHECKING:
+    from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+    from .lora import LoraConfig, LoraModel
+    from .ia3 import IA3Config, IA3Model
+    from .adalora import AdaLoraConfig, AdaLoraModel
+    from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
+    from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
+    from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
+    from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
+
+    # Mapping of tuners that support direct plugging
+    TUNERS_MAPPING = {
+        "LORA": LoraModel,
+        "IA3": IA3Model,
+        "ADALORA": AdaLoraModel,
+    }
+else:
+    import sys
+
+    sys.modules[__name__] = _LazyModule(__name__, globals()["__file__"], _import_structure, module_spec=__spec__)
