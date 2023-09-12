@@ -633,7 +633,7 @@ class LoraModel(BaseTuner):
                     warnings.warn(
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
                     )
-                    target.active_adapter = resetting_active_adapter
+                    target.set_adapter(resetting_active_adapter)
 
     def merge_and_unload(self, progressbar: bool = False):
         r"""
