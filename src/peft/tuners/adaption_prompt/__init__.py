@@ -12,18 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import TYPE_CHECKING
-from ...import_utils import _LazyModule
+from .config import AdaptionPromptConfig
+from .layer import AdaptedAttention
+from .model import AdaptionPromptModel
 
-_import_structure = {
-    "config": ["PrefixTuningConfig"],
-    "model": ["PrefixEncoder"],
-}
 
-if TYPE_CHECKING:
-    from .config import PrefixTuningConfig
-    from .model import PrefixEncoder
-else:
-    import sys
-
-    sys.modules[__name__] = _LazyModule(__name__, globals()["__file__"], _import_structure, module_spec=__spec__)
+__all__ = ["AdaptionPromptConfig", "AdaptedAttention", "AdaptionPromptModel"]

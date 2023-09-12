@@ -168,11 +168,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        # for embeddings, even with init_lora_weights=False, the LoRA embeddings weights are still initialized to
-        # perform the identity transform, thus the test would fail.
-        if config_kwargs["target_modules"] == ["emb"]:
-            return
-
         config_kwargs = config_kwargs.copy()
         config_kwargs["init_lora_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
@@ -368,3 +363,17 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+
+class TestRepr(unittest.TestCase):
+    """Tests related to the repr of adapted models"""
+
+    def test_repr_lora(self):
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(MLP(), config)
+        print_output = repr(model.model.lin0)
+        self.assertTrue(print_output.startswith("Linear"))
+        self.assertTrue("in_features=10, out_features=20" in print_output)
+        self.assertTrue("lora_A" in print_output)
+        self.assertTrue("lora_B" in print_output)
+        self.assertTrue("default" in print_output)
