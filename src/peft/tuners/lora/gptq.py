@@ -36,7 +36,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         self.weight = quant_linear_module.qweight
         init_lora_weights = kwargs.pop("init_lora_weights", True)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.set_adapter(adapter_name)
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
