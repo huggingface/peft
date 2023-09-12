@@ -13,7 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import TYPE_CHECKING
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, _LazyModule, OptionalDependencyNotAvailable, is_auto_gptq_available
+
+from peft.import_utils import (
+    OptionalDependencyNotAvailable,
+    _LazyModule,
+    is_auto_gptq_available,
+    is_bnb_4bit_available,
+    is_bnb_available,
+)
+
 
 _import_structure = {
     "config": ["LoraConfig"],
@@ -47,9 +55,6 @@ else:
 
 
 if TYPE_CHECKING:
-    from .config import LoraConfig
-    from .layer import Conv2d, Embedding, Linear, LoraLayer
-    from .model import LoraModel
 
     try:
         if not is_auto_gptq_available():
@@ -57,7 +62,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .gptq import QuantLinear
+        pass
 
     try:
         if not is_bnb_4bit_available():
@@ -65,8 +70,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .bnb import Linear4bit
-
+        pass
 
     try:
         if not is_bnb_available():
@@ -74,7 +78,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .bnb import Linear8bitLt
+        pass
 
 else:
     import sys

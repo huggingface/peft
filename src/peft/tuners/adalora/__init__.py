@@ -13,8 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import TYPE_CHECKING
-from ...import_utils import _LazyModule, OptionalDependencyNotAvailable
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_auto_gptq_available
+
+from peft.import_utils import is_auto_gptq_available, is_bnb_4bit_available, is_bnb_available
+
+from ...import_utils import OptionalDependencyNotAvailable, _LazyModule
+
 
 _import_structure = {
     "config": ["AdaLoraConfig"],
@@ -47,12 +50,7 @@ else:
     _import_structure["gptq"] = ["SVDQuantLinear"]
 
 
-
 if TYPE_CHECKING:
-    from .config import AdaLoraConfig
-    from .layer import AdaLoraLayer, RankAllocator, SVDLinear
-    from .model import AdaLoraModel
-
 
     try:
         if not is_auto_gptq_available():
@@ -60,8 +58,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .gptq import SVDQuantLinear
-
+        pass
 
     try:
         if not is_bnb_available():
@@ -69,7 +66,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .bnb import SVDLinear8bitLt
+        pass
 
     try:
         if not is_bnb_4bit_available():
@@ -77,7 +74,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .bnb import SVDLinear4bit
+        pass
 else:
     import sys
 

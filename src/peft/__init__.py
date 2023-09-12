@@ -81,7 +81,7 @@ _import_structure = {
         "shift_tokens_right",
         "load_peft_weights",
     ],
-    "config": ["PeftConfig", "PromptLearningConfig"]
+    "config": ["PeftConfig", "PromptLearningConfig"],
 }
 
 
@@ -147,4 +147,10 @@ if TYPE_CHECKING:
 else:
     import sys
 
-    sys.modules[__name__] = _LazyModule(__name__, globals()["__file__"], _import_structure, module_spec=__spec__, extra_objects={"__version__": __version__})
+    sys.modules[__name__] = _LazyModule(
+        __name__,
+        globals()["__file__"],
+        _import_structure,
+        module_spec=__spec__,
+        extra_objects={"__version__": __version__},
+    )

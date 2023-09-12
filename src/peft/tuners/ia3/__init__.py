@@ -13,8 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import TYPE_CHECKING
-from ...import_utils import _LazyModule, OptionalDependencyNotAvailable
+
 from peft.import_utils import is_bnb_available
+
+from ...import_utils import OptionalDependencyNotAvailable, _LazyModule
+
 
 _import_structure = {
     "config": ["IA3Config"],
@@ -31,9 +34,7 @@ else:
     _import_structure["bnb"] = ["Linear8bitLt"]
 
 if TYPE_CHECKING:
-    from .config import IA3Config
-    from .layer import IA3Layer, Linear
-    from .model import IA3Model
+    pass
 else:
     import sys
 
