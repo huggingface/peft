@@ -24,6 +24,9 @@ from peft.utils import transpose
 
 
 class IA3Layer(BaseTunerLayer):
+    # List all names of layers that may contain adapter weights
+    adapter_layer_names = ["ia3_l"]
+
     def __init__(
         self,
         in_features: int,
@@ -34,7 +37,7 @@ class IA3Layer(BaseTunerLayer):
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
         self.merged = False
-        self.disable_adapters = False
+        self._disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
         self.is_feedforward = is_feedforward
@@ -71,6 +74,7 @@ class Linear(nn.Linear, IA3Layer):
 
         nn.Linear.__init__(self, in_features, out_features, **kwargs)
         IA3Layer.__init__(self, in_features=in_features, out_features=out_features, is_feedforward=is_feedforward)
+        self.is_feedforward = is_feedforward
         # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
 
@@ -80,9 +84,7 @@ class Linear(nn.Linear, IA3Layer):
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, init_ia3_weights)
-        self.active_adapter = adapter_name
-
-        self.is_feedforward = is_feedforward
+        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
         if self.active_adapter not in self.ia3_l.keys():
