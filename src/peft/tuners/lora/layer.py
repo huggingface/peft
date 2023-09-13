@@ -75,7 +75,10 @@ class LoraLayer(BaseTunerLayer):
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
-            self.to(weight.device, dtype=weight.dtype)
+            if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                self.to(weight.device, dtype=weight.dtype)
+            else:
+                self.to(weight.device)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
