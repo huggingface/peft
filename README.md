@@ -14,8 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -->
 
-**(Update: 13/07/2023)** Our implementation of $(IA)^3$ ([Infused Adapter by Inhibiting and Amplifying Inner Activations](https://arxiv.org/abs/2205.05638)) is now a part of 🤗 PEFT ([PR](https://github.com/huggingface/peft/pull/578)).
-
 <h1 align="center"> <p>🤗 PEFT</p></h1>
 <h3 align="center">
     <p>State-of-the-art Parameter-Efficient Fine-Tuning (PEFT) methods</p>
