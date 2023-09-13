@@ -54,6 +54,14 @@ def b2mb(x):
     return int(x / 2**20)
 
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
 # This context manager is used to track the peak memory usage of the process
 class TorchTracemalloc:
     def __enter__(self):
@@ -192,6 +200,10 @@ def main(args):
         is_ds_zero_3 = accelerator.state.deepspeed_plugin.zero_stage == 3
 
     mlflow.start_run()
+
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
+
     elapsed = 0
     epoch_runtime_list = []
     for epoch in range(num_epochs):

@@ -37,11 +37,6 @@ parser.add_argument('--cache_dir', type=str, default=None, help='Directory to re
 
 args = parser.parse_args()
 
-# mlflow init
-# mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-# if (not mlflow_uri):
-#     mlflow_uri = "http://127.0.0.1:5001"
-#     mlflow.set_tracking_uri(mlflow_uri)
 
 # Load dataset
 dataset = load_dataset(args.dataset_name, split="train[:5000]", cache_dir=args.cache_dir)
@@ -68,6 +63,14 @@ val_transforms = Compose([
     ToTensor(),
     normalize,
 ])
+
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
 
 # Preprocess functions for train and val datasets
 def preprocess_train(example_batch):
@@ -136,6 +139,7 @@ training_args = TrainingArguments(
     label_names=["labels"],
 )
 
+
 # Compute evaluation metrics
 metric = evaluate.load("accuracy")
 def compute_metrics(eval_pred):
@@ -166,6 +170,10 @@ trainer.log_metrics("train", train_results.metrics)
 trainer.save_metrics("train", train_results.metrics)
 trainer.save_model()
 trainer.save_state()
+
+num_params = get_num_parameters(lora_model)
+mlflow.log_param('num_params', num_params)
+
 for metric_dict in trainer.state.log_history:
     if 'loss' in metric_dict:
         mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])

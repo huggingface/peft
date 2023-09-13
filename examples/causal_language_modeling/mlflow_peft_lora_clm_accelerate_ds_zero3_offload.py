@@ -28,6 +28,14 @@ import time
 #     mlflow_uri = "http://127.0.0.1:5001"
 #     mlflow.set_tracking_uri(mlflow_uri)
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
 def levenshtein_distance(str1, str2):
     # TC: O(N^2)
     # SC: O(N^2)
@@ -255,6 +263,10 @@ def main(args):
 
     # with mlflow_runner:
     mlflow.start_run()
+
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
+    
     elapsed = 0
     epoch_runtime_list = []
     for epoch in range(num_epochs):

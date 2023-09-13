@@ -82,6 +82,14 @@ def parse_args():
     return args
 
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
 def main():
     args = parse_args()
     ddp_scaler = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -178,6 +186,9 @@ def main():
             model, train_dataloader, eval_dataloader, optimizer, lr_scheduler
         )
     mlflow.start_run()
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
+
     elapsed = 0
     epoch_runtime_list = []
     for epoch in range(args.num_train_epochs):

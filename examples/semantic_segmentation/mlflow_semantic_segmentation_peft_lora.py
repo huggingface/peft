@@ -45,6 +45,13 @@ num_labels = len(id2label)
 image_processor = AutoImageProcessor.from_pretrained(args.checkpoint, reduce_labels=True)
 jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
 
 def handle_grayscale_image(image):
     np_image = np.array(image)
@@ -166,6 +173,10 @@ trainer.log_metrics("train", train_results.metrics)
 trainer.save_metrics("train", train_results.metrics)
 trainer.save_model()
 trainer.save_state()
+
+num_params = get_num_parameters(model)
+mlflow.log_param('num_params', num_params)
+
 for metric_dict in trainer.state.log_history:
     if 'loss' in metric_dict:
         mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])
