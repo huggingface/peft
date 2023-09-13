@@ -207,9 +207,13 @@ def get_loss(cosine_score, labels):
 
 def main():
     args = parse_args()
-    accelerator = (
-        Accelerator(log_with=args.report_to, project_dir=args.output_dir) if args.with_tracking else Accelerator()
-    )
+
+    accelerator_kwargs = {"gradient_accumulation_steps": args.gradient_accumulation_steps}
+    if args.with_tracking:
+        accelerator_kwargs["log_with"] = args.report_to
+        accelerator_kwargs["project_dir"] = args.output_dir
+    accelerator = Accelerator(**accelerator_kwargs)
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -402,7 +406,7 @@ def main():
             resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
             starting_epoch = resume_step // len(train_dataloader)
             resume_step -= starting_epoch * len(train_dataloader)
-            completed_steps = resume_step // args.gradient_accumulation_stepp
+            completed_steps = resume_step // args.gradient_accumulation_steps
 
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)

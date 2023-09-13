@@ -64,16 +64,20 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         # Instantiate StableDiffusionPipeline
         model = self.transformers_class.from_pretrained(model_id)
 
+        config_kwargs = config_kwargs.copy()
+        text_encoder_kwargs = config_kwargs.pop("text_encoder")
+        unet_kwargs = config_kwargs.pop("unet")
+        # the remaining config kwargs should be applied to both configs
+        for key, val in config_kwargs.items():
+            text_encoder_kwargs[key] = val
+            unet_kwargs[key] = val
+
         # Instantiate text_encoder adapter
-        config_text_encoder = config_cls(
-            **config_kwargs["text_encoder"],
-        )
+        config_text_encoder = config_cls(**text_encoder_kwargs)
         model.text_encoder = get_peft_model(model.text_encoder, config_text_encoder)
 
         # Instantiate unet adapter
-        config_unet = config_cls(
-            **config_kwargs["unet"],
-        )
+        config_unet = config_cls(**unet_kwargs)
         model.unet = get_peft_model(model.unet, config_unet)
 
         # Move model to device
@@ -142,3 +146,14 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name])
         )
         self.assertTrue(asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name]))
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+            },
+        )
+    )
+    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_disable_adapter(model_id, config_cls, config_kwargs)

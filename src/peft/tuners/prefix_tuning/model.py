@@ -13,39 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-from dataclasses import dataclass, field
-
-import torch
-
-from ..utils import PeftType, PromptLearningConfig
-
-
-@dataclass
-class PrefixTuningConfig(PromptLearningConfig):
-    """
-    This is the configuration class to store the configuration of a [`PrefixEncoder`].
-
-    Args:
-        encoder_hidden_size (`int`): The hidden size of the prompt encoder.
-        prefix_projection (`bool`): Whether to project the prefix embeddings.
-    """
-
-    encoder_hidden_size: int = field(
-        default=None,
-        metadata={"help": "The hidden size of the encoder"},
-    )
-    prefix_projection: bool = field(
-        default=False,
-        metadata={"help": "Whether to project the prefix tokens"},
-    )
-
-    def __post_init__(self):
-        self.peft_type = PeftType.PREFIX_TUNING
-
-
 # Based on https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
 # with some refactor
+import torch
+
+
 class PrefixEncoder(torch.nn.Module):
     r"""
     The `torch.nn` model to encode the prefix.

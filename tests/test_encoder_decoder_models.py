@@ -68,6 +68,10 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
@@ -76,6 +80,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -115,3 +120,55 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "task_type": "SEQ_2_SEQ_LM",
+            },
+        )
+    )
+    def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_unload_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "task_type": "SEQ_2_SEQ_LM",
+            },
+        )
+    )
+    def test_weighted_combination_of_adapters(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_weighted_combination_of_adapters(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_training_prompt_learning_tasks(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_training_prompt_learning_tasks(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_ENCODER_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "task_type": "SEQ_2_SEQ_LM",
+            },
+        )
+    )
+    def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_disable_adapter(model_id, config_cls, config_kwargs)

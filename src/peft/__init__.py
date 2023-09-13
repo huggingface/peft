@@ -17,9 +17,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.4.0.dev0"
+__version__ = "0.6.0.dev0"
 
-from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING, get_peft_config, get_peft_model
+from .auto import (
+    AutoPeftModel,
+    AutoPeftModelForCausalLM,
+    AutoPeftModelForSequenceClassification,
+    AutoPeftModelForSeq2SeqLM,
+    AutoPeftModelForTokenClassification,
+    AutoPeftModelForQuestionAnswering,
+    AutoPeftModelForFeatureExtraction,
+)
+from .mapping import (
+    MODEL_TYPE_TO_PEFT_MODEL_MAPPING,
+    PEFT_TYPE_TO_CONFIG_MAPPING,
+    get_peft_config,
+    get_peft_model,
+    inject_adapter_in_model,
+)
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -46,12 +61,12 @@ from .tuners import (
     PromptEncoderReparameterizationType,
     PromptTuningConfig,
     PromptTuningInit,
+    MultitaskPromptTuningConfig,
+    MultitaskPromptTuningInit,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
-    PeftConfig,
     PeftType,
-    PromptLearningConfig,
     TaskType,
     bloom_model_postprocess_past_key_value,
     get_peft_model_state_dict,
@@ -59,4 +74,6 @@ from .utils import (
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
     shift_tokens_right,
+    load_peft_weights,
 )
+from .config import PeftConfig, PromptLearningConfig

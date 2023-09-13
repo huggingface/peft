@@ -13,57 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import enum
+# Based on https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/modules/common/prompt_encoder.py
+# with some refactor
 import warnings
-from dataclasses import dataclass, field
-from typing import Union
 
 import torch
 
-from ..utils import PeftType, PromptLearningConfig
+from .config import PromptEncoderConfig, PromptEncoderReparameterizationType
 
 
-class PromptEncoderReparameterizationType(str, enum.Enum):
-    MLP = "MLP"
-    LSTM = "LSTM"
-
-
-@dataclass
-class PromptEncoderConfig(PromptLearningConfig):
-    """
-    This is the configuration class to store the configuration of a [`PromptEncoder`].
-
-    Args:
-        encoder_reparameterization_type (Union[[`PromptEncoderReparameterizationType`], `str`]):
-            The type of reparameterization to use.
-        encoder_hidden_size (`int`): The hidden size of the prompt encoder.
-        encoder_num_layers (`int`): The number of layers of the prompt encoder.
-        encoder_dropout (`float`): The dropout probability of the prompt encoder.
-    """
-
-    encoder_reparameterization_type: Union[str, PromptEncoderReparameterizationType] = field(
-        default=PromptEncoderReparameterizationType.MLP,
-        metadata={"help": "How to reparameterize the prompt encoder"},
-    )
-    encoder_hidden_size: int = field(
-        default=None,
-        metadata={"help": "The hidden size of the prompt encoder"},
-    )
-    encoder_num_layers: int = field(
-        default=2,
-        metadata={"help": "The number of layers of the prompt encoder"},
-    )
-    encoder_dropout: float = field(
-        default=0.0,
-        metadata={"help": "The dropout of the prompt encoder"},
-    )
-
-    def __post_init__(self):
-        self.peft_type = PeftType.P_TUNING
-
-
-# Based on https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/nlp/modules/common/prompt_encoder.py
-# with some refactor
 class PromptEncoder(torch.nn.Module):
     """
     The prompt encoder network that is used to generate the virtual token embeddings for p-tuning.
@@ -143,9 +101,12 @@ class PromptEncoder(torch.nn.Module):
                 )
 
             elif self.encoder_type == PromptEncoderReparameterizationType.MLP:
-                warnings.warn(
-                    f"for {self.encoder_type}, the `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
-                )
+                encoder_num_layers_default = PromptEncoderConfig.encoder_num_layers
+                if config.encoder_num_layers != encoder_num_layers_default:
+                    warnings.warn(
+                        f"for {self.encoder_type}, the argument `encoder_num_layers` is ignored. "
+                        f"Exactly {encoder_num_layers_default} MLP layers are used."
+                    )
                 layers = [
                     torch.nn.Linear(self.input_size, self.hidden_size),
                     torch.nn.ReLU(),

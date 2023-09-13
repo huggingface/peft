@@ -45,7 +45,13 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 
-from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
+from .testing_utils import (
+    require_auto_gptq,
+    require_bitsandbytes,
+    require_optimum,
+    require_torch_gpu,
+    require_torch_multi_gpu,
+)
 
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
@@ -113,7 +119,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         https://github.com/huggingface/transformers/issues/21094
         """
         gc.collect()
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         gc.collect()
 
     @pytest.mark.single_gpu_tests
@@ -162,6 +169,125 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     output_dir=tmp_dir,
                 ),
                 data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit(self):
+        r"""
+        Test the CausalLM training on a single GPU device. This test is a converted version of
+        https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
+        `opt-6.7b` on `english_quotes` dataset in few steps using 4bit base model. The test would simply fail if the
+        adapters are not set correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                load_in_4bit=True,
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_mutli_gpu_4bit(self):
+        r"""
+        Test the CausalLM training on a multi-GPU device with 4bit base model. The test would simply fail if the
+        adapters are not set correctly.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                load_in_4bit=True,
+            )
+
+            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
             model.config.use_cache = False
             trainer.train()
@@ -508,6 +634,209 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 tokenizer=processor.feature_extractor,
             )
 
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+@require_torch_gpu
+@require_auto_gptq
+@require_optimum
+class PeftGPTQGPUTests(unittest.TestCase):
+    r"""
+    GPTQ + peft tests
+    """
+
+    def setUp(self):
+        from transformers import GPTQConfig
+
+        self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
+        self.quantization_config = GPTQConfig(bits=4, disable_exllama=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training(self):
+        r"""
+        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    def test_adalora_causalLM(self):
+        r"""
+        Tests the gptq training with adalora
+        """
+
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+
+        model = prepare_model_for_kbit_training(model)
+
+        peft_config = AdaLoraConfig(
+            init_r=6,
+            target_r=4,
+            tinit=50,
+            tfinal=100,
+            deltaT=5,
+            beta1=0.3,
+            beta2=0.3,
+            orth_reg_weight=0.2,
+            lora_alpha=32,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        model = get_peft_model(model, peft_config)
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_causal_lm_training_mutli_gpu(self):
+        r"""
+        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)

@@ -16,6 +16,7 @@
 import importlib
 import os
 import tempfile
+import unittest
 from unittest import TestCase
 
 import torch
@@ -128,6 +129,56 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             torch.manual_seed(seed)
             model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+
+            # check if same keys
+            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+
+            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+            self.assertEqual(len(list(state_dict.keys())), 4)
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                self.assertTrue(
+                    torch.allclose(
+                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                    )
+                )
+
+            # check if `adapter_model.bin` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+
+            # check if `adapter_config.json` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+
+            # check if `pytorch_model.bin` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+
+            # check if `config.json` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+    def test_save_pretrained_selected_adapters(self) -> None:
+        seed = 420
+        torch.manual_seed(seed)
+        model = LlamaForCausalLM(self._create_test_llama_config())
+        config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        new_adapter_config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model.add_adapter("new_adapter", new_adapter_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            torch.manual_seed(seed)
+            model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            model_from_pretrained.load_adapter(tmp_dirname, "new_adapter")
 
             # check if the state dicts are equal
             state_dict = get_peft_model_state_dict(model)
@@ -324,3 +375,23 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         )
         adapted = adapted.to(self.torch_device)
         _ = adapted.generate(input_ids=input_ids)
+
+    @unittest.expectedFailure
+    def test_disable_adapter(self):
+        llama_config = self._create_test_llama_config()
+        model = LlamaForCausalLM(llama_config).to(self.torch_device)
+        dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
+        output_before = model(dummy_input).logits
+
+        config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config).to(self.torch_device)
+        output_peft = model(dummy_input).logits
+        # TODO currently this fails because scores are zeroed out:
+        # https://github.com/huggingface/peft/blob/062d95a09eb5d1de35c0e5e23d4387daba99e2db/src/peft/tuners/adaption_prompt.py#L303
+        # This is fine for users but makes it difficult to test if anything happens. In the future, we will have a clean
+        # way to control initialization. Until then, this test is expected to fail.
+        self.assertFalse(torch.allclose(output_before, output_peft))
+
+        with model.disable_adapter():
+            output_peft_disabled = model(dummy_input).logits
+        self.assertTrue(torch.allclose(output_before, output_peft_disabled))
