@@ -212,7 +212,7 @@ class Linear(nn.Linear, LoraLayer):
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.active_adapter not in self.lora_A.keys():
             return self._linear(x)
 
@@ -287,7 +287,7 @@ class Embedding(nn.Embedding, LoraLayer):
             sparse=self.sparse,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.active_adapter not in self.lora_embedding_A.keys():
             return self._embed(x)
 
@@ -388,7 +388,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
             groups=self.groups,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.active_adapter not in self.lora_A.keys():
             return self._conv2d(x)
 
