@@ -17,8 +17,6 @@ from peft import LoraConfig, get_peft_model
 import mlflow
 import os
 
-import sys
-sys.path.append('../')
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Image Classification with LoRA")
 parser.add_argument("--model_checkpoint", type=str, default="google/vit-base-patch16-224-in21k",
