@@ -23,6 +23,7 @@ logging_steps = 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
+    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
     parser.add_argument(
         "--num_virtual_tokens",
         type=int,
@@ -38,9 +39,8 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default='roberta-large',
-        help="Path to pretrained model or model identifier from huggingface.co/models.",
-        required=True,
+        default='bert-base-uncased',
+        help="Path to pretrained model or model identifier from huggingface.co/models."
     )
     parser.add_argument(
         "--per_device_train_batch_size",
@@ -73,6 +73,8 @@ def parse_args():
         help="The PEFT type to use.",
         choices=["p_tuning", "prefix_tuning", "prompt_tuning"],
     )
+    parser.add_argument('--dataset_name', type=str, default='glue', help='The name of the Dataset (from the HuggingFace hub) to train on.')
+    parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     args = parser.parse_args()
 
     assert args.output_dir is not None, "Need an `output_dir` to store the finetune model and verify."
@@ -125,7 +127,7 @@ def main():
     if getattr(tokenizer, "pad_token_id") is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    datasets = load_dataset("glue", task)
+    datasets = load_dataset(args.dataset_name, task, cache_dir=args.cache_dir)
     metric = evaluate.load("glue", task)
 
     def tokenize_function(examples):
@@ -187,12 +189,15 @@ def main():
     num_params = get_num_parameters(model)
     mlflow.log_param('num_params', num_params)
 
-    start_time = time.time()
+    elapsed = 0
+    epoch_runtime_list = []
     for epoch in range(args.num_train_epochs):
+        start_time = time.time()
         model.train()
         total_loss = 0
-        interval_start_time = time.time()  # Start time for the epoch
+
         for step, batch in enumerate(tqdm(train_dataloader)):
+            start_time_step = time.time()
             outputs = model(**batch)
             loss = outputs.loss
             total_loss += loss.detach().float()
@@ -200,26 +205,23 @@ def main():
             optimizer.step()
             lr_scheduler.step()
             optimizer.zero_grad()
+            elapsed += time.time() - start_time_step
+            total_steps = epoch * len(train_dataloader) + step + 1
+            if total_steps % args.log_interval == 0:
+                thoughput = total_steps * args.per_device_train_batch_size/ elapsed
+                mlflow.log_metric('throughput', thoughput, step=total_steps)
+                mlflow.log_metric('loss', loss, step=total_steps)
+                mlflow.log_metric('lr', lr_scheduler.get_last_lr()[0], step=total_steps)
 
         end_time = time.time()  # End time for the epoch
-        interval_elapsed_time = time.time() - interval_start_time
-        # interval_start_time = time.time()
-        interval_throughput = (logging_steps*args.per_device_train_batch_size) / interval_elapsed_time
+
         # Calculate metrics
         epoch_runtime = end_time - start_time
-        samples_per_second = len(train_dataloader.dataset) / epoch_runtime
-        steps_per_second = len(train_dataloader) / epoch_runtime
-        avg_loss = total_loss / len(train_dataloader)
-
-        # Log metrics for the epoch
-        mlflow.log_metric('loss', avg_loss, step=step)
-        mlflow.log_metric('total_loss', total_loss)
-        mlflow.log_metric('train_runtime', epoch_runtime)
-        mlflow.log_metric('train_samples_per_second', samples_per_second)
-        mlflow.log_metric('train_steps_per_second', steps_per_second)
-        mlflow.log_metric('throughput', interval_throughput, step=step)
-        mlflow.log_metric('lr', args.learning_rate , step=step)
-
+        epoch_runtime_list.append(epoch_runtime)
+    avg_epoch_runtime = sum(epoch_runtime_list)/len(epoch_runtime_list)
+    avg_throughput = len(train_dataloader) * args.per_device_train_batch_size*args.num_train_epochs/ sum(epoch_runtime_list)
+    mlflow.log_metric('epoch_time', avg_epoch_runtime)  
+    mlflow.log_metric('avg_throughput', avg_throughput)
     mlflow.end_run()
 
     model.eval()

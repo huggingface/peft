@@ -16,15 +16,19 @@ import os
 # Argument parsing
 parser = argparse.ArgumentParser()
 parser.add_argument("--checkpoint", type=str, default="nvidia/mit-b0", help="Checkpoint for the model")
+parser.add_argument('--dataset_name', type=str, default='scene_parse_150', help='The name of the Dataset (from the HuggingFace hub) to train on.')
+parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
 parser.add_argument("--learning_rate", type=float, default=5e-4, help="Learning rate for training")
-parser.add_argument("--num_train_epochs", type=int, default=50, help="Number of training epochs")
+parser.add_argument("--num_train_epochs", type=int, default=2, help="Number of training epochs")
 parser.add_argument("--per_device_train_batch_size", type=int, default=4, help="Batch size for training")
 parser.add_argument("--per_device_eval_batch_size", type=int, default=2, help="Batch size for evaluation")
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
+parser.add_argument("--logging_steps", type=int, default=10,
+                    help="Log metrics every X steps")
 args = parser.parse_args()
 
 # Load dataset
-ds = load_dataset("scene_parse_150", split="train[:150]")
+ds = load_dataset(args.dataset_name, split="train[:150]", cache_dir=args.cache_dir)
 ds = ds.train_test_split(test_size=0.1)
 train_ds = ds["train"]
 test_ds = ds["test"]
@@ -141,13 +145,6 @@ for name, param in lora_model.named_parameters():
 
 model_name = args.checkpoint.split("/")[-1]
 
-# mlflow initial
-experiment_id = mlflow.create_experiment('semantic_segmentation-{}'.format(model_name))
-experiment = mlflow.get_experiment(experiment_id)
-mlflow_runner = mlflow.start_run(run_name=model_name, experiment_id=experiment.experiment_id)
-num_params = get_num_parameters(model)
-mlflow.log_param('num_params', num_params)
-
 training_args = TrainingArguments(
     output_dir=args.output_dir,
     learning_rate=args.learning_rate,
@@ -157,10 +154,10 @@ training_args = TrainingArguments(
     save_total_limit=3,
     evaluation_strategy="epoch",
     save_strategy="epoch",
-    logging_steps=5,
+    logging_steps=args.logging_steps,
     remove_unused_columns=False,
     push_to_hub=False,
-    label_names=["labels"],
+    label_names=["labels"]
 )
 trainer = Trainer(
     model=lora_model,
@@ -177,8 +174,19 @@ trainer.save_metrics("train", train_results.metrics)
 trainer.save_model()
 trainer.save_state()
 
-mlflow.log_metric('loss', train_results.metrics["train_loss"])
-mlflow.log_metric('runtime', train_results.metrics["train_runtime"])
-mlflow.log_metric('samples_per_second', train_results.metrics["train_samples_per_second"])
+num_params = get_num_parameters(model)
+mlflow.log_param('num_params', num_params)
+
+for metric_dict in trainer.state.log_history:
+    if 'loss' in metric_dict:
+        mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])
+        mlflow.log_metric('lr', metric_dict['learning_rate'], step=metric_dict['step'])
+
+mlflow.log_metric('epoch', train_results.metrics["epoch"])
+mlflow.log_metric('train_loss', train_results.metrics["train_loss"])
+mlflow.log_metric('train_runtime', train_results.metrics["train_runtime"])
+mlflow.log_metric('throughput', train_results.metrics["train_samples_per_second"])
 mlflow.log_metric('steps_per_second', train_results.metrics["train_steps_per_second"])
+epoch_time = train_results.metrics["train_runtime"] / train_results.metrics["epoch"]
+mlflow.log_metric('epoch_time', epoch_time)
 mlflow.end_run()

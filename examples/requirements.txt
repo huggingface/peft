@@ -10,3 +10,4 @@ Pillow
 torchvision
 huggingface_hub
 accelerate
+deepspeed
