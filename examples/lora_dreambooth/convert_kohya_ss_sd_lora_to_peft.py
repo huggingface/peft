@@ -41,9 +41,6 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     Args:
         info (Dict[str, LoRAInfo]): Information extracted from kohya checkpoint
 
-    Raises:
-        NotImplementedError: Raises if some layers have different ranks or alphas
-
     Returns:
         LoraConfig: config for constructing LoRA
     """
