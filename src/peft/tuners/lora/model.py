@@ -16,6 +16,7 @@ import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from itertools import chain
 
 import torch
 from torch import nn
@@ -161,9 +162,13 @@ class LoraModel(BaseTuner):
         parent,
         **optional_kwargs,
     ):
+        # Regexp matching - Find key which matches current target_name in patterns provided
         current_key = optional_kwargs["current_key"]
-        r = lora_config.rank_pattern.get(current_key, lora_config.r)
-        alpha = lora_config.alpha_pattern.get(current_key, lora_config.lora_alpha)
+        pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), target_name)
+
+        r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
