@@ -27,8 +27,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install .[test]
       - name: Test compile with pytest
         run: |
+          echo "PEFT_DEBUG_WITH_TORCH_COMPILE=$PEFT_DEBUG_WITH_TORCH_COMPILE"
           git status
           make test
