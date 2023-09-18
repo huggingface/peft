@@ -13,6 +13,8 @@ from ..utils import (
     PeftType,
     _freeze_adapter,
     _get_submodules,
+    get_auto_gptq_quant_linear,
+    get_quantization_config,
     transpose,
 )
 from .lora import (
@@ -182,7 +184,6 @@ class AdaLoraModel(LoraModel):
     ):
         loaded_in_8bit = optionnal_kwargs.get("loaded_in_8bit", False)
         loaded_in_4bit = optionnal_kwargs.get("loaded_in_4bit", False)
-
         if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
             raise ImportError(
                 "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
@@ -197,6 +198,10 @@ class AdaLoraModel(LoraModel):
             "loaded_in_8bit": loaded_in_8bit,
             "loaded_in_4bit": loaded_in_4bit,
         }
+
+        quantization_config = get_quantization_config(self.model, method="gptq")
+        if quantization_config is not None:
+            kwargs["gptq_quantization_config"] = quantization_config
 
         # If it is not a LoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
@@ -213,6 +218,9 @@ class AdaLoraModel(LoraModel):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
+        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+
         bias = target.bias is not None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
@@ -239,6 +247,9 @@ class AdaLoraModel(LoraModel):
             new_module = SVDLinear4bit(
                 adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
             )
+        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+            new_module = SVDQuantLinear(adapter_name, target, **kwargs)
+            target.weight = target.qweight
         else:
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
@@ -594,6 +605,60 @@ if is_bnb_4bit_available():
                     )
                 result = result + output
             return result
+
+
+class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
+    def __init__(
+        self,
+        adapter_name,
+        quant_linear_module,
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        **kwargs,
+    ):
+        torch.nn.Module.__init__(self)
+        AdaLoraLayer.__init__(
+            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
+        )
+        self.quant_linear_module = quant_linear_module
+        self.weight = quant_linear_module.qweight
+        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.active_adapter = adapter_name
+
+    def forward(self, x: torch.Tensor):
+        result = self.quant_linear_module(x)
+
+        if self.disable_adapters or self.active_adapter not in self.lora_A.keys():
+            return result
+        elif self.r[self.active_adapter] > 0:
+            if not torch.is_autocast_enabled():
+                expected_dtype = result.dtype
+
+                if x.dtype != torch.float32:
+                    x = x.float()
+                output = (
+                    (
+                        self.lora_dropout[self.active_adapter](x)
+                        @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                        @ self.lora_B[self.active_adapter].T
+                    )
+                    * self.scaling[self.active_adapter]
+                    / (self.ranknum[self.active_adapter] + 1e-5)
+                ).to(expected_dtype)
+            else:
+                output = (
+                    (
+                        self.lora_dropout[self.active_adapter](x)
+                        @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]).T
+                        @ self.lora_B[self.active_adapter].T
+                    )
+                    * self.scaling[self.active_adapter]
+                    / (self.ranknum[self.active_adapter] + 1e-5)
+                )
+            result = result + output
+        return result
 
 
 class RankAllocator(object):

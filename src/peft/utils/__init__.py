@@ -29,7 +29,6 @@ from .other import (
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
-    CLAMP_QUANTILE,
     _set_trainable,
     add_library_to_model_card,
     bloom_model_postprocess_past_key_value,
@@ -45,6 +44,8 @@ from .other import (
     _prepare_prompt_learning_config,
     _is_valid_match,
     infer_device,
+    get_auto_gptq_quant_linear,
+    get_quantization_config,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights
