@@ -21,7 +21,7 @@ from enum import Enum
 import torch
 from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
@@ -38,6 +38,11 @@ if is_bnb_available():
     import bitsandbytes as bnb
 
     from .bnb import Linear8bitLt
+
+if is_bnb_4bit_available():
+    import bitsandbytes as bnb
+
+    from .bnb import Linear4bit, Linear8bitLt
 
 
 class IA3Model(BaseTuner):
@@ -82,6 +87,7 @@ class IA3Model(BaseTuner):
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
         bias = hasattr(target, "bias") and target.bias is not None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
+        loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
 
         if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
@@ -101,6 +107,23 @@ class IA3Model(BaseTuner):
                 is_feedforward,
                 bias=bias,
                 **eightbit_kwargs,
+            )
+        elif loaded_in_4bit and isinstance(target, bnb.nn.Linear4bit):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(
+                {
+                    "compute_dtype": target.compute_dtype,
+                    "compress_statistics": target.weight.compress_statistics,
+                    "quant_type": target.weight.quant_type,
+                }
+            )
+            new_module = Linear4bit(
+                adapter_name,
+                target.in_features,
+                target.out_features,
+                is_feedforward,
+                bias=bias,
+                **fourbit_kwargs,
             )
         else:
             #  Create a new Linear module with (IA)^3 parameters for torch.nn.Linear
@@ -156,6 +179,7 @@ class IA3Model(BaseTuner):
         **optionnal_kwargs,
     ):
         loaded_in_8bit = optionnal_kwargs["loaded_in_8bit"]
+        loaded_in_4bit = optionnal_kwargs["loaded_in_4bit"]
         current_key = optionnal_kwargs["current_key"]
 
         # check if target module is in feedforward_modules
@@ -168,6 +192,7 @@ class IA3Model(BaseTuner):
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
             "init_ia3_weights": ia3_config.init_ia3_weights,
             "loaded_in_8bit": loaded_in_8bit,
+            "loaded_in_4bit": loaded_in_4bit,
             "is_feedforward": is_feedforward,
         }
 
