@@ -128,6 +128,8 @@ accelerate launch train_dreambooth.py \
 Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 [smangrul/peft-lora-sd-dreambooth](https://huggingface.co/spaces/smangrul/peft-lora-sd-dreambooth).
 
+>Tips: If you find this space is paused, please clone it and run it in your own space. Note that some applicable Python environments are: peft==0.0.1, diffusers==0.12.0, and transformers==4.26.0.
+
 ![peft lora dreambooth gradio space](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_lora_dreambooth_gradio_space.png)
 
 **NEW** ✨ Multi Adapter support and combining multiple LoRA adapters in a weighted combination 
