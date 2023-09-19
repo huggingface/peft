@@ -234,7 +234,7 @@ class LoraModel(BaseTuner):
         for n, p in self.model.named_parameters():
             if "lora_" not in n:
                 p.requires_grad = False
-        if bias is None or bias == "none":
+        if bias == "none":
             return
         elif bias == "all":
             for n, p in self.model.named_parameters():
