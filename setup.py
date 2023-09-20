@@ -18,7 +18,7 @@ extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
-extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers"]
+extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers<0.21.0"]
 
 setup(
     name="peft",
@@ -45,7 +45,7 @@ setup(
         "torch>=1.13.0",
         "transformers",
         "tqdm",
-        "accelerate",
+        "accelerate>=0.21.0",
         "safetensors",
     ],
     extras_require=extras,

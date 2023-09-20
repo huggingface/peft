@@ -24,9 +24,7 @@ Install all the necessary required libraries with:
 pip install -r requirements.txt
 ```
 
-## Setup
-
-Let's start by importing all the necessary libraries you'll need:
+Next, import all the necessary libraries:
 
 - 🤗 Transformers for loading the `intfloat/e5-large-v2` model and tokenizer
 - 🤗 Accelerate for the training loop
