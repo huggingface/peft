@@ -139,6 +139,14 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
+    def scale_layer(self, scale_factor: float) -> None:
+        if scale_factor != 0 and scale_factor != 1:
+            self.scaling[self.active_adapter] *= scale_factor
+
+    def unscale_layer(self, scale_factor: float) -> None:
+        if scale_factor != 0 and scale_factor != 1:
+            self.scaling[self.active_adapter] /= scale_factor
+
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
@@ -179,14 +187,6 @@ class Linear(nn.Linear, LoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-
-    def scale_layer(self, scale_factor: float) -> None:
-        if scale_factor != 0 and scale_factor != 1:
-            self.scaling[self.active_adapter] *= scale_factor
-
-    def unscale_layer(self, scale_factor: float) -> None:
-        if scale_factor != 0 and scale_factor != 1:
-            self.scaling[self.active_adapter] /= scale_factor
 
     def merge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():
