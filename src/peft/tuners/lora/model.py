@@ -245,7 +245,7 @@ class LoraModel(BaseTuner):
                 if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
                     m.bias.requires_grad = True
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
