@@ -75,7 +75,10 @@ class LoraLayer(BaseTunerLayer):
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
-            self.to(weight.device, dtype=weight.dtype)
+            if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                self.to(weight.device, dtype=weight.dtype)
+            else:
+                self.to(weight.device)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -176,6 +179,14 @@ class Linear(nn.Linear, LoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
+
+    def scale_layer(self, scale_factor: float) -> None:
+        if scale_factor != 0 and scale_factor != 1:
+            self.scaling[self.active_adapter] *= scale_factor
+
+    def unscale_layer(self, scale_factor: float) -> None:
+        if scale_factor != 0 and scale_factor != 1:
+            self.scaling[self.active_adapter] /= scale_factor
 
     def merge(self) -> None:
         if self.active_adapter not in self.lora_A.keys():
