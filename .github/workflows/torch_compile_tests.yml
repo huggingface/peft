@@ -34,7 +34,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install .[test]
           if [ "${{ github.event.inputs.pytorch_nightly }}" = "true" ]; then
-            python -m pip install --upgrade torch --index-url https://download.pytorch.org/whl/test/cpu
+            python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
           fi
       - name: Test compile with pytest
         run: |
