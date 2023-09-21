@@ -60,7 +60,7 @@ if is_bnb_available():
                 return result
 
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.lora_A:
+                if active_adapter not in self.lora_A.keys():
                     continue
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
@@ -128,7 +128,7 @@ if is_bnb_4bit_available():
             result = result.clone()
 
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.lora_A:
+                if active_adapter not in self.lora_A.keys():
                     continue
 
                 lora_A = self.lora_A[active_adapter]
