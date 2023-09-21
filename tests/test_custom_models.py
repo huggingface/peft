@@ -26,6 +26,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import LoraConfig, PeftModel, get_peft_model
 
 from .testing_common import PeftCommonTester
+from .testing_utils import get_state_dict
 
 
 # MLP is a vanilla FF network with only linear layers
@@ -264,7 +265,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             optimizer.step()
 
         tol = 1e-4
-        params_before = dict(model.named_parameters())
+        params_before = get_state_dict(model)
         # note: no need to sanity check if parameters were updated at all, this
         # is already covered in the previous test
 
@@ -272,7 +273,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             model.save_pretrained(tmp_dirname)
             model_from_pretrained = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
-            params_after = dict(model_from_pretrained.named_parameters())
+            params_after = get_state_dict(model_from_pretrained)
 
             self.assertEqual(params_before.keys(), params_after.keys())
             for name, param_before in params_before.items():
