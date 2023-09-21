@@ -89,3 +89,12 @@ def temp_seed(seed: int):
         torch.random.set_rng_state(torch_state)
         if torch.cuda.is_available():
             torch.cuda.set_rng_state_all(torch_cuda_states)
+
+
+def get_state_dict(model, unwrap_compiled=True):
+    """
+    Get the state dict of a model. If the model is compiled, unwrap it first.
+    """
+    if unwrap_compiled:
+        model = getattr(model, "_orig_mod", model)
+    return model.state_dict()
