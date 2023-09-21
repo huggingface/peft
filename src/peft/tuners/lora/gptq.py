@@ -36,34 +36,33 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         self.weight = quant_linear_module.qweight
         init_lora_weights = kwargs.pop("init_lora_weights", True)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.active_adapters = [adapter_name]
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
         result = self.quant_linear_module(x)
 
-        if (
-            self.disable_adapters
-            or (self.active_adapter not in self.lora_A.keys())
-            or (self.r[self.active_adapter] == 0)
-        ):
+        if self.disable_adapters:
             return result
 
-        lora_A = self.lora_A[self.active_adapter]
-        lora_B = self.lora_B[self.active_adapter]
-        dropout = self.lora_dropout[self.active_adapter]
-        scaling = self.scaling[self.active_adapter]
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.lora_A:
+                continue
+            lora_A = self.lora_A[active_adapter]
+            lora_B = self.lora_B[active_adapter]
+            dropout = self.lora_dropout[active_adapter]
+            scaling = self.scaling[active_adapter]
 
-        requires_conversion = not torch.is_autocast_enabled()
-        if requires_conversion:
-            expected_dtype = result.dtype
-            x = x.to(lora_A.weight.dtype)
+            requires_conversion = not torch.is_autocast_enabled()
+            if requires_conversion:
+                expected_dtype = result.dtype
+                x = x.to(lora_A.weight.dtype)
 
-        output = lora_B(lora_A(dropout(x)))
-        if requires_conversion:
-            output = output.to(expected_dtype)
-        output = output * scaling
-        result += output
+            output = lora_B(lora_A(dropout(x)))
+            if requires_conversion:
+                output = output.to(expected_dtype)
+            output = output * scaling
+            result += output
         return result
 
     # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102

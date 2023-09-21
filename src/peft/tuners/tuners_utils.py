@@ -255,10 +255,10 @@ class BaseTunerLayer(ABC):
     Args:
         is_plugable (`bool`, *optional*):
             Whether the adapter layer can be plugged to any pytorch module
-        active_adapter (`str`, *optional*):
+        active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
-    active_adapter = None
+    active_adapters = None
 
     def merge(self) -> None:
         raise NotImplementedError

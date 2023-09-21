@@ -38,6 +38,7 @@ class LoraLayer(BaseTunerLayer):
         self.lora_embedding_B = nn.ParameterDict({})
         # Mark the weight as unmerged
         self.merged = False
+        self.merged_adapters = []
         self.disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
@@ -56,6 +57,8 @@ class LoraLayer(BaseTunerLayer):
         self.to_empty(device=final_device)
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -81,6 +84,8 @@ class LoraLayer(BaseTunerLayer):
                 self.to(weight.device)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -106,6 +111,8 @@ class LoraLayer(BaseTunerLayer):
             self.to(self.weight.device, dtype=weight.dtype)
 
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -141,11 +148,15 @@ class LoraLayer(BaseTunerLayer):
 
     def scale_layer(self, scale_factor: float) -> None:
         if scale_factor != 0 and scale_factor != 1:
-            self.scaling[self.active_adapter] *= scale_factor
+            for active_adapter in self.active_adapters:
+                alpha = self.lora_alpha[active_adapter]
+                r = self.r[active_adapter]
+                self.scaling[active_adapter] = (alpha / r) * scale_factor
 
     def unscale_layer(self, scale_factor: float) -> None:
         if scale_factor != 0 and scale_factor != 1:
-            self.scaling[self.active_adapter] /= scale_factor
+            for active_adapter in self.active_adapters:
+                self.scaling[active_adapter] /= scale_factor
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
@@ -185,28 +196,30 @@ class Linear(nn.Linear, LoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.active_adapters = [adapter_name]
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self) -> None:
-        if self.active_adapter not in self.lora_A.keys():
-            return
         if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data += self.get_delta_weight(self.active_adapter)
-            self.merged = True
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.lora_A.keys():
+                self.weight.data += self.get_delta_weight(active_adapter)
+                self.merged_adapters.append(active_adapter)
+                self.merged = True
 
     def unmerge(self) -> None:
-        if self.active_adapter not in self.lora_A.keys():
-            return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data -= self.get_delta_weight(self.active_adapter)
-            self.merged = False
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.lora_A.keys():
+                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return (
@@ -221,26 +234,25 @@ class Linear(nn.Linear, LoraLayer):
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.lora_A.keys():
-            return self._linear(x)
-
         previous_dtype = x.dtype
 
         if self.disable_adapters:
-            if (self.r[self.active_adapter] > 0) and self.merged:
+            if self.merged:
                 self.unmerge()
             result = self._linear(x)
-        elif (self.r[self.active_adapter] == 0) or self.merged:
+        elif self.merged:
             result = self._linear(x)
         else:
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
-
             result = self._linear(x)
-            x = x.to(lora_A.weight.dtype)
-            result += lora_B(lora_A(dropout(x))) * scaling
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                x = x.to(lora_A.weight.dtype)
+                result += lora_B(lora_A(dropout(x))) * scaling
 
         result = result.to(previous_dtype)
         return result
@@ -262,23 +274,29 @@ class Embedding(nn.Embedding, LoraLayer):
         self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
         LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.active_adapters = [adapter_name]
+
+    def merge(self) -> None:
+        if self.merged:
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.lora_embedding_A.keys():
+                self.weight.data += self.get_delta_weight(active_adapter)
+                self.merged_adapters.append(active_adapter)
+                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data -= self.get_delta_weight(self.active_adapter)
-            self.merged = False
-
-    def merge(self) -> None:
-        if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data += self.get_delta_weight(self.active_adapter)
-            self.merged = True
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.lora_embedding_A.keys():
+                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return transpose(self.lora_embedding_B[adapter] @ self.lora_embedding_A[adapter], True) * self.scaling[adapter]
@@ -296,24 +314,23 @@ class Embedding(nn.Embedding, LoraLayer):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.lora_embedding_A.keys():
-            return self._embed(x)
-
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
         if self.disable_adapters:
-            if (self.r[self.active_adapter] > 0) and self.merged:
+            if self.merged:
                 self.unmerge()
             result = self._embed(x)
-        elif (self.r[self.active_adapter] == 0) or self.merged:
+        elif self.merged:
             result = self._embed(x)
         else:
-            embedding_A = self.lora_embedding_A[self.active_adapter].T
-            embedding_B = self.lora_embedding_B[self.active_adapter].T
-            scaling = self.scaling[self.active_adapter]
-
             result = self._embed(x)
-            after_A = self._embed(x, embedding_A)
-            result += (after_A @ embedding_B) * scaling
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_embedding_A:
+                    continue
+                embedding_A = self.lora_embedding_A[active_adapter].T
+                embedding_B = self.lora_embedding_B[active_adapter].T
+                scaling = self.scaling[active_adapter]
+                after_A = self._embed(x, embedding_A)
+                result += (after_A @ embedding_B) * scaling
 
         return result
 
@@ -346,27 +363,29 @@ class Conv2d(nn.Conv2d, LoraLayer):
         )
 
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.active_adapters = [adapter_name]
 
     def merge(self) -> None:
-        if self.active_adapter not in self.lora_A.keys():
-            return
         if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data += self.get_delta_weight(self.active_adapter)
-            self.merged = True
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.lora_A.keys():
+                self.weight.data += self.get_delta_weight(active_adapter)
+                self.merged_adapters.append(active_adapter)
+                self.merged = True
 
     def unmerge(self) -> None:
-        if self.active_adapter not in self.lora_A.keys():
-            return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data -= self.get_delta_weight(self.active_adapter)
-            self.merged = False
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.lora_A.keys():
+                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
@@ -397,26 +416,25 @@ class Conv2d(nn.Conv2d, LoraLayer):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.lora_A.keys():
-            return self._conv2d(x)
-
         previous_dtype = x.dtype
 
         if self.disable_adapters:
-            if self.r[self.active_adapter] > 0 and self.merged:
+            if self.merged:
                 self.unmerge()
             result = self._conv2d(x)
-        elif (self.r[self.active_adapter] == 0) or self.merged:
+        elif self.merged:
             result = self._conv2d(x)
         else:
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
-
             result = self._conv2d(x)
-            x = x.to(lora_A.weight.dtype)
-            result += lora_B(lora_A(dropout(x))) * scaling
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                x = x.to(lora_A.weight.dtype)
+                result += lora_B(lora_A(dropout(x))) * scaling
 
         result = result.to(previous_dtype)
         return result

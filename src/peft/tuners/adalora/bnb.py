@@ -51,36 +51,35 @@ if is_bnb_available():
 
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapter = adapter_name
+            self.active_adapters = [adapter_name]
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)
 
-            if (
-                self.disable_adapters
-                or (self.active_adapter not in self.lora_A.keys())
-                or (self.r[self.active_adapter] == 0)
-            ):
+            if self.disable_adapters:
                 return result
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                if x.dtype != torch.float32:
-                    x = x.float()
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    if x.dtype != torch.float32:
+                        x = x.float()
 
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            lora_E = self.lora_E[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
-            ranknum = self.ranknum[self.active_adapter] + 1e-5
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                lora_E = self.lora_E[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                ranknum = self.ranknum[active_adapter] + 1e-5
 
-            output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
-            if requires_conversion:
-                output = output.to(expected_dtype)
-            output = output * scaling / ranknum
-            result = result + output
+                output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                output = output * scaling / ranknum
+                result += output
             return result
 
 
@@ -113,16 +112,12 @@ if is_bnb_4bit_available():
 
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapter = adapter_name
+            self.active_adapters = [adapter_name]
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)
 
-            if (
-                self.disable_adapters
-                or (self.active_adapter not in self.lora_A.keys())
-                or (self.r[self.active_adapter] == 0)
-            ):
+            if self.disable_adapters:
                 return result
 
             # As per Tim Dettmers, for 4bit, we need to defensively clone here.
@@ -132,23 +127,27 @@ if is_bnb_4bit_available():
             # sure.
             result = result.clone()
 
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            lora_E = self.lora_E[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
-            ranknum = self.ranknum[self.active_adapter] + 1e-5
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A:
+                    continue
 
-            requires_conversion = not torch.is_autocast_enabled()
-            if requires_conversion:
-                expected_dtype = result.dtype
-                compute_dtype = lora_A.weight.dtype
-                if x.dtype != compute_dtype:
-                    x = x.to(compute_dtype)
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                lora_E = self.lora_E[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                ranknum = self.ranknum[active_adapter] + 1e-5
 
-            output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
-            if requires_conversion:
-                output = output.to(expected_dtype)
-            output = output * scaling / ranknum
-            result = result + output
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    compute_dtype = lora_A.weight.dtype
+                    if x.dtype != compute_dtype:
+                        x = x.to(compute_dtype)
+
+                output = dropout(x) @ (lora_A * lora_E).T @ lora_B.T
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                output = output * scaling / ranknum
+                result += output
             return result

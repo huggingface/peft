@@ -230,7 +230,7 @@ class IA3Model(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.active_adapter = adapter_name
+                module.active_adapters = [adapter_name]
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
@@ -270,6 +270,9 @@ class IA3Model(BaseTuner):
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
-                setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                active_adapters = target.active_adapters
+                if len(active_adapters) > 1:
+                    raise ValueError("Only set a single active adapter. Multiple active adapters is not supported.")
+                setattr(parent, target_name, target.modules_to_save[target.active_adapters[0]])
 
         return self.model

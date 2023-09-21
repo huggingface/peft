@@ -357,16 +357,18 @@ class LoraModel(BaseTuner):
         self._set_adapter_layers(enabled=True)
 
     def _get_active_adapter(self) -> str:
-        active_adapter = None
+        active_adapters = None
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
-                active_adapter = module.active_adapter
+                active_adapters = module.active_adapters
 
-        if active_adapter is None:
+        if active_adapters is None:
             raise ValueError(
                 "Something went wrong, no active adapter could be found, please report the issue on GitHub"
             )
-        return active_adapter
+        if len(active_adapters) > 1:
+            raise ValueError("Only set a single active adapter. Multiple active adapters is not supported.")
+        return active_adapters[0]
 
     def disable_adapter_layers(self):
         active_adapter = self._get_active_adapter()
@@ -385,7 +387,7 @@ class LoraModel(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.active_adapter = adapter_name
+                module.active_adapters = [adapter_name]
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
@@ -454,7 +456,10 @@ class LoraModel(BaseTuner):
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
-                setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                active_adapters = target.active_adapters
+                if len(active_adapters) > 1:
+                    raise ValueError("Only set a single active adapter. Multiple active adapters is not supported.")
+                setattr(parent, target_name, target.modules_to_save[active_adapters[0]])
 
         return self.model
 
