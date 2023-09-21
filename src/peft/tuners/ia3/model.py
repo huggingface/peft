@@ -281,6 +281,9 @@ class IA3Model(BaseTuner):
         if getattr(self.model, "is_loaded_in_8bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 8-bit mode")
 
+        if getattr(self.model, "is_loaded_in_4bit", False):
+            raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
+
         key_list = [key for key, _ in self.model.named_modules() if "ia3" not in key]
         for key in key_list:
             try:
