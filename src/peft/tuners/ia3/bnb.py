@@ -46,7 +46,7 @@ class Linear8bitLt(bnb.nn.Linear8bitLt, IA3Layer):
 
         init_ia3_weights = kwargs.pop("init_ia3_weights", True)
         self.update_layer(adapter_name, init_ia3_weights)
-        self.active_adapters = [adapter_name]
+        self.active_adapter = adapter_name
         self.is_feedforward = is_feedforward
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -387,7 +387,7 @@ class LoraModel(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.active_adapters = [adapter_name]
+                module.active_adapter = adapter_name
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
@@ -654,7 +654,7 @@ class LoraModel(BaseTuner):
                 ]:
                     if adapter_name in getattr(target, attr):
                         getattr(target, attr).pop(adapter_name)
-                if target.active_adapter == adapter_name:
+                if adapter_name in target.active_adapters:
                     resetting_active_adapter = list(self.peft_config.keys())[0]
                     warnings.warn(
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "

@@ -92,7 +92,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapters = [adapter_name]
+        self.active_adapter = adapter_name
 
     def merge(self) -> None:
         if self.merged:

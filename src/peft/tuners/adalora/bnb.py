@@ -112,7 +112,7 @@ if is_bnb_4bit_available():
 
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapters = [adapter_name]
+            self.active_adapter = adapter_name
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             result = super().forward(x)

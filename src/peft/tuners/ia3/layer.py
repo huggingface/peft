@@ -81,7 +81,7 @@ class Linear(nn.Linear, IA3Layer):
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, init_ia3_weights)
-        self.active_adapters = [adapter_name]
+        self.active_adapter = adapter_name
 
         self.is_feedforward = is_feedforward
 

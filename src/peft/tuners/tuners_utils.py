@@ -258,10 +258,17 @@ class BaseTunerLayer(ABC):
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
-    active_adapters = None
+    active_adapter = None
 
     def merge(self) -> None:
         raise NotImplementedError
 
     def unmerge(self) -> None:
         raise NotImplementedError
+
+    @property
+    def active_adapters(self):
+        if isinstance(self.active_adapter, str):
+            return [self.active_adapter]
+        # is already a list of str
+        return self.active_adapter
