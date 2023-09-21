@@ -44,7 +44,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
             return result
 
         for active_adapter in self.active_adapters:
-            if active_adapter not in self.lora_A:
+            if active_adapter not in self.lora_A.keys():
                 continue
             lora_A = self.lora_A[active_adapter]
             lora_B = self.lora_B[active_adapter]
