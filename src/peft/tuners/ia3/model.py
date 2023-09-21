@@ -270,9 +270,6 @@ class IA3Model(BaseTuner):
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
-                active_adapters = target.active_adapters
-                if len(active_adapters) > 1:
-                    raise ValueError("Only set a single active adapter. Multiple active adapters is not supported.")
-                setattr(parent, target_name, target.modules_to_save[target.active_adapters[0]])
+                setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
