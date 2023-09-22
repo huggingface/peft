@@ -17,6 +17,7 @@ import warnings
 from dataclasses import asdict, replace
 from enum import Enum
 from itertools import chain
+from typing import List
 
 import torch
 from torch import nn
@@ -358,7 +359,7 @@ class LoraModel(BaseTuner):
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
 
-    def _get_active_adapters(self) -> str:
+    def _get_active_adapters(self) -> List[str]:
         active_adapters = None
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
