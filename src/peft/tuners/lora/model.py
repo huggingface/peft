@@ -160,10 +160,12 @@ class LoraModel(BaseTuner):
         target,
         target_name,
         parent,
+        current_key=None,
         **optional_kwargs,
     ):
+        if current_key is None:
+            raise ValueError("Current Key shouldn't be `None`")
         # Regexp matching - Find key which matches current target_name in patterns provided
-        current_key = optional_kwargs["current_key"]
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
         target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), target_name)
 
@@ -236,24 +238,24 @@ class LoraModel(BaseTuner):
                 module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
-        active_adapter = self._get_active_adapter()
-        bias = self.peft_config[active_adapter].bias
+        for active_adapter in self._get_active_adapters():
+            bias = self.peft_config[active_adapter].bias
 
-        for n, p in self.model.named_parameters():
-            if "lora_" not in n:
-                p.requires_grad = False
-        if bias == "none":
-            return
-        elif bias == "all":
             for n, p in self.model.named_parameters():
-                if "bias" in n:
-                    p.requires_grad = True
-        elif bias == "lora_only":
-            for m in self.model.modules():
-                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
-                    m.bias.requires_grad = True
-        else:
-            raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+                if "lora_" not in n:
+                    p.requires_grad = False
+            if bias == "none":
+                return
+            elif bias == "all":
+                for n, p in self.model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias == "lora_only":
+                for m in self.model.modules():
+                    if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                        m.bias.requires_grad = True
+            else:
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -356,7 +358,7 @@ class LoraModel(BaseTuner):
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
 
-    def _get_active_adapter(self) -> str:
+    def _get_active_adapters(self) -> str:
         active_adapters = None
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
@@ -366,19 +368,17 @@ class LoraModel(BaseTuner):
             raise ValueError(
                 "Something went wrong, no active adapter could be found, please report the issue on GitHub"
             )
-        if len(active_adapters) > 1:
-            raise ValueError("Only set a single active adapter. Multiple active adapters is not supported.")
-        return active_adapters[0]
+        return active_adapters
 
     def disable_adapter_layers(self):
-        active_adapter = self._get_active_adapter()
-        val = self.peft_config[active_adapter].bias
-        if val != "none":
-            msg = (
-                f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                "output as the the base model would without adaption."
-            )
-            warnings.warn(msg)
+        for active_adapter in self._get_active_adapters():
+            val = self.peft_config[active_adapter].bias
+            if val != "none":
+                msg = (
+                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+                    "output as the the base model would without adaption."
+                )
+                warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name):
@@ -652,7 +652,9 @@ class LoraModel(BaseTuner):
                     if adapter_name in getattr(target, attr):
                         getattr(target, attr).pop(adapter_name)
                 if adapter_name in target.active_adapters:
-                    resetting_active_adapter = list(self.peft_config.keys())[0]
+                    resetting_active_adapter = (
+                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
+                    )
                     warnings.warn(
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
                     )

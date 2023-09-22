@@ -133,7 +133,7 @@ class BaseTuner(nn.Module, ABC):
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
-        **optionnal_kwargs: Any,
+        **optional_kwargs: Any,
     ) -> None:
         r"""
         Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
@@ -152,7 +152,7 @@ class BaseTuner(nn.Module, ABC):
                 The target module's name.
             parent (`nn.Module`):
                 The parent module.
-            **optionnal_kwargs (`dict`):
+            **optional_kwargs (`dict`):
                 The optional keyword arguments to pass to deal with particular cases (e.g. 8bit, 4bit quantization)
         """
         ...
@@ -211,12 +211,12 @@ class BaseTuner(nn.Module, ABC):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
 
-            optionnal_kwargs = {
+            optional_kwargs = {
                 "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
                 "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
                 "current_key": key,
             }
-            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optionnal_kwargs)
+            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optional_kwargs)
 
         if not is_target_modules_in_base_model:
             raise ValueError(

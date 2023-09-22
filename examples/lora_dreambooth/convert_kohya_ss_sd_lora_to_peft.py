@@ -31,7 +31,7 @@ class LoRAInfo:
 
     def peft_state_dict(self) -> Dict[str, torch.Tensor]:
         if self.lora_A is None or self.lora_B is None:
-            raise ValueError("One of weights is not present - either lora_A or lora_B")
+            raise ValueError("At least one of lora_A or lora_B is None, they must both be provided")
         return {f"{peft_key}.lora_A.weight": self.lora_A, f"{peft_key}.lora_B.weight": self.lora_A}
 
 
