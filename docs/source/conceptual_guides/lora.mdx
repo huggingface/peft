@@ -77,6 +77,8 @@ As with other methods supported by PEFT, to fine-tune a model using LoRA, you ne
 - `modules_to_save`: List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
 - `layers_to_transform`: List of layers to be transformed by LoRA. If not specified, all layers in `target_modules` are transformed.
 - `layers_pattern`: Pattern to match layer names in `target_modules`, if `layers_to_transform` is specified. By default `PeftModel` will look at common layer pattern (`layers`, `h`, `blocks`, etc.), use it for exotic and custom models.
+- `rank_pattern`: The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`.
+- `alpha_pattern`: The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`.
 
 ## LoRA examples
 
