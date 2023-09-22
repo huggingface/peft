@@ -160,7 +160,7 @@ class LoraModel(BaseTuner):
         target,
         target_name,
         parent,
-        current_key=None,
+        current_key,
         **optional_kwargs,
     ):
         if current_key is None:
