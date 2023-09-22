@@ -30,7 +30,8 @@ class LoHaConfig(PeftConfig):
         alpha (`int`): The alpha parameter for LoHa scaling.
         rank_dropout (`int`): The dropout probability for rank dimension during training.
         module_dropout (`int`): The dropout probability for disabling LoHa modules during training.
-        use_effective_conv2d (`bool`): Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
+        use_effective_conv2d (`bool`):
+            Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
         target_modules (`Union[List[str],str]`): The names of the modules to apply LoHa to.
         init_weights (`bool`): Whether to perform initialization of LoHa weights.
         layers_to_transform (`Union[List[int],int]`):
