@@ -17,7 +17,6 @@ import warnings
 from dataclasses import asdict, replace
 from enum import Enum
 from itertools import chain
-from typing import List
 
 import torch
 from torch import nn
