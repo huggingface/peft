@@ -54,14 +54,18 @@ if is_bnb_available():
             self.is_feedforward = is_feedforward
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            if self.disable_adapters or (self.active_adapter not in self.ia3_l.keys()):
+            if self.disable_adapters:
                 return super().forward(x)
+
+            ia3_scaling = 1
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.ia3_l.keys():
+                    continue
+                ia3_scaling *= self.ia3_l[active_adapter].flatten()
 
             requires_conversion = (not torch.is_autocast_enabled()) and (x.dtype != torch.float32)
             if requires_conversion:
                 x = x.float()
-
-            ia3_scaling = self.ia3_l[self.active_adapter].flatten()
             if self.is_feedforward:
                 result = super().forward(x * ia3_scaling)
                 expected_dtype = result.dtype
@@ -108,14 +112,18 @@ if is_bnb_4bit_available():
             self.is_feedforward = is_feedforward
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            if self.disable_adapters or (self.active_adapter not in self.ia3_l.keys()):
+            if self.disable_adapters:
                 return super().forward(x)
 
+            ia3_scaling = 1
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.ia3_l.keys():
+                    continue
+                ia3_scaling *= self.ia3_l[active_adapter].flatten()
+                
             requires_conversion = (not torch.is_autocast_enabled()) and (x.dtype != torch.float32)
             if requires_conversion:
                 x = x.float()
-
-            ia3_scaling = self.ia3_l[self.active_adapter].flatten()
             if self.is_feedforward:
                 result = super().forward(x * ia3_scaling)
                 expected_dtype = result.dtype
