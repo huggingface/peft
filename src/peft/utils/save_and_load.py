@@ -25,17 +25,23 @@ from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
 
-def get_peft_model_state_dict(model, state_dict=None, adapter_name="default"):
+def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", unwrap_compiled=False):
     """
     Get the state dict of the Peft model.
 
     Args:
         model ([`PeftModel`]): The Peft model. When using torch.nn.DistributedDataParallel, DeepSpeed or FSDP,
-        the model should be the underlying model/unwrapped model (i.e. model.module).
+            the model should be the underlying model/unwrapped model (i.e. model.module).
         state_dict (`dict`, *optional*, defaults to `None`):
-            The state dict of the model. If not provided, the state dict of the model
-        will be used.
+            The state dict of the model. If not provided, the state dict of the passed model will be used.
+        adapter_name (`str`, *optional*, defaults to `"default"`):
+            The name of the adapter whose state dict should be returned.
+        unwrap_compiled (`bool`, *optional*, defaults to `False`):
+            Whether to unwrap the model if torch.compile was used.
     """
+    if unwrap_compiled:
+        model = getattr(model, "_orig_mod", model)
+
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()

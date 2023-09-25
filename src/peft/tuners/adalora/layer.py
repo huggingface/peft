@@ -95,64 +95,58 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         self.active_adapter = adapter_name
 
     def merge(self) -> None:
-        if self.active_adapter not in self.lora_A.keys():
-            return
         if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data += (
-                transpose(
-                    self.lora_B[self.active_adapter]
-                    @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter]),
-                    self.fan_in_fan_out,
-                )
-                * self.scaling[self.active_adapter]
-                / (self.ranknum[self.active_adapter] + 1e-5)
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-            self.merged = True
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.lora_embedding_A.keys():
+                self.weight.data += self.get_delta_weight(active_adapter)
+                self.merged_adapters.append(active_adapter)
+                self.merged = True
 
     def unmerge(self) -> None:
-        if self.active_adapter not in self.lora_A.keys():
-            return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data -= (
-                transpose(
-                    self.lora_B[self.active_adapter]
-                    @ (self.lora_A[self.active_adapter] * self.lora_E[self.active_adapter])
-                )
-                * self.scaling[self.active_adapter]
-                / (self.ranknum[self.active_adapter] + 1e-5)
-            )
-            self.merged = False
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.lora_embedding_A.keys():
+                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.merged = False
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        return (
+            transpose(self.lora_B[adapter] @ (self.lora_A[adapter] * self.lora_E[adapter]))
+            * self.scaling[adapter]
+            / (self.ranknum[adapter] + 1e-5)
+        )
 
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.lora_A.keys():
-            return self._linear(x)
-
         # TODO: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
-            if self.r[self.active_adapter] > 0 and self.merged:
+            if self.merged:
                 self.unmerge()
             result = self._linear(x)
-        elif (self.r[self.active_adapter] == 0) or self.merged:
+        elif self.merged:
             result = self._linear(x)
         else:
-            lora_A = self.lora_A[self.active_adapter]
-            lora_B = self.lora_B[self.active_adapter]
-            lora_E = self.lora_E[self.active_adapter]
-            dropout = self.lora_dropout[self.active_adapter]
-            scaling = self.scaling[self.active_adapter]
-            ranknum = self.ranknum[self.active_adapter] + 1e-5
-
             result = self._linear(x)
-            result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A.keys():
+                    continue
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                lora_E = self.lora_E[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+                ranknum = self.ranknum[active_adapter] + 1e-5
+
+                result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
         return result
 
