@@ -35,8 +35,8 @@ class LoHaConfig(PeftConfig):
         target_modules (`Union[List[str],str]`): The names of the modules to apply LoHa to.
         init_weights (`bool`): Whether to perform initialization of LoHa weights.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the LoRA transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoRA
+            The layer indexes to transform, if this argument is specified, it will apply the LoHa transformations on
+            the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoHa
             transformations on the layer at this index.
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
@@ -46,7 +46,7 @@ class LoHaConfig(PeftConfig):
             specified by `r`.
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `lora_alpha`.
+            specified by `alpha`.
         modules_to_save (`List[str]`): The names of modules to be set as trainable except LoHa parameters.
     """
 
@@ -67,7 +67,7 @@ class LoHaConfig(PeftConfig):
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with Lora."
+            "help": "List of module names or regex expression of the module names to replace with LoHa."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
@@ -105,7 +105,7 @@ class LoHaConfig(PeftConfig):
         default_factory=dict,
         metadata={
             "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
+                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
                 "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
             )
         },
