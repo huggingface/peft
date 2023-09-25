@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 import warnings
 from typing import Optional, Tuple, Union
 
@@ -75,15 +76,19 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
             self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))
 
     def reset_loha_parameters(self, adapter_name: str):
+        # Original implementation performs initialization with normal distribution
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/3549fdef8f564761d68b695a08ef88b1122fdedc/lycoris/modules/loha.py#L158
+
+        # FedPara paper proposes to perform He initialization, let's stick with it
+        # It is enough to initialize only single matrix with zeros to make adapter do nothing after initialization
         if adapter_name in self.hada_w1_a.keys():
-            nn.init.normal_(self.hada_w1_b[adapter_name], std=1)
-            nn.init.normal_(self.hada_w1_a[adapter_name], std=0.1)
-            nn.init.normal_(self.hada_w2_b[adapter_name], std=1)
-            nn.init.normal_(self.hada_w2_a[adapter_name], std=0.1)
+            nn.init.kaiming_uniform_(self.hada_w1_a[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_w1_b[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_w2_a[adapter_name], a=math.sqrt(5))
+            nn.init.zeros_(self.hada_w2_b[adapter_name])
         if adapter_name in self.hada_t1.keys():
-            nn.init.normal_(self.hada_t1[adapter_name], std=0.1)
-            nn.init.normal_(self.hada_t2[adapter_name], std=0.1)
+            nn.init.kaiming_uniform_(self.hada_t1[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_t2[adapter_name], a=math.sqrt(5))
 
     def update_layer(
         self,
@@ -155,7 +160,7 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
                 scale=torch.tensor(self.scaling[adapter_name]),
             )
         else:
-            weight: torch.Tensor = make_weight(
+            weight = make_weight(
                 self.hada_w1_a[adapter_name],
                 self.hada_w1_b[adapter_name],
                 self.hada_w2_a[adapter_name],
