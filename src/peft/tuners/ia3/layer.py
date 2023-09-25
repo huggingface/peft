@@ -38,6 +38,7 @@ class IA3Layer(BaseTunerLayer):
         # Mark the weight as unmerged
         self.merged = False
         self._disable_adapters = False
+        self.merged_adapters = []
         self.in_features = in_features
         self.out_features = out_features
         self.is_feedforward = is_feedforward
@@ -52,7 +53,7 @@ class IA3Layer(BaseTunerLayer):
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
-        self.set_adapter(self.active_adapter)
+        self.set_adapter(self.active_adapters)
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
@@ -88,40 +89,37 @@ class Linear(nn.Linear, IA3Layer):
         self.set_adapter(adapter_name)
 
     def merge(self) -> None:
-        if self.active_adapter not in self.ia3_l.keys():
-            return
         if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
 
-        self.weight = transpose(self.weight, self.fan_in_fan_out)
-        self.weight.data = torch.mul(self.weight.data, self.ia3_l[self.active_adapter].data)
-        self.weight = transpose(self.weight, self.fan_in_fan_out)
-
-        self.merged = True
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.ia3_l.keys():
+                self.weight = transpose(self.weight, self.fan_in_fan_out)
+                self.weight.data = torch.mul(self.weight.data, self.ia3_l[active_adapter].data)
+                self.weight = transpose(self.weight, self.fan_in_fan_out)
+                self.merged = True
 
     def unmerge(self) -> None:
-        if self.active_adapter not in self.ia3_l.keys():
-            return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
 
         warnings.warn("Unmerge result can be inaccurate for (IA)^3.")
-        self.weight = transpose(self.weight, self.fan_in_fan_out)
-        # divide by (IA)^3 vector. Add tolerace to avoid division by zero
-        self.weight.data = torch.div(self.weight.data, self.ia3_l[self.active_adapter].data + 1e-8)
-        self.weight = transpose(self.weight, self.fan_in_fan_out)
-
-        self.merged = False
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.ia3_l.keys():
+                self.weight = transpose(self.weight, self.fan_in_fan_out)
+                # divide by (IA)^3 vector. Add tolerace to avoid division by zero
+                self.weight.data = torch.div(self.weight.data, self.ia3_l[active_adapter].data + 1e-8)
+                self.weight = transpose(self.weight, self.fan_in_fan_out)
+                self.merged = False
 
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.ia3_l.keys():
-            return self._linear(x)
-
         previous_dtype = x.dtype
 
         if self.disable_adapters:
@@ -131,11 +129,16 @@ class Linear(nn.Linear, IA3Layer):
         elif self.merged:
             result = self._linear(x)
         else:
-            dtype = self.ia3_l[self.active_adapter].dtype
-            ia3_scaling = self.ia3_l[self.active_adapter].flatten()
+            ia3_scaling = 1
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.ia3_l.keys():
+                    continue
+                dtype = self.ia3_l[active_adapter].dtype
+                ia3_scaling *= self.ia3_l[active_adapter].flatten()
+
             if self.is_feedforward:
                 x = x.to(dtype)
-                # TODO: self.weight.dtype can be != self.ia3_l[self.active_adapter].dtype
+                # TODO: self.weight.dtype can be != self.ia3_l[self.active_adapters].dtype
                 # e.g. bf16 vs fp32. Is that okay?
                 interm = (x * ia3_scaling).to(self.weight.dtype)
                 result = self._linear(interm)

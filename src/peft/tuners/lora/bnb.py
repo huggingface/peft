@@ -57,16 +57,18 @@ if is_bnb_available():
             self.set_adapter(adapter_name)
 
         def merge(self):
-            if self.active_adapter not in self.lora_A.keys():
-                return
             if self.merged:
-                warnings.warn("Already merged. Nothing to do.")
-                return
-            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                    f"You are now additionally merging {','.join(self.active_adapters)}."
+                )
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A.keys():
+                    continue
                 warnings.warn(
                     "Merge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
-                lora_data = self.get_delta_weight(self.active_adapter)
+                lora_data = self.get_delta_weight(active_adapter)
 
                 if self.state.SCB is None:
                     self.state.SCB = self.weight.SCB
@@ -87,19 +89,21 @@ if is_bnb_available():
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
                 ).to(self.weight.device)
                 self.state.reset_grads()
+                self.merged_adapters.append(active_adapter)
                 self.merged = True
 
         def unmerge(self):
-            if self.active_adapter not in self.lora_A.keys():
-                return
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
-            if self.r[self.active_adapter] > 0:
+            while len(self.merged_adapters) > 0:
+                active_adapter = self.merged_adapters.pop()
+                if active_adapter not in self.lora_A.keys():
+                    continue
                 warnings.warn(
                     "Unmerge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
-                lora_data = self.get_delta_weight(self.active_adapter)
+                lora_data = self.get_delta_weight(active_adapter)
 
                 if self.state.SCB is None:
                     self.state.SCB = self.weight.SCB
@@ -130,35 +134,33 @@ if is_bnb_available():
             )
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            if self.active_adapter not in self.lora_A.keys():
-                return super().forward(x)
-
             if self.disable_adapters:
-                if (self.r[self.active_adapter] > 0) and self.merged:
+                if self.merged:
                     self.unmerge()
                 result = super().forward(x)
-            elif (self.r[self.active_adapter] == 0) or self.merged:
+            elif self.merged:
                 result = super().forward(x)
             else:
-                lora_A = self.lora_A[self.active_adapter]
-                lora_B = self.lora_B[self.active_adapter]
-                dropout = self.lora_dropout[self.active_adapter]
-                scaling = self.scaling[self.active_adapter]
-
                 result = super().forward(x)
+                for active_adapter in self.active_adapters:
+                    if active_adapter not in self.lora_A.keys():
+                        continue
+                    lora_A = self.lora_A[active_adapter]
+                    lora_B = self.lora_B[active_adapter]
+                    dropout = self.lora_dropout[active_adapter]
+                    scaling = self.scaling[active_adapter]
 
-                requires_conversion = not torch.is_autocast_enabled()
-                if requires_conversion:
-                    expected_dtype = result.dtype
-                    compute_dtype = lora_A.weight.dtype
-                    if x.dtype != compute_dtype:
-                        x = x.to(compute_dtype)
-
-                output = lora_B(lora_A(dropout(x)))
-                if requires_conversion:
-                    output = output.to(expected_dtype)
-                output = output * scaling
-                result += output
+                    requires_conversion = not torch.is_autocast_enabled()
+                    if requires_conversion:
+                        expected_dtype = result.dtype
+                        compute_dtype = lora_A.weight.dtype
+                        if x.dtype != compute_dtype:
+                            x = x.to(compute_dtype)
+                    output = lora_B(lora_A(dropout(x)))
+                    if requires_conversion:
+                        output = output.to(expected_dtype)
+                    output = output * scaling
+                    result += output
 
             return result
 
@@ -196,34 +198,37 @@ if is_bnb_4bit_available():
             self.set_adapter(adapter_name)
 
         def merge(self):
-            if self.active_adapter not in self.lora_A.keys():
-                return
             if self.merged:
-                warnings.warn("Already merged. Nothing to do.")
-                return
-            if self.r[self.active_adapter] > 0:
+                warnings.warn(
+                    f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                    f"You are now additionally merging {','.join(self.active_adapters)}."
+                )
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A.keys():
+                    continue
                 warnings.warn(
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 kwargs = self.weight.__dict__
-                lora_data = self.get_delta_weight(self.active_adapter)
+                lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
                 self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
                 self.merged = True
 
         def unmerge(self):
-            if self.active_adapter not in self.lora_A.keys():
-                return
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
-            if self.r[self.active_adapter] > 0:
+            while len(self.merged_adapters) > 0:
+                active_adapter = self.merged_adapters.pop()
+                if active_adapter not in self.lora_A.keys():
+                    continue
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
                 kwargs = self.weight.__dict__
-                lora_data = self.get_delta_weight(self.active_adapter)
+                lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
                 self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
                 self.merged = False
@@ -238,21 +243,13 @@ if is_bnb_4bit_available():
             )
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            if self.active_adapter not in self.lora_A.keys():
-                return super().forward(x)
-
             if self.disable_adapters:
-                if (self.r[self.active_adapter] > 0) and self.merged:
+                if self.merged:
                     self.unmerge()
                 result = super().forward(x)
-            elif (self.r[self.active_adapter] == 0) or self.merged:
+            elif self.merged:
                 result = super().forward(x)
             else:
-                lora_A = self.lora_A[self.active_adapter]
-                lora_B = self.lora_B[self.active_adapter]
-                dropout = self.lora_dropout[self.active_adapter]
-                scaling = self.scaling[self.active_adapter]
-
                 result = super().forward(x)
                 # As per Tim Dettmers, for 4bit, we need to defensively clone here.
                 # The reason is that in some cases, an error can occur that backprop
@@ -261,15 +258,23 @@ if is_bnb_4bit_available():
                 # sure.
                 result = result.clone()
 
-                requires_conversion = not torch.is_autocast_enabled()
-                if requires_conversion:
-                    expected_dtype = result.dtype
-                    x = x.to(lora_A.weight.dtype)
+                for active_adapter in self.active_adapters:
+                    if active_adapter not in self.lora_A.keys():
+                        continue
+                    lora_A = self.lora_A[active_adapter]
+                    lora_B = self.lora_B[active_adapter]
+                    dropout = self.lora_dropout[active_adapter]
+                    scaling = self.scaling[active_adapter]
 
-                output = lora_B(lora_A(dropout(x)))
-                if requires_conversion:
-                    output = output.to(expected_dtype)
-                output = output * scaling
-                result += output
+                    requires_conversion = not torch.is_autocast_enabled()
+                    if requires_conversion:
+                        expected_dtype = result.dtype
+                        x = x.to(lora_A.weight.dtype)
+
+                    output = lora_B(lora_A(dropout(x)))
+                    if requires_conversion:
+                        output = output.to(expected_dtype)
+                    output = output * scaling
+                    result += output
 
             return result

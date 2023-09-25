@@ -16,6 +16,8 @@ import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from itertools import chain
+from typing import List
 
 import torch
 from torch import nn
@@ -159,18 +161,27 @@ class LoraModel(BaseTuner):
         target,
         target_name,
         parent,
-        **optionnal_kwargs,
+        current_key,
+        **optional_kwargs,
     ):
+        if current_key is None:
+            raise ValueError("Current Key shouldn't be `None`")
+        # Regexp matching - Find key which matches current target_name in patterns provided
+        pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), target_name)
+
+        r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
+        alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
-            "r": lora_config.r,
-            "lora_alpha": lora_config.lora_alpha,
+            "r": r,
+            "lora_alpha": alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
         }
-        kwargs["loaded_in_8bit"] = optionnal_kwargs.pop("loaded_in_8bit", False)
-        kwargs["loaded_in_4bit"] = optionnal_kwargs.pop("loaded_in_4bit", False)
+        kwargs["loaded_in_8bit"] = optional_kwargs.pop("loaded_in_8bit", False)
+        kwargs["loaded_in_4bit"] = optional_kwargs.pop("loaded_in_4bit", False)
         kwargs["bias"] = bias
 
         quantization_config = get_quantization_config(self.model, method="gptq")
@@ -181,16 +192,16 @@ class LoraModel(BaseTuner):
         if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
-                lora_config.r,
-                lora_config.lora_alpha,
+                r,
+                alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
         elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
             target.update_layer_embedding(
                 adapter_name,
-                lora_config.r,
-                lora_config.lora_alpha,
+                r,
+                alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
@@ -198,8 +209,8 @@ class LoraModel(BaseTuner):
         elif isinstance(target, LoraLayer):
             target.update_layer(
                 adapter_name,
-                lora_config.r,
-                lora_config.lora_alpha,
+                r,
+                alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
@@ -235,19 +246,21 @@ class LoraModel(BaseTuner):
             if "lora_" not in n:
                 p.requires_grad = False
 
-        bias = self.peft_config[self.active_adapter].bias
-        if bias == "none":
-            return
-        elif bias == "all":
-            for n, p in self.model.named_parameters():
-                if "bias" in n:
-                    p.requires_grad = True
-        elif bias == "lora_only":
-            for m in self.model.modules():
-                if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
-                    m.bias.requires_grad = True
-        else:
-            raise NotImplementedError
+        for active_adapter in self.active_adapters:
+            bias = self.peft_config[active_adapter].bias
+            if bias == "none":
+                continue
+
+            if bias == "all":
+                for n, p in self.model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias == "lora_only":
+                for m in self.model.modules():
+                    if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                        m.bias.requires_grad = True
+            else:
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
@@ -349,13 +362,14 @@ class LoraModel(BaseTuner):
         self._set_adapter_layers(enabled=True)
 
     def disable_adapter_layers(self):
-        val = self.peft_config[self.active_adapter].bias
-        if val != "none":
-            msg = (
-                f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
-                "output as the the base model would without adaption."
-            )
-            warnings.warn(msg)
+        for active_adapter in self.active_adapters:
+            val = self.peft_config[active_adapter].bias
+            if val != "none":
+                msg = (
+                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+                    "output as the the base model would without adaption."
+                )
+                warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
     def set_adapter(self, adapter_name):
@@ -602,7 +616,7 @@ class LoraModel(BaseTuner):
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
 
-    def delete_adapter(self, adapter_name):
+    def delete_adapter(self, adapter_name: str):
         """
         Deletes an existing adapter.
 
@@ -612,6 +626,7 @@ class LoraModel(BaseTuner):
         if adapter_name not in list(self.peft_config.keys()):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
+
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
@@ -628,8 +643,10 @@ class LoraModel(BaseTuner):
                 ]:
                     if adapter_name in getattr(target, attr):
                         getattr(target, attr).pop(adapter_name)
-                if target.active_adapter == adapter_name:
-                    resetting_active_adapter = list(self.peft_config.keys())[0]
+                if adapter_name in target.active_adapters:
+                    resetting_active_adapter = (
+                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
+                    )
                     warnings.warn(
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
                     )

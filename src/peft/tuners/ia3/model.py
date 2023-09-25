@@ -153,10 +153,10 @@ class IA3Model(BaseTuner):
         target,
         target_name,
         parent,
-        **optionnal_kwargs,
+        **optional_kwargs,
     ):
-        loaded_in_8bit = optionnal_kwargs["loaded_in_8bit"]
-        current_key = optionnal_kwargs["current_key"]
+        loaded_in_8bit = optional_kwargs["loaded_in_8bit"]
+        current_key = optional_kwargs["current_key"]
 
         # check if target module is in feedforward_modules
         if isinstance(ia3_config.feedforward_modules, str):

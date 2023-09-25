@@ -26,6 +26,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import AdaLoraConfig, IA3Config, LoraConfig, PeftModel, get_peft_model
 
 from .testing_common import PeftCommonTester
+from .testing_utils import get_state_dict
 
 
 # MLP is a vanilla FF network with only linear layers
@@ -264,7 +265,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             optimizer.step()
 
         tol = 1e-4
-        params_before = dict(model.named_parameters())
+        params_before = get_state_dict(model)
         # note: no need to sanity check if parameters were updated at all, this
         # is already covered in the previous test
 
@@ -272,7 +273,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             model.save_pretrained(tmp_dirname)
             model_from_pretrained = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
-            params_after = dict(model_from_pretrained.named_parameters())
+            params_after = get_state_dict(model_from_pretrained)
 
             self.assertEqual(params_before.keys(), params_after.keys())
             for name, param_before in params_before.items():
@@ -363,6 +364,38 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+
+class TestMultiRankAdapter(unittest.TestCase):
+    """Tests related to multirank LoRA adapters"""
+
+    def test_multirank(self):
+        config_1 = LoraConfig(
+            r=8,
+            lora_alpha=8,
+            init_lora_weights=False,
+            target_modules=["lin0", "lin1"],
+        )
+        config_2 = LoraConfig(
+            r=8,
+            lora_alpha=8,
+            init_lora_weights=False,
+            target_modules=["lin0", "lin1"],
+            rank_pattern={"lin0": 4},
+            alpha_pattern={"lin0": 4},
+        )
+
+        # Add first adapter
+        model = get_peft_model(MLP(), config_1, adapter_name="first")
+
+        # Add second adapter
+        model.add_adapter("second", config_2)
+
+        # Extract current and expected ranks
+        rank_current = model.lin0.lora_A["second"].weight.shape[0]
+        rank_expected = config_2.rank_pattern["lin0"]
+
+        self.assertTrue(rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}")
 
 
 class TestRepr(unittest.TestCase):
