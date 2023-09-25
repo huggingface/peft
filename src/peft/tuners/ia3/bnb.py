@@ -120,7 +120,7 @@ if is_bnb_4bit_available():
                 if active_adapter not in self.ia3_l.keys():
                     continue
                 ia3_scaling *= self.ia3_l[active_adapter].flatten()
-                
+
             requires_conversion = (not torch.is_autocast_enabled()) and (x.dtype != torch.float32)
             if requires_conversion:
                 x = x.float()
