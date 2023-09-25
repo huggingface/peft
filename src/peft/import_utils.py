@@ -15,11 +15,11 @@
 import importlib
 
 
-def is_bnb_available():
+def is_bnb_available() -> bool:
     return importlib.util.find_spec("bitsandbytes") is not None
 
 
-def is_bnb_4bit_available():
+def is_bnb_4bit_available() -> bool:
     if not is_bnb_available():
         return False
 
@@ -28,9 +28,9 @@ def is_bnb_4bit_available():
     return hasattr(bnb.nn, "Linear4bit")
 
 
-def is_auto_gptq_available():
+def is_auto_gptq_available() -> bool:
     return importlib.util.find_spec("auto_gptq") is not None
 
 
-def is_optimum_available():
+def is_optimum_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
