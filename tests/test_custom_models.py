@@ -25,6 +25,7 @@ from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft import AdaLoraConfig, IA3Config, LoraConfig, PeftModel, get_peft_model
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict
@@ -459,29 +460,47 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
     def __init__(self):
         self.configs = {
-            "lora": {"class": LoraConfig, "kwargs": {"target_modules": ["lin0"]}},
+            "lora": {"class": LoraConfig, "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False}},
             "ia3": {
                 "class": IA3Config,
-                "kwargs": {"target_modules": ["lin0", "lin1"], "feedforward_modules": ["lin0"]},
+                "kwargs": {
+                    "target_modules": ["lin0", "lin1"],
+                    "feedforward_modules": ["lin0"],
+                    "init_ia3_weights": False,
+                },
             },
-            "adaloara": {"class": AdaLoraConfig, "kwargs": {"target_modules": ["lin0"]}},
+            "adaloara": {"class": AdaLoraConfig, "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False}},
         }
+
+    def prepare_inputs_for_testing(self):
+        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        return {"X": X}
 
     def get_adapter_config(self, tuner_method, same_targets):
         if same_targets:
             return self.configs[tuner_method]
         config = self.configs[tuner_method].copy()
         kwargs = config["kwargs"]
-        for key, old_targets in kwargs.items():
+        for key, value in kwargs.items():
             new_targets = []
-            for target in old_targets:
+            if not isinstance(value, list):
+                continue
+            for target in value:
                 new_targets.append("lin1" if target == "lin0" else "lin0")
             kwargs[key] = new_targets
         return config
 
+    def set_multiple_active_adapters(self, model, adapter_names):
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.set_adapter(adapter_names)
+
     @parameterized.expand(TUNERS_AND_TARGETS)
     def test_multiple_active_adapters_forward(self, tuner_method, same_targets):
         model = MLP()
+        model.eval()
+        X = self.prepare_inputs_for_testing()
+
         config_1 = self.get_adapter_config(tuner_method, same_targets)
         config_2 = self.get_adapter_config(tuner_method, same_targets)
         config_cls = config_1["class"]
@@ -490,15 +509,63 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
-        pass
+
+        # set adapter_1
+        peft_model.set_adapter("adapter_1")
+        adapter_1_output = peft_model(**X)
+
+        # set adapter_2
+        peft_model.set_adapter("adapter_2")
+        adapter_2_output = peft_model(**X)
+
+        # set ["adapter_1", "adapter_2"]
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        combined_output = peft_model(**X)
+
+        self.assertFalse(torch.allclose(adapter_1_output, adapter_2_output))
+        self.assertFalse(torch.allclose(adapter_1_output, combined_output))
+        self.assertFalse(torch.allclose(adapter_2_output, combined_output))
+
+        if tuner_method == "lora":
+            # create a weighted adapter combining both adapters and check that
+            # its output is same as setting multiple active adapters
+            peft_model.add_weighted_adapter(
+                ["adapter_1", "adapter_2"], [1.0, 1.0], "new_combined_adapter", combination_type="cat"
+            )
+            peft_model.set_adapter("new_combined_adapter")
+            new_combined_output = peft_model(**X)
+            self.assertTrue(torch.allclose(new_combined_output, combined_output))
 
     @parameterized.expand(TUNERS_AND_TARGETS)
-    def test_multiple_active_adapters_merge(self, tuner_method, same_targets):
-        pass
+    def test_multiple_active_adapters_merge_and_unmerge(self, tuner_method, same_targets):
+        model = MLP()
+        model.eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
 
-    @parameterized.expand(TUNERS_AND_TARGETS)
-    def test_multiple_active_adapters_unmerge(self, tuner_method, same_targets):
-        pass
+        config_1 = self.get_adapter_config(tuner_method, same_targets)
+        config_2 = self.get_adapter_config(tuner_method, same_targets)
+        config_cls = config_1["class"]
+        config_1 = config_cls(**config_1["kwargs"])
+        config_2 = config_cls(**config_2["kwargs"])
+
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
+        peft_model.add_adapter("adapter_2", config_2)
+
+        # set ["adapter_1", "adapter_2"]
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter()
+        merged_combined_output = peft_model(**X)
+        self.assertTrue(torch.allclose(merged_combined_output, combined_output))
+
+        peft_model.unmerge_adapter()
+
+        with peft_model.disable_adapter():
+            disabled_adapter_output = peft_model(**X)
+
+        self.assertTrue(torch.allclose(disabled_adapter_output, base_output))
 
 
 class RequiresGradTester(unittest.TestCase):
