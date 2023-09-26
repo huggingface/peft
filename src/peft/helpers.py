@@ -6,7 +6,7 @@ from types import MethodType
 from .peft_model import PeftModel
 
 
-def update_forward_signature(model: PeftModel):
+def update_forward_signature(model: PeftModel) -> None:
     """
     Args:
     Updates the forward signature of the PeftModel to include parents class signature
@@ -39,7 +39,7 @@ def update_forward_signature(model: PeftModel):
         model.forward = MethodType(forward, model)
 
 
-def update_generate_signature(model: PeftModel):
+def update_generate_signature(model: PeftModel) -> None:
     """
     Args:
     Updates the generate signature of a PeftModel with overriding generate to include parents class signature
@@ -79,7 +79,7 @@ def update_generate_signature(model: PeftModel):
         model.generate = MethodType(generate, model)
 
 
-def update_signature(model: PeftModel, method: str = "all"):
+def update_signature(model: PeftModel, method: str = "all") -> None:
     """
     Args:
     Updates the signature of a PeftModel include parents class signature for forward or generate method

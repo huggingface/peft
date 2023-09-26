@@ -203,6 +203,9 @@ class IA3Model(BaseTuner):
             )
         else:
             new_module = self._create_new_module(ia3_config, adapter_name, target, **kwargs)
+            if adapter_name != self.active_adapter:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
@@ -238,10 +241,8 @@ class IA3Model(BaseTuner):
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
-            if isinstance(module, IA3Layer):
-                module.disable_adapters = False if enabled else True
-            elif isinstance(module, ModulesToSaveWrapper):
-                module.disable_adapters = False if enabled else True
+            if isinstance(module, (IA3Layer, ModulesToSaveWrapper)):
+                module.enable_adapters(enabled)
 
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
@@ -255,7 +256,7 @@ class IA3Model(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.active_adapter = adapter_name
+                module.set_adapter(adapter_name)
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
