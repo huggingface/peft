@@ -777,7 +777,7 @@ class RequiresGradTester(unittest.TestCase):
         config0 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin1"])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
