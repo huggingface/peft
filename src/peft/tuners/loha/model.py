@@ -129,6 +129,7 @@ class LoHaModel(BaseTuner):
         target: Union[LoHaLayer, nn.Module],
         target_name,
         parent,
+        current_key,
         **optional_kwargs,
     ):
         """
@@ -136,7 +137,6 @@ class LoHaModel(BaseTuner):
         """
 
         # Regexp matching - Find key which matches current target_name in patterns provided
-        current_key = optional_kwargs["current_key"]
         pattern_keys = list(chain(loha_config.rank_pattern.keys(), loha_config.alpha_pattern.keys()))
         target_name_key = next(filter(lambda key: re.match(f"(.*\.)?{key}$", current_key), pattern_keys), target_name)
 
@@ -186,6 +186,10 @@ class LoHaModel(BaseTuner):
                 adapter_name=adapter_name,
                 **kwargs,
             )
+        else:
+            raise ValueError(
+                "Target module not found, currently only adapters for nn.Linear and nn.Conv2d are supported"
+            )
         return new_module
 
     @staticmethod
@@ -213,14 +217,6 @@ class LoHaModel(BaseTuner):
 
     def merge_and_unload(self, progressbar: bool = False):
         return self._unload_and_optionally_merge(progressbar=progressbar)
-
-    def set_adapter(self, adapter_name):
-        for module in self.model.modules():
-            if isinstance(module, LoHaLayer):
-                if module.merged:
-                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge()
-                module.set_adapter(adapter_name)
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
