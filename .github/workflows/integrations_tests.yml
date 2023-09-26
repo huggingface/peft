@@ -10,6 +10,7 @@ on:
 jobs:
   run_transformers_integration_tests:
     strategy:
+      fail-fast: false
       matrix:
         transformers-version: ['main', 'latest']
     runs-on: ubuntu-latest
@@ -40,10 +41,11 @@ jobs:
 
       - name: Test transformers integration
         run: |
-          cd .. && git clone https://github.com/huggingface/transformers.git && cd transformers/ && git log
+          cd .. && git clone https://github.com/huggingface/transformers.git && cd transformers/ && git rev-parse HEAD
           RUN_SLOW=1 pytest tests/peft_integration/test_peft_integration.py
   run_diffusers_integration_tests:
     strategy:
+      fail-fast: false
       matrix:
         # For now diffusers integration is not on PyPI
         diffusers-version: ['main']
@@ -76,5 +78,5 @@ jobs:
 
       - name: Test diffusers integration
         run: |
-          cd .. && git clone https://github.com/huggingface/diffusers.git && cd diffusers/ && git log
+          cd .. && git clone https://github.com/huggingface/diffusers.git && cd diffusers/ && git rev-parse HEAD
           pytest tests/lora/test_lora_layers_peft.py
