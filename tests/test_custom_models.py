@@ -55,7 +55,6 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
-
     # LoHa
     ("Vanilla MLP 1 LOHA", "MLP", LoHaConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0"]}),
@@ -74,7 +73,6 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
-
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
