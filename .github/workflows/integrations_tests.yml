@@ -10,6 +10,7 @@ on:
 jobs:
   run_transformers_integration_tests:
     strategy:
+      fail-fast: false
       matrix:
         transformers-version: ['main', 'latest']
     runs-on: ubuntu-latest
@@ -44,6 +45,7 @@ jobs:
           RUN_SLOW=1 pytest tests/peft_integration/test_peft_integration.py
   run_diffusers_integration_tests:
     strategy:
+      fail-fast: false
       matrix:
         # For now diffusers integration is not on PyPI
         diffusers-version: ['main']
