@@ -248,6 +248,10 @@ class LoHaModel(BaseTuner):
                         bias=bias,
                         device=target.weight.device,
                     )
+                else:
+                    raise ValueError(
+                        "Cannot convert current module to torch module, currently only adapters for nn.Linear and nn.Conv2d are supported"
+                    )
                 if merge:
                     target.merge()
                 self._replace_module(parent, target_name, new_module, target)
