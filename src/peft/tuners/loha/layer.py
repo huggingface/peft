@@ -25,6 +25,9 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 
 
 class LoHaLayer(BaseTunerLayer, nn.Module):
+    # List all names of layers that may contain adapter weights
+    adapter_layer_names = ["hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2"]
+
     def __init__(self):
         super(nn.Module, self).__init__()
 
@@ -43,8 +46,8 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
 
         # Tuner info
         self.merged = False
-        self.disable_adapters = False
-        self.active_adapter = None
+        self._disable_adapters = False
+        self.merged_adapters = []
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
@@ -146,6 +149,7 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
                 self.to(weight.device, dtype=weight.dtype)
             else:
                 self.to(weight.device)
+        self.set_adapter(self.active_adapters)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L178
@@ -206,31 +210,47 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
         raise NotImplementedError
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.hada_w1_a.keys():
-            return self._op(x, self.weight)
-
         previous_dtype = x.dtype
 
         if self.disable_adapters:
-            if self.r[self.active_adapter] > 0 and self.merged:
+            if self.merged:
                 self.unmerge()
             result = self._op(x, self.weight)
-        elif (self.r[self.active_adapter] == 0) or self.merged:
+        elif self.merged:
             result = self._op(x, self.weight)
         else:
             # Get base weights
             weight = self.weight.data
-            module_dropout = self.module_dropout[self.active_adapter]
 
-            # Modify current execution weights
-            if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                weight = weight + self.get_delta_weight(self.active_adapter)
+            # Execute all the adapters
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.hada_w1_a.keys():
+                    continue
+
+                module_dropout = self.module_dropout[active_adapter]
+
+                # Modify current execution weights
+                if (not self.training) or (self.training and torch.rand(1) > module_dropout):
+                    weight = weight + self.get_delta_weight(active_adapter)
 
             # Perform actual operation
             result = self._op(x, weight)
 
         result = result.to(previous_dtype)
         return result
+
+    def scale_layer(self, scale_factor: float) -> None:
+        if scale_factor != 1:
+            for active_adapter in self.active_adapters:
+                alpha = self.alpha[active_adapter]
+                r = self.r[active_adapter]
+                self.scaling[active_adapter] = (alpha / r) * scale_factor
+
+    def unscale_layer(self) -> None:
+        for active_adapter in self.active_adapters:
+            alpha = self.alpha[active_adapter]
+            r = self.r[active_adapter]
+            self.scaling[active_adapter] = alpha / r
 
 
 class Linear(LoHaLayer, nn.Linear):
@@ -259,7 +279,7 @@ class Linear(LoHaLayer, nn.Linear):
 
         # Create adapter and set it active
         self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
-        self.active_adapter = adapter_name
+        self.set_adapter(adapter_name)
 
     def _op(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         return F.linear(input, weight, bias=self.bias)
@@ -311,7 +331,7 @@ class Conv2d(LoHaLayer, nn.Conv2d):
         self.update_layer(
             adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
         )
-        self.active_adapter = adapter_name
+        self.set_adapter(adapter_name)
 
     def _op(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         return F.conv2d(

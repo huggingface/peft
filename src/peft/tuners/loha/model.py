@@ -201,7 +201,7 @@ class LoHaModel(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.active_adapter = adapter_name
+                module.set_adapter(adapter_name)
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
         if merge:
