@@ -477,8 +477,8 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         X = torch.arange(90).view(9, 10)
         return {"X": X}
 
-    def get_adapter_config(self, tuner_method, same_targets):
-        if same_targets:
+    def get_adapter_config(self, tuner_method, targets):
+        if targets == "same":
             return self.configs[tuner_method]
         config = self.configs[tuner_method].copy()
         kwargs = config["kwargs"]
@@ -497,13 +497,13 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
                 module.set_adapter(adapter_names)
 
     @parameterized.expand(TUNERS_AND_TARGETS)
-    def test_multiple_active_adapters_forward(self, tuner_method, same_targets):
+    def test_multiple_active_adapters_forward(self, tuner_method, targets):
         model = MLP()
         model.eval()
         X = self.prepare_inputs_for_testing()
 
-        config_1 = self.get_adapter_config(tuner_method, same_targets)
-        config_2 = self.get_adapter_config(tuner_method, same_targets)
+        config_1 = self.get_adapter_config(tuner_method, targets)
+        config_2 = self.get_adapter_config(tuner_method, targets)
         config_cls = config_1["class"]
         config_1 = config_cls(**config_1["kwargs"])
         config_2 = config_cls(**config_2["kwargs"])
@@ -538,14 +538,14 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             self.assertTrue(torch.allclose(new_combined_output, combined_output))
 
     @parameterized.expand(TUNERS_AND_TARGETS)
-    def test_multiple_active_adapters_merge_and_unmerge(self, tuner_method, same_targets):
+    def test_multiple_active_adapters_merge_and_unmerge(self, tuner_method, targets):
         model = MLP()
         model.eval()
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
-        config_1 = self.get_adapter_config(tuner_method, same_targets)
-        config_2 = self.get_adapter_config(tuner_method, same_targets)
+        config_1 = self.get_adapter_config(tuner_method, targets)
+        config_2 = self.get_adapter_config(tuner_method, targets)
         config_cls = config_1["class"]
         config_1 = config_cls(**config_1["kwargs"])
         config_2 = config_cls(**config_2["kwargs"])
