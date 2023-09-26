@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import itertools
 import tempfile
 import unittest
 
@@ -23,7 +24,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import AdaLoraConfig, IA3Config, LoraConfig, PeftModel, get_peft_model
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict
@@ -54,6 +55,10 @@ TEST_CASES = [
     ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
 ]
+
+TUNERS = ["lora", "ia3", "adalora"]
+TARGETS = ["same", "different"]
+TUNERS_AND_TARGETS = list(itertools.product(TUNERS, TARGETS))
 
 
 class MLP(nn.Module):
@@ -442,3 +447,55 @@ class TestRepr(unittest.TestCase):
         self.assertTrue("lora_A" in print_output)
         self.assertTrue("lora_B" in print_output)
         self.assertTrue("default" in print_output)
+
+
+class MultipleActiveAdaptersTester(unittest.TestCase):
+    """
+    A test class to test the functionality of multiple active adapters.
+
+    This is not specifically tied to custom models, it's just easy to test here and testing it on all types of models
+    would be overkill.
+    """
+
+    def __init__(self):
+        self.configs = {
+            "lora": {"class": LoraConfig, "kwargs": {"target_modules": ["lin0"]}},
+            "ia3": {
+                "class": IA3Config,
+                "kwargs": {"target_modules": ["lin0", "lin1"], "feedforward_modules": ["lin0"]},
+            },
+            "adaloara": {"class": AdaLoraConfig, "kwargs": {"target_modules": ["lin0"]}},
+        }
+
+    def get_adapter_config(self, tuner_method, same_targets):
+        if same_targets:
+            return self.configs[tuner_method]
+        config = self.configs[tuner_method].copy()
+        kwargs = config["kwargs"]
+        for key, old_targets in kwargs.items():
+            new_targets = []
+            for target in old_targets:
+                new_targets.append("lin1" if target == "lin0" else "lin0")
+            kwargs[key] = new_targets
+        return config
+
+    @parameterized.expand(TUNERS_AND_TARGETS)
+    def test_multiple_active_adapters_forward(self, tuner_method, same_targets):
+        model = MLP()
+        config_1 = self.get_adapter_config(tuner_method, same_targets)
+        config_2 = self.get_adapter_config(tuner_method, same_targets)
+        config_cls = config_1["class"]
+        config_1 = config_cls(**config_1["kwargs"])
+        config_2 = config_cls(**config_2["kwargs"])
+
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
+        peft_model.add_adapter("adapter_2", config_2)
+        pass
+
+    @parameterized.expand(TUNERS_AND_TARGETS)
+    def test_multiple_active_adapters_merge(self, tuner_method, same_targets):
+        pass
+
+    @parameterized.expand(TUNERS_AND_TARGETS)
+    def test_multiple_active_adapters_unmerge(self, tuner_method, same_targets):
+        pass
