@@ -518,7 +518,18 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
-        self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
+        new_target_modules = []
+        for adapter in adapters:
+            if not isinstance(self.peft_config[adapter].target_modules, list):
+                raise ValueError("regex target modules not supported with `add_weighted_adapter` method")
+            new_target_modules.extend(self.peft_config[adapter].target_modules)
+
+        self.peft_config[adapter_name] = replace(
+            self.peft_config[adapters[0]],
+            r=new_rank,
+            lora_alpha=new_rank,
+            target_modules=list(set(new_target_modules)),
+        )
         self.inject_adapter(self.model, adapter_name)
 
         # Do we really need that?
@@ -545,6 +556,8 @@ class LoraModel(BaseTuner):
                         elif adapter in target.lora_embedding_A:
                             current_adapter_lora_A = target.lora_embedding_A[adapter]
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
+                        else:
+                            continue
                         target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
                         target_lora_B.data += current_adapter_lora_B.data
                 elif combination_type == "cat":
@@ -556,10 +569,16 @@ class LoraModel(BaseTuner):
                         elif adapter in target.lora_embedding_A:
                             current_adapter_lora_A = target.lora_embedding_A[adapter]
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
+                        else:
+                            continue
                         loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
                         loras_B.append(current_adapter_lora_B.data)
-                    torch.cat(loras_A, dim=0, out=target_lora_A.data)
-                    torch.cat(loras_B, dim=1, out=target_lora_B.data)
+
+                    if len(loras_A) > 0:
+                        loras_A = torch.cat(loras_A, dim=0)
+                        loras_B = torch.cat(loras_B, dim=1)
+                        target_lora_A.data[: loras_A.shape[0], :] = loras_A
+                        target_lora_B.data[:, : loras_B.shape[1]] = loras_B
                 elif combination_type == "svd":
                     target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
                         adapters,
@@ -585,8 +604,19 @@ class LoraModel(BaseTuner):
         full_matrices=True,
         driver=None,
     ):
-        delta_weight = weights[0] * target.get_delta_weight(adapters[0])
-        for adapter, weight in zip(adapters[1:], weights[1:]):
+        valid_adapters = []
+        valid_weights = []
+        for adapter, weight in zip(adapters, weights):
+            if adapter in target.lora_A or adapter in target.lora_embedding_A:
+                valid_adapters.append(adapter)
+                valid_weights.append(weight)
+
+        # if no valid adapter, nothing to do
+        if len(valid_adapters) == 0:
+            return target_lora_A.data, target_lora_B.data
+
+        delta_weight = valid_weights[0] * target.get_delta_weight(valid_adapters[0])
+        for adapter, weight in zip(valid_adapters[1:], valid_weights[1:]):
             delta_weight += weight * target.get_delta_weight(adapter)
         conv2d = isinstance(target, Conv2d)
         if conv2d:

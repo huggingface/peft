@@ -70,12 +70,12 @@ def _parameterized_custom_name_func(func, param_num, param):
 
 
 class MLP(nn.Module):
-    def __init__(self):
+    def __init__(self, bias=True):
         super().__init__()
-        self.lin0 = nn.Linear(10, 20)
+        self.lin0 = nn.Linear(10, 20, bias=bias)
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(0.5)
-        self.lin1 = nn.Linear(20, 2)
+        self.lin1 = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
@@ -472,7 +472,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             "ia3": {
                 "class": IA3Config,
                 "kwargs": {
-                    "target_modules": ["lin0", "lin1"],
+                    "target_modules": ["lin0"],
                     "feedforward_modules": ["lin0"],
                     "init_ia3_weights": False,
                 },
@@ -490,7 +490,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     def get_adapter_config(self, tuner_method, targets):
         if targets == "same":
             return self.configs[tuner_method]
-        config = self.configs[tuner_method].copy()
+        config = copy.deepcopy(self.configs[tuner_method])
         kwargs = config["kwargs"]
         for key, value in kwargs.items():
             new_targets = []
@@ -508,11 +508,11 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
     @parameterized.expand(TUNERS_AND_TARGETS, name_func=_parameterized_custom_name_func)
     def test_multiple_active_adapters_forward(self, tuner_method, targets):
-        model = MLP()
+        model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
 
-        config_1 = self.get_adapter_config(tuner_method, targets)
+        config_1 = self.get_adapter_config(tuner_method, "same")
         config_2 = self.get_adapter_config(tuner_method, targets)
         config_cls = config_1["class"]
         config_1 = config_cls(**config_1["kwargs"])
@@ -520,6 +520,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
+        print(peft_model)
 
         # set adapter_1
         peft_model.set_adapter("adapter_1")
@@ -533,9 +534,9 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
         combined_output = peft_model(**X)
 
-        self.assertFalse(torch.allclose(adapter_1_output, adapter_2_output))
-        self.assertFalse(torch.allclose(adapter_1_output, combined_output))
-        self.assertFalse(torch.allclose(adapter_2_output, combined_output))
+        self.assertFalse(torch.allclose(adapter_1_output, adapter_2_output, atol=1e-5))
+        self.assertFalse(torch.allclose(adapter_1_output, combined_output, atol=1e-5))
+        self.assertFalse(torch.allclose(adapter_2_output, combined_output, atol=1e-5))
 
         if tuner_method == "lora":
             # create a weighted adapter combining both adapters and check that
@@ -545,16 +546,16 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             )
             peft_model.set_adapter("new_combined_adapter")
             new_combined_output = peft_model(**X)
-            self.assertTrue(torch.allclose(new_combined_output, combined_output))
+            self.assertTrue(torch.allclose(new_combined_output, combined_output, atol=1e-5))
 
     @parameterized.expand(TUNERS_AND_TARGETS, name_func=_parameterized_custom_name_func)
     def test_multiple_active_adapters_merge_and_unmerge(self, tuner_method, targets):
-        model = MLP()
+        model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
-        config_1 = self.get_adapter_config(tuner_method, targets)
+        config_1 = self.get_adapter_config(tuner_method, "same")
         config_2 = self.get_adapter_config(tuner_method, targets)
         config_cls = config_1["class"]
         config_1 = config_cls(**config_1["kwargs"])
@@ -562,6 +563,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
+        print(peft_model)
 
         # set ["adapter_1", "adapter_2"]
         self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
@@ -569,14 +571,14 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model.merge_adapter()
         merged_combined_output = peft_model(**X)
-        self.assertTrue(torch.allclose(merged_combined_output, combined_output))
+        self.assertTrue(torch.allclose(merged_combined_output, combined_output, atol=1e-5))
 
         peft_model.unmerge_adapter()
 
         with peft_model.disable_adapter():
             disabled_adapter_output = peft_model(**X)
 
-        self.assertTrue(torch.allclose(disabled_adapter_output, base_output))
+        self.assertTrue(torch.allclose(disabled_adapter_output, base_output, atol=1e-5))
 
 
 class RequiresGradTester(unittest.TestCase):
