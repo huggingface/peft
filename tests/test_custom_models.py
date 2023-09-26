@@ -62,6 +62,13 @@ TARGETS = ["same", "different"]
 TUNERS_AND_TARGETS = list(itertools.product(TUNERS, TARGETS))
 
 
+def _parameterized_custom_name_func(func, param_num, param):
+    # customize the test name generator function as we want both params to appear in the sub-test
+    # name, as by default it shows only the first param
+    param_based_name = parameterized.to_safe_name("_".join(str(x) for x in param.args))
+    return f"{func.__name__}_{param_based_name}"
+
+
 class MLP(nn.Module):
     def __init__(self):
         super().__init__()
@@ -499,7 +506,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             if isinstance(module, BaseTunerLayer):
                 module.set_adapter(adapter_names)
 
-    @parameterized.expand(TUNERS_AND_TARGETS)
+    @parameterized.expand(TUNERS_AND_TARGETS, name_func=_parameterized_custom_name_func)
     def test_multiple_active_adapters_forward(self, tuner_method, targets):
         model = MLP()
         model.eval()
@@ -540,7 +547,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             new_combined_output = peft_model(**X)
             self.assertTrue(torch.allclose(new_combined_output, combined_output))
 
-    @parameterized.expand(TUNERS_AND_TARGETS)
+    @parameterized.expand(TUNERS_AND_TARGETS, name_func=_parameterized_custom_name_func)
     def test_multiple_active_adapters_merge_and_unmerge(self, tuner_method, targets):
         model = MLP()
         model.eval()
