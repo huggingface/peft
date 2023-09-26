@@ -172,7 +172,7 @@ class IA3Model(BaseTuner):
         }
 
         if isinstance(target, IA3Layer):
-            if target.is_feedforward != ia3_config.is_feedforward:
+            if target.is_feedforward != is_feedforward:
                 raise ValueError(
                     "New adapter should have the same value for `is_feedforward` as previously added adapter."
                 )
