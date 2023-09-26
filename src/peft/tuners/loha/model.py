@@ -22,7 +22,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     COMMON_LAYERS_PATTERN,
     ModulesToSaveWrapper,
@@ -63,6 +63,25 @@ class LoHaModel(BaseTuner):
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
             return getattr(self.model, name)
+
+    def _set_adapter_layers(self, enabled=True):
+        for module in self.model.modules():
+            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                module.enable_adapters(enabled)
+
+    def enable_adapter_layers(self):
+        self._set_adapter_layers(enabled=True)
+
+    def disable_adapter_layers(self):
+        self._set_adapter_layers(enabled=False)
+
+    def set_adapter(self, adapter_name):
+        for module in self.model.modules():
+            if isinstance(module, LoHaLayer):
+                if module.merged:
+                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                    module.unmerge()
+                module.set_adapter(adapter_name)
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
