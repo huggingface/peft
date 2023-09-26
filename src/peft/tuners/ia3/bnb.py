@@ -132,9 +132,9 @@ if is_bnb_4bit_available():
                 expected_dtype = result.dtype
                 result = result * ia3_scaling
 
-            result = (
-                result.clone()
-            )  # adalora.py and lora.py both suggested that the inclusion of this was necessary for 4-bit training on older versions of Pytorch. This has been duplicated here.
+            result = result.clone()
+            # adalora.py and lora.py both suggest that this is necessary for 4-bit training on older versions of Pytorch.
+            # This has been duplicated here.
 
             if requires_conversion:
                 result = result.to(expected_dtype)
