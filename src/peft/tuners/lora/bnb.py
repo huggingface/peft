@@ -54,7 +54,7 @@ if is_bnb_available():
             self.weight.requires_grad = False
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapter = adapter_name
+            self.set_adapter(adapter_name)
 
         def merge(self):
             if self.merged:
@@ -195,7 +195,7 @@ if is_bnb_4bit_available():
 
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.active_adapter = adapter_name
+            self.set_adapter(adapter_name)
 
         def merge(self):
             if self.merged:

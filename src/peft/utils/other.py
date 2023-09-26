@@ -164,9 +164,19 @@ class ModulesToSaveWrapper(torch.nn.Module):
         super().__init__()
         self.original_module = module_to_save
         self.modules_to_save = torch.nn.ModuleDict({})
+        self._active_adapter = adapter_name
+        self._disable_adapters = False
         self.update(adapter_name)
-        self.active_adapter = adapter_name
-        self.disable_adapters = False
+
+    @property
+    def disable_adapters(self) -> bool:
+        # use a property to ensure that disable_adapters is not set directly, instead use the enable_adapters method
+        return self._disable_adapters
+
+    @property
+    def active_adapter(self) -> str:
+        # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
+        return self._active_adapter
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
@@ -176,6 +186,10 @@ class ModulesToSaveWrapper(torch.nn.Module):
             new_hook = self._create_new_hook(old_hook)
             remove_hook_from_module(self.modules_to_save[adapter_name])
             add_hook_to_module(self.modules_to_save[adapter_name], new_hook)
+
+        self.original_module.requires_grad_(False)
+        if adapter_name == self.active_adapter:
+            self.modules_to_save[adapter_name].requires_grad_(True)
 
     def _create_new_hook(self, old_hook):
         r"""
@@ -195,6 +209,40 @@ class ModulesToSaveWrapper(torch.nn.Module):
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
             return self.original_module(*args, **kwargs)
         return self.modules_to_save[self.active_adapter](*args, **kwargs)
+
+    def enable_adapters(self, enabled: bool):
+        """Toggle the enabling and disabling of adapters
+
+        Takes care of setting the requires_grad flag for the adapter weights.
+
+        Args:
+            enabled (bool): True to enable adapters, False to disable adapters
+        """
+        if self._disable_adapters is not enabled:
+            # already in the desired state, do nothing
+            return
+
+        if enabled:
+            self.original_module.requires_grad_(False)
+            self.modules_to_save[self.active_adapter].requires_grad_(True)
+            self._disable_adapters = False
+        else:
+            self.original_module.requires_grad_(True)
+            self.modules_to_save.requires_grad_(False)
+            self._disable_adapters = True
+
+    def set_adapter(self, adapter_name: str):
+        """Set the active adapter
+
+        Args:
+            adapter_name (str): The name of the adapter to set as active
+        """
+        if adapter_name not in self.modules_to_save:
+            raise ValueError(f"Adapter {adapter_name} not found in {self.modules_to_save.keys()}")
+
+        self.modules_to_save[self.active_adapter].requires_grad_(False)
+        self.modules_to_save[adapter_name].requires_grad_(True)
+        self._active_adapter = adapter_name
 
 
 def _get_submodules(model, key):
@@ -218,16 +266,17 @@ def _set_trainable(model, adapter_name):
             parent, target, target_name = _get_submodules(model, key)
             if isinstance(target, ModulesToSaveWrapper):
                 target.update(adapter_name)
+                target.set_adapter(target.active_adapter)
             else:
-                for param in target.parameters():
-                    param.requires_grad = True
-                setattr(parent, target_name, ModulesToSaveWrapper(target, adapter_name))
+                new_module = ModulesToSaveWrapper(target, adapter_name)
+                new_module.set_adapter(adapter_name)
+                setattr(parent, target_name, new_module)
 
 
 def _set_adapter(model, adapter_name):
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
-            module.active_adapter = adapter_name
+            module.set_adapter(adapter_name)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
