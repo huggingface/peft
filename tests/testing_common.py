@@ -207,14 +207,14 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         dummy_output = model.get_input_embeddings()(dummy_input["input_ids"])
 
-        self.assertTrue(not dummy_output.requires_grad)
+        self.assertFalse(dummy_output.requires_grad)
 
         # load with `prepare_model_for_int8_training`
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         model = prepare_model_for_int8_training(model)
 
         for param in model.parameters():
-            self.assertTrue(not param.requires_grad)
+            self.assertFalse(param.requires_grad)
 
         config = config_cls(
             base_model_name_or_path=model_id,

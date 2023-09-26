@@ -17,7 +17,6 @@ import warnings
 from dataclasses import asdict, replace
 from enum import Enum
 from itertools import chain
-from typing import List
 
 import torch
 from torch import nn
@@ -25,7 +24,7 @@ from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     COMMON_LAYERS_PATTERN,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -216,6 +215,9 @@ class LoraModel(BaseTuner):
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
+            if adapter_name != self.active_adapter:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
@@ -239,15 +241,16 @@ class LoraModel(BaseTuner):
                 module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
-        for active_adapter in self._get_active_adapters():
-            bias = self.peft_config[active_adapter].bias
+        for n, p in self.model.named_parameters():
+            if "lora_" not in n:
+                p.requires_grad = False
 
-            for n, p in self.model.named_parameters():
-                if "lora_" not in n:
-                    p.requires_grad = False
+        for active_adapter in self.active_adapters:
+            bias = self.peft_config[active_adapter].bias
             if bias == "none":
-                return
-            elif bias == "all":
+                continue
+
+            if bias == "all":
                 for n, p in self.model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
@@ -351,28 +354,14 @@ class LoraModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():
-            if isinstance(module, LoraLayer):
-                module.disable_adapters = False if enabled else True
-            elif isinstance(module, ModulesToSaveWrapper):
-                module.disable_adapters = False if enabled else True
+            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                module.enable_adapters(enabled)
 
     def enable_adapter_layers(self):
         self._set_adapter_layers(enabled=True)
 
-    def _get_active_adapters(self) -> List[str]:
-        active_adapters = None
-        for module in self.model.modules():
-            if isinstance(module, LoraLayer):
-                active_adapters = module.active_adapters
-
-        if active_adapters is None:
-            raise ValueError(
-                "Something went wrong, no active adapter could be found, please report the issue on GitHub"
-            )
-        return active_adapters
-
     def disable_adapter_layers(self):
-        for active_adapter in self._get_active_adapters():
+        for active_adapter in self.active_adapters:
             val = self.peft_config[active_adapter].bias
             if val != "none":
                 msg = (
@@ -388,7 +377,7 @@ class LoraModel(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
-                module.active_adapter = adapter_name
+                module.set_adapter(adapter_name)
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
@@ -626,7 +615,7 @@ class LoraModel(BaseTuner):
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
 
-    def delete_adapter(self, adapter_name):
+    def delete_adapter(self, adapter_name: str):
         """
         Deletes an existing adapter.
 
@@ -636,6 +625,7 @@ class LoraModel(BaseTuner):
         if adapter_name not in list(self.peft_config.keys()):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
+
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
@@ -659,7 +649,7 @@ class LoraModel(BaseTuner):
                     warnings.warn(
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
                     )
-                    target.active_adapter = resetting_active_adapter
+                    target.set_adapter(resetting_active_adapter)
 
     def merge_and_unload(self, progressbar: bool = False):
         r"""
