@@ -545,6 +545,8 @@ class LoraModel(BaseTuner):
                 elif adapter_name in target.lora_embedding_A:
                     target_lora_A = target.lora_embedding_A[adapter_name]
                     target_lora_B = target.lora_embedding_B[adapter_name]
+                else:
+                    continue
 
                 target_lora_A.data = target_lora_A.data * 0.0
                 target_lora_B.data = target_lora_B.data * 0.0
