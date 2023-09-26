@@ -32,15 +32,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .[test]
-          cd .. && git clone https://github.com/huggingface/transformers.git && cd transformers/ && git log
           if [ "${{ matrix.transformers-version }}" == "main" ]; then
-              pip install -e ".[dev]"
+              pip install -U git+https://github.com/huggingface/transformers.git
           else
               echo "Nothing to do as transformers latest already installed"
           fi
 
       - name: Test transformers integration
         run: |
+          cd .. && git clone https://github.com/huggingface/transformers.git && cd transformers/ && git log
           RUN_SLOW=1 pytest tests/peft_integration/test_peft_integration.py
   run_diffusers_integration_tests:
     strategy:
@@ -67,13 +67,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .[test]
-          cd .. && git clone https://github.com/huggingface/diffusers.git && cd diffusers/ && git log
+          
           if [ "${{ matrix.diffusers-version }}" == "main" ]; then
-              pip install -e ".[dev]"
+              pip install -U git+https://github.com/huggingface/diffusers.git
           else
               echo "Nothing to do as diffusers latest already installed"
           fi
 
       - name: Test diffusers integration
         run: |
+          cd .. && git clone https://github.com/huggingface/diffusers.git && cd diffusers/ && git log
           pytest tests/lora/test_lora_layers_peft.py
