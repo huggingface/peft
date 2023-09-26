@@ -458,7 +458,8 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     would be overkill.
     """
 
-    def __init__(self):
+    def setUp(self):
+        super().setUp()
         self.configs = {
             "lora": {"class": LoraConfig, "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False}},
             "ia3": {
