@@ -499,3 +499,333 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     @parameterized.expand(TUNERS_AND_TARGETS)
     def test_multiple_active_adapters_unmerge(self, tuner_method, same_targets):
         pass
+
+
+class RequiresGradTester(unittest.TestCase):
+    """Test that requires_grad is set correctly in specific circumstances
+
+    # See issue #899.
+
+    This is not specifically tied to custom models, it's just easy to test here and testing it on all types of models
+    would be overkill.
+
+    """
+
+    def test_requires_grad_modules_to_save_default(self):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertFalse(peft_model.model.lin1.original_module.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.original_module.bias.requires_grad)
+
+    def test_requires_grad_modules_to_save_disabling(self):
+        config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config)
+
+        # when disabling the adapter, the original module's grad should be enabled and vice versa
+        peft_model.disable_adapter_layers()
+        self.assertFalse(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertTrue(peft_model.model.lin1.original_module.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.original_module.bias.requires_grad)
+
+        # when re-enabling the adapter, the original module's grad should be disabled and vice versa
+        peft_model.enable_adapter_layers()
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertFalse(peft_model.model.lin1.original_module.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.original_module.bias.requires_grad)
+
+        # when using the disable_adapter context, the original module's grad should be enabled and vice versa
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+            self.assertTrue(peft_model.model.lin1.original_module.weight.requires_grad)
+            self.assertTrue(peft_model.model.lin1.original_module.bias.requires_grad)
+
+        # after context is exited, return to the previous state
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertFalse(peft_model.model.lin1.original_module.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.original_module.bias.requires_grad)
+
+    def test_requires_grad_modules_to_save_multiple_adapters(self):
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertFalse(peft_model.model.lin1.modules_to_save.adapter1.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.modules_to_save.adapter1.bias.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertFalse(peft_model.model.lin1.modules_to_save.adapter1.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.modules_to_save.adapter1.bias.requires_grad)
+
+        # set config1 as active, should lead to adapter1 requiring grad
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin1.modules_to_save.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.modules_to_save.default.bias.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.adapter1.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.modules_to_save.adapter1.bias.requires_grad)
+
+    def test_requires_grad_lora_different_targets(self):
+        # test two different LoRA adapters that target different modules
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_A.adapter1.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_B.adapter1.weight.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_A.adapter1.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_B.adapter1.weight.requires_grad)
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_A.adapter1.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_B.adapter1.weight.requires_grad)
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin1.lora_A.adapter1.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin1.lora_B.adapter1.weight.requires_grad)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_A.adapter1.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_B.adapter1.weight.requires_grad)
+
+    def test_requires_grad_lora_same_targets(self):
+        # same as previous test, except that LoRA adapters target the same layer
+        config0 = LoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = LoraConfig(target_modules=["lin0"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_A.adapter1.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.adapter1.weight.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_A.adapter1.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.adapter1.weight.requires_grad)
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_A.adapter1.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.adapter1.weight.requires_grad)
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_A.adapter1.weight.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_B.adapter1.weight.requires_grad)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.weight.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_A.adapter1.weight.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.adapter1.weight.requires_grad)
+
+    def test_requires_grad_ia3_different_targets(self):
+        # test two different IA3 adapters that target different modules
+        config0 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = IA3Config(target_modules=["lin1"], feedforward_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertFalse(peft_model.model.lin1.ia3_l.adapter1.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertFalse(peft_model.model.lin1.ia3_l.adapter1.requires_grad)
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertTrue(peft_model.model.lin1.ia3_l.adapter1.requires_grad)
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin0.ia3_l.default.requires_grad)
+            self.assertFalse(peft_model.model.lin1.ia3_l.adapter1.requires_grad)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertTrue(peft_model.model.lin1.ia3_l.adapter1.requires_grad)
+
+    def test_requires_grad_ia3_same_targets(self):
+        # same as previous test, except that IA3 adapters target the same layer
+        config0 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.ia3_l.adapter1.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.ia3_l.adapter1.requires_grad)
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.ia3_l.adapter1.requires_grad)
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin0.ia3_l.default.requires_grad)
+            self.assertFalse(peft_model.model.lin0.ia3_l.adapter1.requires_grad)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.ia3_l.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.ia3_l.adapter1.requires_grad)
+
+    def test_requires_grad_adalora_different_targets(self):
+        # test two different AdaLora adapters that target different modules
+        config0 = AdaLoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = AdaLoraConfig(target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_E.default.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_A.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_B.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_E.adapter1.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_E.default.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_A.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_B.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin1.lora_E.adapter1.requires_grad)
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.default.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_A.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_B.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_E.adapter1.requires_grad)
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin0.lora_A.default.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_B.default.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_E.default.requires_grad)
+            self.assertFalse(peft_model.model.lin1.lora_A.adapter1.requires_grad)
+            self.assertFalse(peft_model.model.lin1.lora_B.adapter1.requires_grad)
+            self.assertFalse(peft_model.model.lin1.lora_E.adapter1.requires_grad)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.default.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_A.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_B.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin1.lora_E.adapter1.requires_grad)
+
+    def test_requires_grad_adalora_same_targets(self):
+        # same as previous test, except that AdaLora adapters target the same layer
+        config0 = AdaLoraConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = AdaLoraConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.assertTrue(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_A.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.assertTrue(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_A.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.adapter1.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_A.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.assertFalse(peft_model.model.lin0.lora_A.default.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_B.default.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_E.default.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_A.adapter1.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_B.adapter1.requires_grad)
+            self.assertFalse(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.assertFalse(peft_model.model.lin0.lora_A.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_B.default.requires_grad)
+        self.assertFalse(peft_model.model.lin0.lora_E.default.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_A.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_B.adapter1.requires_grad)
+        self.assertTrue(peft_model.model.lin0.lora_E.adapter1.requires_grad)

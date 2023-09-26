@@ -26,6 +26,9 @@ from peft.utils.other import transpose
 
 
 class LoraLayer(BaseTunerLayer):
+    # List all names of layers that may contain adapter weights
+    adapter_layer_names = ["lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"]
+
     def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
         self.lora_alpha = {}
@@ -38,8 +41,8 @@ class LoraLayer(BaseTunerLayer):
         self.lora_embedding_B = nn.ParameterDict({})
         # Mark the weight as unmerged
         self.merged = False
+        self._disable_adapters = False
         self.merged_adapters = []
-        self.disable_adapters = False
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
@@ -82,6 +85,7 @@ class LoraLayer(BaseTunerLayer):
                 self.to(weight.device, dtype=weight.dtype)
             else:
                 self.to(weight.device)
+        self.set_adapter(self.active_adapters)
 
     def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
@@ -197,8 +201,8 @@ class Linear(nn.Linear, LoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
+        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
         if self.merged:
@@ -275,7 +279,7 @@ class Embedding(nn.Embedding, LoraLayer):
         self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
         LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
         if self.merged:
@@ -364,7 +368,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
         )
 
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.active_adapter = adapter_name
+        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
         if self.merged:
