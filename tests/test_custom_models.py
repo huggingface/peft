@@ -474,7 +474,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         }
 
     def prepare_inputs_for_testing(self):
-        X = torch.arange(90).view(9, 10).to(self.torch_device)
+        X = torch.arange(90).view(9, 10)
         return {"X": X}
 
     def get_adapter_config(self, tuner_method, same_targets):
