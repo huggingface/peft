@@ -470,7 +470,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
                     "init_ia3_weights": False,
                 },
             },
-            "adaloara": {"class": AdaLoraConfig, "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False}},
+            "adalora": {"class": AdaLoraConfig, "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False}},
         }
 
     def prepare_inputs_for_testing(self):
