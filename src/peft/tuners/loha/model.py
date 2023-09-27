@@ -46,7 +46,41 @@ class LoHaModel(BaseTuner):
         `torch.nn.Module`: The LoHa model.
 
     Example:
-        #TODO: Add example
+        ```py
+        >>> from diffusers import StableDiffusionPipeline
+        >>> from peft import LoHaModel, LoHaConfig
+
+        >>> config_te = LoHaConfig(
+        ...     r=8,
+        ...     lora_alpha=32,
+        ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+        ...     rank_dropout=0.0,
+        ...     module_dropout=0.0,
+        ...     init_weights=True,
+        ... )
+        >>> config_unet = LoHaConfig(
+        ...     r=8,
+        ...     lora_alpha=32,
+        ...     target_modules=[
+        ...         "proj_in",
+        ...         "proj_out",
+        ...         "to_k",
+        ...         "to_q",
+        ...         "to_v",
+        ...         "to_out.0",
+        ...         "ff.net.0.proj",
+        ...         "ff.net.2",
+        ...     ],
+        ...     rank_dropout=0.0,
+        ...     module_dropout=0.0,
+        ...     init_weights=True,
+        ...     use_effective_conv2d=True,
+        ... )
+
+        >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
+        >>> model.text_encoder = LoHaModel(model.text_enoder, config_te, "default")
+        >>> model.unet = LoHaModel(model.unet, config_unet, "default")
+        ```
 
     **Attributes**:
         - **model** ([`~torch.nn.Module`]) -- The model to be adapted.
