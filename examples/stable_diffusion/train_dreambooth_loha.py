@@ -195,7 +195,7 @@ def parse_args(input_args=None):
     # lora args
     parser.add_argument("--use_loha", action="store_true", help="Whether to use LoHa for parameter efficient tuning")
     parser.add_argument("--r", type=int, default=8, help="LoHa rank, only used if use_loha is True")
-    parser.add_argument("--alpha", type=int, default=32, help="LoHa alpha, only used if use_lora is True")
+    parser.add_argument("--alpha", type=int, default=32, help="LoHa alpha, only used if use_loha is True")
     parser.add_argument("--rank_dropout", type=float, default=0.0, help="LoHa dropout for rank")
     parser.add_argument("--module_dropout", type=float, default=0.0, help="LoHa dropout for disabling module at all")
     parser.add_argument(

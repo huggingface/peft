@@ -83,7 +83,7 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     """
 
     # Unpack all ranks and alphas
-    ranks = {x[0]: x[1].rank for x in info.items()}
+    ranks = {key: val.rank for key, val in info.items()}
     alphas = {x[0]: x[1].alpha or x[1].rank for x in info.items()}
 
     # Determine which modules needs to be transformed
@@ -137,7 +137,7 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo]) -> LoHaConfig:
     alpha_pattern = dict(sorted(filter(lambda x: x[1] != alpha, alphas.items()), key=lambda x: x[0]))
 
     # Determine whether any of modules have effective conv2d decomposition
-    use_effective_conv2d = any(((x[1].hada_t1 is not None) or (x[1].hada_t2 is not None) for x in info.items()))
+    use_effective_conv2d = any(((val.hada_t1 is not None) or (val.hada_t2 is not None) for val in info.values()))
 
     config = LoHaConfig(
         r=r,
@@ -156,7 +156,7 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo]) -> LoHaConfig:
 
 def combine_peft_state_dict(info: Dict[str, Union[LoRAInfo, LoHaInfo]]) -> Dict[str, torch.Tensor]:
     result = {}
-    for _, key_info in info.items():
+    for key_info in info.values():
         result.update(key_info.peft_state_dict())
     return result
 
