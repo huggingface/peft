@@ -36,6 +36,7 @@ from peft import (
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
+
 from .testing_utils import get_state_dict
 
 
@@ -263,8 +264,8 @@ class PeftCommonTester:
 
             # check if the state dicts are equal
             if issubclass(config_cls, PromptEncoderConfig):
-                # For prompt encoding, the state_dict may contain EXTRA keys, so we don't test that keys are equal but
-                # that keys are a subset.
+                # For prompt encoding, when loading the whole state_dict, there are differences, therefore, only load
+                # adapter-specific weights for comparison.
                 # TODO: is this expected?
                 state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
                 state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
@@ -331,8 +332,8 @@ class PeftCommonTester:
 
             # check if the state dicts are equal
             if issubclass(config_cls, PromptEncoderConfig):
-                # For prompt encoding, the state_dict may contain EXTRA keys, so we don't test that keys are equal but
-                # that keys are a subset.
+                # For prompt encoding, when loading the whole state_dict, there are differences, therefore, only load
+                # adapter-specific weights for comparison.
                 # TODO: is this expected?
                 state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
                 state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
