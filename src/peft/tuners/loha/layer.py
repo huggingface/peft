@@ -177,7 +177,7 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
         # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]
         if self.training and rank_dropout:
-            drop = (torch.rand(weight.size(0)) > rank_dropout).float()
+            drop = (torch.rand(weight.size(0)) > rank_dropout).to(weight.dtype)
             drop = drop.view(-1, *[1] * len(weight.shape[1:])).to(weight.device)
             # TODO: Investigate if there should be a scaler like in normal dropout during training
             # Original implementation doesn't have it
@@ -274,9 +274,7 @@ class Linear(LoHaLayer, nn.Linear):
         **kwargs,
     ):
         init_weights = kwargs.pop("init_weights", True)
-        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
-        # added robustness is not big enough for Linear.
-        nn.Linear.__init__(self, in_features, out_features, bias, device, dtype)
+        self._init_empty_weights(nn.Linear, in_features, out_features, bias, device=device, dtype=dtype)
 
         LoHaLayer.__init__(self)
 
