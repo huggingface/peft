@@ -78,7 +78,7 @@ class LoHaModel(BaseTuner):
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = LoHaModel(model.text_enoder, config_te, "default")
+        >>> model.text_encoder = LoHaModel(model.text_encoder, config_te, "default")
         >>> model.unet = LoHaModel(model.unet, config_unet, "default")
         ```
 
