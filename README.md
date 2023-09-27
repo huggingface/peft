@@ -32,6 +32,7 @@ Supported methods:
 5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://arxiv.org/abs/2303.10512)  
 6. $(IA)^3$: [Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning](https://arxiv.org/abs/2205.05638)
 7. MultiTask Prompt Tuning: [Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning](https://arxiv.org/abs/2303.02861)
+8. LoHa: [FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning](https://arxiv.org/abs/2108.06098)
 
 ## Getting started
 
@@ -270,9 +271,9 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 
 ### Text-to-Image Generation
 
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | ----  |
-| Stable Diffusion           | ✅  |   |   |   |   |  
+|   Model         | LoRA | LoHa | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ---- | ----  | ----  |
+| Stable Diffusion           | ✅  | ✅  |   |   |   |
 
 
 ### Image Classification
