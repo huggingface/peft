@@ -187,24 +187,27 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
 
         return weight
 
-    def merge(self):
-        if self.active_adapter not in self.hada_w1_a.keys():
-            return
+    def merge(self) -> None:
         if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data += self.get_delta_weight(self.active_adapter)
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.hada_w1_a.keys():
+                self.weight.data += self.get_delta_weight(active_adapter)
+                self.merged_adapters.append(active_adapter)
+                self.merged = True
 
-    def unmerge(self):
-        if self.active_adapter not in self.hada_w1_a.keys():
-            return
+    def unmerge(self) -> None:
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.r[self.active_adapter] > 0:
-            self.weight.data -= self.get_delta_weight(self.active_adapter)
-            self.merged = False
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.hada_w1_a.keys():
+                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.merged = False
 
     def _op(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
