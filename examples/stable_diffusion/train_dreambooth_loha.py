@@ -192,7 +192,7 @@ def parse_args(input_args=None):
     )
     parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
 
-    # lora args
+    # loha args
     parser.add_argument("--use_loha", action="store_true", help="Whether to use LoHa for parameter efficient tuning")
     parser.add_argument("--r", type=int, default=8, help="LoHa rank, only used if use_loha is True")
     parser.add_argument("--alpha", type=int, default=32, help="LoHa alpha, only used if use_loha is True")
@@ -761,7 +761,6 @@ def main(args):
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
-        # below fails when using lora so commenting it out
         if args.train_text_encoder and not args.use_loha:
             text_encoder.gradient_checkpointing_enable()
 

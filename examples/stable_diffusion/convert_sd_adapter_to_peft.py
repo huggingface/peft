@@ -1,5 +1,6 @@
 import argparse
 import os
+from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 
@@ -90,8 +91,8 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     target_modules = sorted(info.keys())
 
     # Determine most common rank and alpha
-    r = max(set(ranks.values()), key=list(ranks.values()).count)
-    lora_alpha = max(set(alphas.values()), key=list(alphas.values()).count)
+    r = Counter(ranks.values()).most_common(1)[0]
+    lora_alpha = Counter(alphas.values()).most_common(1)[0]
 
     # Determine which modules have different rank and alpha
     rank_pattern = dict(sorted(filter(lambda x: x[1] != r, ranks.items()), key=lambda x: x[0]))
@@ -129,8 +130,8 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo]) -> LoHaConfig:
     target_modules = sorted(info.keys())
 
     # Determine most common rank and alpha
-    r = max(set(ranks.values()), key=list(ranks.values()).count)
-    alpha = max(set(alphas.values()), key=list(alphas.values()).count)
+    r = Counter(ranks.values()).most_common(1)[0]
+    alpha = Counter(alphas.values()).most_common(1)[0]
 
     # Determine which modules have different rank and alpha
     rank_pattern = dict(sorted(filter(lambda x: x[1] != r, ranks.items()), key=lambda x: x[0]))
@@ -171,26 +172,14 @@ def detect_adapter_type(keys: List[str]) -> PeftType:
         elif any(x in key for x in ["lora_down", "lora_up"]):
             # LoRA
             return PeftType.LORA
-        elif any(x in key for x in ["hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b"]):
+        elif any(x in key for x in ["hada_w1", "hada_w2", "hada_t1", "hada_t2"]):
             # LoHa
             return PeftType.LOHA
-        elif any(
-            x in key
-            for x in [
-                "lokr_w1",
-                "lokr_w1_a",
-                "lokr_w1_b",
-                "lokr_w2",
-                "lokr_w2_a",
-                "lokr_w2_b",
-                "lokr_t1",
-                "lokr_t2",
-            ]
-        ):
+        elif any(x in key for x in ["lokr_w1", "lokr_w2", "lokr_t1", "lokr_t2"]):
             # LoKr
-            raise NotImplementedError("Currently LoKr adapters are not implemented")
+            raise ValueError("Currently LoKr adapters are not implemented")
         elif "diff" in key:
-            raise NotImplementedError("Currently full diff adapters are not implemented")
+            raise ValueError("Currently full diff adapters are not implemented")
         else:
             raise ValueError("Unkown adapter type, probably not implemented")
 
