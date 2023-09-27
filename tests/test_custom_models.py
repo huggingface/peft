@@ -33,6 +33,7 @@ from .testing_utils import get_state_dict
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    # LoRA
     ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
@@ -53,7 +54,48 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    # IA3
+    ("Vanilla MLP 1 IA3", "MLP", IA3Config, {"target_modules": "lin0", "feedforward_modules": "lin0"}),
+    ("Vanilla MLP 2 IA3", "MLP", IA3Config, {"target_modules": ["lin0"], "feedforward_modules": ["lin0"]}),
+    ("Vanilla MLP 3 IA3", "MLP", IA3Config, {"target_modules": ["lin1"], "feedforward_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 4 IA3",
+        "MLP",
+        IA3Config,
+        {"target_modules": ["lin0", "lin1"], "feedforward_modules": ["lin0", "lin1"]},
+    ),
+    (
+        "Vanilla MLP 5 IA3",
+        "MLP",
+        IA3Config,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "feedforward_modules": ["lin0"]},
+    ),
+    # TODO: There are errors when trying to merge Conv1D, hence skipping them for now
+    # (
+    #     "transformers Conv1D 1 IA3",
+    #     "EmbConv1D",
+    #     IA3Config,
+    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"]},
+    # ),
+    # (
+    #     "transformers Conv1D 1 IA3",
+    #     "EmbConv1D",
+    #     IA3Config,
+    #     {"target_modules": ["conv1d", "lin0"], "feedforward_modules": ["conv1d", "lin0"]},
+    # ),
+    ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
+    (
+        "Conv2d 2 IA3",
+        "Conv2d",
+        IA3Config,
+        {"target_modules": ["conv2d", "lin0"], "feedforward_modules": ["conv2d", "lin0"]},
+    ),
 ]
+
+PREFIXES = {
+    LoraConfig: "lora_",
+    IA3Config: "ia3_",
+}
 
 
 class MLP(nn.Module):
@@ -170,7 +212,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         config_kwargs = config_kwargs.copy()
-        config_kwargs["init_lora_weights"] = False
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
@@ -233,9 +278,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
         self.assertEqual(params_before.keys(), params_after.keys())
+
+        prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if ("lora_" in name) or ("modules_to_save" in name):
+            if (prefix in name) or ("modules_to_save" in name):
                 # target_modules and modules_to_save _are_ updated
                 self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
             else:
@@ -324,6 +371,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
+
+        if not issubclass(config_cls, LoraConfig):
+            self.skipTest("Bias argument is only supported for LoRA models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()

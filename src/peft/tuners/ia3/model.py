@@ -31,7 +31,7 @@ from peft.utils import (
     _is_valid_match,
 )
 
-from .layer import IA3Layer, Linear
+from .layer import Conv2d, IA3Layer, Linear
 
 
 if is_bnb_available():
@@ -125,9 +125,13 @@ class IA3Model(BaseTuner):
                 bias=bias,
                 **fourbit_kwargs,
             )
+        elif isinstance(target, torch.nn.Conv2d):
+            out_channels, in_channels = target.weight.size()[:2]
+            kernel_size = target.weight.size()[2:]
+            stride = target.stride
+            padding = target.padding
+            new_module = Conv2d(adapter_name, in_channels, out_channels, kernel_size, stride, padding, **kwargs)
         else:
-            #  Create a new Linear module with (IA)^3 parameters for torch.nn.Linear
-            # or Conv1D modules
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
                 if kwargs["fan_in_fan_out"]:
@@ -149,7 +153,7 @@ class IA3Model(BaseTuner):
             else:
                 raise ValueError(
                     f"Target module {target} is not supported. "
-                    f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
+                    f"Currently, only `torch.nn.Linear`, `torch.nn.Conv2d`, and `Conv1D` are supported."
                 )
             new_module = Linear(
                 adapter_name, in_features, out_features, is_feedforward=is_feedforward, bias=bias, **kwargs
@@ -196,7 +200,12 @@ class IA3Model(BaseTuner):
             "is_feedforward": is_feedforward,
         }
 
-        if isinstance(target, IA3Layer):
+        if isinstance(target, IA3Layer) and isinstance(target, torch.nn.Conv2d):
+            target.update_layer_conv2d(
+                adapter_name,
+                ia3_config.init_ia3_weights,
+            )
+        elif isinstance(target, IA3Layer):
             target.update_layer(
                 adapter_name,
                 ia3_config.init_ia3_weights,
@@ -276,9 +285,6 @@ class IA3Model(BaseTuner):
         This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
         """
-        if getattr(self.config, "model_type", None) == "gpt2":
-            raise ValueError("GPT2 models are not supported for merging ia3 layers")
-
         if getattr(self.model, "is_loaded_in_8bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 8-bit mode")
 
@@ -291,14 +297,29 @@ class IA3Model(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, IA3Layer):
-                bias = target.bias is not None
-                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
-                target.merge()
-                self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                continue
+
+            if not isinstance(target, IA3Layer):
+                continue
+
+            if isinstance(target, torch.nn.Conv2d):
+                new_module = torch.nn.Conv2d(
+                    target.in_channels,
+                    target.out_channels,
+                    kernel_size=target.kernel_size,
+                    stride=target.stride,
+                    padding=target.padding,
+                    dilation=target.dilation,
+                )
+            else:
+                bias = target.bias is not None
+                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+
+            target.merge()
+            self._replace_module(parent, target_name, new_module, target)
 
         return self.model
