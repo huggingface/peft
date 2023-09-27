@@ -173,10 +173,12 @@ def detect_adapter_type(keys: List[str]) -> PeftType:
             # LoRA
             return PeftType.LORA
         elif any(x in key for x in ["hada_w1", "hada_w2", "hada_t1", "hada_t2"]):
-            # LoHa
+            # LoHa may have the following keys:
+            # hada_w1_a, hada_w1_b, hada_w2_a, hada_w2_b, hada_t1, hada_t2
             return PeftType.LOHA
         elif any(x in key for x in ["lokr_w1", "lokr_w2", "lokr_t1", "lokr_t2"]):
-            # LoKr
+            # LoKr may have the following keys:
+            # lokr_w1, lokr_w2, lokr_w1_a, lokr_w1_b, lokr_w2_a, lokr_w2_b, lokr_t1, lokr_t2
             raise ValueError("Currently LoKr adapters are not implemented")
         elif "diff" in key:
             raise ValueError("Currently full diff adapters are not implemented")
