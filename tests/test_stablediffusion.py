@@ -20,7 +20,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import LoraConfig, LoHaConfig, get_peft_model
+from peft import LoHaConfig, LoraConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -59,7 +59,7 @@ CONFIG_TESTING_KWARGS = (
             "rank_dropout": 0.0,
             "module_dropout": 0.0,
         },
-    }
+    },
 )
 CLASSES_MAPPING = {
     "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
@@ -143,7 +143,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if "loha" not in x[0]]
+            filter_params_func=lambda tests: [x for x in tests if "loha" not in x[0]],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
