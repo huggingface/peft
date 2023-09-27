@@ -22,9 +22,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
-    COMMON_LAYERS_PATTERN,
     ModulesToSaveWrapper,
     _get_submodules,
 )
@@ -91,36 +90,7 @@ class LoHaModel(BaseTuner):
 
     @staticmethod
     def _check_target_module_exists(loha_config, key):
-        """
-        A helper private method to check if the passed module's key name matches any of the target modules in the
-        adatper_config.
-        """
-        if isinstance(loha_config.target_modules, str):
-            target_module_found = re.fullmatch(loha_config.target_modules, key)
-        else:
-            target_module_found = any(
-                re.match(f".*\.{target_key}$", key) for target_key in loha_config.target_modules
-            ) or any(target_key == key for target_key in loha_config.target_modules)
-            is_using_layer_indexes = getattr(loha_config, "layers_to_transform", None) is not None
-            layer_indexing_pattern = getattr(loha_config, "layers_pattern", None)
-
-            if is_using_layer_indexes and target_module_found:
-                layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
-
-                for pattern in layers_pattern:
-                    layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                    if layer_index is not None:
-                        layer_index = int(layer_index.group(1))
-                        if isinstance(loha_config.layers_to_transform, int):
-                            target_module_found = layer_index == loha_config.layers_to_transform
-                        else:
-                            target_module_found = layer_index in loha_config.layers_to_transform
-
-                        break
-                    else:
-                        target_module_found = False
-        return target_module_found
+        return check_target_module_exists(loha_config, key)
 
     def _create_and_replace(
         self,
