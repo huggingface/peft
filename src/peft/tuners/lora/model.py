@@ -167,7 +167,7 @@ class LoraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), target_name)
+        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
 
         r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
@@ -518,17 +518,26 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
-        new_target_modules = []
+        target_modules_type = type(self.peft_config[adapters[0]].target_modules)
+        new_target_modules = {} if target_modules_type == list else ""
         for adapter in adapters:
-            if not isinstance(self.peft_config[adapter].target_modules, list):
-                raise ValueError("regex target modules not supported with `add_weighted_adapter` method")
-            new_target_modules.extend(self.peft_config[adapter].target_modules)
+            if type(self.peft_config[adapter].target_modules) != target_modules_type:
+                raise ValueError(
+                    "all adapter configs should follow the same target modules type. "
+                    "Combining adapters with `target_modules` type being a mix of list and string is not supported."
+                )
+            if target_modules_type == list:
+                new_target_modules |= set(self.peft_config[adapter].target_modules)
+            else:
+                new_target_modules += f"({self.peft_config[adapter].target_modules})|"
+
+        new_target_modules = list(new_target_modules) if target_modules_type == list else new_target_modules[:-1]
 
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
             lora_alpha=new_rank,
-            target_modules=list(set(new_target_modules)),
+            target_modules=new_target_modules,
         )
         self.inject_adapter(self.model, adapter_name)
 
@@ -576,11 +585,12 @@ class LoraModel(BaseTuner):
                         loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
                         loras_B.append(current_adapter_lora_B.data)
 
-                    if len(loras_A) > 0:
-                        loras_A = torch.cat(loras_A, dim=0)
-                        loras_B = torch.cat(loras_B, dim=1)
-                        target_lora_A.data[: loras_A.shape[0], :] = loras_A
-                        target_lora_B.data[:, : loras_B.shape[1]] = loras_B
+                    if len(loras_A) == 0:
+                        raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+                    loras_A = torch.cat(loras_A, dim=0)
+                    loras_B = torch.cat(loras_B, dim=1)
+                    target_lora_A.data[: loras_A.shape[0], :] = loras_A
+                    target_lora_B.data[:, : loras_B.shape[1]] = loras_B
                 elif combination_type == "svd":
                     target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
                         adapters,
@@ -615,7 +625,7 @@ class LoraModel(BaseTuner):
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
-            return target_lora_A.data, target_lora_B.data
+            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
 
         delta_weight = valid_weights[0] * target.get_delta_weight(valid_adapters[0])
         for adapter, weight in zip(valid_adapters[1:], valid_weights[1:]):

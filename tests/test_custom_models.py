@@ -57,6 +57,67 @@ TEST_CASES = [
     ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
 ]
 
+MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
+    (
+        "LoRA Same",
+        "lora",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False},
+        {"target_modules": ["lin0"], "init_lora_weights": False},
+    ),
+    (
+        "LoRA Different",
+        "lora",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False},
+        {"target_modules": ["lin1"], "init_lora_weights": False},
+    ),
+    (
+        "IA3 Same",
+        "ia3",
+        IA3Config,
+        {
+            "target_modules": ["lin0"],
+            "feedforward_modules": ["lin0"],
+            "init_ia3_weights": False,
+        },
+        {
+            "target_modules": ["lin0"],
+            "feedforward_modules": ["lin0"],
+            "init_ia3_weights": False,
+        },
+    ),
+    (
+        "IA3 Different",
+        "ia3",
+        IA3Config,
+        {
+            "target_modules": ["lin0"],
+            "feedforward_modules": ["lin0"],
+            "init_ia3_weights": False,
+        },
+        {
+            "target_modules": ["lin1"],
+            "feedforward_modules": ["lin1"],
+            "init_ia3_weights": False,
+        },
+    ),
+    (
+        "AdaLora Same",
+        "adalora",
+        AdaLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+    ),
+    (
+        "AdaLora Different",
+        "adalora",
+        AdaLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
+    ),
+]
+
 TUNERS = ["lora", "ia3", "adalora"]
 TARGETS = ["same", "different"]
 TUNERS_AND_TARGETS = list(itertools.product(TUNERS, TARGETS))
@@ -84,6 +145,39 @@ class MLP(nn.Module):
         X = self.relu(X)
         X = self.drop(X)
         X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class Block(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(20, 10, bias=bias)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.lin1(X)
+        return X
+
+
+class DeepMLP(nn.Module):
+    def __init__(self, bias=True, num_hidden_layers=12):
+        super().__init__()
+        self.layers = nn.ModuleList([Block(bias=bias) for _ in range(num_hidden_layers)])
+        self.out = nn.Linear(10, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float(X)
+        for layer in self.layers:
+            X = layer(X)
+        X = self.out(X)
         X = self.sm(X)
         return X
 
@@ -410,6 +504,42 @@ class TestMultiRankAdapter(unittest.TestCase):
 
         self.assertTrue(rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}")
 
+    def test_multirank_2(self):
+        rank_pattern = {}
+        alpha_pattern = {}
+        r = 4
+        lora_alpha = 8
+
+        for i in range(10):
+            rank = 64 // (i + 1)
+            for j in range(2):
+                rank_pattern[f"layers.{i}.lin{j}"] = rank
+                alpha_pattern[f"layers.{i}.lin{j}"] = 2 * rank
+
+        config = LoraConfig(
+            r=r,
+            lora_alpha=lora_alpha,
+            init_lora_weights=False,
+            target_modules=["lin0", "lin1"],
+            rank_pattern=rank_pattern,
+            alpha_pattern=alpha_pattern,
+        )
+
+        # Add first adapter
+        model = get_peft_model(DeepMLP(), config, adapter_name="first")
+
+        # Add second adapter
+        model.add_adapter("second", config)
+
+        for adapter in ["first", "second"]:
+            for key, module in model.base_model.named_modules():
+                if isinstance(module, BaseTunerLayer):
+                    rank_expected = rank_pattern.get(key, r)
+                    rank_current = module.lora_A[adapter].weight.shape[0]
+                    self.assertTrue(
+                        rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
+
 
 class TestRepr(unittest.TestCase):
     """Tests related to the repr of adapted models"""
@@ -465,58 +595,25 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     would be overkill.
     """
 
-    def setUp(self):
-        super().setUp()
-        self.configs = {
-            "lora": {"class": LoraConfig, "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False}},
-            "ia3": {
-                "class": IA3Config,
-                "kwargs": {
-                    "target_modules": ["lin0"],
-                    "feedforward_modules": ["lin0"],
-                    "init_ia3_weights": False,
-                },
-            },
-            "adalora": {
-                "class": AdaLoraConfig,
-                "kwargs": {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
-            },
-        }
-
     def prepare_inputs_for_testing(self):
         X = torch.arange(90).view(9, 10)
         return {"X": X}
-
-    def get_adapter_config(self, tuner_method, targets):
-        if targets == "same":
-            return self.configs[tuner_method]
-        config = copy.deepcopy(self.configs[tuner_method])
-        kwargs = config["kwargs"]
-        for key, value in kwargs.items():
-            new_targets = []
-            if not isinstance(value, list):
-                continue
-            for target in value:
-                new_targets.append("lin1" if target == "lin0" else "lin0")
-            kwargs[key] = new_targets
-        return config
 
     def set_multiple_active_adapters(self, model, adapter_names):
         for module in model.modules():
             if isinstance(module, BaseTunerLayer):
                 module.set_adapter(adapter_names)
 
-    @parameterized.expand(TUNERS_AND_TARGETS, name_func=_parameterized_custom_name_func)
-    def test_multiple_active_adapters_forward(self, tuner_method, targets):
+    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    def test_multiple_active_adapters_forward(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
 
-        config_1 = self.get_adapter_config(tuner_method, "same")
-        config_2 = self.get_adapter_config(tuner_method, targets)
-        config_cls = config_1["class"]
-        config_1 = config_cls(**config_1["kwargs"])
-        config_2 = config_cls(**config_2["kwargs"])
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
@@ -547,18 +644,17 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             new_combined_output = peft_model(**X)
             self.assertTrue(torch.allclose(new_combined_output, combined_output, atol=1e-5))
 
-    @parameterized.expand(TUNERS_AND_TARGETS, name_func=_parameterized_custom_name_func)
-    def test_multiple_active_adapters_merge_and_unmerge(self, tuner_method, targets):
+    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    def test_multiple_active_adapters_merge_and_unmerge(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
         base_output = model(**X)
 
-        config_1 = self.get_adapter_config(tuner_method, "same")
-        config_2 = self.get_adapter_config(tuner_method, targets)
-        config_cls = config_1["class"]
-        config_1 = config_cls(**config_1["kwargs"])
-        config_2 = config_cls(**config_2["kwargs"])
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
 
         peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
         peft_model.add_adapter("adapter_2", config_2)
