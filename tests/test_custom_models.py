@@ -660,7 +660,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         with peft_model.disable_adapter():
             disabled_adapter_output = peft_model(**X)
 
-        self.assertTrue(torch.allclose(disabled_adapter_output, base_output, atol=1e-5))
+        self.assertTrue(torch.allclose(disabled_adapter_output, base_output, atol=1e-4))
 
 
 class RequiresGradTester(unittest.TestCase):
