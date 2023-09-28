@@ -130,7 +130,16 @@ class IA3Model(BaseTuner):
             kernel_size = target.weight.size()[2:]
             stride = target.stride
             padding = target.padding
-            new_module = Conv2d(adapter_name, in_channels, out_channels, kernel_size, stride, padding, **kwargs)
+            new_module = Conv2d(
+                adapter_name=adapter_name,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                is_feedforward=is_feedforward,
+                **kwargs,
+            )
         else:
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
