@@ -532,7 +532,7 @@ class TestMultiRankAdapter(unittest.TestCase):
         model.add_adapter("second", config)
 
         for adapter in ["first", "second"]:
-            for key, module in model.base_model.named_modules():
+            for key, module in model.base_model.model.named_modules():
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
