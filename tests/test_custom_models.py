@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import os
 import tempfile
 import unittest
 
@@ -364,6 +365,41 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    def test_existing_model_card(self):
+        # ensure that if there is already a model card, it is not overwritten
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            # create a model card
+            text = "---\nmeta: hello\n---\nThis is a model card\n"
+            with open(os.path.join(tmp_dirname, "README.md"), "w") as f:
+                f.write(text)
+
+            model.save_pretrained(tmp_dirname)
+            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+                model_card = f.read()
+
+        self.assertIn("library_name: peft", model_card)
+        self.assertIn("meta: hello", model_card)
+        self.assertIn("This is a model card", model_card)
+
+    def test_non_existing_model_card(self):
+        # ensure that if there is already a model card, it is not overwritten
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+                model_card = f.read()
+
+        self.assertIn("library_name: peft", model_card)
+        # rough check that the model card is pre-filled
+        self.assertGreater(len(model_card), 1000)
 
 
 class TestMultiRankAdapter(unittest.TestCase):

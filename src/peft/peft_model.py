@@ -28,7 +28,7 @@ import yaml
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
-from huggingface_hub import hf_hub_download, ModelCard, ModelCardData
+from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
@@ -656,7 +656,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
 
         filename = os.path.join(output_dir, "README.md")
+        card_exists = True
         if not os.path.exists(filename):
+            card_exists = False
             # touch an empty model card
             with open(filename, "a"):
                 pass
@@ -664,6 +666,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         with open(filename, "r") as f:
             readme = f.read()
 
+        # add metadata
         match = re.search(r"---\n(.*?)\n---", readme, re.DOTALL)
         metainfo = {} if match is None else yaml.safe_load(match.group(1))
         metainfo["library_name"] = "peft"
@@ -675,8 +678,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         card_data = ModelCardData(**metainfo)
 
+        # add extra data to model card body
         card = ModelCard.from_template(card_data)
-        lines = card.text.splitlines()
+
+        # check if there is already a text body on the README.md, if not, use default template
+        if card_exists:
+            text = readme.split("\n---\n", 1)[-1]
+        else:
+            text = card.text
+        lines = text.splitlines()
 
         quantization_config = None
         if hasattr(self.config, "quantization_config"):
