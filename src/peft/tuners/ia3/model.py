@@ -27,9 +27,9 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
+    _freeze_adapter,
     _get_submodules,
     _is_valid_match,
-    _freeze_adapter,
 )
 
 from .layer import Conv2d, IA3Layer, Linear
@@ -364,7 +364,6 @@ class IA3Model(BaseTuner):
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
                     )
                     target.set_adapter(resetting_active_adapter)
-
 
     def add_weighted_adapter(self, adapters, weights, adapter_name):
         """
