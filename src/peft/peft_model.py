@@ -17,14 +17,12 @@ from __future__ import annotations
 
 import inspect
 import os
-import re
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union
 
 import torch
-import yaml
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
@@ -656,12 +654,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
 
         filename = os.path.join(output_dir, "README.md")
-        
-        card = (
-            ModelCard.load(filename)
-            if os.path.exists(filename)
-            else ModelCard.from_template(ModelCardData())
-        )
+
+        card = ModelCard.load(filename) if os.path.exists(filename) else ModelCard.from_template(ModelCardData())
 
         card.data["library_name"] = "peft"
         model_config = self.config
