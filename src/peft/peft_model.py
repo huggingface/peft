@@ -656,37 +656,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
 
         filename = os.path.join(output_dir, "README.md")
-        card_exists = True
-        if not os.path.exists(filename):
-            card_exists = False
-            # touch an empty model card
-            with open(filename, "a"):
-                pass
+        
+        card = (
+            ModelCard.load(filename)
+            if os.path.exists(filename)
+            else ModelCard.from_template(ModelCardData())
+        )
 
-        with open(filename, "r") as f:
-            readme = f.read()
-
-        # add metadata
-        match = re.search(r"---\n(.*?)\n---", readme, re.DOTALL)
-        metainfo = {} if match is None else yaml.safe_load(match.group(1))
-        metainfo["library_name"] = "peft"
+        card.data["library_name"] = "peft"
         model_config = self.config
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
         if model_config["model_type"] != "custom":
-            metainfo["base_model"] = model_config["_name_or_path"]
+            card.data["base_model"] = model_config["_name_or_path"]
 
-        card_data = ModelCardData(**metainfo)
-
-        # add extra data to model card body
-        card = ModelCard.from_template(card_data)
-
-        # check if there is already a text body on the README.md, if not, use default template
-        if card_exists:
-            text = readme.split("\n---\n", 1)[-1]
-        else:
-            text = card.text
-        lines = text.splitlines()
+        lines = card.text.splitlines()
 
         quantization_config = None
         if hasattr(self.config, "quantization_config"):
