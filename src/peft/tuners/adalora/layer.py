@@ -109,7 +109,6 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             if active_adapter in self.lora_embedding_A.keys():
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -119,7 +118,6 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_embedding_A.keys():
                 self.weight.data -= self.get_delta_weight(active_adapter)
-                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return (
