@@ -178,6 +178,7 @@ class ModelEmbConv1D(nn.Module):
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
         X = self.emb(X)
@@ -185,6 +186,7 @@ class ModelEmbConv1D(nn.Module):
         X = self.relu(X)
         X = self.flat(X)
         X = self.lin0(X)
+        X = self.sm(X)
         return X
 
 
@@ -195,6 +197,7 @@ class ModelConv2D(nn.Module):
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
         X = X.float().reshape(2, 5, 3, 3)
@@ -202,6 +205,7 @@ class ModelConv2D(nn.Module):
         X = self.relu(X)
         X = self.flat(X)
         X = self.lin0(X)
+        X = self.sm(X)
         return X
 
 
@@ -388,14 +392,17 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_before = model(**X)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        # EmbConv1D is slow to learn for some reason
+        lr = 0.01 if model_id != "EmbConv1D" else 0.1
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
         for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
-            loss = y_pred.sum()
+            y = torch.arange(len(y_pred)).to(self.torch_device) % 2
+            loss = nn.functional.nll_loss(y_pred, y)
             loss.backward()
             optimizer.step()
 
@@ -426,19 +433,22 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_before = model(**X)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        # EmbConv1D is slow to learn for some reason
+        lr = 0.01 if model_id != "EmbConv1D" else 0.1
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
         for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
-            loss = y_pred.sum()
+            y = torch.arange(len(y_pred)).to(self.torch_device) % 2
+            loss = nn.functional.nll_loss(y_pred, y)
             loss.backward()
             optimizer.step()
 
-        model.merge_adapter()
         model.eval()
+        model.merge_adapter()
         outputs_after = model(**X)
 
         with model.disable_adapter():
@@ -447,9 +457,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        self.assertFalse(torch.allclose(outputs_before, outputs_after))
-        self.assertTrue(torch.allclose(outputs_before, outputs_disabled))
-        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
+        atol, rtol = 1e-5, 1e-5  # merging introduces some numerical instability
+        self.assertFalse(torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol))
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
