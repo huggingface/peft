@@ -15,7 +15,7 @@
 
 import re
 import warnings
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from enum import Enum
 
 import torch
@@ -28,6 +28,8 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _get_submodules,
+    _is_valid_match,
+    _freeze_adapter,
 )
 
 from .layer import Conv2d, IA3Layer, Linear
@@ -336,3 +338,92 @@ class IA3Model(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
         return self.model
+
+    def delete_adapter(self, adapter_name: str):
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (str): Name of the adapter to be deleted.
+        """
+        if adapter_name not in list(self.peft_config.keys()):
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, IA3Layer):
+                for attr in [
+                    "ia3_l",
+                    "scaling",
+                ]:
+                    if adapter_name in getattr(target, attr):
+                        getattr(target, attr).pop(adapter_name)
+                if adapter_name in target.active_adapters:
+                    resetting_active_adapter = (
+                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
+                    )
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
+                    )
+                    target.set_adapter(resetting_active_adapter)
+
+
+    def add_weighted_adapter(self, adapters, weights, adapter_name):
+        """
+        This method adds a new adapter by merging the given adapters with the given weights.
+
+        Args:
+            adapters (`list`):
+                List of adapter names to be merged.
+            weights (`list`):
+                List of weights for each adapter.
+            adapter_name (`str`):
+                Name of the new adapter.
+        """
+        if adapter_name in list(self.peft_config.keys()):
+            return
+        for adapter in adapters:
+            if adapter not in list(self.peft_config.keys()):
+                raise ValueError(f"Adapter {adapter} does not exist")
+
+        target_modules_type = type(self.peft_config[adapters[0]].target_modules)
+        new_target_modules = set() if target_modules_type == list else ""
+        for adapter in adapters:
+            if type(self.peft_config[adapter].target_modules) != target_modules_type:
+                raise ValueError(
+                    "all adapter configs should follow the same target modules type. "
+                    "Combining adapters with `target_modules` type being a mix of list and string is not supported."
+                )
+            if target_modules_type == list:
+                new_target_modules |= set(self.peft_config[adapter].target_modules)
+            else:
+                new_target_modules += f"({self.peft_config[adapter].target_modules})|"
+
+        new_target_modules = list(new_target_modules) if target_modules_type == list else new_target_modules[:-1]
+        self.peft_config[adapter_name] = replace(
+            self.peft_config[adapters[0]],
+            target_modules=new_target_modules,
+        )
+        self.inject_adapter(self.model, adapter_name)
+
+        # Do we really need that?
+        _freeze_adapter(self.model, adapter_name)
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, IA3Layer):
+                if adapter_name in target.ia3_l:
+                    target_ia3_l = target.ia3_l[adapter_name]
+                else:
+                    continue
+
+                target_ia3_l.data = target_ia3_l.data * 0.0
+                for adapter, weight in zip(adapters, weights):
+                    if adapter in target.ia3_l:
+                        current_adapter_ia3_l = target.ia3_l[adapter]
+                    else:
+                        continue
+                    target_ia3_l.data += current_adapter_ia3_l.data * weight * target.scaling[adapter]
