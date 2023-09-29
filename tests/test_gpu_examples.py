@@ -111,6 +111,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
     def setUp(self):
         self.seq2seq_model_id = "google/flan-t5-base"
         self.causal_lm_model_id = "facebook/opt-6.7b"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
         self.audio_model_id = "openai/whisper-large"
 
     def tearDown(self):
