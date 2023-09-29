@@ -214,6 +214,7 @@ if is_bnb_4bit_available():
                 lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
                 self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                self.merged_adapters.append(active_adapter)
                 self.merged = True
 
         def unmerge(self):

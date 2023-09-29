@@ -413,6 +413,45 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
 
     @parameterized.expand(TEST_CASES)
+    def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
+        # same as test_disable_adapters, but with merging
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+        outputs_before = model(**X)
+
+        model.train()
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+
+        # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
+        # breaking of some LoRA layers that are initialized with constants)
+        for _ in range(3):
+            optimizer.zero_grad()
+            y_pred = model(**X)
+            loss = y_pred.sum()
+            loss.backward()
+            optimizer.step()
+
+        model.merge_adapter()
+        model.eval()
+        outputs_after = model(**X)
+
+        with model.disable_adapter():
+            outputs_disabled = model(**X)
+
+        # check that after leaving the disable_adapter context, everything is enabled again
+        outputs_enabled_after_disable = model(**X)
+
+        self.assertFalse(torch.allclose(outputs_before, outputs_after))
+        self.assertTrue(torch.allclose(outputs_before, outputs_disabled))
+        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
+
+    @parameterized.expand(TEST_CASES)
     def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
         # When training biases in lora, disabling adapters does not reset the biases, so the output is not what users
         # might expect. Therefore, a warning should be given.
