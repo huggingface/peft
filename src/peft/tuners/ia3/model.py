@@ -354,12 +354,8 @@ class IA3Model(BaseTuner):
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, IA3Layer):
-                for attr in [
-                    "ia3_l",
-                    "scaling",
-                ]:
-                    if adapter_name in getattr(target, attr):
-                        getattr(target, attr).pop(adapter_name)
+                if adapter_name in target.ia3_l:
+                    target.ia3_l.pop(adapter_name)
                 if adapter_name in target.active_adapters:
                     resetting_active_adapter = (
                         list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
