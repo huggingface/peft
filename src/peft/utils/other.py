@@ -451,6 +451,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "falcon": ["query_key_value"],
     "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
+    "mistral": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {

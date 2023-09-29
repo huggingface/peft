@@ -209,16 +209,21 @@ class IA3Model(BaseTuner):
             "is_feedforward": is_feedforward,
         }
 
-        if isinstance(target, IA3Layer) and isinstance(target, torch.nn.Conv2d):
-            target.update_layer_conv2d(
-                adapter_name,
-                ia3_config.init_ia3_weights,
-            )
-        elif isinstance(target, IA3Layer):
-            target.update_layer(
-                adapter_name,
-                ia3_config.init_ia3_weights,
-            )
+        if isinstance(target, IA3Layer):
+            if target.is_feedforward != is_feedforward:
+                raise ValueError(
+                    "New adapter should have the same value for `is_feedforward` as previously added adapter."
+                )
+            if isinstance(target, torch.nn.Conv2d):
+                target.update_layer_conv2d(
+                    adapter_name,
+                    ia3_config.init_ia3_weights,
+                )
+            else:  # Linear
+                target.update_layer(
+                    adapter_name,
+                    ia3_config.init_ia3_weights,
+                )
         else:
             new_module = self._create_new_module(ia3_config, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:

@@ -37,6 +37,8 @@ from peft import (
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
 
+from .testing_utils import get_state_dict
+
 
 CONFIG_CLASSES = (
     IA3Config,
@@ -238,6 +240,14 @@ class PeftCommonTester:
         self.assertTrue(dummy_output.requires_grad)
 
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs):
+        # ensure that the weights are randomly initialized
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_lora_weights"] = False
+        if issubclass(config_cls, IA3Config):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_ia3_weights"] = False
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -253,11 +263,15 @@ class PeftCommonTester:
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
             # check if the state dicts are equal
-            state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
-            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
-
-            # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            if issubclass(config_cls, PromptEncoderConfig):
+                # For prompt encoding, when loading the whole state_dict, there are differences, therefore, only load
+                # adapter-specific weights for comparison.
+                # TODO: is this expected?
+                state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
+                state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
+            else:
+                state_dict = get_state_dict(model, unwrap_compiled=True)
+                state_dict_from_pretrained = get_state_dict(model_from_pretrained, unwrap_compiled=True)
 
             # check if tensors equal
             for key in state_dict.keys():
@@ -284,6 +298,14 @@ class PeftCommonTester:
             # AdaLora does not support adding more than 1 adapter
             return
 
+        # ensure that the weights are randomly initialized
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_lora_weights"] = False
+        if issubclass(config_cls, IA3Config):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_ia3_weights"] = False
+
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -305,11 +327,19 @@ class PeftCommonTester:
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
-            model_from_pretrained.load_adapter(tmp_dirname, "new_adapter")
+            new_adapter_dir = os.path.join(tmp_dirname, "new_adapter")
+            model_from_pretrained.load_adapter(new_adapter_dir, "new_adapter")
 
             # check if the state dicts are equal
-            state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
-            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
+            if issubclass(config_cls, PromptEncoderConfig):
+                # For prompt encoding, when loading the whole state_dict, there are differences, therefore, only load
+                # adapter-specific weights for comparison.
+                # TODO: is this expected?
+                state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
+                state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
+            else:
+                state_dict = get_state_dict(model, unwrap_compiled=True)
+                state_dict_from_pretrained = get_state_dict(model_from_pretrained, unwrap_compiled=True)
 
             # check if same keys
             self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
@@ -324,15 +354,19 @@ class PeftCommonTester:
 
             # check if `adapter_model.bin` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_model.bin")))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_config.json")))
 
             # check if `pytorch_model.bin` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "pytorch_model.bin")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "config.json")))
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname, selected_adapters=["default"])

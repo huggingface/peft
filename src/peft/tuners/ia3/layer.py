@@ -131,7 +131,7 @@ class Linear(nn.Linear, IA3Layer):
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        previous_dtype = x.dtype
+        dtype = previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
