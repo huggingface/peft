@@ -34,7 +34,6 @@ class IA3Layer(BaseTunerLayer):
         out_features: int,
         is_feedforward: bool,
     ):
-        self.scaling = {}
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False

@@ -426,4 +426,4 @@ class IA3Model(BaseTuner):
                         current_adapter_ia3_l = target.ia3_l[adapter]
                     else:
                         continue
-                    target_ia3_l.data += current_adapter_ia3_l.data * weight * target.scaling[adapter]
+                    target_ia3_l.data += current_adapter_ia3_l.data * weight
