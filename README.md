@@ -134,6 +134,8 @@ Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 **NEW** ✨ Multi Adapter support and combining multiple LoRA adapters in a weighted combination 
 ![peft lora dreambooth weighted adapter](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/weighted_adapter_dreambooth_lora.png)
 
+**NEW** ✨ Dreambooth training for Stable Diffusion using LoHa adapter [`examples/stable_diffusion/train_dreambooth_loha.py`](examples/stable_diffusion/train_dreambooth_loha.py)
+
 ### Parameter Efficient Tuning of LLMs for RLHF components such as Ranker and Policy
 - Here is an example in [trl](https://github.com/lvwerra/trl) library using PEFT+INT8 for tuning policy model: [gpt2-sentiment_peft.py](https://github.com/lvwerra/trl/blob/main/examples/sentiment/scripts/gpt2-sentiment_peft.py) and corresponding [Blog](https://huggingface.co/blog/trl-peft)
 - Example using PEFT for Instrction finetuning, reward model and policy : [stack_llama](https://github.com/lvwerra/trl/tree/main/examples/stack_llama/scripts) and corresponding [Blog](https://huggingface.co/blog/stackllama) 
