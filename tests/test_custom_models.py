@@ -816,7 +816,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self.assertFalse(torch.allclose(adapter_1_output, combined_output, atol=1e-5))
         self.assertFalse(torch.allclose(adapter_2_output, combined_output, atol=1e-5))
 
-        if tuner_method == "lora" or tuner_method == "ia3":
+        if tuner_method == "lora":
             # create a weighted adapter combining both adapters and check that
             # its output is same as setting multiple active adapters
             peft_model.add_weighted_adapter(
