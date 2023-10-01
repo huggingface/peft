@@ -182,3 +182,10 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
             PromptEncoder(config)
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
+
+    def test_ia3_is_feedforward_subset(self):
+        # This test checks that the IA3 config raises a value error if the feedforward_modules argument
+        # is not a subset of the target_modules argument
+        incorrect_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
+        with self.assertRaises(ValueError):
+            IA3Config(**incorrect_config)

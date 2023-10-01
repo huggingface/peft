@@ -40,9 +40,7 @@ if is_bnb_available():
     from .bnb import Linear8bitLt
 
 if is_bnb_4bit_available():
-    import bitsandbytes as bnb
-
-    from .bnb import Linear4bit, Linear8bitLt
+    from .bnb import Linear4bit
 
 
 class IA3Model(BaseTuner):
