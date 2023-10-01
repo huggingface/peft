@@ -165,7 +165,6 @@ class Linear(nn.Linear, IA3Layer):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         dtype = previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()

@@ -350,7 +350,7 @@ class IA3Model(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if "ia3" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, IA3Layer):
@@ -385,6 +385,8 @@ class IA3Model(BaseTuner):
 
         target_modules_type = type(self.peft_config[adapters[0]].target_modules)
         new_target_modules = set() if target_modules_type == list else ""
+        feedforward_modules_type = type(self.peft_config[adapters[0]].feedforward_modules)
+        new_feedforward_modules = set() if feedforward_modules_type == list else ""
         for adapter in adapters:
             if type(self.peft_config[adapter].target_modules) != target_modules_type:
                 raise ValueError(
@@ -396,17 +398,32 @@ class IA3Model(BaseTuner):
             else:
                 new_target_modules += f"({self.peft_config[adapter].target_modules})|"
 
+            if type(self.peft_config[adapter].feedforward_modules) != feedforward_modules_type:
+                raise ValueError(
+                    "all adapter configs should follow the same feedforward modules type. "
+                    "Combining adapters with `feedforward_modules` type being a mix of list and string is not supported."
+                )
+            if feedforward_modules_type == list:
+                new_feedforward_modules |= set(self.peft_config[adapter].feedforward_modules)
+            else:
+                new_feedforward_modules += f"({self.peft_config[adapter].feedforward_modules})|"
+
         new_target_modules = list(new_target_modules) if target_modules_type == list else new_target_modules[:-1]
+        new_feedforward_modules = (
+            list(new_feedforward_modules) if target_modules_type == list else new_feedforward_modules[:-1]
+        )
+
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             target_modules=new_target_modules,
+            feedforward_modules=new_feedforward_modules,
         )
         self.inject_adapter(self.model, adapter_name)
 
         # Do we really need that?
         _freeze_adapter(self.model, adapter_name)
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if "ia3" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, IA3Layer):

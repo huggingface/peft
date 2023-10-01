@@ -37,6 +37,7 @@ from peft import (
     get_peft_model_state_dict,
     prepare_model_for_int8_training,
 )
+from peft.tuners.ia3 import IA3Layer
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
 
@@ -810,7 +811,7 @@ class PeftCommonTester:
         model.set_adapter(adapter_to_delete)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA"):
+        if config.peft_type not in ("LORA", "IA3"):
             with self.assertRaises(AttributeError):
                 model.delete_adapter(adapter_to_delete)
         else:
@@ -831,6 +832,8 @@ class PeftCommonTester:
                         "lora_dropout",
                     ]:
                         self.assertFalse(adapter_to_delete in getattr(target, attr))
+                if isinstance(target, IA3Layer):
+                    self.assertFalse(adapter_to_delete in getattr(target, "ia3_l"))
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -870,70 +873,101 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        if not isinstance(config, (LoraConfig)):
+        if not isinstance(config, (LoraConfig)) or not isinstance(config, (IA3Config)):
             return
         model = get_peft_model(model, config, adapter_list[0])
         model.add_adapter(adapter_list[1], config)
         model.add_adapter(adapter_list[2], replace(config, r=20))
         model = model.to(self.torch_device)
 
-        # test re-weighting single adapter
-        model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
+        if isinstance(config, (LoraConfig)):
+            # test re-weighting single adapter
+            model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
 
-        # test svd re-weighting with multiple adapters
-        model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
+            # test svd re-weighting with multiple adapters
+            model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
 
-        # test cat re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
-        )
-
-        # test linear re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
-        )
-
-        with self.assertRaises(ValueError):
+            # test cat re-weighting with multiple adapters
             model.add_weighted_adapter(
-                adapter_list[1:],
-                weight_list[1:],
-                "multi_adapter_linear_reweighting_uneven_r",
-                combination_type="linear",
+                adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
             )
 
-        new_adapters = [
-            "single_adapter_reweighting",
-            "multi_adapter_svd_reweighting",
-            "multi_adapter_cat_reweighting",
-            "multi_adapter_linear_reweighting",
-        ]
-        for new_adapter in new_adapters:
-            self.assertTrue(new_adapter in model.peft_config)
+            # test linear re-weighting with multiple adapters
+            model.add_weighted_adapter(
+                adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
+            )
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
-        for key in key_list:
-            _, target, _ = _get_submodules(model, key)
-            if isinstance(target, LoraLayer):
-                for adapter_name in new_adapters:
-                    if "single" in adapter_name:
+            with self.assertRaises(ValueError):
+                model.add_weighted_adapter(
+                    adapter_list[1:],
+                    weight_list[1:],
+                    "multi_adapter_linear_reweighting_uneven_r",
+                    combination_type="linear",
+                )
+
+            new_adapters = [
+                "single_adapter_reweighting",
+                "multi_adapter_svd_reweighting",
+                "multi_adapter_cat_reweighting",
+                "multi_adapter_linear_reweighting",
+            ]
+            for new_adapter in new_adapters:
+                self.assertTrue(new_adapter in model.peft_config)
+
+            key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+            for key in key_list:
+                _, target, _ = _get_submodules(model, key)
+                if isinstance(target, LoraLayer):
+                    for adapter_name in new_adapters:
+                        if "single" in adapter_name:
+                            new_delta_weight = target.get_delta_weight(adapter_name)
+                            weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
+                            self.assertTrue(
+                                torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
+                            )
+                        elif "svd" in adapter_name:
+                            self.assertTrue(target.r[adapter_name] == 20)
+                        elif "linear" in adapter_name:
+                            self.assertTrue(target.r[adapter_name] == 8)
+                        elif "cat" in adapter_name:
+                            self.assertTrue(target.r[adapter_name] == 28)
+
+            for adapter_name in new_adapters:
+                # ensuring new adapters pass the forward loop
+                model.set_adapter(adapter_name)
+                dummy_input = self.prepare_inputs_for_testing()
+                model.eval()
+                _ = model(**dummy_input)[0]
+
+        elif isinstance(config, (IA3Config)):
+            # single adapter re-weighting and multi adapter linear re-weighting
+            # Note: IA3 only supports linear re-weighting
+            model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
+            model.add_weighted_adapter(adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting")
+
+            new_adapters = [
+                "single_adapter_reweighting",
+                "multi_adapter_linear_reweighting",
+            ]
+            for new_adapter in new_adapters:
+                self.assertTrue(new_adapter in model.peft_config)
+
+            key_list = [key for key, _ in model.named_modules() if "ia3" not in key]
+            for key in key_list:
+                _, target, _ = _get_submodules(model, key)
+                if isinstance(target, IA3Layer):
+                    for adapter_name in new_adapters:
                         new_delta_weight = target.get_delta_weight(adapter_name)
                         weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
                         self.assertTrue(
                             torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
                         )
-                    elif "svd" in adapter_name:
-                        self.assertTrue(target.r[adapter_name] == 20)
-                    elif "linear" in adapter_name:
-                        self.assertTrue(target.r[adapter_name] == 8)
-                    elif "cat" in adapter_name:
-                        self.assertTrue(target.r[adapter_name] == 28)
-
-        for adapter_name in new_adapters:
-            # ensuring new adapters pass the forward loop
-            model.set_adapter(adapter_name)
-            dummy_input = self.prepare_inputs_for_testing()
-            model.eval()
-            _ = model(**dummy_input)[0]
+            for adapter_name in new_adapters:
+                # ensuring new adapters pass the forward loop
+                model.set_adapter(adapter_name)
+                dummy_input = self.prepare_inputs_for_testing()
+                model.eval()
+                _ = model(**dummy_input)[0]
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")
