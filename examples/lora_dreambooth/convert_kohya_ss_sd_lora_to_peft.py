@@ -1,5 +1,6 @@
 import argparse
 import os
+from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -53,8 +54,8 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     target_modules = list(info.keys())
 
     # Determine most common rank and alpha
-    r = max(set(ranks.values()), key=list(ranks.values()).count)
-    lora_alpha = max(set(alphas.values()), key=list(alphas.values()).count)
+    r = Counter(ranks.values()).most_common(1)[0]
+    lora_alpha = Counter(alphas.values()).most_common(1)[0]
 
     # Determine which modules have different rank and alpha
     rank_pattern = dict(filter(lambda x: x[1] != r, ranks.items()))
