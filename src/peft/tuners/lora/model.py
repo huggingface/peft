@@ -24,9 +24,8 @@ from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
-    COMMON_LAYERS_PATTERN,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _freeze_adapter,
@@ -126,32 +125,7 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
-        if isinstance(lora_config.target_modules, str):
-            target_module_found = re.fullmatch(lora_config.target_modules, key)
-        else:
-            target_module_found = any(
-                re.match(f".*\.{target_key}$", key) for target_key in lora_config.target_modules
-            ) or any(target_key == key for target_key in lora_config.target_modules)
-            is_using_layer_indexes = getattr(lora_config, "layers_to_transform", None) is not None
-            layer_indexing_pattern = getattr(lora_config, "layers_pattern", None)
-
-            if is_using_layer_indexes and target_module_found:
-                layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
-
-                for pattern in layers_pattern:
-                    layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                    if layer_index is not None:
-                        layer_index = int(layer_index.group(1))
-                        if isinstance(lora_config.layers_to_transform, int):
-                            target_module_found = layer_index == lora_config.layers_to_transform
-                        else:
-                            target_module_found = layer_index in lora_config.layers_to_transform
-
-                        break
-                    else:
-                        target_module_found = False
-        return target_module_found
+        return check_target_module_exists(lora_config, key)
 
     def _create_and_replace(
         self,
