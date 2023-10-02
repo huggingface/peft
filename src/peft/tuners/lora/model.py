@@ -24,9 +24,8 @@ from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
-    COMMON_LAYERS_PATTERN,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _freeze_adapter,
@@ -126,32 +125,7 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
-        if isinstance(lora_config.target_modules, str):
-            target_module_found = re.fullmatch(lora_config.target_modules, key)
-        else:
-            target_module_found = any(
-                re.match(f".*\.{target_key}$", key) for target_key in lora_config.target_modules
-            ) or any(target_key == key for target_key in lora_config.target_modules)
-            is_using_layer_indexes = getattr(lora_config, "layers_to_transform", None) is not None
-            layer_indexing_pattern = getattr(lora_config, "layers_pattern", None)
-
-            if is_using_layer_indexes and target_module_found:
-                layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
-
-                for pattern in layers_pattern:
-                    layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                    if layer_index is not None:
-                        layer_index = int(layer_index.group(1))
-                        if isinstance(lora_config.layers_to_transform, int):
-                            target_module_found = layer_index == lora_config.layers_to_transform
-                        else:
-                            target_module_found = layer_index in lora_config.layers_to_transform
-
-                        break
-                    else:
-                        target_module_found = False
-        return target_module_found
+        return check_target_module_exists(lora_config, key)
 
     def _create_and_replace(
         self,
@@ -167,7 +141,7 @@ class LoraModel(BaseTuner):
             raise ValueError("Current Key shouldn't be `None`")
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), target_name)
+        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
 
         r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
@@ -518,7 +492,27 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
-        self.peft_config[adapter_name] = replace(self.peft_config[adapters[0]], r=new_rank, lora_alpha=new_rank)
+        target_modules_type = type(self.peft_config[adapters[0]].target_modules)
+        new_target_modules = set() if target_modules_type == list else ""
+        for adapter in adapters:
+            if type(self.peft_config[adapter].target_modules) != target_modules_type:
+                raise ValueError(
+                    "all adapter configs should follow the same target modules type. "
+                    "Combining adapters with `target_modules` type being a mix of list and string is not supported."
+                )
+            if target_modules_type == list:
+                new_target_modules |= set(self.peft_config[adapter].target_modules)
+            else:
+                new_target_modules += f"({self.peft_config[adapter].target_modules})|"
+
+        new_target_modules = list(new_target_modules) if target_modules_type == list else new_target_modules[:-1]
+
+        self.peft_config[adapter_name] = replace(
+            self.peft_config[adapters[0]],
+            r=new_rank,
+            lora_alpha=new_rank,
+            target_modules=new_target_modules,
+        )
         self.inject_adapter(self.model, adapter_name)
 
         # Do we really need that?
@@ -534,6 +528,8 @@ class LoraModel(BaseTuner):
                 elif adapter_name in target.lora_embedding_A:
                     target_lora_A = target.lora_embedding_A[adapter_name]
                     target_lora_B = target.lora_embedding_B[adapter_name]
+                else:
+                    continue
 
                 target_lora_A.data = target_lora_A.data * 0.0
                 target_lora_B.data = target_lora_B.data * 0.0
@@ -545,6 +541,8 @@ class LoraModel(BaseTuner):
                         elif adapter in target.lora_embedding_A:
                             current_adapter_lora_A = target.lora_embedding_A[adapter]
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
+                        else:
+                            continue
                         target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
                         target_lora_B.data += current_adapter_lora_B.data
                 elif combination_type == "cat":
@@ -556,10 +554,17 @@ class LoraModel(BaseTuner):
                         elif adapter in target.lora_embedding_A:
                             current_adapter_lora_A = target.lora_embedding_A[adapter]
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
+                        else:
+                            continue
                         loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
                         loras_B.append(current_adapter_lora_B.data)
-                    torch.cat(loras_A, dim=0, out=target_lora_A.data)
-                    torch.cat(loras_B, dim=1, out=target_lora_B.data)
+
+                    if len(loras_A) == 0:
+                        raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+                    loras_A = torch.cat(loras_A, dim=0)
+                    loras_B = torch.cat(loras_B, dim=1)
+                    target_lora_A.data[: loras_A.shape[0], :] = loras_A
+                    target_lora_B.data[:, : loras_B.shape[1]] = loras_B
                 elif combination_type == "svd":
                     target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
                         adapters,
@@ -585,8 +590,19 @@ class LoraModel(BaseTuner):
         full_matrices=True,
         driver=None,
     ):
-        delta_weight = weights[0] * target.get_delta_weight(adapters[0])
-        for adapter, weight in zip(adapters[1:], weights[1:]):
+        valid_adapters = []
+        valid_weights = []
+        for adapter, weight in zip(adapters, weights):
+            if adapter in target.lora_A or adapter in target.lora_embedding_A:
+                valid_adapters.append(adapter)
+                valid_weights.append(weight)
+
+        # if no valid adapter, nothing to do
+        if len(valid_adapters) == 0:
+            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+
+        delta_weight = valid_weights[0] * target.get_delta_weight(valid_adapters[0])
+        for adapter, weight in zip(valid_adapters[1:], valid_weights[1:]):
             delta_weight += weight * target.get_delta_weight(adapter)
         conv2d = isinstance(target, Conv2d)
         if conv2d:

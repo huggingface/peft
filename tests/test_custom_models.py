@@ -23,7 +23,8 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoraConfig, PeftModel, get_peft_model
+from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoraConfig, PeftModel, get_peft_model
+from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict
@@ -33,6 +34,7 @@ from .testing_utils import get_state_dict
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
+    # LoRA
     ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
@@ -53,16 +55,99 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    # LoHa
+    ("Vanilla MLP 1 LOHA", "MLP", LoHaConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 LOHA",
+        "MLP",
+        LoHaConfig,
+        {
+            "target_modules": ["lin0"],
+            "alpha": 4,
+            "module_dropout": 0.1,
+        },
+    ),
+    ("Conv2d 1 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
 ]
+
+MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
+    (
+        "LoRA Same",
+        "lora",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False},
+        {"target_modules": ["lin0"], "init_lora_weights": False},
+    ),
+    (
+        "LoRA Different",
+        "lora",
+        LoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False},
+        {"target_modules": ["lin1"], "init_lora_weights": False},
+    ),
+    (
+        "IA3 Same",
+        "ia3",
+        IA3Config,
+        {
+            "target_modules": ["lin0"],
+            "feedforward_modules": ["lin0"],
+            "init_ia3_weights": False,
+        },
+        {
+            "target_modules": ["lin0"],
+            "feedforward_modules": ["lin0"],
+            "init_ia3_weights": False,
+        },
+    ),
+    (
+        "IA3 Different",
+        "ia3",
+        IA3Config,
+        {
+            "target_modules": ["lin0"],
+            "feedforward_modules": ["lin0"],
+            "init_ia3_weights": False,
+        },
+        {
+            "target_modules": ["lin1"],
+            "feedforward_modules": ["lin1"],
+            "init_ia3_weights": False,
+        },
+    ),
+    (
+        "AdaLora Same",
+        "adalora",
+        AdaLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+    ),
+    (
+        "AdaLora Different",
+        "adalora",
+        AdaLoraConfig,
+        {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
+        {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
+    ),
+]
+PREFIXES = {
+    LoraConfig: "lora_",
+    LoHaConfig: "hada_",
+}
 
 
 class MLP(nn.Module):
-    def __init__(self):
+    def __init__(self, bias=True):
         super().__init__()
-        self.lin0 = nn.Linear(10, 20)
+        self.lin0 = nn.Linear(10, 20, bias=bias)
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(0.5)
-        self.lin1 = nn.Linear(20, 2)
+        self.lin1 = nn.Linear(20, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
@@ -71,6 +156,39 @@ class MLP(nn.Module):
         X = self.relu(X)
         X = self.drop(X)
         X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class Block(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(20, 10, bias=bias)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.lin1(X)
+        return X
+
+
+class DeepMLP(nn.Module):
+    def __init__(self, bias=True, num_hidden_layers=12):
+        super().__init__()
+        self.layers = nn.ModuleList([Block(bias=bias) for _ in range(num_hidden_layers)])
+        self.out = nn.Linear(10, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float(X)
+        for layer in self.layers:
+            X = layer(X)
+        X = self.out(X)
         X = self.sm(X)
         return X
 
@@ -233,9 +351,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
         self.assertEqual(params_before.keys(), params_after.keys())
+
+        prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if ("lora_" in name) or ("modules_to_save" in name):
+            if (prefix in name) or ("modules_to_save" in name):
                 # target_modules and modules_to_save _are_ updated
                 self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
             else:
@@ -324,6 +444,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
+        if config_cls != LoraConfig:
+            # skip this test for other configs as bias is specific to Lora
+            self.skipTest("Testing bias warnings only for LoraConfig")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -397,6 +520,42 @@ class TestMultiRankAdapter(unittest.TestCase):
 
         self.assertTrue(rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}")
 
+    def test_multirank_2(self):
+        rank_pattern = {}
+        alpha_pattern = {}
+        r = 4
+        lora_alpha = 8
+
+        for i in range(10):
+            rank = 64 // (i + 1)
+            for j in range(2):
+                rank_pattern[f"layers.{i}.lin{j}"] = rank
+                alpha_pattern[f"layers.{i}.lin{j}"] = 2 * rank
+
+        config = LoraConfig(
+            r=r,
+            lora_alpha=lora_alpha,
+            init_lora_weights=False,
+            target_modules=["lin0", "lin1"],
+            rank_pattern=rank_pattern,
+            alpha_pattern=alpha_pattern,
+        )
+
+        # Add first adapter
+        model = get_peft_model(DeepMLP(), config, adapter_name="first")
+
+        # Add second adapter
+        model.add_adapter("second", config)
+
+        for adapter in ["first", "second"]:
+            for key, module in model.base_model.model.named_modules():
+                if isinstance(module, BaseTunerLayer):
+                    rank_expected = rank_pattern.get(key, r)
+                    rank_current = module.lora_A[adapter].weight.shape[0]
+                    self.assertTrue(
+                        rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}"
+                    )
+
 
 class TestRepr(unittest.TestCase):
     """Tests related to the repr of adapted models"""
@@ -442,6 +601,94 @@ class TestRepr(unittest.TestCase):
         self.assertTrue("lora_A" in print_output)
         self.assertTrue("lora_B" in print_output)
         self.assertTrue("default" in print_output)
+
+
+class MultipleActiveAdaptersTester(unittest.TestCase):
+    """
+    A test class to test the functionality of multiple active adapters.
+
+    This is not specifically tied to custom models, it's just easy to test here and testing it on all types of models
+    would be overkill.
+    """
+
+    def prepare_inputs_for_testing(self):
+        X = torch.arange(90).view(9, 10)
+        return {"X": X}
+
+    def set_multiple_active_adapters(self, model, adapter_names):
+        for module in model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.set_adapter(adapter_names)
+
+    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    def test_multiple_active_adapters_forward(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        model = MLP(bias=tuner_method != "ia3")
+        model.eval()
+        X = self.prepare_inputs_for_testing()
+
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
+        peft_model.add_adapter("adapter_2", config_2)
+
+        # set adapter_1
+        peft_model.set_adapter("adapter_1")
+        adapter_1_output = peft_model(**X)
+
+        # set adapter_2
+        peft_model.set_adapter("adapter_2")
+        adapter_2_output = peft_model(**X)
+
+        # set ["adapter_1", "adapter_2"]
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        combined_output = peft_model(**X)
+
+        self.assertFalse(torch.allclose(adapter_1_output, adapter_2_output, atol=1e-5))
+        self.assertFalse(torch.allclose(adapter_1_output, combined_output, atol=1e-5))
+        self.assertFalse(torch.allclose(adapter_2_output, combined_output, atol=1e-5))
+
+        if tuner_method == "lora":
+            # create a weighted adapter combining both adapters and check that
+            # its output is same as setting multiple active adapters
+            peft_model.add_weighted_adapter(
+                ["adapter_1", "adapter_2"], [1.0, 1.0], "new_combined_adapter", combination_type="cat"
+            )
+            peft_model.set_adapter("new_combined_adapter")
+            new_combined_output = peft_model(**X)
+            self.assertTrue(torch.allclose(new_combined_output, combined_output, atol=1e-5))
+
+    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    def test_multiple_active_adapters_merge_and_unmerge(
+        self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
+    ):
+        model = MLP(bias=tuner_method != "ia3")
+        model.eval()
+        X = self.prepare_inputs_for_testing()
+        base_output = model(**X)
+
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+
+        peft_model = get_peft_model(model, config_1, adapter_name="adapter_1")
+        peft_model.add_adapter("adapter_2", config_2)
+
+        # set ["adapter_1", "adapter_2"]
+        self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
+        combined_output = peft_model(**X)
+
+        peft_model.merge_adapter()
+        merged_combined_output = peft_model(**X)
+        self.assertTrue(torch.allclose(merged_combined_output, combined_output, atol=1e-5))
+
+        peft_model.unmerge_adapter()
+
+        with peft_model.disable_adapter():
+            disabled_adapter_output = peft_model(**X)
+
+        self.assertTrue(torch.allclose(disabled_adapter_output, base_output, atol=1e-4))
 
 
 class RequiresGradTester(unittest.TestCase):
@@ -642,7 +889,7 @@ class RequiresGradTester(unittest.TestCase):
         config0 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin1"])
+        config1 = IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
