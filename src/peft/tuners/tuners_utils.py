@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
 from torch import nn
+
+from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
 from ..utils import _get_submodules
@@ -340,3 +343,42 @@ class BaseTunerLayer(ABC):
                     layer.requires_grad_(False)
 
         self._active_adapter = adapter_names
+
+
+def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
+    """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.
+
+    Args:
+        config (`LoraConfig` | `LoHaConfig`): A config to match target modules from
+        key (`str`): A key to search any matches in config
+
+    Returns:
+        `bool` | `re.Match[str]` | `None`: True of match object if key matches any target modules from config, False or
+        None if no match found
+    """
+    if isinstance(config.target_modules, str):
+        target_module_found = re.fullmatch(config.target_modules, key)
+    else:
+        target_module_found = any(re.match(f".*\.{target_key}$", key) for target_key in config.target_modules) or any(
+            target_key == key for target_key in config.target_modules
+        )
+        is_using_layer_indexes = getattr(config, "layers_to_transform", None) is not None
+        layer_indexing_pattern = getattr(config, "layers_pattern", None)
+
+        if is_using_layer_indexes and target_module_found:
+            layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
+            layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+
+            for pattern in layers_pattern:
+                layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
+                if layer_index is not None:
+                    layer_index = int(layer_index.group(1))
+                    if isinstance(config.layers_to_transform, int):
+                        target_module_found = layer_index == config.layers_to_transform
+                    else:
+                        target_module_found = layer_index in config.layers_to_transform
+
+                    break
+                else:
+                    target_module_found = False
+    return target_module_found
