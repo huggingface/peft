@@ -51,6 +51,8 @@ from .tuners import (
     LoraModel,
     LoHaConfig,
     LoHaModel,
+    LoKrConfig,
+    LoKrModel,
     IA3Config,
     IA3Model,
     AdaLoraConfig,
