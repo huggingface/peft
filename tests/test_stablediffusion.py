@@ -177,3 +177,31 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "loha_kwargs": {"init_weights": [False]},
+            },
+        )
+    )
+    def test_multi_adapter_inference(self, test_name, model_id, config_cls, config_kwargs):
+        model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+
+        peft_config = config_cls(**config_kwargs)
+
+        dummy_input = self.prepare_inputs_for_testing()
+
+        with temp_seed(seed=42):
+            output_simple = np.array(model(**dummy_input).images[0]).astype(np.float32)
+
+        model.text_encoder.add_adapter("second", peft_config)
+
+        self.assertTrue(model.text_encoder.active_adapter == ["default", "second"])
+
+        with temp_seed(seed=42):
+            output_mixed = np.array(model(**dummy_input).images[0]).astype(np.float32)
+
+        self.assertFalse(np.allclose(output_simple, output_mixed))
