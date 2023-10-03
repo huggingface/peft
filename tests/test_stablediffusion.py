@@ -199,6 +199,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             output_simple = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         model.text_encoder.add_adapter("second", peft_config)
+        model.text_encoder.set_adapter(["first", "second"])
 
         self.assertTrue(model.text_encoder.active_adapter == ["default", "second"])
 
