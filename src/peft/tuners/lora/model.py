@@ -210,7 +210,7 @@ class LoraModel(BaseTuner):
         if hasattr(child, "bias"):
             new_module.bias = child.bias
 
-        if new_module.bias.device.type == "meta":
+        if hasattr(new_module, "bias") and new_module.bias is not None and new_module.bias.device.type == "meta":
             set_module_to_device(new_module, child, "bias")
             meta_loading = True
 
