@@ -136,10 +136,10 @@ def main():
         inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
         targets = [str(x) for x in examples[label_column]]
         model_inputs = tokenizer(inputs)
-        labels = tokenizer(targets)
+        labels = tokenizer(targets, add_special_tokens=False)  # don't add bos token because we concatenate with inputs
         for i in range(batch_size):
             sample_input_ids = model_inputs["input_ids"][i]
-            label_input_ids = labels["input_ids"][i] + [tokenizer.pad_token_id]
+            label_input_ids = labels["input_ids"][i] + [tokenizer.eos_token_id]
             model_inputs["input_ids"][i] = sample_input_ids + label_input_ids
             labels["input_ids"][i] = [-100] * len(sample_input_ids) + label_input_ids
             model_inputs["attention_mask"][i] = [1] * len(model_inputs["input_ids"][i])
