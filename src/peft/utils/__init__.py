@@ -46,6 +46,7 @@ from .other import (
     infer_device,
     get_auto_gptq_quant_linear,
     get_quantization_config,
+    set_module_to_device,
 )
 from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights

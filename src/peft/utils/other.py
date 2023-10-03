@@ -20,7 +20,7 @@ from typing import Optional
 
 import accelerate
 import torch
-from accelerate.hooks import add_hook_to_module, remove_hook_from_module
+from accelerate.hooks import add_hook_to_module, remove_hook_from_module, set_module_tensor_to_device
 from accelerate.utils import is_npu_available, is_xpu_available
 
 from ..import_utils import is_auto_gptq_available
@@ -422,6 +422,27 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
             )
             return AutoGPTQQuantLinear
     return None
+
+
+def set_module_to_device(new_module, old_module, param_name):
+    """
+    Sets a module that is loaded on the meta device to the device of the old module
+
+    Args:
+        new_module (`torch.nn.Module`):
+            The module to set to the device of the old module
+        old_module (`torch.nn.Module`):
+            The module from which to get the device
+        param_name (`str`):
+            The name of the parameter of the old module that should be used to set the device of the new module
+    """
+    accepts_dtype = "dtype" in set(inspect.signature(set_module_tensor_to_device).parameters.keys())
+    param = getattr(old_module, param_name)
+
+    if accepts_dtype:
+        set_module_tensor_to_device(new_module, param_name, param.device, value=param, dtype=param.dtype)
+    else:
+        set_module_tensor_to_device(new_module, param_name, param.device, value=param.weight)
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {

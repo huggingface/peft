@@ -32,6 +32,7 @@ from peft.utils import (
     _get_submodules,
     get_auto_gptq_quant_linear,
     get_quantization_config,
+    set_module_to_device,
 )
 
 from .config import LoraConfig
@@ -200,19 +201,33 @@ class LoraModel(BaseTuner):
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
         new_module.weight = child.weight
+        meta_loading = False
+
+        if new_module.weight.device.type == "meta":
+            set_module_to_device(new_module, child, "weight")
+            meta_loading = True
+
         if hasattr(child, "bias"):
             new_module.bias = child.bias
+
+        if new_module.bias.device.type == "meta":
+            set_module_to_device(new_module, child, "bias")
+            meta_loading = True
 
         if getattr(child, "state", None) is not None:
             new_module.state = child.state
             new_module.to(child.weight.device)
 
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if "lora_" in name:
-                module.to(child.weight.device)
-            if "ranknum" in name:
-                module.to(child.weight.device)
+        # dispatch to correct device - no need to do it in the case
+        # of the meta device as it should be handled later by the user
+        # through the `to` method
+        if not meta_loading:
+            for name, module in new_module.named_modules():
+                if "lora_" in name:
+                    # import pdb; pdb.set_trace()
+                    module.to(child.weight.device)
+                if "ranknum" in name:
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
