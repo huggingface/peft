@@ -88,4 +88,4 @@ class IA3Config(PeftConfig):
                 target_module_list = self.target_modules
 
             if not set(feedforward_module_list).issubset(set(target_module_list)):
-                raise ValueError("feedforward_modules should be a subset of target_modules")
+                raise ValueError("`feedforward_modules` should be a subset of `target_modules`")
