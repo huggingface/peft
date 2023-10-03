@@ -185,7 +185,6 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if "loha" not in x[0]],
         )
     )
     def test_multi_adapter_inference(self, test_name, model_id, config_cls, config_kwargs):
@@ -199,7 +198,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             output_simple = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         model.text_encoder.add_adapter("second", peft_config)
-        model.text_encoder.set_adapter(["first", "second"])
+        model.text_encoder.set_adapter(["default", "second"])
 
         self.assertTrue(model.text_encoder.active_adapter == ["default", "second"])
 
