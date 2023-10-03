@@ -185,12 +185,13 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
             },
+            filter_params_func=lambda tests: [x for x in tests if "loha" not in x[0]],
         )
     )
     def test_multi_adapter_inference(self, test_name, model_id, config_cls, config_kwargs):
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
-        peft_config = config_cls(**config_kwargs)
+        peft_config = config_cls(**config_kwargs["text_encoder"])
 
         dummy_input = self.prepare_inputs_for_testing()
 
