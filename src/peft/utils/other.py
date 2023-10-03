@@ -276,7 +276,7 @@ def _set_trainable(model, adapter_name):
 def _set_adapter(model, adapter_name):
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
-            module.set_adapter(adapter_name)
+            module.set_adapter(adapter_name)       
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
