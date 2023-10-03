@@ -234,7 +234,7 @@ class LoKrModel(BaseTuner):
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
-            if "hada_" not in n:
+            if "lokr_" not in n:
                 p.requires_grad = False
 
     def merge_and_unload(self, progressbar: bool = False):
