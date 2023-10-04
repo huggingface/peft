@@ -36,12 +36,15 @@ class IA3Layer(BaseTunerLayer):
         self.scaling = {}
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
-        self.merged = False
         self._disable_adapters = False
         self.merged_adapters = []
         self.in_features = in_features
         self.out_features = out_features
         self.is_feedforward = is_feedforward
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
@@ -101,7 +104,6 @@ class Linear(nn.Linear, IA3Layer):
                 self.weight.data = torch.mul(self.weight.data, self.ia3_l[active_adapter].data)
                 self.weight = transpose(self.weight, self.fan_in_fan_out)
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -116,7 +118,6 @@ class Linear(nn.Linear, IA3Layer):
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
                 self.weight.data = torch.div(self.weight.data, self.ia3_l[active_adapter].data + 1e-8)
                 self.weight = transpose(self.weight, self.fan_in_fan_out)
-                self.merged = False
 
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
