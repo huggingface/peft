@@ -359,9 +359,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
     else:
-        target_module_found = key in config.target_modules
-        if not target_module_found:
-            target_module_found = any(key.endswith(f".{target_key}") for target_key in config.target_modules)
+        target_module_found = key in config.target_modules or any(
+            key.endswith(f".{target_key}") for target_key in config.target_modules
+        )
         is_using_layer_indexes = getattr(config, "layers_to_transform", None) is not None
         layer_indexing_pattern = getattr(config, "layers_pattern", None)
 
