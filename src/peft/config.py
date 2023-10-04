@@ -62,9 +62,8 @@ class PeftConfigMixin(PushToHubMixin):
 
         output_dict = asdict(self)
         # converting set type to list
-        for key in list(output_dict.keys()):
-            if isinstance(output_dict[key], set):
-                value = output_dict.pop(key)
+        for key, value in output_dict.items():
+            if isinstance(value, set):
                 output_dict[key] = list(value)
 
         output_path = os.path.join(save_directory, CONFIG_NAME)
