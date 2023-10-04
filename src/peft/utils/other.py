@@ -14,7 +14,6 @@
 # limitations under the License.
 import copy
 import inspect
-import os
 import warnings
 from typing import Optional
 
@@ -37,31 +36,6 @@ def infer_device():
     else:
         torch_device = "cpu"
     return torch_device
-
-
-# Add or edit model card to have `library_name: peft`
-def add_library_to_model_card(output_dir):
-    if os.path.exists(os.path.join(output_dir, "README.md")):
-        with open(os.path.join(output_dir, "README.md"), "r") as f:
-            lines = f.readlines()
-        # check if the first line is `---`
-        if len(lines) > 0 and lines[0].startswith("---"):
-            for i, line in enumerate(lines[1:]):
-                # check if line starts with `library_name`, if yes, update it
-                if line.startswith("library_name"):
-                    lines[i + 1] = "library_name: peft\n"
-                    break
-                elif line.startswith("---"):
-                    # insert `library_name: peft` before the last `---`
-                    lines.insert(i + 1, "library_name: peft\n")
-                    break
-        else:
-            lines = ["---\n", "library_name: peft\n", "---\n"] + lines
-    else:
-        lines = ["---\n", "library_name: peft\n", "---\n"]
-    # write the lines back to README.md
-    with open(os.path.join(output_dir, "README.md"), "w") as f:
-        f.writelines(lines)
 
 
 # needed for prefix-tuning of bloom model
@@ -452,6 +426,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
     "mistral": ["q_proj", "v_proj"],
+    "stablelm": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {

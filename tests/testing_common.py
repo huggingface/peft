@@ -12,13 +12,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 import os
 import pickle
+import re
 import tempfile
 from collections import OrderedDict
 from dataclasses import replace
 
 import torch
+import yaml
 from diffusers import StableDiffusionPipeline
 
 from peft import (
@@ -171,6 +174,33 @@ class PeftCommonTester:
     def prepare_inputs_for_common(self):
         raise NotImplementedError
 
+    def check_modelcard(self, tmp_dirname, model):
+        # check the generated README.md
+        filename = os.path.join(tmp_dirname, "README.md")
+        self.assertTrue(os.path.exists(filename))
+        with open(filename, "r", encoding="utf-8") as f:
+            readme = f.read()
+        metainfo = re.search(r"---\n(.*?)\n---", readme, re.DOTALL).group(1)
+        dct = yaml.safe_load(metainfo)
+        self.assertEqual(dct["library_name"], "peft")
+
+        model_config = model.config if isinstance(model.config, dict) else model.config.to_dict()
+        if model_config["model_type"] != "custom":
+            self.assertEqual(dct["base_model"], model_config["_name_or_path"])
+        else:
+            self.assertTrue("base_model" not in dct)
+
+    def check_config_json(self, tmp_dirname, model):
+        # check the generated config.json
+        filename = os.path.join(tmp_dirname, "adapter_config.json")
+        self.assertTrue(os.path.exists(filename))
+        with open(filename, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        model_config = model.config if isinstance(model.config, dict) else model.config.to_dict()
+        if model_config["model_type"] != "custom":
+            self.assertEqual(config["base_model_name_or_path"], model_config["_name_or_path"])
+
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -293,6 +323,9 @@ class PeftCommonTester:
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
 
+            self.check_modelcard(tmp_dirname, model)
+            self.check_config_json(tmp_dirname, model)
+
     def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
@@ -367,6 +400,9 @@ class PeftCommonTester:
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
             self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "config.json")))
+
+            self.check_modelcard(tmp_dirname, model)
+            self.check_config_json(tmp_dirname, model)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname, selected_adapters=["default"])
