@@ -12,10 +12,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import operator
 import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from functools import reduce
 from itertools import chain
 
 import torch
@@ -494,20 +496,23 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
-        target_modules_type = type(self.peft_config[adapters[0]].target_modules)
-        new_target_modules = set() if target_modules_type == set else ""
-        for adapter in adapters:
-            if type(self.peft_config[adapter].target_modules) != target_modules_type:
-                raise ValueError(
-                    "all adapter configs should follow the same target modules type. "
-                    "Combining adapters with `target_modules` type being a mix of list and string is not supported."
-                )
-            if target_modules_type == set:
-                new_target_modules |= self.peft_config[adapter].target_modules
-            else:
-                new_target_modules += f"({self.peft_config[adapter].target_modules})|"
+        target_module_types = [type(self.peft_config[adapter].target_modules) for adapter in adapters]
+        if not target_module_types:
+            raise ValueError(f"Found no adapter matching the names in {adapters}")
+        if len(set(target_module_types)) > 1:
+            raise ValueError(
+                "all adapter configs should follow the same target modules type. "
+                "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
+            )
 
-        new_target_modules = list(new_target_modules) if target_modules_type == set else new_target_modules[:-1]
+        if target_module_types[0] == str:
+            new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
+        elif target_module_types[0] == set:
+            new_target_modules = reduce(
+                operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
+            )
+        else:
+            raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
 
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],

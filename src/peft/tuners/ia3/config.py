@@ -72,3 +72,9 @@ class IA3Config(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.IA3
+        self.target_modules = (
+            set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        self.feedforward_modules = (
+            set(self.feedforward_modules) if isinstance(self.feedforward_modules, list) else self.feedforward_modules
+        )
