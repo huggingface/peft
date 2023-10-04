@@ -558,6 +558,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_enabled_after_disable = model(**X)
 
         atol, rtol = 1e-5, 1e-5  # merging introduces some numerical instability
+        if issubclass(config_cls, IA3Config):  # IA³ introduces more instability
+            atol, rtol = 1e-3, 1e-3
+
         self.assertFalse(torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol))
         self.assertTrue(torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol))
         self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol))
