@@ -62,7 +62,7 @@ class PeftConfigMixin(PushToHubMixin):
 
         output_dict = asdict(self)
         # converting set type to list
-        for key in output_dict.keys():
+        for key in list(output_dict.keys()):
             if isinstance(output_dict[key], set):
                 value = output_dict.pop(key)
                 output_dict[key] = list(value)
