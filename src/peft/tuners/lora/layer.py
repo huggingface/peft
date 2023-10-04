@@ -40,12 +40,15 @@ class LoraLayer(BaseTunerLayer):
         self.lora_embedding_A = nn.ParameterDict({})
         self.lora_embedding_B = nn.ParameterDict({})
         # Mark the weight as unmerged
-        self.merged = False
         self._disable_adapters = False
         self.merged_adapters = []
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
@@ -214,7 +217,6 @@ class Linear(nn.Linear, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -224,7 +226,6 @@ class Linear(nn.Linear, LoraLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
                 self.weight.data -= self.get_delta_weight(active_adapter)
-                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return (
@@ -291,7 +292,6 @@ class Embedding(nn.Embedding, LoraLayer):
             if active_adapter in self.lora_embedding_A.keys():
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -301,7 +301,6 @@ class Embedding(nn.Embedding, LoraLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_embedding_A.keys():
                 self.weight.data -= self.get_delta_weight(active_adapter)
-                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return transpose(self.lora_embedding_B[adapter] @ self.lora_embedding_A[adapter], True) * self.scaling[adapter]
@@ -380,7 +379,6 @@ class Conv2d(nn.Conv2d, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -390,7 +388,6 @@ class Conv2d(nn.Conv2d, LoraLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
                 self.weight.data -= self.get_delta_weight(active_adapter)
-                self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117

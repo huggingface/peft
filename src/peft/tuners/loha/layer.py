@@ -45,9 +45,12 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
         self.module_dropout = {}
 
         # Tuner info
-        self.merged = False
         self._disable_adapters = False
         self.merged_adapters = []
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
@@ -197,7 +200,6 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
             if active_adapter in self.hada_w1_a.keys():
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -207,7 +209,6 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.hada_w1_a.keys():
                 self.weight.data -= self.get_delta_weight(active_adapter)
-                self.merged = False
 
     def _op(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError

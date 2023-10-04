@@ -37,12 +37,27 @@ class IA3Layer(BaseTunerLayer):
         self.scaling = {}
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
-        self.merged = False
         self._disable_adapters = False
         self.merged_adapters = []
         self.in_features = in_features
         self.out_features = out_features
         self.is_feedforward = is_feedforward
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
+
+    def update_layer(self, adapter_name, init_ia3_weights):
+        # Actual trainable parameters
+        if self.is_feedforward:
+            weight = torch.randn((1, self.in_features))
+        else:
+            weight = torch.randn((self.out_features, 1))
+        self.ia3_l[adapter_name] = nn.Parameter(weight)
+        if init_ia3_weights:
+            self.reset_ia3_parameters(adapter_name)
+        self.to(self.weight.device)
+        self.set_adapter(self.active_adapters)
 
     def reset_ia3_parameters(self, adapter_name):
         if adapter_name in self.ia3_l.keys():
@@ -107,7 +122,6 @@ class Linear(nn.Linear, IA3Layer):
                     self.bias.data = torch.mul(self.bias.data, scaling.data)
 
                 self.merged_adapters.append(active_adapter)
-                self.merged = True
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -126,8 +140,6 @@ class Linear(nn.Linear, IA3Layer):
                 if not self.is_feedforward and (self.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(self.bias.shape)
                     self.bias.data = torch.div(self.bias.data, scaling.data + 1e-8)
-
-                self.merged = False
 
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
@@ -222,7 +234,7 @@ class Conv2d(nn.Conv2d, IA3Layer):
                     scaling = self.ia3_l[active_adapter].reshape(self.bias.shape)
                     self.bias.data = torch.mul(self.bias.data, scaling.data)
 
-                self.merged = True
+                self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -230,7 +242,8 @@ class Conv2d(nn.Conv2d, IA3Layer):
             return
 
         warnings.warn("Unmerge result can be inaccurate for (IA)^3.")
-        for active_adapter in self.active_adapters:
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
             if active_adapter in self.ia3_l.keys():
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
                 ia3_scaling = self.ia3_l[active_adapter].data
@@ -241,8 +254,6 @@ class Conv2d(nn.Conv2d, IA3Layer):
                 if not self.is_feedforward and (self.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(self.bias.shape)
                     self.bias.data = torch.mul(self.bias.data, scaling.data)
-
-                self.merged = False
 
     def _conv2d(self, input: torch.Tensor) -> torch.Tensor:
         return F.conv2d(
