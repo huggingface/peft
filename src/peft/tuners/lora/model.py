@@ -358,7 +358,9 @@ class LoraModel(BaseTuner):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            peft_config.target_modules = set(
+                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            )
         return peft_config
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
