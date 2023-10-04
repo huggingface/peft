@@ -493,7 +493,7 @@ class LoraModel(BaseTuner):
             raise ValueError(f"Invalid combination_type: {combination_type}")
 
         target_modules_type = type(self.peft_config[adapters[0]].target_modules)
-        new_target_modules = set() if target_modules_type == list else ""
+        new_target_modules = set() if target_modules_type == set else ""
         for adapter in adapters:
             if type(self.peft_config[adapter].target_modules) != target_modules_type:
                 raise ValueError(
