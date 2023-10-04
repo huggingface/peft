@@ -121,7 +121,3 @@ class LoraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-        target_modules_regex = ""
-        for module in self.target_modules:
-            target_modules_regex += f"(.*{module}$)|"
-        self.target_modules_regex = target_modules_regex[:-1]
