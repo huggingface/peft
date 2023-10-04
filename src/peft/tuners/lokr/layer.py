@@ -121,15 +121,17 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
 
     def reset_lokr_parameters(self, adapter_name: str):
         if adapter_name in self.lokr_w1:
-            nn.init.kaiming_uniform_(self.lokr_w1[adapter_name], a=math.sqrt(5))
+            nn.init.zeros_(self.lokr_w1[adapter_name])
+        else:
+            nn.init.zeros_(self.lokr_w1_a[adapter_name])
+            nn.init.kaiming_uniform_(self.lokr_w1_b[adapter_name], a=math.sqrt(5))
+
         if adapter_name in self.lokr_w2:
             nn.init.kaiming_uniform_(self.lokr_w2[adapter_name], a=math.sqrt(5))
-        if adapter_name in self.lokr_w1_a:
-            nn.init.kaiming_uniform_(self.lokr_w1_a[adapter_name], a=math.sqrt(5))
-            nn.init.zeros_(self.lokr_w1_b[adapter_name])
-        if adapter_name in self.lokr_w2_a:
+        else:
             nn.init.kaiming_uniform_(self.lokr_w2_a[adapter_name], a=math.sqrt(5))
-            nn.init.zeros_(self.lokr_w2_b[adapter_name])
+            nn.init.kaiming_uniform_(self.lokr_w2_b[adapter_name], a=math.sqrt(5))
+
         if adapter_name in self.lokr_t2:
             nn.init.kaiming_uniform_(self.lokr_t2[adapter_name], a=math.sqrt(5))
 
@@ -187,7 +189,7 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
             use_effective_conv2d = use_effective_conv2d and self.kernel_size != (1, 1)
         else:
-            raise NotImplementedError(f"LoHa is not implemented for {type(self).__name__} layer")
+            raise NotImplementedError(f"LoKr is not implemented for {type(self).__name__} layer")
 
         # Create weights with provided shape
         self.create_lokr_parameters(adapter_name, r, shape, use_w1, use_w2, use_effective_conv2d)
@@ -207,7 +209,7 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
         self.set_adapter(self.active_adapters)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L178
+        # https://github.com/KohakuBlueleaf/LyCORIS/blob/e4259b870d3354a9615a96be61cb5d07455c58ea/lycoris/modules/lokr.py#L224
         if adapter_name in self.lokr_w1:
             w1 = self.lokr_w1[adapter_name]
         else:
