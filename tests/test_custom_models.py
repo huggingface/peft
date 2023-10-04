@@ -493,7 +493,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         model.train()
         # EmbConv1D is slow to learn for some reason
-        lr = 0.01 if model_id != "EmbConv1D" else 0.1
+        lr = 0.01 if model_id != "EmbConv1D" else 100.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -534,7 +534,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         model.train()
         # EmbConv1D is slow to learn for some reason
-        lr = 0.01 if model_id != "EmbConv1D" else 0.1
+        lr = 0.01 if model_id != "EmbConv1D" else 100.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
