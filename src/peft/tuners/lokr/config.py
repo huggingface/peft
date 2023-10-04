@@ -29,7 +29,7 @@ class LoKrConfig(PeftConfig):
         r (`int`): LoKr rank.
         alpha (`int`): The alpha parameter for LoKr scaling.
         rank_dropout (`int`): The dropout probability for rank dimension during training.
-        module_dropout (`int`): The dropout probability for disabling LoHa modules during training.
+        module_dropout (`int`): The dropout probability for disabling LoKr modules during training.
         use_effective_conv2d (`bool`):
             Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
         decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
@@ -37,7 +37,7 @@ class LoKrConfig(PeftConfig):
         target_modules (`Union[List[str],str]`): The names of the modules to apply LoKr to.
         init_weights (`bool`): Whether to perform initialization of LoKr weights.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the LoHa transformations on
+            The layer indexes to transform, if this argument is specified, it will apply the LoKr transformations on
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoKr
             transformations on the layer at this index.
         layers_pattern (`str`):
@@ -49,16 +49,16 @@ class LoKrConfig(PeftConfig):
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `alpha`.
-        modules_to_save (`List[str]`): The names of modules to be set as trainable except LoHa parameters.
+        modules_to_save (`List[str]`): The names of modules to be set as trainable except LoKr parameters.
     """
 
-    r: int = field(default=8, metadata={"help": "LoHa rank"})
-    alpha: int = field(default=8, metadata={"help": "LoHa alpha"})
+    r: int = field(default=8, metadata={"help": "LoKr rank"})
+    alpha: int = field(default=8, metadata={"help": "LoKr alpha"})
     rank_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for rank dimension during training"}
     )
     module_dropout: float = field(
-        default=0.0, metadata={"help": "The dropout probability for disabling LoHa modules during training"}
+        default=0.0, metadata={"help": "The dropout probability for disabling LoKr modules during training"}
     )
     use_effective_conv2d: bool = field(
         default=False,
@@ -74,7 +74,7 @@ class LoKrConfig(PeftConfig):
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with LoHa."
+            "help": "List of module names or regex expression of the module names to replace with LoKr."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
@@ -82,7 +82,7 @@ class LoKrConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the LoHa layers with their default initialization. Don't change "
+                "Whether to initialize the weights of the LoKr layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
         },
@@ -120,7 +120,7 @@ class LoKrConfig(PeftConfig):
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from LoHA layers to be set as trainable and saved in the final checkpoint. "
+            "help": "List of modules apart from LoKr layers to be set as trainable and saved in the final checkpoint. "
             "For example, in Sequence Classification or Token Classification tasks, "
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
