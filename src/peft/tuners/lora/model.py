@@ -505,7 +505,7 @@ class LoraModel(BaseTuner):
             else:
                 new_target_modules += f"({self.peft_config[adapter].target_modules})|"
 
-        new_target_modules = new_target_modules if target_modules_type == set else new_target_modules[:-1]
+        new_target_modules = list(new_target_modules) if target_modules_type == set else new_target_modules[:-1]
 
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
