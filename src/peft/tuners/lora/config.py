@@ -118,3 +118,4 @@ class LoraConfig(PeftConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
+        self.target_modules = set(self.target_modules) if type(self.target_modules, list) else self.target_modules

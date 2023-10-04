@@ -61,6 +61,12 @@ class PeftConfigMixin(PushToHubMixin):
         auto_mapping_dict = kwargs.pop("auto_mapping_dict", None)
 
         output_dict = asdict(self)
+        # converting set type to list
+        for key in output_dict.keys():
+            if type(output_dict[key], set):
+                value = output_dict.pop(key)
+                output_dict[key] = list(value)
+
         output_path = os.path.join(save_directory, CONFIG_NAME)
 
         # Add auto mapping details for custom models.
