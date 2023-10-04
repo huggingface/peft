@@ -500,12 +500,12 @@ class LoraModel(BaseTuner):
                     "all adapter configs should follow the same target modules type. "
                     "Combining adapters with `target_modules` type being a mix of list and string is not supported."
                 )
-            if target_modules_type == list:
+            if target_modules_type == set:
                 new_target_modules |= set(self.peft_config[adapter].target_modules)
             else:
                 new_target_modules += f"({self.peft_config[adapter].target_modules})|"
 
-        new_target_modules = list(new_target_modules) if target_modules_type == list else new_target_modules[:-1]
+        new_target_modules = new_target_modules if target_modules_type == set else new_target_modules[:-1]
 
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
