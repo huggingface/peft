@@ -501,7 +501,7 @@ class LoraModel(BaseTuner):
                     "Combining adapters with `target_modules` type being a mix of list and string is not supported."
                 )
             if target_modules_type == set:
-                new_target_modules |= set(self.peft_config[adapter].target_modules)
+                new_target_modules |= self.peft_config[adapter].target_modules
             else:
                 new_target_modules += f"({self.peft_config[adapter].target_modules})|"
 
