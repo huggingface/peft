@@ -243,7 +243,6 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
         for active_adapter in self.active_adapters:
-            # if active_adapter in self.hada_w1_a.keys():
             if active_adapter in self._available_adapters:
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
@@ -255,7 +254,6 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            # if active_adapter in self.hada_w1_a.keys():
             if active_adapter in self._available_adapters:
                 self.weight.data -= self.get_delta_weight(active_adapter)
                 self.merged = False
@@ -278,7 +276,6 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
 
             # Execute all the adapters
             for active_adapter in self.active_adapters:
-                # if active_adapter not in self.hada_w1_a.keys():
                 if active_adapter not in self._available_adapters:
                     continue
 
