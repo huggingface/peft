@@ -106,6 +106,7 @@ class Linear(nn.Linear, IA3Layer):
                     scaling = self.ia3_l[active_adapter].reshape(self.bias.shape)
                     self.bias.data = torch.mul(self.bias.data, scaling.data)
 
+                self.merged_adapters.append(active_adapter)
                 self.merged = True
 
     def unmerge(self) -> None:
@@ -114,7 +115,8 @@ class Linear(nn.Linear, IA3Layer):
             return
 
         warnings.warn("Unmerge result can be inaccurate for (IA)^3.")
-        for active_adapter in self.active_adapters:
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
             if active_adapter in self.ia3_l.keys():
                 self.weight = transpose(self.weight, self.fan_in_fan_out)
                 # divide by (IA)^3 vector. Add tolerace to avoid division by zero
