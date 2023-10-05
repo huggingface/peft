@@ -26,32 +26,21 @@ from .layer import LoraLayer
 
 if is_bnb_available():
 
-    class Linear8bitLt(bnb.nn.Linear8bitLt, LoraLayer):
+    class Linear8bitLt(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
             self,
             adapter_name,
-            in_features,
-            out_features,
+            base_layer,
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             **kwargs,
         ) -> None:
-            bnb.nn.Linear8bitLt.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                has_fp16_weights=kwargs.get("has_fp16_weights", True),
-                memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-                threshold=kwargs.get("threshold", 0.0),
-                index=kwargs.get("index", None),
-            )
-            LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+            super().__init__()
+            LoraLayer.__init__(self, in_features=base_layer.in_features, out_features=base_layer.out_features)
+            self.base_layer = base_layer
 
-            # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.set_adapter(adapter_name)
@@ -62,6 +51,22 @@ if is_bnb_available():
                     f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                     f"You are now additionally merging {','.join(self.active_adapters)}."
                 )
+
+            weight = self.base_layer.weight
+            state = self.base_layer.state
+            if state.SCB is None:
+                state.SCB = weight.SCB
+
+            # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
+            # dequantization directly
+            im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
+            im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+            im, Sim = bnb.functional.transform(im, "col32")
+            if state.CxB is None:
+                state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
+            out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
+            output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -69,32 +74,32 @@ if is_bnb_available():
                     "Merge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
                 lora_data = self.get_delta_weight(active_adapter)
-
-                if self.state.SCB is None:
-                    self.state.SCB = self.weight.SCB
-                # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
-                # dequantization directly
-                im = torch.eye(self.weight.data.shape[-1]).contiguous().half().to(self.weight.device)
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
-
-                if self.state.CxB is None:
-                    self.state.CxB, self.state.SB = bnb.functional.transform(
-                        self.weight.data, to_order=self.state.formatB
-                    )
-                out32, Sout32 = bnb.functional.igemmlt(im, self.state.CxB, Sim, self.state.SB)
-                output = bnb.functional.mm_dequant(out32, Sout32, SCim, self.state.SCB, bias=None).t()
                 w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
-                self.weight = bnb.nn.Int8Params(
-                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
-                ).to(self.weight.device)
-                self.state.reset_grads()
+                self.base_layer.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
+                ).to(weight.device)
+                state.reset_grads()
+                weight = self.base_layer.weight
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
+
+            weight = self.base_layer.weight
+            state = self.base_layer.state
+            if state.SCB is None:
+                state.SCB = weight.SCB
+            im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
+            im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+            im, Sim = bnb.functional.transform(im, "col32")
+
+            if state.CxB is None:
+                state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
+            out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
+            output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
@@ -104,23 +109,12 @@ if is_bnb_available():
                 )
                 lora_data = self.get_delta_weight(active_adapter)
 
-                if self.state.SCB is None:
-                    self.state.SCB = self.weight.SCB
-                im = torch.eye(self.weight.data.shape[-1]).contiguous().half().to(self.weight.device)
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
-
-                if self.state.CxB is None:
-                    self.state.CxB, self.state.SB = bnb.functional.transform(
-                        self.weight.data, to_order=self.state.formatB
-                    )
-                out32, Sout32 = bnb.functional.igemmlt(im, self.state.CxB, Sim, self.state.SB)
-                output = bnb.functional.mm_dequant(out32, Sout32, SCim, self.state.SCB, bias=None).t()
                 w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
-                self.weight = bnb.nn.Int8Params(
-                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
-                ).to(self.weight.device)
-                self.state.reset_grads()
+                self.base_layer.weight = bnb.nn.Int8Params(
+                    w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
+                ).to(weight.device)
+                state.reset_grads()
+                weight = self.base_layer.weight
 
         def get_delta_weight(self, adapter):
             return (
@@ -131,15 +125,15 @@ if is_bnb_available():
                 * self.scaling[adapter]
             )
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = super().forward(x)
+                result = self.base_layer(x, *args, **kwargs)
             elif self.merged:
-                result = super().forward(x)
+                result = self.base_layer(x, *args, **kwargs)
             else:
-                result = super().forward(x)
+                result = self.base_layer(x, *args, **kwargs)
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
                         continue
@@ -165,31 +159,20 @@ if is_bnb_available():
 
 if is_bnb_4bit_available():
 
-    class Linear4bit(bnb.nn.Linear4bit, LoraLayer):
+    class Linear4bit(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
             self,
             adapter_name,
-            in_features,
-            out_features,
+            base_layer,
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             **kwargs,
         ) -> None:
-            bnb.nn.Linear4bit.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                compute_dtype=kwargs.get("compute_dtype", torch.float32),
-                compress_statistics=kwargs.get("compress_statistics", True),
-                quant_type=kwargs.get("quant_type", "nf4"),
-            )
-            LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
-
-            # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
+            super().__init__()
+            LoraLayer.__init__(self, in_features=base_layer.in_features, out_features=base_layer.out_features)
+            self.base_layer = base_layer
 
             init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
@@ -201,6 +184,8 @@ if is_bnb_4bit_available():
                     f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                     f"You are now additionally merging {','.join(self.active_adapters)}."
                 )
+
+            weight = self.base_layer.weight
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -208,16 +193,21 @@ if is_bnb_4bit_available():
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
-                kwargs = self.weight.__dict__
+                kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
-                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
-                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                    weight.device
+                )
+                weight = self.base_layer.weight
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
+
+            weight = self.base_layer.weight
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
@@ -225,10 +215,13 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
-                kwargs = self.weight.__dict__
+                kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
-                w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) - lora_data
-                self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
+                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                    weight.device
+                )
+                weight = self.base_layer.weight
 
         def get_delta_weight(self, adapter):
             return (
@@ -239,15 +232,15 @@ if is_bnb_4bit_available():
                 * self.scaling[adapter]
             )
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = super().forward(x)
+                result = self.base_layer.forward(x, *args, **kwargs)
             elif self.merged:
-                result = super().forward(x)
+                result = self.base_layer.forward(x, *args, **kwargs)
             else:
-                result = super().forward(x)
+                result = self.base_layer.forward(x, *args, **kwargs)
                 # As per Tim Dettmers, for 4bit, we need to defensively clone here.
                 # The reason is that in some cases, an error can occur that backprop
                 # does not work on a manipulated view. This issue may be solved with

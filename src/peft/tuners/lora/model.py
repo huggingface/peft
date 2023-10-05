@@ -199,12 +199,23 @@ class LoraModel(BaseTuner):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
-        new_module.weight = child.weight
-        if hasattr(child, "bias"):
-            new_module.bias = child.bias
+
+        # child layer wraps the original module, unpack it
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+        elif hasattr(child, "quant_linear_module"):
+            child = child.quant_linear_module
+
+        # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
-            new_module.state = child.state
+            if not hasattr(new_module, "base_layer"):
+                # TODO is setting state even necessary in any situation?
+                new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
@@ -254,9 +265,7 @@ class LoraModel(BaseTuner):
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(
-                adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
-            )
+            new_module = Linear8bitLt(adapter_name, target, **eightbit_kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -266,7 +275,7 @@ class LoraModel(BaseTuner):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
+            new_module = Linear4bit(adapter_name, target, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
             new_module = QuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
@@ -385,28 +394,28 @@ class LoraModel(BaseTuner):
                         padding=target.padding,
                         dilation=target.dilation,
                     )
-                elif is_bnb_available() and isinstance(target, bnb.nn.Linear8bitLt):
-                    bias = target.bias is not None
+                elif is_bnb_available() and isinstance(target, Linear8bitLt):
+                    bias = target.base_layer.bias is not None
                     new_module = bnb.nn.Linear8bitLt(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        has_fp16_weights=target.state.has_fp16_weights,
-                        memory_efficient_backward=target.state.memory_efficient_backward,
-                        threshold=target.state.threshold,
-                        index=target.index,
-                        device=target.weight.device,
+                        has_fp16_weights=target.base_layer.state.has_fp16_weights,
+                        memory_efficient_backward=target.base_layer.state.memory_efficient_backward,
+                        threshold=target.base_layer.state.threshold,
+                        index=target.base_layer.index,
+                        device=target.base_layer.weight.device,
                     )
-                elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
-                    bias = target.bias is not None
+                elif is_bnb_4bit_available() and isinstance(target, Linear4bit):
+                    bias = target.base_layer.bias is not None
                     new_module = bnb.nn.Linear4bit(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        compute_dtype=target.compute_dtype,
-                        compress_statistics=target.weight.compress_statistics,
-                        quant_type=target.weight.quant_type,
-                        device=target.weight.device,
+                        compute_dtype=target.base_layer.compute_dtype,
+                        compress_statistics=target.base_layer.weight.compress_statistics,
+                        quant_type=target.base_layer.weight.quant_type,
+                        device=target.base_layer.weight.device,
                     )
                 else:
                     bias = target.bias is not None
