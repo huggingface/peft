@@ -30,7 +30,6 @@ from .other import (
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
     _set_trainable,
-    add_library_to_model_card,
     bloom_model_postprocess_past_key_value,
     prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
