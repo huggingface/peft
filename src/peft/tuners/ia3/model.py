@@ -22,13 +22,12 @@ import torch
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _get_submodules,
-    _is_valid_match,
 )
 
 from .layer import IA3Layer, Linear
@@ -40,9 +39,7 @@ if is_bnb_available():
     from .bnb import Linear8bitLt
 
 if is_bnb_4bit_available():
-    import bitsandbytes as bnb
-
-    from .bnb import Linear4bit, Linear8bitLt
+    from .bnb import Linear4bit
 
 
 class IA3Model(BaseTuner):
@@ -158,11 +155,7 @@ class IA3Model(BaseTuner):
 
     @staticmethod
     def _check_target_module_exists(ia3_config, key):
-        if isinstance(ia3_config.target_modules, str):
-            target_module_found = re.fullmatch(ia3_config.target_modules, key)
-        else:
-            target_module_found = any(_is_valid_match(key, target_key) for target_key in ia3_config.target_modules)
-        return target_module_found
+        return check_target_module_exists(ia3_config, key)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
