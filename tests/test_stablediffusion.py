@@ -113,12 +113,15 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
-                # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
-                # "loha_kwargs": {"init_weights": [False]},
+                "loha_kwargs": {"init_weights": [False]},
             },
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
+        if config_cls == LoHaConfig:
+            # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
+            self.skipTest("LoHaConfig test is flaky")
+
         # Instantiate model & adapters
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
 
