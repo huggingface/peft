@@ -315,7 +315,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
         for named_param, value in list(transformer_backbone.named_parameters()):
-            if value.shape[0] == self.base_model.config.vocab_size:
+            if value.shape[0] == self.base_model.config.vocab_size or (
+                hasattr(value, "ds_shape") and value.ds_shape[0] == self.base_model.config.vocab_size
+            ):
                 self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                 break
 
