@@ -17,9 +17,7 @@ import pytest
 
 
 def pytest_addoption(parser):
-    parser.addoption(
-        "--regression", action="store_true", default=False, help="run regression tests"
-    )
+    parser.addoption("--regression", action="store_true", default=False, help="run regression tests")
 
 
 def pytest_configure(config):
