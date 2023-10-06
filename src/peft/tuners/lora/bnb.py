@@ -184,7 +184,6 @@ if is_bnb_4bit_available():
                     f"You are now additionally merging {','.join(self.active_adapters)}."
                 )
 
-            weight = self.base_layer.weight
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -192,13 +191,13 @@ if is_bnb_4bit_available():
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
+                weight = self.base_layer.weight
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
                 self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                     weight.device
                 )
-                weight = self.base_layer.weight
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
@@ -206,7 +205,6 @@ if is_bnb_4bit_available():
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
 
-            weight = self.base_layer.weight
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
@@ -214,13 +212,13 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
+                weight = self.base_layer.weight
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
                 self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                     weight.device
                 )
-                weight = self.base_layer.weight
 
         def get_delta_weight(self, adapter):
             return (
