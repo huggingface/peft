@@ -17,12 +17,13 @@
 #
 # For normal regression testing, just run:
 #
-# `pytest tests/regression/test_regression.py -s`.
+# `pytest tests/regression/test_regression.py -s --regression`
 #
-# Add `-s` to show potentially useful debugging information.
+# Add `-s` to show potentially useful debugging information. `--regression` is a custom marker that is required for
+# regression tests not to be skipped.
 #
 # To create new regression tests, run:
-# `REGRESSION_CREATION_MODE=True pytest tests/regression/test_regression.py -s`.
+# `REGRESSION_CREATION_MODE=True pytest tests/regression/test_regression.py -s --regression`
 #
 # This will *fail* if:
 #
@@ -35,7 +36,7 @@
 # `git checkout v0.1.0`
 #
 # To override these checks, run:
-# `REGRESSION_CREATION_MODE=True REGRESSION_FORCE_MODE=True pytest tests/regression/test_regression.py -s`.
+# `REGRESSION_CREATION_MODE=True REGRESSION_FORCE_MODE=True pytest tests/regression/test_regression.py -s --regression`
 #
 # In REGRESSION_CREATION_MODE, one directory will be created in tests/regression/<TEST_NAME>/<PEFT_VERSION>/ for each
 # test. This will contain the saved adapter, as well as the output of the test of the model for that version.
@@ -48,6 +49,7 @@ import subprocess
 import sys
 import unittest
 
+import pytest
 import torch
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
@@ -105,6 +107,7 @@ def load_output(name):
     return torch.load(filename)
 
 
+@pytest.mark.regression
 class RegressionTester(unittest.TestCase):
     """Base class for regression testing
 
@@ -186,7 +189,7 @@ class TestLora8bitBnb(RegressionTester):
             load_in_8bit=True,
         )
 
-    def test_lora_linear_8bit(self):
+    def test_lora_8bit(self):
         self.fix_seed()
         base_model = self.load_base_model()
         config = LoraConfig(
@@ -216,7 +219,7 @@ class TestLora4bitBnb(RegressionTester):
             torch_dtype=torch.float32,
         )
 
-    def test_lora_linear_4bit(self):
+    def test_lora_4bit(self):
         self.fix_seed()
         base_model = self.load_base_model()
         config = LoraConfig(
