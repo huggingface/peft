@@ -213,8 +213,9 @@ class LoraModel(BaseTuner):
                 new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
-            if not hasattr(new_module, "base_layer"):
-                # TODO is setting state even necessary in any situation?
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
                 new_module.state = child.state
             new_module.to(child.weight.device)
 

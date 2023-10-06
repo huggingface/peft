@@ -52,21 +52,6 @@ if is_bnb_available():
                     f"You are now additionally merging {','.join(self.active_adapters)}."
                 )
 
-            weight = self.base_layer.weight
-            state = self.base_layer.state
-            if state.SCB is None:
-                state.SCB = weight.SCB
-
-            # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
-            # dequantization directly
-            im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
-            im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-            im, Sim = bnb.functional.transform(im, "col32")
-            if state.CxB is None:
-                state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
-            out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-            output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
-
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -74,31 +59,33 @@ if is_bnb_available():
                     "Merge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
                 lora_data = self.get_delta_weight(active_adapter)
+
+                weight = self.base_layer.weight
+                state = self.base_layer.state
+                if state.SCB is None:
+                    state.SCB = weight.SCB
+
+                # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
+                # dequantization directly
+                im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
+                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+                im, Sim = bnb.functional.transform(im, "col32")
+                if state.CxB is None:
+                    state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
+                out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
+                output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+
                 w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
                 self.base_layer.weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 state.reset_grads()
-                weight = self.base_layer.weight
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
-
-            weight = self.base_layer.weight
-            state = self.base_layer.state
-            if state.SCB is None:
-                state.SCB = weight.SCB
-            im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
-            im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-            im, Sim = bnb.functional.transform(im, "col32")
-
-            if state.CxB is None:
-                state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
-            out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-            output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
 
             while len(self.merged_adapters) > 0:
                 active_adapter = self.merged_adapters.pop()
@@ -109,12 +96,24 @@ if is_bnb_available():
                 )
                 lora_data = self.get_delta_weight(active_adapter)
 
+                weight = self.base_layer.weight
+                state = self.base_layer.state
+                if state.SCB is None:
+                    state.SCB = weight.SCB
+                im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
+                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+                im, Sim = bnb.functional.transform(im, "col32")
+
+                if state.CxB is None:
+                    state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
+                out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
+                output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+
                 w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
                 self.base_layer.weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 state.reset_grads()
-                weight = self.base_layer.weight
 
         def get_delta_weight(self, adapter):
             return (
