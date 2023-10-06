@@ -145,7 +145,8 @@ def main(args):
         num_proc=1,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
     def preprocess_function(examples):
         batch_size = len(examples[text_column])
@@ -235,7 +236,7 @@ def main(args):
     print(next(iter(train_dataloader)))
 
     # creating model
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path)
+    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, pad_token_id=tokenizer.eos_token_id)
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
