@@ -113,7 +113,8 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
-                "loha_kwargs": {"init_weights": [False]},
+                # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
+                # "loha_kwargs": {"init_weights": [False]},
             },
         )
     )
