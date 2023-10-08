@@ -186,6 +186,19 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
     def test_ia3_is_feedforward_subset(self):
         # This test checks that the IA3 config raises a value error if the feedforward_modules argument
         # is not a subset of the target_modules argument
-        incorrect_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
-        with self.assertRaises(ValueError):
-            IA3Config(**incorrect_config)
+
+        # an example invalid config
+        invalid_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
+
+        # an example valid config with regex expressions. no error should be raised for this.
+        valid_config = {
+            "target_modules": ".*.(SelfAttention|EncDecAttention|DenseReluDense).*(q|v|wo)$",
+            "feedforward_modules": ".*.DenseReluDense.wo$",
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            IA3Config(**invalid_config)
+        self.assertEqual(str(ctx.exception), "`feedforward_modules` should be a subset of `target_modules`")
+
+        # should run without errors
+        IA3Config(**valid_config)
