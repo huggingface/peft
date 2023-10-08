@@ -30,8 +30,8 @@ class IA3Config(PeftConfig):
             The names of the modules to apply (IA)^3 to.
         feedforward_modules (`Union[List[str],str]`):
             The names of the modules to be treated as feedforward modules, as in the original paper. These modules will
-            have (IA)^3 vectors multiplied at the input, as opposed to activations. feedforward_modules must be a name
-            or a subset of names present in target_modules.
+            have (IA)^3 vectors multiplied to the input, instead of the outuput. feedforward_modules must be a name or a
+            subset of names present in target_modules.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
