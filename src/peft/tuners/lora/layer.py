@@ -207,9 +207,9 @@ class Linear(nn.Linear, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: Optional[bool] = False) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
         """
-        Merge the active adapter weights inside the base weights
+        Merge the active adapter weights into the base weights
 
         Args:
             safe_merge (`bool`, *optional*):
@@ -307,7 +307,7 @@ class Embedding(nn.Embedding, LoraLayer):
 
     def merge(self, safe_merge: Optional[bool] = False) -> None:
         """
-        Merge the active adapter weights inside the base weights
+        Merge the active adapter weights into the base weights
 
         Args:
             safe_merge (`bool`, *optional*):
