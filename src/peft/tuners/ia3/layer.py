@@ -237,7 +237,16 @@ class Conv2d(nn.Conv2d, IA3Layer):
         self.to(self.weight.device)
         self.set_adapter(self.active_adapters)
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -249,7 +258,19 @@ class Conv2d(nn.Conv2d, IA3Layer):
                 ia3_scaling = self.ia3_l[active_adapter].data
                 if not self.is_feedforward:
                     ia3_scaling = ia3_scaling.permute(1, 0, 2, 3)
-                self.weight.data = torch.mul(self.weight.data, ia3_scaling)
+
+                if safe_merge:
+                    output_weight = torch.mul(self.weight.data, ia3_scaling).clone()
+
+                    if torch.isnan(output_weight).any():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            " and should be removed."
+                        )
+
+                    self.weight.data = output_weight
+                else:
+                    self.weight.data = torch.mul(self.weight.data, ia3_scaling)
 
                 if not self.is_feedforward and (self.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(self.bias.shape)

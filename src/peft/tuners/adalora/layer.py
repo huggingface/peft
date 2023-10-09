@@ -139,7 +139,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.lora_embedding_A.keys():
+            if active_adapter in self.lora_A.keys():
                 self.weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
