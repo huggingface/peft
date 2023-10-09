@@ -305,7 +305,7 @@ class Embedding(nn.Embedding, LoraLayer):
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: Optional[bool] = False) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
