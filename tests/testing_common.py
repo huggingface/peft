@@ -474,7 +474,19 @@ class PeftCommonTester:
 
         self.assertEqual(
             str(error_context.exception),
-            "NaNs detected in the merged weights. The Lora adapter default seems to be broken and should be removed.",
+            "NaNs detected in the merged weights. The Lora adapter default seems to be broken",
+        )
+
+        for name, module in model.named_parameters():
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+                module.data[0] = torch.inf
+
+        with self.assertRaises(ValueError) as error_context:
+            model = model.merge_and_unload(safe_merge=True)
+
+        self.assertEqual(
+            str(error_context.exception),
+            "NaNs detected in the merged weights. The Lora adapter default seems to be broken",
         )
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
