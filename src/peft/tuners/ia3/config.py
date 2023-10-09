@@ -30,7 +30,7 @@ class IA3Config(PeftConfig):
             The names of the modules to apply (IA)^3 to.
         feedforward_modules (`Union[List[str],str]`):
             The names of the modules to be treated as feedforward modules, as in the original paper. These modules will
-            have (IA)^3 vectors multiplied to the input, instead of the outuput. feedforward_modules must be a name or a
+            have (IA)^3 vectors multiplied to the input, instead of the output. feedforward_modules must be a name or a
             subset of names present in target_modules.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
@@ -85,5 +85,5 @@ class IA3Config(PeftConfig):
         if self.feedforward_modules and self.target_modules:
             # run a check only if feedforward_modules and target_modules are lists, and not regex expressions
             if (not isinstance(self.feedforward_modules, str)) and (not isinstance(self.target_modules, str)):
-                if not set(self.feedforward_modules).issubset(set(self.target_modules)):
+                if not self.feedforward_modules.issubset(self.target_modules):
                     raise ValueError("`feedforward_modules` should be a subset of `target_modules`")
