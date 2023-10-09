@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import os
 import tempfile
 import unittest
 
@@ -23,7 +24,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoraConfig, PeftModel, get_peft_model
+from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoraConfig, PeftModel, get_peft_model
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
@@ -34,13 +35,16 @@ from .testing_utils import get_state_dict
 # EmbConv1D has an embedding and a Conv1D layer
 # Conv2D has a Conv2D layer
 TEST_CASES = [
-    ("Vanilla MLP 1", "MLP", LoraConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5", "MLP", LoraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ########
+    # LoRA #
+    ########
+    ("Vanilla MLP 1 LoRA", "MLP", LoraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 LoRA", "MLP", LoraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 LoRA", "MLP", LoraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 LoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 LoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     (
-        "Vanilla MLP 6",
+        "Vanilla MLP 6 LoRA",
         "MLP",
         LoraConfig,
         {
@@ -49,11 +53,97 @@ TEST_CASES = [
             "lora_dropout": 0.1,
         },
     ),
-    ("Embedding + transformers Conv1D 1", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
-    ("Embedding + transformers Conv1D 2", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
-    ("Embedding + transformers Conv1D 3", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
-    ("Conv2d 1", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d 2", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
+    ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
+    ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
+    ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    #######
+    # IA³ #
+    #######
+    ("Vanilla MLP 1 IA3", "MLP", IA3Config, {"target_modules": "lin0", "feedforward_modules": []}),
+    ("Vanilla MLP 2 IA3", "MLP", IA3Config, {"target_modules": "lin0", "feedforward_modules": "lin0"}),
+    ("Vanilla MLP 3 IA3", "MLP", IA3Config, {"target_modules": ["lin0"], "feedforward_modules": []}),
+    ("Vanilla MLP 4 IA3", "MLP", IA3Config, {"target_modules": ["lin0"], "feedforward_modules": ["lin0"]}),
+    ("Vanilla MLP 5 IA3", "MLP", IA3Config, {"target_modules": ["lin1"], "feedforward_modules": []}),
+    ("Vanilla MLP 6 IA3", "MLP", IA3Config, {"target_modules": ["lin1"], "feedforward_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 7 IA3",
+        "MLP",
+        IA3Config,
+        {"target_modules": ["lin0", "lin1"], "feedforward_modules": []},
+    ),
+    (
+        "Vanilla MLP 8 IA3",
+        "MLP",
+        IA3Config,
+        {"target_modules": ["lin0", "lin1"], "feedforward_modules": ["lin0", "lin1"]},
+    ),
+    (
+        "Vanilla MLP 9 IA3",
+        "MLP",
+        IA3Config,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "feedforward_modules": ["lin0"]},
+    ),
+    # TODO: There are errors when trying to merge Conv1D, hence skipping them for now
+    # (
+    #     "transformers Conv1D 1 IA3",
+    #     "EmbConv1D",
+    #     IA3Config,
+    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"]},
+    # ),
+    # (
+    #     "transformers Conv1D 2 IA3",
+    #     "EmbConv1D",
+    #     IA3Config,
+    #     {"target_modules": ["conv1d", "lin0"], "feedforward_modules": ["conv1d", "lin0"]},
+    # ),
+    # (
+    #     "transformers Conv1D 1 IA3",
+    #     "EmbConv1D",
+    #     IA3Config,
+    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin1"]},
+    # ),
+    # ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
+    # ("Conv2d 2 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
+    (
+        "Conv2d 3 IA3",
+        "Conv2d",
+        IA3Config,
+        {"target_modules": ["conv2d", "lin0"], "feedforward_modules": []},
+    ),
+    (
+        "Conv2d 4 IA3",
+        "Conv2d",
+        IA3Config,
+        {"target_modules": ["conv2d", "lin0"], "feedforward_modules": ["conv2d"]},
+    ),
+    (
+        "Conv2d 5 IA3",
+        "Conv2d",
+        IA3Config,
+        {"target_modules": ["conv2d", "lin0"], "feedforward_modules": ["conv2d", "lin0"]},
+    ),
+    ########
+    # LoHa #
+    ########
+    ("Vanilla MLP 1 LOHA", "MLP", LoHaConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 LOHA", "MLP", LoHaConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 LOHA",
+        "MLP",
+        LoHaConfig,
+        {
+            "target_modules": ["lin0"],
+            "alpha": 4,
+            "module_dropout": 0.1,
+        },
+    ),
+    ("Conv2d 1 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -116,6 +206,11 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
 ]
+PREFIXES = {
+    IA3Config: "ia3_",
+    LoraConfig: "lora_",
+    LoHaConfig: "hada_",
+}
 
 
 class MLP(nn.Module):
@@ -178,6 +273,7 @@ class ModelEmbConv1D(nn.Module):
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
         X = self.emb(X)
@@ -185,6 +281,7 @@ class ModelEmbConv1D(nn.Module):
         X = self.relu(X)
         X = self.flat(X)
         X = self.lin0(X)
+        X = self.sm(X)
         return X
 
 
@@ -195,6 +292,7 @@ class ModelConv2D(nn.Module):
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
         self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
         X = X.float().reshape(2, 5, 3, 3)
@@ -202,6 +300,7 @@ class ModelConv2D(nn.Module):
         X = self.relu(X)
         X = self.flat(X)
         X = self.lin0(X)
+        X = self.sm(X)
         return X
 
 
@@ -265,7 +364,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         config_kwargs = config_kwargs.copy()
-        config_kwargs["init_lora_weights"] = False
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
@@ -328,9 +430,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
         self.assertEqual(params_before.keys(), params_after.keys())
+
+        prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
-            if ("lora_" in name) or ("modules_to_save" in name):
+            if (prefix in name) or ("modules_to_save" in name):
                 # target_modules and modules_to_save _are_ updated
                 self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
             else:
@@ -388,14 +492,17 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_before = model(**X)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+        # EmbConv1D is slow to learn for some reason
+        lr = 0.01 if model_id != "EmbConv1D" else 1.0
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
         for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
-            loss = y_pred.sum()
+            y = torch.arange(len(y_pred)).to(self.torch_device) % 2
+            loss = nn.functional.nll_loss(y_pred, y)
             loss.backward()
             optimizer.step()
 
@@ -413,12 +520,64 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
 
     @parameterized.expand(TEST_CASES)
+    def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
+        # same as test_disable_adapters, but with merging
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+        outputs_before = model(**X)
+
+        model.train()
+        # EmbConv1D is slow to learn for some reason
+        lr = 0.01 if model_id != "EmbConv1D" else 1.0
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+
+        # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
+        # breaking of some LoRA layers that are initialized with constants)
+        for _ in range(3):
+            optimizer.zero_grad()
+            y_pred = model(**X)
+            y = torch.arange(len(y_pred)).to(self.torch_device) % 2
+            loss = nn.functional.nll_loss(y_pred, y)
+            loss.backward()
+            optimizer.step()
+
+        model.eval()
+        model.merge_adapter()
+        outputs_after = model(**X)
+
+        with model.disable_adapter():
+            outputs_disabled = model(**X)
+
+        # check that after leaving the disable_adapter context, everything is enabled again
+        outputs_enabled_after_disable = model(**X)
+
+        atol, rtol = 1e-5, 1e-5  # merging introduces some numerical instability
+        if issubclass(config_cls, IA3Config):  # IA³ introduces more instability
+            atol, rtol = 1e-3, 1e-3
+
+        self.assertFalse(torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol))
+
+    @parameterized.expand(TEST_CASES)
     def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
         # When training biases in lora, disabling adapters does not reset the biases, so the output is not what users
         # might expect. Therefore, a warning should be given.
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
+        if config_cls != LoraConfig:
+            # skip this test for other configs as bias is specific to Lora
+            self.skipTest("Testing bias warnings only for LoraConfig")
+
+        if not issubclass(config_cls, LoraConfig):
+            self.skipTest("Bias argument is only supported for LoRA models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -459,6 +618,41 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    def test_existing_model_card(self):
+        # ensure that if there is already a model card, it is not overwritten
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            # create a model card
+            text = "---\nmeta: hello\n---\nThis is a model card\n"
+            with open(os.path.join(tmp_dirname, "README.md"), "w") as f:
+                f.write(text)
+
+            model.save_pretrained(tmp_dirname)
+            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+                model_card = f.read()
+
+        self.assertIn("library_name: peft", model_card)
+        self.assertIn("meta: hello", model_card)
+        self.assertIn("This is a model card", model_card)
+
+    def test_non_existing_model_card(self):
+        # ensure that if there is already a model card, it is not overwritten
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+                model_card = f.read()
+
+        self.assertIn("library_name: peft", model_card)
+        # rough check that the model card is pre-filled
+        self.assertGreater(len(model_card), 1000)
 
 
 class TestMultiRankAdapter(unittest.TestCase):
