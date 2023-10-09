@@ -365,7 +365,7 @@ class LoraModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
@@ -419,7 +419,7 @@ class LoraModel(BaseTuner):
                     else:
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
-                    target.merge()
+                    target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
@@ -674,13 +674,17 @@ class LoraModel(BaseTuner):
                     )
                     target.set_adapter(resetting_active_adapter)
 
-    def merge_and_unload(self, progressbar: bool = False):
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
 
         Args:
-            progressbar (bool): whether to show a progressbar indicating the unload and merge process
+            progressbar (`bool`):
+                whether to show a progressbar indicating the unload and merge process
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights
 
         Example:
 
@@ -694,7 +698,7 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar)
+        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
 
     def unload(self):
         """
