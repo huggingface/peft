@@ -471,9 +471,9 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "bert": ["output.dense"],
     "deberta-v2": ["output.dense"],
     "deberta": ["output.dense"],
-    "RefinedWeb": ["query_key_value"],
-    "RefinedWebModel": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWeb": ["dense_4h_to_h"],
+    "RefinedWebModel": ["dense_4h_to_h"],
+    "falcon": ["dense_4h_to_h"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
