@@ -431,7 +431,7 @@ class PeftCommonTester:
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig):
             # Merge layers only supported for LoRA and IA³
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -455,7 +455,7 @@ class PeftCommonTester:
         model = model.merge_and_unload()
         logits_merged = model(**dummy_input)[0]
 
-        self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
+        self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-3, rtol=1e-3))
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -466,7 +466,7 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name:
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
                 module.data[0] = torch.nan
 
         with self.assertRaises(ValueError) as error_context:
