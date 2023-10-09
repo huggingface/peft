@@ -29,7 +29,6 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
-    _is_valid_match,
 )
 
 from .layer import Conv2d, IA3Layer, Linear
