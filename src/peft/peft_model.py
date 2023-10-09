@@ -315,8 +315,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
         for named_param, value in list(transformer_backbone.named_parameters()):
+            # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape [0]
+            # the actual unsharded shape is stored in "ds_shape" attribute
+            # special handling is needed in case the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig
+            # has been called before
+            # For reference refer to issue: https://github.com/huggingface/peft/issues/996
+            is_deepspeed_distributed_tensor = hasattr(value, "ds_shape")
+
+            deepspeed_distributed_tensor_shape = None
+            if is_deepspeed_distributed_tensor:
+                deepspeed_distributed_tensor_shape = value.ds_shape
+
             if value.shape[0] == self.base_model.config.vocab_size or (
-                hasattr(value, "ds_shape") and value.ds_shape[0] == self.base_model.config.vocab_size
+                is_deepspeed_distributed_tensor
+                and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
             ):
                 self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                 break
