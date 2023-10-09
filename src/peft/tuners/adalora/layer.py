@@ -99,15 +99,38 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
         for active_adapter in self.active_adapters:
-            if active_adapter in self.lora_embedding_A.keys():
-                self.weight.data += self.get_delta_weight(active_adapter)
+            if active_adapter in self.lora_A.keys():
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = self.weight.data.clone()
+                    orig_weights += self.get_delta_weight(active_adapter)
+
+                    if torch.isnan(orig_weights).any():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            " and should be removed."
+                        )
+
+                    self.weight.data = orig_weights
+                else:
+                    self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -121,7 +144,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return (
-            transpose(self.lora_B[adapter] @ (self.lora_A[adapter] * self.lora_E[adapter]))
+            transpose(self.lora_B[adapter] @ (self.lora_A[adapter] * self.lora_E[adapter]), self.fan_in_fan_out)
             * self.scaling[adapter]
             / (self.ranknum[adapter] + 1e-5)
         )

@@ -219,10 +219,10 @@ class LoHaModel(BaseTuner):
             if "hada_" not in n:
                 p.requires_grad = False
 
-    def merge_and_unload(self, progressbar: bool = False):
-        return self._unload_and_optionally_merge(progressbar=progressbar)
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOHA layers when the model is gptq quantized")
@@ -257,7 +257,7 @@ class LoHaModel(BaseTuner):
                         "Cannot convert current module to torch module, currently only adapters for nn.Linear and nn.Conv2d are supported"
                     )
                 if merge:
-                    target.merge()
+                    target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`

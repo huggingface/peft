@@ -94,6 +94,7 @@ class Linear(nn.Linear, IA3Layer):
     def merge(self, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
+
         Args:
             safe_merge (`bool`, *optional*):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
