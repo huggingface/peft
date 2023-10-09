@@ -103,7 +103,7 @@ class Linear(nn.Linear, IA3Layer):
             self.reset_ia3_parameters(adapter_name)
         self.to(self.weight.device)
         self.set_adapter(self.active_adapters)
-        
+
     def merge(self, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
