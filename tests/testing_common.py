@@ -474,7 +474,7 @@ class PeftCommonTester:
 
         self.assertEqual(
             str(error_context.exception),
-            "NaNs detected in the merged weights. The Lora adapter default seems to be broken",
+            "NaNs detected in the merged weights. The adapter default seems to be broken",
         )
 
         for name, module in model.named_parameters():
@@ -486,7 +486,7 @@ class PeftCommonTester:
 
         self.assertEqual(
             str(error_context.exception),
-            "NaNs detected in the merged weights. The Lora adapter default seems to be broken",
+            "NaNs detected in the merged weights. The adapter default seems to be broken",
         )
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):

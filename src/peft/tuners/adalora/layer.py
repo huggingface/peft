@@ -124,7 +124,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
-                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
                     self.weight.data = orig_weights

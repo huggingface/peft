@@ -232,7 +232,7 @@ class Linear(nn.Linear, LoraLayer):
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
-                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
                     self.weight.data = orig_weights
@@ -329,7 +329,7 @@ class Embedding(nn.Embedding, LoraLayer):
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
-                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
                     self.weight.data = orig_weights
@@ -438,7 +438,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
-                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
                     self.weight.data = orig_weights
                 else:

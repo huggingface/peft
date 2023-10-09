@@ -128,7 +128,7 @@ class Linear(nn.Linear, IA3Layer):
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
-                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
                     self.weight.data = orig_weights
                     self.weight = transpose(self.weight, self.fan_in_fan_out)
@@ -263,7 +263,7 @@ class Conv2d(nn.Conv2d, IA3Layer):
 
                     if not torch.isfinite(output_weight).all():
                         raise ValueError(
-                            f"NaNs detected in the merged weights. The Lora adapter {active_adapter} seems to be broken"
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
                     self.weight.data = output_weight
