@@ -26,7 +26,7 @@ import torch
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
-from huggingface_hub import hf_hub_download
+from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
@@ -57,7 +57,6 @@ from .utils import (
     _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
-    add_library_to_model_card,
     get_peft_model_state_dict,
     infer_device,
     load_peft_weights,
@@ -318,7 +317,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.num_transformer_submodules = 2 if config.task_type == TaskType.SEQ_2_SEQ_LM else 1
 
         for named_param, value in list(transformer_backbone.named_parameters()):
-            if value.shape[0] == self.base_model.config.vocab_size:
+            # for ZeRO-3, the tensor is sharded across accelerators and deepspeed modifies it to a tensor with shape [0]
+            # the actual unsharded shape is stored in "ds_shape" attribute
+            # special handling is needed in case the model is initialized in deepspeed.zero.Init() context or HfDeepSpeedConfig
+            # has been called before
+            # For reference refer to issue: https://github.com/huggingface/peft/issues/996
+            deepspeed_distributed_tensor_shape = getattr(value, "ds_shape", None)
+
+            if value.shape[0] == self.base_model.config.vocab_size or (
+                deepspeed_distributed_tensor_shape is not None
+                and deepspeed_distributed_tensor_shape[0] == self.base_model.config.vocab_size
+            ):
                 self.word_embeddings = transformer_backbone.get_submodule(named_param.replace(".weight", ""))
                 break
 
@@ -654,13 +663,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Updates or create model card to include information about peft:
         1. Adds `peft` library tag
         2. Adds peft version
-        3. Adds quantization information if it was used
+        3. Adds base model info
+        4. Adds quantization information if it was used
         """
-        # Adds `peft` library tag
-        add_library_to_model_card(output_dir)
 
-        with open(os.path.join(output_dir, "README.md"), "r") as f:
-            lines = f.readlines()
+        filename = os.path.join(output_dir, "README.md")
+
+        card = ModelCard.load(filename) if os.path.exists(filename) else ModelCard.from_template(ModelCardData())
+
+        card.data["library_name"] = "peft"
+        model_config = self.config
+        if hasattr(model_config, "to_dict"):
+            model_config = model_config.to_dict()
+        if model_config["model_type"] != "custom":
+            card.data["base_model"] = model_config["_name_or_path"]
+
+        lines = card.text.splitlines()
 
         quantization_config = None
         if hasattr(self.config, "quantization_config"):
@@ -685,9 +703,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             lines.append(f"{framework_block_heading}\n\n- PEFT {__version__}\n")
 
-        # write the lines back to README.md
-        with open(os.path.join(output_dir, "README.md"), "w") as f:
-            f.writelines(lines)
+        card.text = "\n".join(lines)
+        card.save(filename)
 
 
 class PeftModelForSequenceClassification(PeftModel):
