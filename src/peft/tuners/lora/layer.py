@@ -240,16 +240,19 @@ class Linear(nn.Linear, LoraLayer):
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        previous_dtype = x.dtype
+
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
             result = self._linear(x)
+            previous_dtype = result.dtype
         elif self.merged:
             result = self._linear(x)
+            previous_dtype = result.dtype
         else:
             result = self._linear(x)
+            previous_dtype = result.dtype
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
