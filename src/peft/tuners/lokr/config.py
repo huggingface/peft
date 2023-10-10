@@ -16,7 +16,6 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
-# from peft.config import PeftConfig
 from peft.tuners.lycoris_utils import LyCORISConfig
 from peft.utils import PeftType
 
