@@ -183,22 +183,30 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
 
-    def test_ia3_is_feedforward_subset(self):
+    def test_ia3_is_feedforward_subset_invalid_config(self):
         # This test checks that the IA3 config raises a value error if the feedforward_modules argument
         # is not a subset of the target_modules argument
 
         # an example invalid config
         invalid_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
 
-        # an example valid config with regex expressions. no error should be raised for this.
-        valid_config = {
+        with self.assertRaisesRegex(
+            ValueError, expected_regex="`feedforward_modules` should be a subset of `target_modules`"
+        ):
+            IA3Config(**invalid_config)
+
+    def test_ia3_is_feedforward_subset_valid_config(self):
+        # This test checks that the IA3 config is created without errors with valid arguments.
+        # feedforward_modules should be a subset of target_modules if both are lists
+
+        # an example valid config with regex expressions.
+        valid_config_regex_exp = {
             "target_modules": ".*.(SelfAttention|EncDecAttention|DenseReluDense).*(q|v|wo)$",
             "feedforward_modules": ".*.DenseReluDense.wo$",
         }
-
-        with self.assertRaises(ValueError) as ctx:
-            IA3Config(**invalid_config)
-        self.assertEqual(str(ctx.exception), "`feedforward_modules` should be a subset of `target_modules`")
+        # an example valid config with module lists.
+        valid_config_list = {"target_modules": ["k", "v", "wo"], "feedforward_modules": ["wo"]}
 
         # should run without errors
-        IA3Config(**valid_config)
+        IA3Config(**valid_config_regex_exp)
+        IA3Config(**valid_config_list)

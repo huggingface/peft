@@ -81,9 +81,7 @@ class IA3Config(PeftConfig):
             set(self.feedforward_modules) if isinstance(self.feedforward_modules, list) else self.feedforward_modules
         )
 
-        # check if feedforward_modules is a subset of target_modules
-        if self.feedforward_modules and self.target_modules:
-            # run a check only if feedforward_modules and target_modules are lists, and not regex expressions
-            if (not isinstance(self.feedforward_modules, str)) and (not isinstance(self.target_modules, str)):
-                if not self.feedforward_modules.issubset(self.target_modules):
-                    raise ValueError("`feedforward_modules` should be a subset of `target_modules`")
+        # check if feedforward_modules is a subset of target_modules. run the check only if both are sets
+        if isinstance(self.feedforward_modules, set) and isinstance(self.target_modules, set):
+            if not self.feedforward_modules.issubset(self.target_modules):
+                raise ValueError("`feedforward_modules` should be a subset of `target_modules`")
