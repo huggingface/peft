@@ -95,11 +95,10 @@ if is_bnb_available():
                 output = bnb.functional.mm_dequant(out32, Sout32, SCim, self.state.SCB, bias=None).t()
                 w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
 
-                if safe_merge:
-                    if not torch.isfinite(w_data).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                if safe_merge and not torch.isfinite(w_data).all():
+                    raise ValueError(
+                        f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                    )
 
                 self.weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=self.weight.has_fp16_weights
@@ -237,11 +236,10 @@ if is_bnb_4bit_available():
                 lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(self.weight.data, self.weight.quant_state) + lora_data
 
-                if safe_merge:
-                    if not torch.isfinite(w_data).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                if safe_merge and not torch.isfinite(w_data).all():
+                    raise ValueError(
+                        f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                    )
                 self.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(self.weight.device)
                 self.merged_adapters.append(active_adapter)
 
