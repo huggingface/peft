@@ -22,10 +22,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.lycoris_utils import LyCORISLayer
 
 
-class LoKrLayer(BaseTunerLayer, nn.Module):
+class LoKrLayer(LyCORISLayer, nn.Module):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = [
         "lokr_w1",
@@ -38,6 +38,7 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
     ]
 
     def __init__(self):
+        LyCORISLayer.__init__(self)
         super(nn.Module, self).__init__()
 
         # LoKr info
@@ -53,14 +54,6 @@ class LoKrLayer(BaseTunerLayer, nn.Module):
         self.lokr_t2 = nn.ParameterDict({})
         self.rank_dropout = {}
         self.module_dropout = {}
-
-        # Tuner info
-        self._disable_adapters = False
-        self.merged_adapters = []
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the

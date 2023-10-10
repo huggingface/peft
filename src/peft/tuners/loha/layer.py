@@ -21,14 +21,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.lycoris_utils import LyCORISLayer
 
 
-class LoHaLayer(BaseTunerLayer, nn.Module):
+class LoHaLayer(LyCORISLayer, nn.Module):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ["hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2"]
 
     def __init__(self):
+        LyCORISLayer.__init__(self)
         super(nn.Module, self).__init__()
 
         # LoHa info
@@ -43,14 +44,6 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
         self.hada_t2 = nn.ParameterDict({})
         self.rank_dropout = {}
         self.module_dropout = {}
-
-        # Tuner info
-        self._disable_adapters = False
-        self.merged_adapters = []
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
