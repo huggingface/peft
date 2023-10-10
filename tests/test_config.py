@@ -191,7 +191,7 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
         invalid_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
 
         with self.assertRaisesRegex(
-            ValueError, expected_regex="`feedforward_modules` should be a subset of `target_modules`"
+            ValueError, expected_regex="^`feedforward_modules` should be a subset of `target_modules`$"
         ):
             IA3Config(**invalid_config)
 
