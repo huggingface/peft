@@ -17,7 +17,7 @@ import re
 import warnings
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Optional, Union
+from typing import Dict, Optional, Type, Union
 
 import torch
 import torch.nn as nn
@@ -81,6 +81,7 @@ class LyCORISTuner(BaseTuner):
     """
 
     prefix: str
+    layers_mapping: Dict[Type[torch.nn.Module], Type[LyCORISLayer]]
 
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
@@ -124,9 +125,53 @@ class LyCORISTuner(BaseTuner):
             new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
 
-    @staticmethod
-    def _create_new_module(config: LyCORISConfig, adapter_name: str, target: nn.Module, **kwargs) -> LyCORISLayer:
-        ...
+    @classmethod
+    def _create_new_module(cls, config: LyCORISConfig, adapter_name: str, target: nn.Module, **kwargs) -> LyCORISLayer:
+        # Find corresponding subtype of provided target module
+        new_module_cls = None
+        for subtype, target_cls in cls.layers_mapping.items():
+            if isinstance(target, subtype):
+                new_module_cls = target_cls
+                break
+
+        # We didn't find corresponding type, so adapter for this layer is not supported
+        if new_module_cls is None:
+            raise ValueError(
+                f"Target module not found, currently only adapters for {', '.join([x.__name__ for x in cls.modules_mapping.keys()])} are supported"
+            )
+
+        if isinstance(target, torch.nn.Conv2d):
+            new_module = new_module_cls(
+                target.in_channels,
+                target.out_channels,
+                target.weight.size()[2:],
+                stride=target.stride,
+                padding=target.padding,
+                dilation=target.dilation,
+                groups=target.groups,
+                bias=target.bias is not None,
+                padding_mode=target.padding_mode,
+                device=target.weight.device,
+                dtype=target.weight.dtype,
+                adapter_name=adapter_name,
+                **kwargs,
+            )
+        elif isinstance(target, torch.nn.Linear):
+            new_module = new_module_cls(
+                target.in_features,
+                target.out_features,
+                bias=target.bias is not None,
+                device=target.weight.device,
+                dtype=target.weight.dtype,
+                adapter_name=adapter_name,
+                **kwargs,
+            )
+        else:
+            raise ValueError(
+                "Target module not found, currently only adapters for nn.Linear and nn.Conv2d are supported"
+            )
+
+        return new_module
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():

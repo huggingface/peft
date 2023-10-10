@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Dict, Type
+
 import torch
 
 from ..lycoris_utils import LyCORISTuner
@@ -76,37 +78,7 @@ class LoHaModel(LyCORISTuner):
     """
 
     prefix: str = "hada_"
-
-    @staticmethod
-    def _create_new_module(config, adapter_name, target, **kwargs) -> LoHaLayer:
-        if isinstance(target, torch.nn.Conv2d):
-            new_module = Conv2d(
-                target.in_channels,
-                target.out_channels,
-                target.weight.size()[2:],
-                stride=target.stride,
-                padding=target.padding,
-                dilation=target.dilation,
-                groups=target.groups,
-                bias=target.bias is not None,
-                padding_mode=target.padding_mode,
-                device=target.weight.device,
-                dtype=target.weight.dtype,
-                adapter_name=adapter_name,
-                **kwargs,
-            )
-        elif isinstance(target, torch.nn.Linear):
-            new_module = Linear(
-                target.in_features,
-                target.out_features,
-                bias=target.bias is not None,
-                device=target.weight.device,
-                dtype=target.weight.dtype,
-                adapter_name=adapter_name,
-                **kwargs,
-            )
-        else:
-            raise ValueError(
-                "Target module not found, currently only adapters for nn.Linear and nn.Conv2d are supported"
-            )
-        return new_module
+    layers_mapping: Dict[Type[torch.nn.Module], Type[LoHaLayer]] = {
+        torch.nn.Conv2d: Conv2d,
+        torch.nn.Linear: Linear,
+    }
