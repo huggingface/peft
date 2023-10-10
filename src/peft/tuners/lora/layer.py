@@ -207,7 +207,16 @@ class Linear(nn.Linear, LoraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self.set_adapter(adapter_name)
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -215,7 +224,20 @@ class Linear(nn.Linear, LoraLayer):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self.lora_A.keys():
-                self.weight.data += self.get_delta_weight(active_adapter)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = self.weight.data.clone()
+                    orig_weights += self.get_delta_weight(active_adapter)
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    self.weight.data = orig_weights
+                else:
+                    self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -282,7 +304,16 @@ class Embedding(nn.Embedding, LoraLayer):
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -290,7 +321,20 @@ class Embedding(nn.Embedding, LoraLayer):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self.lora_embedding_A.keys():
-                self.weight.data += self.get_delta_weight(active_adapter)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = self.weight.data.copy()
+                    orig_weights += self.get_delta_weight(active_adapter)
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    self.weight.data = orig_weights
+                else:
+                    self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -369,7 +413,16 @@ class Conv2d(nn.Conv2d, LoraLayer):
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
+        """
+        Merge the active adapter weights inside the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -377,7 +430,19 @@ class Conv2d(nn.Conv2d, LoraLayer):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self.lora_A.keys():
-                self.weight.data += self.get_delta_weight(active_adapter)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = self.weight.data.copy()
+                    orig_weights += self.get_delta_weight(active_adapter)
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+                    self.weight.data = orig_weights
+                else:
+                    self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:

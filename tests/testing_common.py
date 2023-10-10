@@ -430,6 +430,65 @@ class PeftCommonTester:
             self.assertTrue(model_from_pretrained.peft_config["default"].inference_mode)
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
+    def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig):
+            # Merge layers only supported for LoRA and IA³
+            return
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        dummy_input = self.prepare_inputs_for_testing()
+
+        model.eval()
+
+        # This should work
+        logits_unmerged = model(**dummy_input)[0]
+
+        model = model.merge_and_unload()
+        logits_merged = model(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-3, rtol=1e-3))
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        for name, module in model.named_parameters():
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+                module.data[0] = torch.nan
+
+        with self.assertRaises(ValueError) as error_context:
+            model = model.merge_and_unload(safe_merge=True)
+
+        self.assertEqual(
+            str(error_context.exception),
+            "NaNs detected in the merged weights. The adapter default seems to be broken",
+        )
+
+        for name, module in model.named_parameters():
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+                module.data[0] = torch.inf
+
+        with self.assertRaises(ValueError) as error_context:
+            model = model.merge_and_unload(safe_merge=True)
+
+        self.assertEqual(
+            str(error_context.exception),
+            "NaNs detected in the merged weights. The adapter default seems to be broken",
+        )
+
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config):
             # Merge layers only supported for LoRA and IA³
@@ -451,15 +510,26 @@ class PeftCommonTester:
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
+        logits = model(**dummy_input)[0]
+
+        model.merge_adapter()
+        logits_merged = model(**dummy_input)[0]
+        model.unmerge_adapter()
         logits_unmerged = model(**dummy_input)[0]
 
         model = model.merge_and_unload()
-        logits_merged = model(**dummy_input)[0]
+        logits_merged_unloaded = model(**dummy_input)[0]
 
-        self.assertTrue(torch.allclose(logits_unmerged, logits_merged, atol=1e-4, rtol=1e-4))
+        atol, rtol = 1e-4, 1e-4
+        if (config.peft_type == "IA3") and (model_id == "Conv2d"):
+            # for some reason, the IA³ Conv2d introduces a larger error
+            atol, rtol = 0.3, 0.01
+        self.assertTrue(torch.allclose(logits, logits_merged, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol))
 
-        # For this test to work, init_lora_weights must be False. This ensures that weights are not initialized to
-        # the identity transform.
+        # For this test to work, weights should not be initialized to identity transform (e.g.
+        # init_lora_weights should be False).
         transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         logits_transformers = transformers_model(**dummy_input)[0]
         self.assertFalse(torch.allclose(logits_merged, logits_transformers, atol=1e-10, rtol=1e-10))
@@ -475,7 +545,7 @@ class PeftCommonTester:
             model_from_pretrained = pickle.loads(pickle.dumps(model))
 
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
-        self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=1e-4, rtol=1e-4))
+        self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)

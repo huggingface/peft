@@ -331,7 +331,12 @@ def fsdp_auto_wrap_policy(model):
 
 
 def transpose(weight, fan_in_fan_out):
-    return weight.T if fan_in_fan_out else weight
+    if not fan_in_fan_out:
+        return weight
+
+    if isinstance(weight, torch.nn.Parameter):
+        return torch.nn.Parameter(weight.T)
+    return weight.T
 
 
 def _is_valid_match(key: str, target_key: str):
