@@ -12,11 +12,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import operator
 import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
+from functools import reduce
 
 import torch
 from transformers.pytorch_utils import Conv1D
@@ -279,13 +280,15 @@ class IA3Model(BaseTuner):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            peft_config.target_modules = set(
+                TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            )
         if peft_config.feedforward_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING:
                 raise ValueError("Please specify `feedforward_modules` in `peft_config`")
-            peft_config.feedforward_modules = TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[
-                model_config["model_type"]
-            ]
+            peft_config.feedforward_modules = set(
+                TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[model_config["model_type"]]
+            )
         return peft_config
 
     def merge_and_unload(self, safe_merge: bool = False):
@@ -345,7 +348,7 @@ class IA3Model(BaseTuner):
         Args:
             adapter_name (str): Name of the adapter to be deleted.
         """
-        if adapter_name not in list(self.peft_config.keys()):
+        if adapter_name not in self.peft_config:
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
@@ -363,6 +366,32 @@ class IA3Model(BaseTuner):
                         f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
                     )
                     target.set_adapter(resetting_active_adapter)
+
+    def _new_modules(self, adapters, module_type):
+        """
+        Args:
+            adapters (`list`):
+                List of adapter names to be merged.
+            module_type (`str`):
+                Type of the module to be merged.
+        """
+        module_types = [type(getattr(self.peft_config[adapter], module_type)) for adapter in adapters]
+        if not module_types:
+            raise ValueError(f"Found no adapter matching the names in {adapters}")
+        if len(set(module_types)) > 1:
+            raise ValueError(
+                "all adapter configs should follow the same target modules type. "
+                f"Combining adapters with `{module_type}` type being a mix of list/set and string is not supported."
+            )
+        if module_types[0] == str:
+            new_modules = "|".join(f"({getattr(self.peft_config[adapter], module_type)})" for adapter in adapters)
+        elif module_types[0] == set:
+            new_modules = reduce(
+                operator.or_, (getattr(self.peft_config[adapter], module_type) for adapter in adapters)
+            )
+        else:
+            raise TypeError(f"Invalid type {module_types[0]} found in {module_type}")
+        return new_modules
 
     def add_weighted_adapter(self, adapters, weights, adapter_name):
         """
@@ -382,35 +411,8 @@ class IA3Model(BaseTuner):
             if adapter not in list(self.peft_config.keys()):
                 raise ValueError(f"Adapter {adapter} does not exist")
 
-        target_modules_type = type(self.peft_config[adapters[0]].target_modules)
-        new_target_modules = set() if target_modules_type == list else ""
-        feedforward_modules_type = type(self.peft_config[adapters[0]].feedforward_modules)
-        new_feedforward_modules = set() if feedforward_modules_type == list else ""
-        for adapter in adapters:
-            if type(self.peft_config[adapter].target_modules) != target_modules_type:
-                raise ValueError(
-                    "all adapter configs should follow the same target modules type. "
-                    "Combining adapters with `target_modules` type being a mix of list and string is not supported."
-                )
-            if target_modules_type == list:
-                new_target_modules |= set(self.peft_config[adapter].target_modules)
-            else:
-                new_target_modules += f"({self.peft_config[adapter].target_modules})|"
-
-            if type(self.peft_config[adapter].feedforward_modules) != feedforward_modules_type:
-                raise ValueError(
-                    "all adapter configs should follow the same feedforward modules type. "
-                    "Combining adapters with `feedforward_modules` type being a mix of list and string is not supported."
-                )
-            if feedforward_modules_type == list:
-                new_feedforward_modules |= set(self.peft_config[adapter].feedforward_modules)
-            else:
-                new_feedforward_modules += f"({self.peft_config[adapter].feedforward_modules})|"
-
-        new_target_modules = list(new_target_modules) if target_modules_type == list else new_target_modules[:-1]
-        new_feedforward_modules = (
-            list(new_feedforward_modules) if target_modules_type == list else new_feedforward_modules[:-1]
-        )
+        new_target_modules = self._new_modules(adapters, "target_modules")
+        new_feedforward_modules = self._new_modules(adapters, "feedforward_modules")
 
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],

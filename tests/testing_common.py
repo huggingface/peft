@@ -832,8 +832,8 @@ class PeftCommonTester:
                         "lora_dropout",
                     ]:
                         self.assertFalse(adapter_to_delete in getattr(target, attr))
-                if isinstance(target, IA3Layer):
-                    self.assertFalse(adapter_to_delete in getattr(target, "ia3_l"))
+                elif isinstance(target, IA3Layer):
+                    self.assertFalse(adapter_to_delete in target.ia3_l)
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -873,14 +873,14 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        if not isinstance(config, (LoraConfig)) or not isinstance(config, (IA3Config)):
+        if not isinstance(config, (LoraConfig, IA3Config)):
             return
-        model = get_peft_model(model, config, adapter_list[0])
-        model.add_adapter(adapter_list[1], config)
-        model.add_adapter(adapter_list[2], replace(config, r=20))
-        model = model.to(self.torch_device)
 
         if isinstance(config, (LoraConfig)):
+            model = get_peft_model(model, config, adapter_list[0])
+            model.add_adapter(adapter_list[1], config)
+            model.add_adapter(adapter_list[2], replace(config, r=20))
+            model = model.to(self.torch_device)
             # test re-weighting single adapter
             model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
 
@@ -940,6 +940,10 @@ class PeftCommonTester:
                 _ = model(**dummy_input)[0]
 
         elif isinstance(config, (IA3Config)):
+            model = get_peft_model(model, config, adapter_list[0])
+            model.add_adapter(adapter_list[1], config)
+            model.add_adapter(adapter_list[2], config)
+            model = model.to(self.torch_device)
             # single adapter re-weighting and multi adapter linear re-weighting
             # Note: IA3 only supports linear re-weighting
             model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
@@ -952,16 +956,6 @@ class PeftCommonTester:
             for new_adapter in new_adapters:
                 self.assertTrue(new_adapter in model.peft_config)
 
-            key_list = [key for key, _ in model.named_modules() if "ia3" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(model, key)
-                if isinstance(target, IA3Layer):
-                    for adapter_name in new_adapters:
-                        new_delta_weight = target.get_delta_weight(adapter_name)
-                        weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
-                        self.assertTrue(
-                            torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
-                        )
             for adapter_name in new_adapters:
                 # ensuring new adapters pass the forward loop
                 model.set_adapter(adapter_name)
