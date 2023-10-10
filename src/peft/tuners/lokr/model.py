@@ -214,7 +214,7 @@ class LoKrModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "hada_" in name:
+            if "lokr_" in name:
                 module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
@@ -230,7 +230,7 @@ class LoKrModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOKR layers when the model is gptq quantized")
 
-        key_list = [key for key, _ in self.model.named_modules() if "hada" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if "lokr" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
