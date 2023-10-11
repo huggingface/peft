@@ -241,7 +241,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
 
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
