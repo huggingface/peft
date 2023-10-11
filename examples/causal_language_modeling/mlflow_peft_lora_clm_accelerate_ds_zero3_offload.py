@@ -236,7 +236,7 @@ def main(args):
     print(next(iter(train_dataloader)))
 
     # creating model
-    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, pad_token_id=tokenizer.eos_token_id)
+    model = AutoModelForCausalLM.from_pretrained(model_name_or_path, pad_token_id=tokenizer.eos_token_id, trust_remote_code=True)
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
