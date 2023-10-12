@@ -74,6 +74,7 @@ class Linear(nn.Linear, IA3Layer):
         out_features: int,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_feedforward: bool = False,  # Set to True if the layer is treated as a feedforward layer
+        is_target_conv_1d_layer: bool = False,  # whether target module is a conv1d layer. useful while unloading later
         **kwargs,
     ) -> None:
         init_ia3_weights = kwargs.pop("init_ia3_weights", True)
@@ -87,6 +88,8 @@ class Linear(nn.Linear, IA3Layer):
         self.fan_in_fan_out = fan_in_fan_out
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
+
+        self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, init_ia3_weights)

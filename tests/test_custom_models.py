@@ -86,26 +86,26 @@ TEST_CASES = [
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "feedforward_modules": ["lin0"]},
     ),
     # TODO: There are errors when trying to merge Conv1D, hence skipping them for now
-    # (
-    #     "transformers Conv1D 1 IA3",
-    #     "EmbConv1D",
-    #     IA3Config,
-    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"]},
-    # ),
-    # (
-    #     "transformers Conv1D 2 IA3",
-    #     "EmbConv1D",
-    #     IA3Config,
-    #     {"target_modules": ["conv1d", "lin0"], "feedforward_modules": ["conv1d", "lin0"]},
-    # ),
-    # (
-    #     "transformers Conv1D 1 IA3",
-    #     "EmbConv1D",
-    #     IA3Config,
-    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin1"]},
-    # ),
-    # ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
-    # ("Conv2d 2 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
+    (
+        "transformers Conv1D 1 IA3",
+        "EmbConv1D",
+        IA3Config,
+        {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"]},
+    ),
+    (
+        "transformers Conv1D 2 IA3",
+        "EmbConv1D",
+        IA3Config,
+        {"target_modules": ["conv1d", "lin0"], "feedforward_modules": ["conv1d", "lin0"]},
+    ),
+    (
+        "transformers Conv1D 1 IA3",
+        "EmbConv1D",
+        IA3Config,
+        {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin1"]},
+    ),
+    ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
+    ("Conv2d 2 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
     (
         "Conv2d 3 IA3",
         "Conv2d",
@@ -557,11 +557,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        atol, rtol = 1e-5, 1e-5  # merging introduces some numerical instability
-        if issubclass(config_cls, IA3Config):  # IA³ introduces more instability
-            atol, rtol = 1e-3, 1e-3
+        atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
 
+        # check that there is a difference in results after training
         self.assertFalse(torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol))
+
+        # change atol and rtol for IA3 for the merge related checks, since the merge introduces more instability
+        # for IA3
+        if issubclass(config_cls, IA3Config):
+            atol, rtol = 1e-3, 1e-3
         self.assertTrue(torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol))
         self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol))
 
