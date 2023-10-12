@@ -316,17 +316,17 @@ class MockTransformerWrapper:
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
-        if torch_dtype is not None:
-            torch.set_default_dtype(torch_dtype)
+        if torch_dtype is None:
+            torch_dtype = torch.float32
 
         if model_id == "MLP":
-            return MLP()
+            return MLP().to(torch_dtype)
 
         if model_id == "EmbConv1D":
-            return ModelEmbConv1D()
+            return ModelEmbConv1D().to(torch_dtype)
 
         if model_id == "Conv2d":
-            return ModelConv2D()
+            return ModelConv2D().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
