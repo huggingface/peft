@@ -116,6 +116,7 @@ class LoraLayer(BaseTunerLayer):
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
+        # Note: set_adapter is called by the caller, not required here
 
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
@@ -142,6 +143,7 @@ class LoraLayer(BaseTunerLayer):
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
+        # Note: set_adapter is called by the caller, not required here
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
