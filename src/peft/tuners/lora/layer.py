@@ -380,13 +380,13 @@ class Embedding(nn.Embedding, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = self.lora_embedding_B[adapter].weight.device
-        dtype = self.lora_embedding_A[adapter].weight.dtype
+        device = self.lora_embedding_B[adapter].device
+        dtype = self.lora_embedding_A[adapter].dtype
 
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
-        weight_A = self.lora_embedding_A[adapter].weight
-        weight_B = self.lora_embedding_B[adapter].weight
+        weight_A = self.lora_embedding_A[adapter]
+        weight_B = self.lora_embedding_B[adapter]
 
         if cast_to_fp32:
             weight_A = weight_A.float()
@@ -398,8 +398,8 @@ class Embedding(nn.Embedding, LoraLayer):
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            self.lora_embedding_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_embedding_B[adapter].weight.data = weight_B.to(dtype)
+            self.lora_embedding_A[adapter] = weight_A.to(dtype)
+            self.lora_embedding_B[adapter] = weight_B.to(dtype)
 
         return output_tensor
 
@@ -523,9 +523,12 @@ class Conv2d(nn.Conv2d, LoraLayer):
 
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
+        weight_A = self.lora_A[adapter].weight
+        weight_B = self.lora_B[adapter].weight
+
         if cast_to_fp32:
-            weight_A = self.lora_A[adapter].weight.float()
-            weight_B = self.lora_B[adapter].weight.float()
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
 
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
         if self.weight.size()[2:4] == (1, 1):
@@ -538,7 +541,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
             output_tensor = (
                 F.conv2d(
                     weight_A.permute(1, 0, 2, 3),
-                    weight_B.weight,
+                    weight_B,
                 ).permute(1, 0, 2, 3)
                 * self.scaling[adapter]
             )
