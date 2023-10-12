@@ -312,9 +312,12 @@ class MockTransformerWrapper:
     """
 
     @classmethod
-    def from_pretrained(cls, model_id):
+    def from_pretrained(cls, model_id, torch_dtype=None):
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
+
+        if torch_dtype is not None:
+            torch.set_default_dtype(torch_dtype)
 
         if model_id == "MLP":
             return MLP()
@@ -369,6 +372,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = config_kwargs.copy()
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
+        self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
