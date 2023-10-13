@@ -281,8 +281,7 @@ class LyCORISTuner(BaseTuner):
             raise ValueError("Please specify `target_modules` in `peft_config`")
         return peft_config
 
-    @classmethod
-    def _replace_module(cls, parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -296,7 +295,7 @@ class LyCORISTuner(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if cls.prefix in name:
+            if self.prefix in name:
                 module.to(child.weight.device)
 
     def _set_adapter_layers(self, enabled=True):
