@@ -262,7 +262,7 @@ class Linear(nn.Linear, LoraLayer):
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        # float16.
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
         weight_A = self.lora_A[adapter].weight
@@ -384,7 +384,7 @@ class Embedding(nn.Embedding, LoraLayer):
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        # float16.
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
         weight_A = self.lora_embedding_A[adapter]
@@ -523,7 +523,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        # float16.
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
         weight_A = self.lora_A[adapter].weight
