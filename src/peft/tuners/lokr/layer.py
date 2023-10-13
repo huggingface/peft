@@ -310,9 +310,9 @@ def factorization(dimension: int, factor: int = -1) -> Tuple[int, int]:
     return a tuple of two value of input dimension decomposed by the number closest to factor second value is higher or
     equal than first value.
 
-    In LoRA with Kroneckor Product, first value is a value for weight scale. secon value is a value for weight.
+    In LoRA with Kroneckor Product, first value is a value for weight scale, second value is a value for weight.
 
-    Becuase of non-commutative property, A⊗B ≠ B⊗A. Meaning of two matrices is slightly different.
+    Because of non-commutative property, A⊗B ≠ B⊗A. Meaning of two matrices is slightly different.
 
     examples) factor
         -1 2 4 8 16 ...

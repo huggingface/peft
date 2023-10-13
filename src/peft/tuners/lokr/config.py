@@ -23,7 +23,7 @@ from peft.utils import PeftType
 @dataclass
 class LoKrConfig(LyCORISConfig):
     """
-    This is the configuration class to store the configuration of a [`LoKrModel`].
+    Configuration class of [`LoKrModel`].
 
     Args:
         r (`int`): LoKr rank.
