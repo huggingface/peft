@@ -201,12 +201,24 @@ class LoraModel(BaseTuner):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
-        new_module.weight = child.weight
-        if hasattr(child, "bias"):
-            new_module.bias = child.bias
+
+        # child layer wraps the original module, unpack it
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+        elif hasattr(child, "quant_linear_module"):
+            child = child.quant_linear_module
+
+        # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
-            new_module.state = child.state
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
@@ -256,9 +268,7 @@ class LoraModel(BaseTuner):
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(
-                adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
-            )
+            new_module = Linear8bitLt(adapter_name, target, **eightbit_kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -268,7 +278,7 @@ class LoraModel(BaseTuner):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
+            new_module = Linear4bit(adapter_name, target, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
             new_module = QuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
@@ -365,7 +375,7 @@ class LoraModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
@@ -389,28 +399,28 @@ class LoraModel(BaseTuner):
                         padding=target.padding,
                         dilation=target.dilation,
                     )
-                elif is_bnb_available() and isinstance(target, bnb.nn.Linear8bitLt):
-                    bias = target.bias is not None
+                elif is_bnb_available() and isinstance(target, Linear8bitLt):
+                    bias = target.base_layer.bias is not None
                     new_module = bnb.nn.Linear8bitLt(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        has_fp16_weights=target.state.has_fp16_weights,
-                        memory_efficient_backward=target.state.memory_efficient_backward,
-                        threshold=target.state.threshold,
-                        index=target.index,
-                        device=target.weight.device,
+                        has_fp16_weights=target.base_layer.state.has_fp16_weights,
+                        memory_efficient_backward=target.base_layer.state.memory_efficient_backward,
+                        threshold=target.base_layer.state.threshold,
+                        index=target.base_layer.index,
+                        device=target.base_layer.weight.device,
                     )
-                elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
-                    bias = target.bias is not None
+                elif is_bnb_4bit_available() and isinstance(target, Linear4bit):
+                    bias = target.base_layer.bias is not None
                     new_module = bnb.nn.Linear4bit(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        compute_dtype=target.compute_dtype,
-                        compress_statistics=target.weight.compress_statistics,
-                        quant_type=target.weight.quant_type,
-                        device=target.weight.device,
+                        compute_dtype=target.base_layer.compute_dtype,
+                        compress_statistics=target.base_layer.weight.compress_statistics,
+                        quant_type=target.base_layer.weight.quant_type,
+                        device=target.base_layer.weight.device,
                     )
                 else:
                     bias = target.bias is not None
@@ -419,7 +429,7 @@ class LoraModel(BaseTuner):
                     else:
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
-                    target.merge()
+                    target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
@@ -674,13 +684,17 @@ class LoraModel(BaseTuner):
                     )
                     target.set_adapter(resetting_active_adapter)
 
-    def merge_and_unload(self, progressbar: bool = False):
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
 
         Args:
-            progressbar (bool): whether to show a progressbar indicating the unload and merge process
+            progressbar (`bool`):
+                whether to show a progressbar indicating the unload and merge process
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights
 
         Example:
 
@@ -694,7 +708,7 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar)
+        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
 
     def unload(self):
         """

@@ -675,7 +675,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model_config = self.config
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config["model_type"] != "custom":
+        if model_config.get("model_type", "custom") != "custom":
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
