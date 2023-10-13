@@ -20,10 +20,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.tuners.lycoris_utils import LyCORISLayer
+from peft.tuners.lycoris_utils import LycorisLayer
 
 
-class LoKrLayer(LyCORISLayer, nn.Module):
+class LoKrLayer(LycorisLayer, nn.Module):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = [
         "lokr_w1",
@@ -36,7 +36,7 @@ class LoKrLayer(LyCORISLayer, nn.Module):
     ]
 
     def __init__(self):
-        LyCORISLayer.__init__(self)
+        LycorisLayer.__init__(self)
         super(nn.Module, self).__init__()
 
         # LoKr info

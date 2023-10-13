@@ -20,15 +20,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.tuners.lycoris_utils import LyCORISLayer
+from peft.tuners.lycoris_utils import LycorisLayer
 
 
-class LoHaLayer(LyCORISLayer, nn.Module):
+class LoHaLayer(LycorisLayer, nn.Module):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ["hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2"]
 
     def __init__(self):
-        LyCORISLayer.__init__(self)
+        LycorisLayer.__init__(self)
         super(nn.Module, self).__init__()
 
         # LoHa info

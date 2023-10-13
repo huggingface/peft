@@ -33,7 +33,7 @@ from .tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 
 
 @dataclass
-class LyCORISConfig(PeftConfig):
+class LycorisConfig(PeftConfig):
     r"""
     A base config for LyCORIS like adapters
     """
@@ -57,7 +57,7 @@ class LyCORISConfig(PeftConfig):
     )
 
 
-class LyCORISLayer(BaseTunerLayer, nn.Module):
+class LycorisLayer(BaseTunerLayer, nn.Module):
     r"""
     A base layer for LyCORIS like adapters
     """
@@ -178,7 +178,7 @@ class LyCORISTuner(BaseTuner):
     """
 
     prefix: str
-    layers_mapping: Dict[Type[torch.nn.Module], Type[LyCORISLayer]]
+    layers_mapping: Dict[Type[torch.nn.Module], Type[LycorisLayer]]
 
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
@@ -196,9 +196,9 @@ class LyCORISTuner(BaseTuner):
 
     def _create_and_replace(
         self,
-        config: LyCORISConfig,
+        config: LycorisConfig,
         adapter_name: str,
-        target: Union[LyCORISLayer, nn.Module],
+        target: Union[LycorisLayer, nn.Module],
         target_name,
         parent,
         current_key,
@@ -216,14 +216,14 @@ class LyCORISTuner(BaseTuner):
         kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
         kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
 
-        if isinstance(target, LyCORISLayer):
+        if isinstance(target, LycorisLayer):
             target.update_layer(adapter_name, **kwargs)
         else:
             new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
 
     @classmethod
-    def _create_new_module(cls, config: LyCORISConfig, adapter_name: str, target: nn.Module, **kwargs) -> LyCORISLayer:
+    def _create_new_module(cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs) -> LycorisLayer:
         # Find corresponding subtype of provided target module
         new_module_cls = None
         for subtype, target_cls in cls.layers_mapping.items():
@@ -315,7 +315,7 @@ class LyCORISTuner(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, LyCORISLayer):
+            if isinstance(target, LycorisLayer):
                 if isinstance(target, nn.Conv2d):
                     new_module = torch.nn.Conv2d(
                         target.in_channels,
@@ -358,7 +358,7 @@ class LyCORISTuner(BaseTuner):
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, LyCORISLayer):
+            if isinstance(module, LycorisLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()

@@ -16,12 +16,12 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
-from peft.tuners.lycoris_utils import LyCORISConfig
+from peft.tuners.lycoris_utils import LycorisConfig
 from peft.utils import PeftType
 
 
 @dataclass
-class LoHaConfig(LyCORISConfig):
+class LoHaConfig(LycorisConfig):
     """
     This is the configuration class to store the configuration of a [`LoHaModel`].
 
