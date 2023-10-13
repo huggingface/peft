@@ -120,10 +120,13 @@ def create_unet_adapter_config(args: argparse.Namespace) -> Union[LoraConfig, Lo
             decompose_factor=args.unet_decompose_factor,
             init_weights=True,
         )
+    else:
+        raise ValueError(f"Unknown adapter type {args.adapter}")
+
     return config
 
 
-def create_te_adapter_config(args: argparse.Namespace) -> Union[LoraConfig, LoHaConfig, LoKrConfig]:
+def create_text_encoder_adapter_config(args: argparse.Namespace) -> Union[LoraConfig, LoHaConfig, LoKrConfig]:
     if args.adapter == "full":
         raise ValueError("Cannot create text_encoder adapter config for full parameter")
 
@@ -156,6 +159,9 @@ def create_te_adapter_config(args: argparse.Namespace) -> Union[LoraConfig, LoHa
             decompose_factor=args.te_decompose_factor,
             init_weights=True,
         )
+    else:
+        raise ValueError(f"Unknown adapter type {args.adapter}")
+
     return config
 
 
@@ -898,7 +904,7 @@ def main(args):
     if not args.train_text_encoder:
         text_encoder.requires_grad_(False)
     elif args.train_text_encoder and args.adapter != "full":
-        config = create_te_adapter_config(args)
+        config = create_text_encoder_adapter_config(args)
         text_encoder = get_peft_model(text_encoder, config)
         text_encoder.print_trainable_parameters()
         print(text_encoder)
