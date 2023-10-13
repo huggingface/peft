@@ -35,7 +35,7 @@ class LoRAInfo:
             raise ValueError("At least one of lora_A or lora_B is None, they must both be provided")
         return {
             f"base_model.model{self.peft_key}.lora_A.weight": self.lora_A,
-            f"base_model.model.{self.peft_key}.lora_B.weight": self.lora_A,
+            f"base_model.model.{self.peft_key}.lora_B.weight": self.lora_B,
         }
 
 
@@ -68,8 +68,8 @@ class LoHaInfo:
         ):
             raise ValueError("hada_t1 and hada_t2 must be either both present or not present at the same time")
         if self.hada_t1 is not None and self.hada_t2 is not None:
-            state_dict[f"{self.peft_key}.hada_t1"] = self.hada_t1
-            state_dict[f"{self.peft_key}.hada_t2"] = self.hada_t2
+            state_dict[f"base_model.model.{self.peft_key}.hada_t1"] = self.hada_t1
+            state_dict[f"base_model.model.{self.peft_key}.hada_t2"] = self.hada_t2
         return state_dict
 
 
@@ -91,8 +91,8 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     target_modules = sorted(info.keys())
 
     # Determine most common rank and alpha
-    r = Counter(ranks.values()).most_common(1)[0]
-    lora_alpha = Counter(alphas.values()).most_common(1)[0]
+    r = int(Counter(ranks.values()).most_common(1)[0][0])
+    lora_alpha = Counter(alphas.values()).most_common(1)[0][0]
 
     # Determine which modules have different rank and alpha
     rank_pattern = dict(sorted(filter(lambda x: x[1] != r, ranks.items()), key=lambda x: x[0]))
@@ -130,8 +130,8 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo]) -> LoHaConfig:
     target_modules = sorted(info.keys())
 
     # Determine most common rank and alpha
-    r = Counter(ranks.values()).most_common(1)[0]
-    alpha = Counter(alphas.values()).most_common(1)[0]
+    r = int(Counter(ranks.values()).most_common(1)[0][0])
+    alpha = Counter(alphas.values()).most_common(1)[0][0]
 
     # Determine which modules have different rank and alpha
     rank_pattern = dict(sorted(filter(lambda x: x[1] != r, ranks.items()), key=lambda x: x[0]))
@@ -282,9 +282,15 @@ if __name__ == "__main__":
             elif kohya_type == "hada_t1":
                 adapter_info[model_type][peft_key].hada_t1 = tensor
                 adapter_info[model_type][peft_key].rank = tensor.shape[0]
-            elif kohya_type == "hada_t2":
+
+                # Right now there exists a bug, so we need to rewrite hada_t2 tensor with hada_t1 info
+                # https://github.com/KohakuBlueleaf/LyCORIS/pull/115
                 adapter_info[model_type][peft_key].hada_t2 = tensor
-                adapter_info[model_type][peft_key].rank = tensor.shape[0]
+
+            elif kohya_type == "hada_t2":
+                # adapter_info[model_type][peft_key].hada_t2 = tensor
+                # adapter_info[model_type][peft_key].rank = tensor.shape[0]
+                pass
             else:
                 raise ValueError(f"Unknown weight name in key: {key} - {kohya_type}")
 
