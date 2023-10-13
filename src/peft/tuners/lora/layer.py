@@ -251,9 +251,7 @@ class Linear(nn.Linear, LoraLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
-        Compute the delta weight for the given adapter. In case users wants to merge the adapter weights that are in
-        float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        float16.
+        Compute the delta weight for the given adapter.
 
         Args:
             adapter (str):
@@ -262,6 +260,9 @@ class Linear(nn.Linear, LoraLayer):
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
 
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
         weight_A = self.lora_A[adapter].weight
@@ -372,9 +373,7 @@ class Embedding(nn.Embedding, LoraLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
-        Compute the delta weight for the given adapter. In case users wants to merge the adapter weights that are in
-        float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        float16.
+        Compute the delta weight for the given adapter.
 
         Args:
             adapter (str):
@@ -383,6 +382,9 @@ class Embedding(nn.Embedding, LoraLayer):
         device = self.lora_embedding_B[adapter].device
         dtype = self.lora_embedding_A[adapter].dtype
 
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
         weight_A = self.lora_embedding_A[adapter]
@@ -510,9 +512,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
-        Compute the delta weight for the given adapter. In case users wants to merge the adapter weights that are in
-        float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        float16.
+        Compute the delta weight for the given adapter.
 
         Args:
             adapter (str):
@@ -521,6 +521,9 @@ class Conv2d(nn.Conv2d, LoraLayer):
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_A[adapter].weight.dtype
 
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
         weight_A = self.lora_A[adapter].weight

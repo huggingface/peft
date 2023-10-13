@@ -443,7 +443,7 @@ class PeftCommonTester:
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(torch.float16)
+        model = model.to(device="cpu", dtype=torch.float16)
 
         model.eval()
 
