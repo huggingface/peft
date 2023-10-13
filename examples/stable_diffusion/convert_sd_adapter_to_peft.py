@@ -3,7 +3,7 @@ import json
 import os
 from collections import Counter
 from dataclasses import dataclass
-from functools import reduce
+from operator import attrgetter
 from typing import Dict, List, Optional, Union
 
 import safetensors
@@ -23,11 +23,6 @@ UNET_TARGET_REPLACE_MODULE_CONV2D_3X3 = ["ResnetBlock2D", "Downsample2D", "Upsam
 TEXT_ENCODER_TARGET_REPLACE_MODULE = ["CLIPAttention", "CLIPMLP"]
 PREFIX_UNET = "lora_unet"
 PREFIX_TEXT_ENCODER = "lora_te"
-
-
-def get_module_by_name(module: Union[torch.Tensor, nn.Module], access_string: str):
-    names = access_string.split(sep=".")
-    return reduce(getattr, names, module)
 
 
 @dataclass
@@ -97,12 +92,11 @@ class LoKrInfo:
     lokr_t2: Optional[torch.Tensor] = None
 
     def peft_state_dict(self) -> Dict[str, torch.Tensor]:
-        if (self.lokr_w1 is None and self.lokr_w1_a is None and self.lokr_w1_b is None) or (
-            self.lokr_w2 is None and self.lokr_w2_a is None and self.lokr_w2_b is None
-        ):
-            raise ValueError(
-                "At least one of lokr_w1, lokr_w1_a, lokr_w1_b, lokr_w2, lokr_w2_a, lokr_w2_b is missing, they all must be provided"
-            )
+        if (self.lokr_w1 is None) and ((self.lokr_w1_a is None) or (self.lokr_w1_b is None)):
+            raise ValueError("Either lokr_w1 or both lokr_w1_a and lokr_w1_b should be provided")
+
+        if (self.lokr_w2 is None) and ((self.lokr_w2_a is None) or (self.lokr_w2_b is None)):
+            raise ValueError("Either lokr_w2 or both lokr_w2_a and lokr_w2_b should be provided")
 
         state_dict = {}
 
@@ -397,7 +391,7 @@ if __name__ == "__main__":
             peft_key = models_keys[kohya_key]
 
             # Retrieve corresponding layer of model
-            layer = get_module_by_name(model, peft_key)
+            layer = attrgetter(peft_key)(model)
 
             # Create a corresponding adapter info
             if peft_key not in adapter_info[model_type]:
