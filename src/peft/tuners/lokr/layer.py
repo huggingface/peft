@@ -14,8 +14,7 @@
 # limitations under the License.
 
 import math
-from itertools import chain
-from typing import Iterable, Optional, Tuple, Union
+from typing import Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -50,18 +49,16 @@ class LoKrLayer(LyCORISLayer, nn.Module):
         self.lokr_t2 = nn.ParameterDict({})
 
     @property
-    def _available_adapters(self) -> Iterable[str]:
-        return set(
-            chain(
-                self.lokr_w1.keys(),
-                self.lokr_w1_a.keys(),
-                self.lokr_w1_b.keys(),
-                self.lokr_w2.keys(),
-                self.lokr_w2_a.keys(),
-                self.lokr_w2_b.keys(),
-                self.lokr_t2.keys(),
-            )
-        )
+    def _available_adapters(self) -> Set[str]:
+        return {
+            *self.lokr_w1,
+            *self.lokr_w1_a,
+            *self.lokr_w1_b,
+            *self.lokr_w2,
+            *self.lokr_w2_a,
+            *self.lokr_w2_b,
+            *self.lokr_t2,
+        }
 
     def create_adapter_parameters(
         self,

@@ -17,7 +17,7 @@ import re
 import warnings
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Dict, Iterable, Optional, Type, Union
+from typing import Dict, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -74,7 +74,7 @@ class LyCORISLayer(BaseTunerLayer, nn.Module):
         self.merged_adapters = []
 
     @property
-    def _available_adapters(self) -> Iterable[str]:
+    def _available_adapters(self) -> Set[str]:
         ...
 
     @property

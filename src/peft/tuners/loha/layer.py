@@ -14,8 +14,7 @@
 # limitations under the License.
 
 import math
-from itertools import chain
-from typing import Iterable, Optional, Tuple, Union
+from typing import Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -41,17 +40,8 @@ class LoHaLayer(LyCORISLayer, nn.Module):
         self.hada_t2 = nn.ParameterDict({})
 
     @property
-    def _available_adapters(self) -> Iterable[str]:
-        return set(
-            chain(
-                self.hada_w1_a.keys(),
-                self.hada_w1_b.keys(),
-                self.hada_w2_a.keys(),
-                self.hada_w2_b.keys(),
-                self.hada_t1.keys(),
-                self.hada_t2.keys(),
-            )
-        )
+    def _available_adapters(self) -> Set[str]:
+        return {*self.hada_w1_a, *self.hada_w1_b, *self.hada_w2_a, *self.hada_w2_b, *self.hada_t1, *self.hada_t2}
 
     def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L130C9-L143C75
