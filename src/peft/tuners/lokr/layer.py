@@ -306,20 +306,33 @@ class Conv2d(LoKrLayer, nn.Conv2d):
 
 
 def factorization(dimension: int, factor: int = -1) -> Tuple[int, int]:
-    """
-    return a tuple of two value of input dimension decomposed by the number closest to factor second value is higher or
-    equal than first value.
+    """Factorizes the provided number into the product of two numbers
 
-    In LoRA with Kroneckor Product, first value is a value for weight scale, second value is a value for weight.
+    Args:
+        dimension (`int`): The number that needs to be factorized.
+        factor (`int`, optional):
+            Factorization divider. The algorithm will try to output two numbers, one of each will be as close to the
+            factor as possible. If -1 is provided, the decomposition algorithm would try to search dividers near the
+            square root of the dimension. Defaults to -1.
 
-    Because of non-commutative property, A⊗B ≠ B⊗A. Meaning of two matrices is slightly different.
+    Returns:
+        Tuple[`int`, `int`]: A tuple of two numbers, whose product is equal to the provided number. The first number is
+        always less than or equal to the second.
 
-    examples) factor
-        -1 2 4 8 16 ...
-    127 -> 127, 1 127 -> 127, 1 127 -> 127, 1 127 -> 127, 1 127 -> 127, 1 128 -> 16, 8 128 -> 64, 2 128 -> 32, 4 128 ->
-    16, 8 128 -> 16, 8 250 -> 125, 2 250 -> 125, 2 250 -> 125, 2 250 -> 125, 2 250 -> 125, 2 360 -> 45, 8 360 -> 180, 2
-    360 -> 90, 4 360 -> 45, 8 360 -> 45, 8 512 -> 32, 16 512 -> 256, 2 512 -> 128, 4 512 -> 64, 8 512 -> 32, 16 1024 ->
-    32, 32 1024 -> 512, 2 1024 -> 256, 4 1024 -> 128, 8 1024 -> 64, 16
+    Example:
+        ```py
+        >>> factorization(256, factor=-1)
+        (16, 16)
+
+        >>> factorization(128, factor=-1)
+        (8, 16)
+
+        >>> factorization(127, factor=-1)
+        (1, 127)
+
+        >>> factorization(128, factor=4)
+        (4, 32)
+        ```
     """
 
     if factor > 0 and (dimension % factor) == 0:
