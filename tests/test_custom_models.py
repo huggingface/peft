@@ -162,6 +162,31 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    ("Conv2d 4 LOKR", "Conv2d", LoKrConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+    (
+        "Conv2d 5 LOKR",
+        "Conv2d",
+        LoKrConfig,
+        {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "decompose_both": True},
+    ),
+    (
+        "Conv2d 6 LOKR",
+        "Conv2d",
+        LoKrConfig,
+        {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True, "decompose_factor": 4},
+    ),
+    (
+        "Conv2d 7 LOKR",
+        "Conv2d",
+        LoKrConfig,
+        {
+            "target_modules": ["conv2d", "lin0"],
+            "use_effective_conv2d": True,
+            "decompose_both": True,
+            "decompose_factor": 4,
+        },
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -449,6 +474,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
         self.assertEqual(params_before.keys(), params_after.keys())
+
+        if isinstance(model, ModelConv2D):
+            print(model)
+            self.assertFalse(True)
 
         prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
