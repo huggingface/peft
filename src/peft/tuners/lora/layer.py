@@ -250,13 +250,38 @@ class Linear(nn.Linear, LoraLayer):
                 self.weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
-        return (
-            transpose(
-                self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
-                self.fan_in_fan_out,
-            )
-            * self.scaling[adapter]
-        )
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_B[adapter].weight.dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
+        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+
+        weight_A = self.lora_A[adapter].weight
+        weight_B = self.lora_B[adapter].weight
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.lora_A[adapter].weight.data = weight_A.to(dtype)
+            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+
+        return output_tensor
 
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
@@ -347,7 +372,38 @@ class Embedding(nn.Embedding, LoraLayer):
                 self.weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
-        return transpose(self.lora_embedding_B[adapter] @ self.lora_embedding_A[adapter], True) * self.scaling[adapter]
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.lora_embedding_B[adapter].device
+        dtype = self.lora_embedding_A[adapter].dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
+        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+
+        weight_A = self.lora_embedding_A[adapter]
+        weight_B = self.lora_embedding_B[adapter]
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
+        output_tensor = transpose(weight_B @ weight_A, True) * self.scaling[adapter]
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.lora_embedding_A[adapter] = weight_A.to(dtype)
+            self.lora_embedding_B[adapter] = weight_B.to(dtype)
+
+        return output_tensor
 
     def _embed(self, input: torch.Tensor, weight: Optional[torch.Tensor] = None) -> torch.Tensor:
         weight = self.weight if weight is None else weight
@@ -455,21 +511,52 @@ class Conv2d(nn.Conv2d, LoraLayer):
                 self.weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_A[adapter].weight.dtype
+
+        # In case users wants to merge the adapter weights that are in
+        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
+        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
+        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
+
+        weight_A = self.lora_A[adapter].weight
+        weight_B = self.lora_B[adapter].weight
+
+        if cast_to_fp32:
+            weight_A = weight_A.float()
+            weight_B = weight_B.float()
+
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
         if self.weight.size()[2:4] == (1, 1):
             # conv2d 1x1
-            return (
-                self.lora_B[adapter].weight.squeeze(3).squeeze(2) @ self.lora_A[adapter].weight.squeeze(3).squeeze(2)
-            ).unsqueeze(2).unsqueeze(3) * self.scaling[adapter]
+            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
+                3
+            ) * self.scaling[adapter]
         else:
             # conv2d 3x3
-            return (
+            output_tensor = (
                 F.conv2d(
-                    self.lora_A[adapter].weight.permute(1, 0, 2, 3),
-                    self.lora_B[adapter].weight,
+                    weight_A.permute(1, 0, 2, 3),
+                    weight_B,
                 ).permute(1, 0, 2, 3)
                 * self.scaling[adapter]
             )
+
+        if cast_to_fp32:
+            output_tensor = output_tensor.to(dtype=dtype)
+
+            # cast back the weights
+            self.lora_A[adapter].weight.data = weight_A.to(dtype)
+            self.lora_B[adapter].weight.data = weight_B.to(dtype)
+
+        return output_tensor
 
     def _conv2d(self, input: torch.Tensor) -> torch.Tensor:
         return F.conv2d(
