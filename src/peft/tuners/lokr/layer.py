@@ -164,7 +164,7 @@ class LoKrLayer(LyCORISLayer, nn.Module):
             use_w2 = r >= max(shape[0][1], shape[1][1]) / 2
             use_effective_conv2d = use_effective_conv2d and self.kernel_size != (1, 1)
         else:
-            raise NotImplementedError(f"LoKr is not implemented for {type(self).__name__} layer")
+            raise TypeError(f"LoKr is not implemented for {type(self).__name__} layer")
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape, use_w1, use_w2, use_effective_conv2d)

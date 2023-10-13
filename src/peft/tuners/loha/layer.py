@@ -114,7 +114,7 @@ class LoHaLayer(LyCORISLayer, nn.Module):
             else:
                 shape = (self.out_channels, self.in_channels * self.kernel_size[0] * self.kernel_size[1])
         else:
-            raise NotImplementedError(f"LoHa is not implemented for {type(self).__name__} layer")
+            raise TypeError(f"LoHa is not implemented for {type(self).__name__} layer")
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape)
