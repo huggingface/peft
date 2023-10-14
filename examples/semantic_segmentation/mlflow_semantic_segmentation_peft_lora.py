@@ -25,6 +25,11 @@ parser.add_argument("--per_device_eval_batch_size", type=int, default=2, help="B
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
 parser.add_argument("--logging_steps", type=int, default=10,
                     help="Log metrics every X steps")
+parser.add_argument(
+        "--amp", 
+        action="store_true", 
+        help="Enable automatic mixed precision training (fp16).",
+    )
 args = parser.parse_args()
 
 # Load dataset
@@ -151,6 +156,7 @@ training_args = TrainingArguments(
     num_train_epochs=args.num_train_epochs,
     per_device_train_batch_size=args.per_device_train_batch_size,
     per_device_eval_batch_size=args.per_device_eval_batch_size,
+    fp16=args.amp,
     save_total_limit=3,
     evaluation_strategy="epoch",
     save_strategy="epoch",
