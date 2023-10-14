@@ -1,14 +1,13 @@
 import argparse
-
 import evaluate
 import torch
+from torch.cuda.amp import autocast, GradScaler  # New import for AMP
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from datasets import load_dataset
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
-
 from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -19,6 +18,7 @@ from peft.utils.other import fsdp_auto_wrap_policy
 import mlflow
 import time
 import os
+
 logging_steps = 100
 
 def parse_args():
@@ -75,6 +75,11 @@ def parse_args():
     )
     parser.add_argument('--dataset_name', type=str, default='glue', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+    parser.add_argument(
+        "--amp", 
+        action="store_true", 
+        help="Enable automatic mixed precision training (fp16).",
+    )
     args = parser.parse_args()
 
     assert args.output_dir is not None, "Need an `output_dir` to store the finetune model and verify."
@@ -92,8 +97,9 @@ def get_num_parameters(model):
 
 def main():
     args = parse_args()
+    
     ddp_scaler = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(kwargs_handlers=[ddp_scaler])
+    accelerator = Accelerator(fp16=args.amp, kwargs_handlers=[ddp_scaler])
 
     task = "mrpc"
 
