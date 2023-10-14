@@ -1,7 +1,6 @@
 import argparse
 import evaluate
 import torch
-from torch.cuda.amp import autocast, GradScaler  # New import for AMP
 from accelerate import Accelerator, DistributedDataParallelKwargs
 from datasets import load_dataset
 from torch.optim import AdamW
