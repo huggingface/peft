@@ -122,7 +122,8 @@ class TorchTracemalloc:
 
 
 def main(args):
-    accelerator = Accelerator()
+    accelerator = Accelerator(fp16=args.amp)
+    
     model_name_or_path = args.model_name_or_path
     dataset_name = args.dataset_name
     text_column = args.text_column
@@ -421,5 +422,10 @@ if __name__ == "__main__":
     parser.add_argument('--do_test', type=bool, default=False, help='do test.')
     parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+    parser.add_argument(
+        "--amp", 
+        action="store_true", 
+        help="Enable automatic mixed precision training (fp16).",
+    )
     args = parser.parse_args()
     main(args)
