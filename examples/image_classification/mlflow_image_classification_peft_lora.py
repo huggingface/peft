@@ -32,6 +32,11 @@ parser.add_argument("--logging_steps", type=int, default=10,
                     help="Log metrics every X steps")
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
 parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+parser.add_argument(
+        "--amp", 
+        action="store_true", 
+        help="Enable automatic mixed precision training (fp16).",
+    )
 
 args = parser.parse_args()
 
@@ -128,7 +133,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=args.batch_size,
     gradient_accumulation_steps=4,
     per_device_eval_batch_size=args.batch_size,
-    fp16=True,
+    fp16=args.amp,
     num_train_epochs=args.num_train_epochs,
     logging_steps=args.logging_steps,
     load_best_model_at_end=True,
