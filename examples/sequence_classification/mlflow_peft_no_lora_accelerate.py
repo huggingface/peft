@@ -22,7 +22,7 @@ logging_steps = 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
-    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument(
         "--num_virtual_tokens",
         type=int,
@@ -75,9 +75,10 @@ def parse_args():
     parser.add_argument('--dataset_name', type=str, default='glue', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     parser.add_argument(
-        "--amp", 
-        action="store_true", 
-        help="Enable automatic mixed precision training (fp16).",
+        "--amp",
+        type=str,
+        default='fp16',
+        help="Enable automatic mixed precision training (fp16/bf16/fp8).",
     )
     args = parser.parse_args()
 
@@ -98,7 +99,7 @@ def main():
     args = parse_args()
     
     ddp_scaler = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(fp16=args.amp, kwargs_handlers=[ddp_scaler])
+    accelerator = Accelerator(mixed_precision=args.amp, kwargs_handlers=[ddp_scaler])
 
     task = "mrpc"
 
