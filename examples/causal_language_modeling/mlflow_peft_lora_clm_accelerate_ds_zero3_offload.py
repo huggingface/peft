@@ -122,7 +122,7 @@ class TorchTracemalloc:
 
 
 def main(args):
-    accelerator = Accelerator(fp16=args.amp)
+    accelerator = Accelerator(mixed_precision=args.amp)
     
     model_name_or_path = args.model_name_or_path
     dataset_name = args.dataset_name
