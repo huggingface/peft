@@ -22,7 +22,7 @@ logging_steps = 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
-    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
+    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
     parser.add_argument(
         "--num_virtual_tokens",
         type=int,
