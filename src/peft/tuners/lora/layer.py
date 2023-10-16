@@ -156,12 +156,16 @@ class LoraLayer(BaseTunerLayer):
     def scale_layer(self, scale_factor: float) -> None:
         if scale_factor != 1:
             for active_adapter in self.active_adapters:
+                if active_adapter not in self.lora_A.keys():
+                    continue
                 alpha = self.lora_alpha[active_adapter]
                 r = self.r[active_adapter]
                 self.scaling[active_adapter] = (alpha / r) * scale_factor
 
     def unscale_layer(self) -> None:
         for active_adapter in self.active_adapters:
+            if active_adapter not in self.lora_A.keys():
+                continue
             alpha = self.lora_alpha[active_adapter]
             r = self.r[active_adapter]
             self.scaling[active_adapter] = alpha / r
