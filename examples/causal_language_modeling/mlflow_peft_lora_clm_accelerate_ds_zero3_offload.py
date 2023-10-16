@@ -78,7 +78,7 @@ class TorchTracemalloc:
     def __enter__(self):
         gc.collect()
         torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
+        # torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
         self.begin = torch.cuda.memory_allocated()
         self.process = psutil.Process()
 
@@ -122,7 +122,10 @@ class TorchTracemalloc:
 
 
 def main(args):
-    accelerator = Accelerator(mixed_precision=args.amp)
+    if args.amp:
+        accelerator = Accelerator(mixed_precision='fp16')
+    else:
+        accelerator = Accelerator(mixed_precision='no')
     
     model_name_or_path = args.model_name_or_path
     dataset_name = args.dataset_name
@@ -410,7 +413,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Indexing elasticsearch documents.')
-    parser.add_argument('--model_name_or_path', type=str, default='bigscience/bloomz-7b1', help='Path to pretrained model or model identifier from huggingface.co/models.')
+    parser.add_argument('--model_name_or_path', type=str, default='bigscience/bloomz-560m', help='Path to pretrained model or model identifier from huggingface.co/models.')
     parser.add_argument('--dataset_name', type=str, default='twitter_complaints', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--text_column', type=str, default="Tweet text", help='text column.')
     parser.add_argument('--label_column', type=str, default="text_label", help='label column.')

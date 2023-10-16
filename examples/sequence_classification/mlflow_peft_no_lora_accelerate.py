@@ -22,7 +22,7 @@ logging_steps = 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
-    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument(
         "--num_virtual_tokens",
         type=int,
@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument(
         "--per_device_train_batch_size",
         type=int,
-        default=8,
+        default=900,
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument(
@@ -59,7 +59,7 @@ def parse_args():
         default=1e-3,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
-    parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
+    parser.add_argument("--num_train_epochs", type=int, default=1, help="Total number of training epochs to perform.")
     parser.add_argument(
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )

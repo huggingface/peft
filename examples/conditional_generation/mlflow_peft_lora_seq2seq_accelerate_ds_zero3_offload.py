@@ -67,7 +67,7 @@ class TorchTracemalloc:
     def __enter__(self):
         gc.collect()
         torch.cuda.empty_cache()
-        torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
+        # torch.cuda.reset_max_memory_allocated()  # reset the peak gauge to zero
         self.begin = torch.cuda.memory_allocated()
         self.process = psutil.Process()
 
@@ -346,9 +346,9 @@ if __name__ == "__main__":
     parser.add_argument("--model_name_or_path", type=str, default="facebook/bart-large", help="Pretrained model name or path")
     parser.add_argument('--dataset_name', type=str, default='twitter_complaints', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
-    parser.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
-    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=900, help="Batch size")
+    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     parser.add_argument(
         "--amp",
