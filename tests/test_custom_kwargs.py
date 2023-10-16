@@ -24,8 +24,6 @@ from peft.tuners.adalora import SVDLinear as AdaLoraLinear
 from peft.tuners.ia3 import Linear as IA3Linear
 from peft.tuners.lora import Linear as LoraLinear
 
-from .testing_common import PeftCommonTester
-
 
 TEST_CASES = [
     # LoRA
@@ -168,7 +166,7 @@ MODULE_MAPPING = {
 }
 
 
-class PeftCustomKwargsTester(unittest.TestCase, PeftCommonTester):
+class PeftCustomKwargsTester(unittest.TestCase):
     r"""
     Test if the PeftModel is instantiated with correct behaviour for custom kwargs. This includes:
     - test if adapters like LoRA, IA3, AdaLoRA replace the right layers
