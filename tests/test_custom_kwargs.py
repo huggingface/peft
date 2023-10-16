@@ -65,7 +65,7 @@ TEST_CASES = [
         "hf-internal-testing/tiny-random-gpt2",
         LoraConfig,
         {"target_modules": ".*(attn|mlp).(c_attn|c_proj|c_fc)$"},
-        {"expected_target_modules": ["attn.c_attn", "attn.c_proj", "mlp.c_proj", "mlp.c_fc"]},
+        {"expected_target_modules": ["c_attn", "c_proj", "c_fc"]},
     ),
     # AdaLoRA
     (
@@ -106,7 +106,7 @@ TEST_CASES = [
         "hf-internal-testing/tiny-random-gpt2",
         AdaLoraConfig,
         {"target_modules": ".*(attn|mlp).(c_attn|c_proj|c_fc)$"},
-        {"expected_target_modules": ["attn.c_attn", "attn.c_proj", "mlp.c_proj", "mlp.c_fc"]},
+        {"expected_target_modules": ["c_attn", "c_proj", "c_fc"]},
     ),
     # IA3
     (
@@ -153,8 +153,8 @@ TEST_CASES = [
         IA3Config,
         {"target_modules": ".*(attn|mlp).(c_attn|c_proj|c_fc)$", "feedforward_modules": ".*.mlp.(c_proj|c_fc)$"},
         {
-            "expected_target_modules": ["attn.c_attn", "attn.c_proj", "mlp.c_proj", "mlp.c_fc"],
-            "expected_feedforward_modules": ["mlp.c_proj", "mlp.c_fc"],
+            "expected_target_modules": ["c_attn", "c_proj", "c_fc"],
+            "expected_feedforward_modules": ["mlp.c_proj", "mlp.c_fc"],  # only mlp.c_proj and mlp.c_fc are feedforward
         },
     ),
 ]
