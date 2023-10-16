@@ -153,22 +153,27 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
-    def scale_layer(self, scale_factor: float) -> None:
+    def scale_layer(self, scale_factor: float, use_original_scale: bool = True) -> None:
         if scale_factor != 1:
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
                 alpha = self.lora_alpha[active_adapter]
                 r = self.r[active_adapter]
-                self.scaling[active_adapter] = (alpha / r) * scale_factor
+                scale = (alpha / r) if use_original_scale else self.scaling[active_adapter]
+                self.scaling[active_adapter] = scale * scale_factor
 
-    def unscale_layer(self) -> None:
+    def unscale_layer(self, scale_factor: Optional[float] = None, use_original_scale: bool = True) -> None:
+        if not use_original_scale and scale_factor is None:
+            raise ValueError("`scale_factor` cannot be `None` when `use_original_scale` is `False`.")
         for active_adapter in self.active_adapters:
             if active_adapter not in self.lora_A.keys():
                 continue
             alpha = self.lora_alpha[active_adapter]
             r = self.r[active_adapter]
-            self.scaling[active_adapter] = alpha / r
+            self.scaling[active_adapter] = (
+                (alpha / r) if use_original_scale else self.scaling[active_adapter] / scale_factor
+            )
 
 
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
