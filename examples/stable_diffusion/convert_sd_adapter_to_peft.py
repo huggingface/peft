@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 from collections import Counter
 from dataclasses import dataclass
@@ -202,6 +203,11 @@ if __name__ == "__main__":
     parser.add_argument("--dump_path", default=None, type=str, required=True, help="Path to the output peft adapter.")
 
     parser.add_argument("--half", action="store_true", help="Save weights in half precision.")
+    parser.add_argument(
+        "--loha_weights_fix",
+        action="store_true",
+        help="Apply LoHa weights fix from this PR https://github.com/KohakuBlueleaf/LyCORIS/pull/115",
+    )
     args = parser.parse_args()
 
     # Load all models that we need to add adapter to
@@ -279,18 +285,21 @@ if __name__ == "__main__":
             elif kohya_type == "hada_w2_b":
                 adapter_info[model_type][peft_key].hada_w2_b = tensor
                 adapter_info[model_type][peft_key].rank = tensor.shape[0]
-            elif kohya_type == "hada_t1":
-                adapter_info[model_type][peft_key].hada_t1 = tensor
-                adapter_info[model_type][peft_key].rank = tensor.shape[0]
-
-                # Right now there exists a bug, so we need to rewrite hada_t2 tensor with hada_t1 info
-                # https://github.com/KohakuBlueleaf/LyCORIS/pull/115
-                adapter_info[model_type][peft_key].hada_t2 = tensor
-
-            elif kohya_type == "hada_t2":
-                # adapter_info[model_type][peft_key].hada_t2 = tensor
-                # adapter_info[model_type][peft_key].rank = tensor.shape[0]
-                pass
+            elif kohya_type in {"hada_t1", "hada_t2"}:
+                if args.loha_weights_fix:
+                    if kohya_type == "hada_t1":
+                        # Right now there exists a bug, so we need to rewrite hada_t2 tensor with hada_t1 info
+                        # https://github.com/KohakuBlueleaf/LyCORIS/pull/115
+                        adapter_info[model_type][peft_key].hada_t1 = tensor
+                        adapter_info[model_type][peft_key].hada_t2 = tensor
+                        adapter_info[model_type][peft_key].rank = tensor.shape[0]
+                else:
+                    if kohya_type == "hada_t1":
+                        adapter_info[model_type][peft_key].hada_t1 = tensor
+                        adapter_info[model_type][peft_key].rank = tensor.shape[0]
+                    elif kohya_type == "hada_t2":
+                        adapter_info[model_type][peft_key].hada_t2 = tensor
+                        adapter_info[model_type][peft_key].rank = tensor.shape[0]
             else:
                 raise ValueError(f"Unknown weight name in key: {key} - {kohya_type}")
 
@@ -303,6 +312,18 @@ if __name__ == "__main__":
     # Process each model sequentially
     for model, model_name in [(text_encoder, "text_encoder"), (unet, "unet")]:
         config = construct_config_fn(adapter_info[model_name])
+
+        # Output warning for LoHa with use_effective_conv2d
+        if (
+            isinstance(config, LoHaConfig)
+            and getattr(config, "use_effective_conv2d", False)
+            and args.loha_weights_fix is False
+        ):
+            logging.warning(
+                'Current official LoHa implementation contains a bug, which can be fixed with "--loha_weights_fix".\n'
+                "For more info, please refer to https://github.com/huggingface/peft/pull/1021 and https://github.com/KohakuBlueleaf/LyCORIS/pull/115"
+            )
+
         model = get_peft_model(model, config)
         set_peft_model_state_dict(model, combine_peft_state_dict(adapter_info[model_name]))
 
