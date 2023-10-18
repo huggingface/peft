@@ -63,7 +63,7 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
     return tuple(result)
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, use_reentrant=True):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -87,17 +87,18 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
 
     if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
         # For backward compatibility
-        if hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        else:
+        if use_reentrant:
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            else:
 
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
+                def make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
 
-            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+                model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
         # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable()
+        model.gradient_checkpointing_enable(use_reentrant=use_reentrant)
 
     return model
 
