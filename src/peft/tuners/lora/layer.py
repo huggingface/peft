@@ -155,11 +155,8 @@ class LoraLayer(BaseTunerLayer):
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
-            raise ValueError(
-                f"Adapter name {adapter} not found in the model. Please pass one of the",
-                f" adapter names in {list(self.scaling.keys())}",
-            )
-
+            # Ignore the case where the adapter is not in the layer
+            return
         self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
     def scale_layer(self, scale: float) -> None:
