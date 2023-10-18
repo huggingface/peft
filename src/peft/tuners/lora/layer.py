@@ -154,6 +154,9 @@ class LoraLayer(BaseTunerLayer):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def set_scale(self, adapter, scale):
+        if adapter not in self.scaling:
+            # Ignore the case where the adapter is not in the layer
+            return
         self.scaling[adapter] = scale * self.lora_alpha[adapter] / self.r[adapter]
 
     def scale_layer(self, scale: float) -> None:
