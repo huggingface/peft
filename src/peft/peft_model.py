@@ -145,6 +145,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         save_directory: str,
         safe_serialization: bool = False,
         selected_adapters: Optional[List[str]] = None,
+        save_function = torch.save,
         **kwargs: Any,
     ):
         r"""
@@ -193,7 +194,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     metadata={"format": "pt"},
                 )
             else:
-                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+                save_function(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
             if peft_config.base_model_name_or_path is None:
