@@ -145,7 +145,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         save_directory: str,
         safe_serialization: bool = False,
         selected_adapters: Optional[List[str]] = None,
-        save_function = torch.save,
+        save_function: Optional[function] = None,
         **kwargs: Any,
     ):
         r"""
@@ -157,6 +157,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
                 exist).
+            safe_serialization (`bool`, *optional*, defaults to `False`):
+                Whether to save model in safe tensors format.
+            save_function (`function`, *optional*, defaults to `torch.save`):
+                Specify a save function. Not compatible with save serialization.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
@@ -188,12 +192,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             os.makedirs(output_dir, exist_ok=True)
 
             if safe_serialization:
+                if save_function is not None:
+                    raise ValueError("You passed a save function, while it is not compatible with safe serialization.")
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
                     metadata={"format": "pt"},
                 )
             else:
+                if save_function is None:
+                    save_function = torch.save
                 save_function(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
