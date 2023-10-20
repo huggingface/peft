@@ -136,6 +136,9 @@ class PeftConfigMixin(PushToHubMixin):
             if hasattr(config, key):
                 setattr(config, key, value)
 
+        # converting the `target_modules` to set
+        config.__post_init__()
+
         return config
 
     @classmethod
