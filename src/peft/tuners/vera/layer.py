@@ -47,8 +47,8 @@ class VeraLayer(BaseTunerLayer):
         self.vera_B = nn.ModuleDict({})
 
         # For storing vector scale
-        self.vera_lambda_b = nn.ModuleDict({})
-        self.vera_lambda_d = nn.ModuleDict({})
+        self.vera_lambda_b = nn.ParameterDict({})
+        self.vera_lambda_d = nn.ParameterDict({})
         # For Embedding layer
         self.vera_embedding_A = nn.ParameterDict({})
         self.vera_embedding_B = nn.ParameterDict({})
@@ -175,6 +175,8 @@ class VeraLayer(BaseTunerLayer):
 
     def reset_vera_parameters(self, adapter_name):
         if adapter_name in self.vera_A.keys():
+            # TODO: these need to be shared between all layers, or at least come from same PRNG key!
+            # ..but do they really? would be nice to check
             nn.init.kaiming_normal_(self.vera_A[adapter_name].weight, a=math.sqrt(5))
             nn.init.kaiming_normal_(self.vera_B[adapter_name].weight)
 
