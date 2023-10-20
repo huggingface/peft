@@ -20,9 +20,25 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.init import _calculate_correct_fan, calculate_gain
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
+
+
+def _kaiming_init(
+    tensor: torch.Tensor,
+    generator: torch.Generator,
+    a: float = 0,
+    mode: str = "fan_in",
+    nonlinearity: str = "leaky_relu",
+):
+    fan = _calculate_correct_fan(tensor, mode)
+    gain = calculate_gain(nonlinearity, a)
+    std = gain / math.sqrt(fan)
+
+    with torch.no_grad():
+        return tensor.normal_(0, std, generator=generator)
 
 
 class VeraLayer(BaseTunerLayer):
@@ -75,7 +91,7 @@ class VeraLayer(BaseTunerLayer):
         cls.__init__(self, *args, device="meta", **kwargs)
         self.to_empty(device=final_device)
 
-    def update_layer(self, adapter_name, r, vera_alpha, vera_dropout, init_vera_weights):
+    def update_layer(self, adapter_name, r, vera_alpha, vera_dropout, init_vera_weights, prng_key):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -97,7 +113,7 @@ class VeraLayer(BaseTunerLayer):
 
             self.scaling[adapter_name] = vera_alpha / r
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name)
+            self.reset_vera_parameters(adapter_name, prng_key)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
@@ -108,7 +124,7 @@ class VeraLayer(BaseTunerLayer):
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
 
-    def update_layer_conv2d(self, adapter_name, r, vera_alpha, vera_dropout, init_vera_weights):
+    def update_layer_conv2d(self, adapter_name, r, vera_alpha, vera_dropout, init_vera_weights, prng_key):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -134,14 +150,14 @@ class VeraLayer(BaseTunerLayer):
 
             self.scaling[adapter_name] = vera_alpha / r
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name)
+            self.reset_vera_parameters(adapter_name, prng_key)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
 
-    def update_layer_embedding(self, adapter_name, r, vera_alpha, vera_dropout, init_vera_weights):
+    def update_layer_embedding(self, adapter_name, r, vera_alpha, vera_dropout, init_vera_weights, prng_key):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -166,19 +182,20 @@ class VeraLayer(BaseTunerLayer):
 
             self.scaling[adapter_name] = vera_alpha / r
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name)
+            self.reset_vera_parameters(adapter_name, prng_key)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
 
-    def reset_vera_parameters(self, adapter_name):
+    def reset_vera_parameters(self, adapter_name, prng_key):
+        generator = torch.Generator().manual_seed(prng_key)
         if adapter_name in self.vera_A.keys():
             # TODO: these need to be shared between all layers, or at least come from same PRNG key!
             # ..but do they really? would be nice to check
-            nn.init.kaiming_normal_(self.vera_A[adapter_name].weight, a=math.sqrt(5))
-            nn.init.kaiming_normal_(self.vera_B[adapter_name].weight)
+            _kaiming_init(self.vera_A[adapter_name].weight, generator, a=math.sqrt(5))
+            _kaiming_init(self.vera_B[adapter_name].weight, generator, a=math.sqrt(5))
 
             # TODO: probably don't need as this is set in `mark_only_adapters_as_trainable`
             self.vera_A[adapter_name].weight.requires_grad = False
@@ -188,8 +205,8 @@ class VeraLayer(BaseTunerLayer):
             nn.init.zeros_(self.vera_lambda_b[adapter_name])
 
         if adapter_name in self.vera_embedding_A.keys():
-            nn.init.kaiming_normal_(self.vera_embedding_A[adapter_name])
-            nn.init.kaiming_normal_(self.vera_embedding_B[adapter_name])
+            _kaiming_init(self.vera_embedding_A[adapter_name], generator)
+            _kaiming_init(self.vera_embedding_B[adapter_name], generator)
 
             self.vera_embedding_A[adapter_name].requires_grad = False
             self.vera_embedding_B[adapter_name].requires_grad = False
@@ -241,6 +258,7 @@ class Linear(nn.Linear, VeraLayer):
         adapter_name: str,
         in_features: int,
         out_features: int,
+        prng_key: int,
         r: int = 0,
         vera_alpha: int = 1,
         vera_dropout: float = 0.0,
@@ -260,7 +278,7 @@ class Linear(nn.Linear, VeraLayer):
 
         self.fan_in_fan_out = fan_in_fan_out
 
-        self.update_layer(adapter_name, r, vera_alpha, vera_dropout, init_vera_weights)
+        self.update_layer(adapter_name, r, vera_alpha, vera_dropout, init_vera_weights, prng_key)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self.set_adapter(adapter_name)
 
@@ -390,6 +408,7 @@ class Embedding(nn.Embedding, VeraLayer):
         adapter_name: str,
         num_embeddings: int,
         embedding_dim: int,
+        prng_key: int,
         r: int = 0,
         vera_alpha: int = 1,
         vera_dropout: float = 0.0,
@@ -398,7 +417,7 @@ class Embedding(nn.Embedding, VeraLayer):
         init_vera_weights = kwargs.pop("init_vera_weights", True)
         self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
         VeraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
-        self.update_layer_embedding(adapter_name, r, vera_alpha, vera_dropout, init_vera_weights)
+        self.update_layer_embedding(adapter_name, r, vera_alpha, vera_dropout, init_vera_weights, prng_key)
         self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:
@@ -528,6 +547,7 @@ class Conv2d(nn.Conv2d, VeraLayer):
     def __init__(
         self,
         adapter_name: str,
+        prng_key: int,
         in_channels: int,
         out_channels: int,
         kernel_size: Union[int, Tuple[int]],
@@ -550,7 +570,7 @@ class Conv2d(nn.Conv2d, VeraLayer):
             padding=padding,
         )
 
-        self.update_layer_conv2d(adapter_name, r, vera_alpha, vera_dropout, init_vera_weights)
+        self.update_layer_conv2d(adapter_name, r, vera_alpha, vera_dropout, init_vera_weights, prng_key)
         self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:

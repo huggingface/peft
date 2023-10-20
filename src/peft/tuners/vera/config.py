@@ -62,6 +62,7 @@ class VeraConfig(PeftConfig):
         },
     )
     vera_alpha: int = field(default=8, metadata={"help": "Vera alpha"})
+    projection_prng_key: Optional[int] = field(default=None, metadata={"help": "Vera PRNG init key"})
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
     fan_in_fan_out: bool = field(
         default=False,

@@ -112,6 +112,9 @@ class VeraModel(BaseTuner):
                 "set bias to 'none' for all adapters."
             )
 
+        if config.projection_prng_key is None:
+            raise ValueError("Vera PRNG initialisation key cannot be `None`. Set `VeraConfig.projection_prng_key`.")
+
     @staticmethod
     def _check_target_module_exists(vera_config, key):
         return check_target_module_exists(vera_config, key)
@@ -158,6 +161,7 @@ class VeraModel(BaseTuner):
                 alpha,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
+                vera_config.projection_prng_key,
             )
         elif isinstance(target, VeraLayer) and isinstance(target, torch.nn.Embedding):
             target.update_layer_embedding(
@@ -166,6 +170,7 @@ class VeraModel(BaseTuner):
                 alpha,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
+                vera_config.projection_prng_key,
             )
 
         elif isinstance(target, VeraLayer):
@@ -175,6 +180,7 @@ class VeraModel(BaseTuner):
                 alpha,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
+                vera_config.projection_prng_key,
             )
         else:
             new_module = self._create_new_module(vera_config, adapter_name, target, **kwargs)
@@ -242,7 +248,9 @@ class VeraModel(BaseTuner):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
             in_features, out_features = target.num_embeddings, target.embedding_dim
-            new_module = Embedding(adapter_name, in_features, out_features, **embedding_kwargs)
+            new_module = Embedding(
+                adapter_name, in_features, out_features, vera_config.projection_prng_key, **embedding_kwargs
+            )
         elif isinstance(target, torch.nn.Conv2d):
             out_channels, in_channels = target.weight.size()[:2]
             kernel_size = target.weight.size()[2:]
@@ -274,7 +282,9 @@ class VeraModel(BaseTuner):
                     f"Target module {target} is not supported. Currently, only the following modules are supported: "
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
-            new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+            new_module = Linear(
+                adapter_name, in_features, out_features, vera_config.projection_prng_key, bias=bias, **kwargs
+            )
 
         return new_module
 
