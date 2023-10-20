@@ -45,6 +45,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VeraModel,
 )
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
@@ -66,6 +67,7 @@ from .utils import (
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
+    PeftType.VERA: VeraModel,
     PeftType.LOHA: LoHaModel,
     PeftType.PROMPT_TUNING: PromptEmbedding,
     PeftType.P_TUNING: PromptEncoder,

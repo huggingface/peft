@@ -19,6 +19,7 @@
 
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
 from .lora import LoraConfig, LoraModel
+from .vera import VeraConfig, VeraModel
 from .loha import LoHaConfig, LoHaModel
 from .ia3 import IA3Config, IA3Model
 from .adalora import AdaLoraConfig, AdaLoraModel
@@ -30,6 +31,7 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 # Mapping of tuners that support direct plugging
 TUNERS_MAPPING = {
     "LORA": LoraModel,
+    "VERA": VeraModel,
     "IA3": IA3Model,
     "ADALORA": AdaLoraModel,
 }
