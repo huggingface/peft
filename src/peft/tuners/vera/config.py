@@ -64,6 +64,7 @@ class VeraConfig(PeftConfig):
     vera_alpha: int = field(default=8, metadata={"help": "Vera alpha"})
     projection_prng_key: Optional[int] = field(default=None, metadata={"help": "Vera PRNG init key"})
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
+    d_initial: float = field(default=1.0, metadata={"help": "Initial init value for d vector."})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},

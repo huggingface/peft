@@ -162,6 +162,7 @@ class VeraModel(BaseTuner):
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 vera_config.projection_prng_key,
+                d_initial=vera_config.d_initial,
             )
         elif isinstance(target, VeraLayer) and isinstance(target, torch.nn.Embedding):
             target.update_layer_embedding(
@@ -171,6 +172,7 @@ class VeraModel(BaseTuner):
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 vera_config.projection_prng_key,
+                d_initial=vera_config.d_initial,
             )
 
         elif isinstance(target, VeraLayer):
@@ -181,6 +183,7 @@ class VeraModel(BaseTuner):
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 vera_config.projection_prng_key,
+                d_initial=vera_config.d_initial,
             )
         else:
             new_module = self._create_new_module(vera_config, adapter_name, target, **kwargs)
@@ -249,14 +252,14 @@ class VeraModel(BaseTuner):
             embedding_kwargs.pop("fan_in_fan_out", None)
             in_features, out_features = target.num_embeddings, target.embedding_dim
             new_module = Embedding(
-                adapter_name, in_features, out_features, vera_config.projection_prng_key, **embedding_kwargs
+                adapter_name, in_features, out_features, vera_config.projection_prng_key, d_initial=vera_config.d_initial, **embedding_kwargs
             )
         elif isinstance(target, torch.nn.Conv2d):
             out_channels, in_channels = target.weight.size()[:2]
             kernel_size = target.weight.size()[2:]
             stride = target.stride
             padding = target.padding
-            new_module = Conv2d(adapter_name, in_channels, out_channels, kernel_size, stride, padding, **kwargs)
+            new_module = Conv2d(adapter_name, in_channels, out_channels, kernel_size, stride, padding, d_initial=vera_config.d_initial, **kwargs)
         else:
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
@@ -283,7 +286,7 @@ class VeraModel(BaseTuner):
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(
-                adapter_name, in_features, out_features, vera_config.projection_prng_key, bias=bias, **kwargs
+                adapter_name, in_features, out_features, vera_config.projection_prng_key, bias=bias, d_initial=vera_config.d_initial, **kwargs
             )
 
         return new_module
