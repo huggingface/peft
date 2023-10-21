@@ -37,8 +37,10 @@ def _kaiming_init(
     gain = calculate_gain(nonlinearity, a)
     std = gain / math.sqrt(fan)
 
+    bound = math.sqrt(3.0) * std
+
     with torch.no_grad():
-        return tensor.normal_(0, std, generator=generator)
+        return tensor.uniform_(-bound, bound, generator=generator)
 
 
 class VeraLayer(BaseTunerLayer):
@@ -190,12 +192,12 @@ class VeraLayer(BaseTunerLayer):
             self.to(self.weight.device, dtype=weight.dtype)
 
     def reset_vera_parameters(self, adapter_name, prng_key, d_initial: float = 1.0):
-        generator = torch.Generator().manual_seed(prng_key)
+        generator = torch.Generator(device='cpu').manual_seed(prng_key)
         if adapter_name in self.vera_A.keys():
             # TODO: these need to be shared between all layers, or at least come from same PRNG key!
             # ..but do they really? would be nice to check
             _kaiming_init(self.vera_A[adapter_name].weight, generator, a=math.sqrt(5))
-            _kaiming_init(self.vera_B[adapter_name].weight, generator, a=math.sqrt(5))
+            _kaiming_init(self.vera_B[adapter_name].weight, generator)
 
             # TODO: probably don't need as this is set in `mark_only_adapters_as_trainable`
             self.vera_A[adapter_name].weight.requires_grad = False
