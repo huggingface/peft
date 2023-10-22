@@ -698,6 +698,8 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
+        # activate pre-forward hook to align sub-modules on device
+        self.pre_forward()
         return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
 
     def unload(self):
