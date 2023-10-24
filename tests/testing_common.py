@@ -430,6 +430,26 @@ class PeftCommonTester:
             self.assertTrue(model_from_pretrained.peft_config["default"].inference_mode)
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
+    def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            # Merge layers only supported for LoRA and IA³
+            return
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(device="cpu", dtype=torch.float16)
+
+        model.eval()
+
+        # This should simply work
+        _ = model.merge_and_unload()
+
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig):
             # Merge layers only supported for LoRA and IA³

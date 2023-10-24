@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import os
 from collections import Counter
 from dataclasses import dataclass
@@ -72,8 +73,8 @@ class LoHaInfo:
         ):
             raise ValueError("hada_t1 and hada_t2 must be either both present or not present at the same time")
         if self.hada_t1 is not None and self.hada_t2 is not None:
-            state_dict[f"{self.peft_key}.hada_t1"] = self.hada_t1
-            state_dict[f"{self.peft_key}.hada_t2"] = self.hada_t2
+            state_dict[f"base_model.model.{self.peft_key}.hada_t1"] = self.hada_t1
+            state_dict[f"base_model.model.{self.peft_key}.hada_t2"] = self.hada_t2
         return state_dict
 
 
@@ -318,6 +319,15 @@ if __name__ == "__main__":
     parser.add_argument("--dump_path", default=None, type=str, required=True, help="Path to the output peft adapter.")
 
     parser.add_argument("--half", action="store_true", help="Save weights in half precision.")
+    parser.add_argument(
+        "--loha_conv2d_weights_fix",
+        action="store_true",
+        help="""LoHa checkpoints trained with lycoris-lora<=1.9.0 contain a bug described in this PR https://github.com/KohakuBlueleaf/LyCORIS/pull/115.
+        This option fixes this bug during weight conversion (replaces hada_t2 with hada_t1 for Conv2d 3x3 layers).
+        The output results may differ from webui, but in general, they should be better in terms of quality.
+        This option should be set to True in case the provided checkpoint has been trained with lycoris-lora version for which the mentioned PR wasn't merged.
+        This option should be set to False in case the provided checkpoint has been trained with lycoris-lora version for which the mentioned PR is merged or full compatibility with webui outputs is required.""",
+    )
     args = parser.parse_args()
 
     # Load all models that we need to add adapter to
@@ -416,12 +426,22 @@ if __name__ == "__main__":
             elif kohya_type == "hada_w2_b":
                 adapter_info[model_type][peft_key].hada_w2_b = tensor
                 adapter_info[model_type][peft_key].rank = tensor.shape[0]
-            elif kohya_type == "hada_t1":
-                adapter_info[model_type][peft_key].hada_t1 = tensor
-                adapter_info[model_type][peft_key].rank = tensor.shape[0]
-            elif kohya_type == "hada_t2":
-                adapter_info[model_type][peft_key].hada_t2 = tensor
-                adapter_info[model_type][peft_key].rank = tensor.shape[0]
+            elif kohya_type in {"hada_t1", "hada_t2"}:
+                if args.loha_conv2d_weights_fix:
+                    if kohya_type == "hada_t1":
+                        # This code block fixes a bug that exists for some LoHa checkpoints
+                        # that resulted in accidentally using hada_t1 weight instead of hada_t2, see
+                        # https://github.com/KohakuBlueleaf/LyCORIS/pull/115
+                        adapter_info[model_type][peft_key].hada_t1 = tensor
+                        adapter_info[model_type][peft_key].hada_t2 = tensor
+                        adapter_info[model_type][peft_key].rank = tensor.shape[0]
+                else:
+                    if kohya_type == "hada_t1":
+                        adapter_info[model_type][peft_key].hada_t1 = tensor
+                        adapter_info[model_type][peft_key].rank = tensor.shape[0]
+                    elif kohya_type == "hada_t2":
+                        adapter_info[model_type][peft_key].hada_t2 = tensor
+                        adapter_info[model_type][peft_key].rank = tensor.shape[0]
             elif kohya_type == "lokr_t2":
                 adapter_info[model_type][peft_key].lokr_t2 = tensor
                 adapter_info[model_type][peft_key].rank = tensor.shape[0]
@@ -464,6 +484,18 @@ if __name__ == "__main__":
     # Process each model sequentially
     for model, model_name in [(text_encoder, "text_encoder"), (unet, "unet")]:
         config = construct_config_fn(adapter_info[model_name], decompose_factor=decompose_factor)
+
+        # Output warning for LoHa with use_effective_conv2d
+        if (
+            isinstance(config, LoHaConfig)
+            and getattr(config, "use_effective_conv2d", False)
+            and args.loha_conv2d_weights_fix is False
+        ):
+            logging.warning(
+                'lycoris-lora<=1.9.0 LoHa implementation contains a bug, which can be fixed with "--loha_conv2d_weights_fix".\n'
+                "For more info, please refer to https://github.com/huggingface/peft/pull/1021 and https://github.com/KohakuBlueleaf/LyCORIS/pull/115"
+            )
+
         model = get_peft_model(model, config)
         set_peft_model_state_dict(model, combine_peft_state_dict(adapter_info[model_name]))
 

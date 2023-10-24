@@ -144,6 +144,8 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    ("Conv2d 4 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
     # LoKr
     ("Vanilla MLP 1 LOKR", "MLP", LoKrConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 LOKR", "MLP", LoKrConfig, {"target_modules": ["lin0"]}),
@@ -356,18 +358,21 @@ class MockTransformerWrapper:
     """
 
     @classmethod
-    def from_pretrained(cls, model_id):
+    def from_pretrained(cls, model_id, torch_dtype=None):
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
+        if torch_dtype is None:
+            torch_dtype = torch.float32
+
         if model_id == "MLP":
-            return MLP()
+            return MLP().to(torch_dtype)
 
         if model_id == "EmbConv1D":
-            return ModelEmbConv1D()
+            return ModelEmbConv1D().to(torch_dtype)
 
         if model_id == "Conv2d":
-            return ModelConv2D()
+            return ModelConv2D().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -413,6 +418,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = config_kwargs.copy()
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
+        self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
