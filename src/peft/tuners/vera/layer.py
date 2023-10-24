@@ -197,7 +197,7 @@ class VeraLayer(BaseTunerLayer):
             # TODO: these need to be shared between all layers, or at least come from same PRNG key!
             # ..but do they really? would be nice to check
             _kaiming_init(self.vera_A[adapter_name].weight, generator, a=math.sqrt(5))
-            _kaiming_init(self.vera_B[adapter_name].weight, generator)
+            _kaiming_init(self.vera_B[adapter_name].weight, generator, a=math.sqrt(5))
 
             # TODO: probably don't need as this is set in `mark_only_adapters_as_trainable`
             self.vera_A[adapter_name].weight.requires_grad = False
@@ -208,8 +208,8 @@ class VeraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.vera_lambda_b[adapter_name])
 
         if adapter_name in self.vera_embedding_A.keys():
-            _kaiming_init(self.vera_embedding_A[adapter_name], generator)
-            _kaiming_init(self.vera_embedding_B[adapter_name], generator)
+            _kaiming_init(self.vera_embedding_A[adapter_name], generator, a=math.sqrt(5))
+            _kaiming_init(self.vera_embedding_B[adapter_name], generator, a=math.sqrt(5))
 
             self.vera_embedding_A[adapter_name].requires_grad = False
             self.vera_embedding_B[adapter_name].requires_grad = False

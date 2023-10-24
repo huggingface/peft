@@ -27,7 +27,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
-    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,  # reuse LoRA mappings
+    TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
@@ -259,7 +259,7 @@ class VeraModel(BaseTuner):
             kernel_size = target.weight.size()[2:]
             stride = target.stride
             padding = target.padding
-            new_module = Conv2d(adapter_name, in_channels, out_channels, kernel_size, stride, padding, d_initial=vera_config.d_initial, **kwargs)
+            new_module = Conv2d(adapter_name, vera_config.projection_prng_key, in_channels, out_channels, kernel_size, stride, padding, d_initial=vera_config.d_initial, **kwargs)
         else:
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
@@ -337,10 +337,10 @@ class VeraModel(BaseTuner):
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
-            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
-                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+                TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
 
@@ -393,7 +393,7 @@ class VeraModel(BaseTuner):
     ):
 
         # TODO: implement this for Vera
-        raise NotImplementedError()
+        raise NotImplementedError("Adapter merging is not supported yet for VeRA.")
         """
         This method adds a new adapter by merging the given adapters with the given weights.
 
@@ -552,6 +552,7 @@ class VeraModel(BaseTuner):
         full_matrices=True,
         driver=None,
     ):
+        raise NotImplementedError("SVD adapter merging is not supported yet for VeRA.")
         valid_adapters = []
         valid_weights = []
         for adapter, weight in zip(adapters, weights):
@@ -594,8 +595,6 @@ class VeraModel(BaseTuner):
         return Vh, U
 
     def delete_adapter(self, adapter_name: str):
-        # TODO: implement for Vera
-        raise NotImplementedError()
         """
         Deletes an existing adapter.
 
@@ -606,19 +605,21 @@ class VeraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, VeraLayer):
                 for attr in [
                     "r",
-                    "lora_alpha",
+                    "vera_alpha",
                     "scaling",
-                    "lora_A",
-                    "lora_B",
-                    "lora_embedding_A",
-                    "lora_embedding_B",
-                    "lora_dropout",
+                    "vera_A",
+                    "vera_B",
+                    "vera_lambda_b",
+                    "vera_lambda_d",
+                    "vera_embedding_A",
+                    "vera_embedding_B",
+                    "vera_dropout",
                 ]:
                     if adapter_name in getattr(target, attr):
                         getattr(target, attr).pop(adapter_name)
