@@ -130,12 +130,8 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             config_cls = cls
 
-        config = config_cls(**class_kwargs)
-
-        for key, value in loaded_attributes.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-
+        kwargs = {**class_kwargs, **loaded_attributes}
+        config = config_cls(**kwargs)
         return config
 
     @classmethod
