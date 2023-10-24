@@ -70,8 +70,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         head to fp32
 
     Args:
-        model, (`transformers.PreTrainedModel`):
+        model (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
+        use_gradient_checkpointing (`bool`, *optional*, defaults to `True`):
+            If True, use gradient checkpointing to save memory at the expense of slower backward pass.
+        gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
+            Keyword arguments to pass to the gradient checkpointing function, e.g. `use_reentrant=True`. Note this is
+            only available in the latest transformers versions.
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
