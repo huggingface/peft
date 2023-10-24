@@ -71,6 +71,8 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+    elif config.peft_type == PeftType.VERA:
+        to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
 
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
@@ -123,11 +125,12 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.ADALORA, PeftType.IA3):
+    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.ADALORA, PeftType.IA3, PeftType.VERA):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",
             PeftType.LORA: "lora_",
+            PeftType.VERA: "vera_lambda_",
             PeftType.ADALORA: "lora_",
             PeftType.LOHA: "hada_",
         }[config.peft_type]

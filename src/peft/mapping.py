@@ -39,6 +39,8 @@ from .tuners import (
     LoHaModel,
     LoraConfig,
     LoraModel,
+    VeraConfig,
+    VeraModel,
     MultitaskPromptTuningConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -67,6 +69,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: Dict[str, PeftConfig] = {
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
     "LOHA": LoHaConfig,
+    "VERA": VeraConfig,
     "ADALORA": AdaLoraConfig,
     "IA3": IA3Config,
     "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
@@ -75,6 +78,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: Dict[str, PeftConfig] = {
 PEFT_TYPE_TO_TUNER_MAPPING = {
     "LORA": LoraModel,
     "LOHA": LoHaModel,
+    "VERA": VeraModel,
     "ADALORA": AdaLoraModel,
     "IA3": IA3Model,
 }
