@@ -63,7 +63,7 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
     return tuple(result)
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, use_reentrant=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
     r"""
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
@@ -75,6 +75,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, use_
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
+    if gradient_checkpointing_kwargs is None:
+        gradient_checkpointing_kwargs = {}
+
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -86,8 +89,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, use_
                 param.data = param.data.to(torch.float32)
 
     if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
-        # For backward compatibility
-        if use_reentrant:
+        # When having `use_reentrant` + gradient_checkpointing, there is no need for this hack
+        if "use_reentrant" not in gradient_checkpointing_kwargs or not gradient_checkpointing_kwargs["use_reentrant"]:
+            # For backward compatibility
             if hasattr(model, "enable_input_require_grads"):
                 model.enable_input_require_grads()
             else:
@@ -97,9 +101,17 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, use_
 
                 model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
 
-        # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable(use_reentrant=use_reentrant)
+        # To support older transformers versions, check if the model supports gradient_checkpointing_kwargs
+        _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
+            inspect.signature(model.gradient_checkpointing_enable).parameters
+        )
 
+        gc_enable_kwargs = (
+            {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
+        )
+
+        # enable gradient checkpointing for memory efficiency
+        model.gradient_checkpointing_enable(**gc_enable_kwargs)
     return model
 
 
