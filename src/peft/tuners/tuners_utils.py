@@ -281,11 +281,18 @@ class BaseTunerLayer(ABC):
     # the currently active adapter(s)
     _active_adapter: str | list[str] = "default"
 
+    # List all merged adapters
+    merged_adapters: list[str] = []
+
     def merge(self, *args) -> None:
         raise NotImplementedError
 
     def unmerge(self, *args) -> None:
         raise NotImplementedError
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
 
     @property
     def disable_adapters(self) -> bool:

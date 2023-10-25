@@ -79,10 +79,6 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
     def _available_adapters(self) -> Set[str]:
         ...
 
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
         # model weights. The implementation is inspired by
