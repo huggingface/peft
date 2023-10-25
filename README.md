@@ -135,7 +135,7 @@ Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 **NEW** ✨ Multi Adapter support and combining multiple LoRA adapters in a weighted combination 
 ![peft lora dreambooth weighted adapter](https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/weighted_adapter_dreambooth_lora.png)
 
-**NEW** ✨ Dreambooth training for Stable Diffusion using LoHa adapter [`examples/stable_diffusion/train_dreambooth_loha.py`](examples/stable_diffusion/train_dreambooth_loha.py)
+**NEW** ✨ Dreambooth training for Stable Diffusion using LoHa and LoKr adapters [`examples/stable_diffusion/train_dreambooth.py`](examples/stable_diffusion/train_dreambooth.py)
 
 ### Parameter Efficient Tuning of LLMs for RLHF components such as Ranker and Policy
 - Here is an example in [trl](https://github.com/lvwerra/trl) library using PEFT+INT8 for tuning policy model: [gpt2-sentiment_peft.py](https://github.com/lvwerra/trl/blob/main/examples/sentiment/scripts/gpt2-sentiment_peft.py) and corresponding [Blog](https://huggingface.co/blog/trl-peft)
@@ -274,9 +274,9 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 
 ### Text-to-Image Generation
 
-|   Model         | LoRA | LoHa | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ---- | ----  | ----  |
-| Stable Diffusion           | ✅  | ✅  |   |   |   |
+|   Model         | LoRA | LoHa | LoKr | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
+| Stable Diffusion           | ✅  | ✅  | ✅  |  |   |   |
 
 
 ### Image Classification
