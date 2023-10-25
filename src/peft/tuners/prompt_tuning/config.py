@@ -37,6 +37,9 @@ class PromptTuningConfig(PromptLearningConfig):
             The text to initialize the prompt embedding. Only used if `prompt_tuning_init` is `TEXT`.
         tokenizer_name_or_path (`str`, *optional*):
             The name or path of the tokenizer. Only used if `prompt_tuning_init` is `TEXT`.
+        tokenizer_kwargs (`dict`, *optional*):
+            The keyword arguments to pass to `AutoTokenizer.from_pretrained`. Only used if `prompt_tuning_init` is
+            `TEXT`.
     """
 
     prompt_tuning_init: Union[PromptTuningInit, str] = field(
@@ -56,5 +59,18 @@ class PromptTuningConfig(PromptLearningConfig):
         },
     )
 
+    tokenizer_kwargs: Optional[dict] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The keyword arguments to pass to `AutoTokenizer.from_pretrained`. Only used if prompt_tuning_init is "
+                "`TEXT`"
+            ),
+        },
+    )
+
     def __post_init__(self):
         self.peft_type = PeftType.PROMPT_TUNING
+
+        if self.tokenizer_kwargs and (self.prompt_tuning_init != PromptTuningInit.TEXT):
+            raise ValueError(f"tokenizer_kwargs only valid when using prompt_tuning_init='{PromptTuningInit.TEXT}'.")

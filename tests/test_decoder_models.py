@@ -13,12 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import unittest
+from unittest.mock import Mock, call, patch
 
 import torch
 from parameterized import parameterized
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AdaLoraConfig
+from peft import AdaLoraConfig, PromptTuningConfig, PromptTuningInit, get_peft_model
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -75,6 +76,61 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_prompt_tuning_text_prepare_for_training(self, test_name, model_id, config_cls, config_kwargs):
+        # Test that prompt tuning works with text init
+        if config_cls != PromptTuningConfig:
+            return
+
+        config_kwargs = config_kwargs.copy()
+        config_kwargs["prompt_tuning_init"] = PromptTuningInit.TEXT
+        config_kwargs["prompt_tuning_init_text"] = "This is a test prompt."
+        config_kwargs["tokenizer_name_or_path"] = model_id
+        self._test_prepare_for_training(model_id, config_cls, config_kwargs)
+
+    def test_prompt_tuning_text_tokenizer_kwargs(self):
+        # Allow users to pass additional arguments to Tokenizer.from_pretrained
+        # Fix for #1032
+        mock = Mock()
+        orig_from_pretrained = AutoTokenizer.from_pretrained
+
+        def mock_autotokenizer_from_pretrained(*args, **kwargs):
+            mock(*args, **kwargs)
+            return orig_from_pretrained(config.tokenizer_name_or_path)
+
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        config = PromptTuningConfig(
+            base_model_name_or_path=model_id,
+            tokenizer_name_or_path=model_id,
+            num_virtual_tokens=10,
+            prompt_tuning_init=PromptTuningInit.TEXT,
+            task_type="CAUSAL_LM",
+            prompt_tuning_init_text="This is a test prompt.",
+            tokenizer_kwargs={"trust_remote_code": True, "foo": "bar"},
+        )
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        with patch("transformers.AutoTokenizer.from_pretrained", mock_autotokenizer_from_pretrained):
+            model = get_peft_model(model, config)
+
+        expected_call = call(model_id, trust_remote_code=True, foo="bar")
+        self.assertEqual(mock.call_args, expected_call)
+
+    def test_prompt_tuning_config_invalid_args(self):
+        # Raise an error when tokenizer_kwargs is used with prompt_tuning_init!='TEXT', because this argument has no
+        # function in that case
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        msg = "tokenizer_kwargs only valid when using prompt_tuning_init='TEXT'."
+        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+            PromptTuningConfig(
+                base_model_name_or_path=model_id,
+                tokenizer_name_or_path=model_id,
+                num_virtual_tokens=10,
+                task_type="CAUSAL_LM",
+                prompt_tuning_init_text="This is a test prompt.",
+                prompt_tuning_init=PromptTuningInit.RANDOM,  # <= should not be used together with tokenizer_kwargs
+                tokenizer_kwargs={"trust_remote_code": True, "foo": "bar"},
+            )
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
