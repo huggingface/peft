@@ -188,7 +188,7 @@ class VeraLayer(BaseTunerLayer):
         if adapter_name in self.vera_A.keys():
             # TODO: these need to be shared between all layers, or at least come from same PRNG key!
             # ..but do they really? would be nice to check
-            _kaiming_init(self.vera_A[adapter_name].weight, generator, a=math.sqrt(5))
+            _kaiming_init(self.vera_A[adapter_name].weight, generator)
             _kaiming_init(self.vera_B[adapter_name].weight, generator)
 
             # TODO: probably don't need as this is set in `mark_only_adapters_as_trainable`

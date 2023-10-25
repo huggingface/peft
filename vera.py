@@ -167,6 +167,7 @@ for key in [1234, 123456789, 1234567890, 0xffff, 0, 1, 666]:
         if list(eval_metric.values())[0] > best_accuracy:
             best_accuracy = list(eval_metric.values())[0]
 
+    print(f"best validation result: {best_accuracy}")
     best_val_accuracies.append(best_accuracy)
 
     for step, batch in enumerate(tqdm(test_dataloader)):
@@ -197,5 +198,8 @@ for key in [1234, 123456789, 1234567890, 0xffff, 0, 1, 666]:
 # bs32 [0.8627450980392157, 0.8553921568627451, 0.8627450980392157, 0.8602941176470589, 0.8651960784313726, 0.875, 0.8676470588235294]
 # bs32+drop0.1 [0.8627450980392157, 0.8651960784313726, 0.8725490196078431, 0.8627450980392157, 0.8651960784313726, 0.8651960784313726, 0.8553921568627451]
 
+
+# post fix
+# [0.8921568627450981, 0.9019607843137255, 0.8700980392156863, 0.8848039215686274, 0.8823529411764706, 0.8872549019607843, 0.8872549019607843]
 print("per seed best validation scores:", best_val_accuracies)
 print("per seed test scores:", test_accuracies)
