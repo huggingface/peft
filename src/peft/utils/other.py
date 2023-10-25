@@ -65,6 +65,8 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
     r"""
+    Note this method only works for `transformers` models.
+
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
         head to fp32
@@ -75,8 +77,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         use_gradient_checkpointing (`bool`, *optional*, defaults to `True`):
             If True, use gradient checkpointing to save memory at the expense of slower backward pass.
         gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
-            Keyword arguments to pass to the gradient checkpointing function, e.g. `use_reentrant=True`. Note this is
-            only available in the latest transformers versions.
+            Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
+            `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
+            Note this is only available in the latest transformers versions (> 4.34.1).
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
