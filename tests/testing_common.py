@@ -948,12 +948,14 @@ class PeftCommonTester:
                     elif "cat" in adapter_name:
                         self.assertTrue(target.r[adapter_name] == 28)
 
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
         for adapter_name in new_adapters:
             # ensuring new adapters pass the forward loop
             model.set_adapter(adapter_name)
-            dummy_input = self.prepare_inputs_for_testing()
-            model.eval()
-            _ = model(**dummy_input)[0]
+            self.assertTrue(model.active_adapter == adapter_name)
+            self.assertTrue(model.active_adapters == [adapter_name])
+            model(**dummy_input)[0]
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")
