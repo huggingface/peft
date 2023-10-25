@@ -140,9 +140,8 @@ for key in [1234, 123456789, 1234567890, 0xffff, 0, 1, 666]:
         model.train()
         for step, batch in enumerate(tqdm(train_dataloader)):
             batch.to(device)
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16):
-                outputs = model(**batch)
-                loss = outputs.loss
+            outputs = model(**batch)
+            loss = outputs.loss
             loss.backward()
             optimizer.step()
             lr_scheduler.step()
@@ -151,7 +150,7 @@ for key in [1234, 123456789, 1234567890, 0xffff, 0, 1, 666]:
         model.eval()
         for step, batch in enumerate(tqdm(eval_dataloader)):
             batch.to(device)
-            with torch.cuda.amp.autocast(dtype=torch.bfloat16), torch.no_grad():
+            with torch.no_grad():
                 predictions = model(**batch).logits
 
             if task not in ['stsb']:
@@ -174,7 +173,7 @@ for key in [1234, 123456789, 1234567890, 0xffff, 0, 1, 666]:
         batch.to(device)
         if batch['labels'][0] == -1:
             break
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16), torch.no_grad():
+        with torch.no_grad():
             predictions = model(**batch).logits
 
         if task not in ['stsb']:
