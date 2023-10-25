@@ -489,10 +489,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         params_after = dict(model.named_parameters())
         self.assertEqual(params_before.keys(), params_after.keys())
 
-        if isinstance(model, ModelConv2D):
-            print(model)
-            self.assertFalse(True)
-
         prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]

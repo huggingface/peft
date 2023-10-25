@@ -17,11 +17,11 @@ from typing import Dict, Type
 
 import torch
 
-from ..lycoris_utils import LyCORISTuner
+from ..lycoris_utils import LycorisTuner
 from .layer import Conv2d, Linear, LoHaLayer
 
 
-class LoHaModel(LyCORISTuner):
+class LoHaModel(LycorisTuner):
     """
     Creates Low-Rank Hadamard Product model from a pretrained model. The method is partially described in
     https://arxiv.org/abs/2108.06098 Current implementation heavily borrows from

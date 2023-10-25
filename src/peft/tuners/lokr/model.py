@@ -17,11 +17,11 @@ from typing import Dict, Type
 
 import torch
 
-from ..lycoris_utils import LyCORISTuner
+from ..lycoris_utils import LycorisTuner
 from .layer import Conv2d, Linear, LoKrLayer
 
 
-class LoKrModel(LyCORISTuner):
+class LoKrModel(LycorisTuner):
     """
     Creates Low-Rank Kronecker Product model from a pretrained model. The original method is partially described in
     https://arxiv.org/abs/2108.06098 and in https://arxiv.org/abs/2309.14859 Current implementation heavily borrows

@@ -146,12 +146,21 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
     def reset_adapter_parameters(self, adapter_name: str):
         ...
 
-    def scale_layer(self, scale_factor: float) -> None:
-        if scale_factor != 1:
-            for active_adapter in self.active_adapters:
-                alpha = self.alpha[active_adapter]
-                r = self.r[active_adapter]
-                self.scaling[active_adapter] = (alpha / r) * scale_factor
+    def set_scale(self, adapter, scale):
+        if adapter not in self._available_adapters:
+            # Ignore the case where the adapter is not in the layer
+            return
+        self.scaling[adapter] = scale * self.alpha[adapter] / self.r[adapter]
+
+    def scale_layer(self, scale: float) -> None:
+        if scale == 1:
+            return
+
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self._available_adapters:
+                continue
+
+            self.scaling[active_adapter] *= scale
 
     def unmerge(self) -> None:
         if not self.merged:
@@ -162,17 +171,21 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
             if active_adapter in self._available_adapters:
                 self.weight.data -= self.get_delta_weight(active_adapter)
 
-    def unscale_layer(self) -> None:
+    def unscale_layer(self, scale=None) -> None:
         for active_adapter in self.active_adapters:
-            alpha = self.alpha[active_adapter]
-            r = self.r[active_adapter]
-            self.scaling[active_adapter] = alpha / r
+            if active_adapter not in self._available_adapters:
+                continue
+
+            if scale is None:
+                self.scaling[active_adapter] = self.alpha[active_adapter] / self.r[active_adapter]
+            else:
+                self.scaling[active_adapter] /= scale
 
     def update_layer(self, adapter_name: str, r: int, alpha: float, **kwargs):
         ...
 
 
-class LyCORISTuner(BaseTuner):
+class LycorisTuner(BaseTuner):
     r"""
     A base tuner for LyCORIS like adapters
     """

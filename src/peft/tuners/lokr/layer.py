@@ -126,13 +126,15 @@ class LoKrLayer(LycorisLayer, nn.Module):
         """Internal function to create lokr adapter
 
         Args:
-            shape (`Tuple[int, ...]`): Shape of weights to produce
-            adapter_name (`str`): Name for the adapter to add
-            r (`int`): Rank for the added adapter
-            alpha (`float`): Alpha for the added adapter
+            adapter_name (`str`): Name for the adapter to add.
+            r (`int`): Rank for the added adapter.
+            alpha (`float`): Alpha for the added adapter.
             rank_dropout (`float`): The dropout probability for rank dimension during training
             module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights
+            init_weights (`bool`): Whether to initialize adapter weights.
+            use_effective_conv2d (`bool`): Use parameter effective decomposition for Conv2d with ksize > 1.
+            decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
+            decompose_factor (`int`): Kronecker product decomposition factor.
         """
 
         self.r[adapter_name] = r
