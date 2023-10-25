@@ -197,7 +197,7 @@ Once the model has been uploaded to the Hub, anyone can easily use it for infere
 ```py
 import torch
 from peft import PeftModel, PeftConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 peft_model_id = "smangrul/roberta-large-peft-p-tuning"
 config = PeftConfig.from_pretrained(peft_model_id)
