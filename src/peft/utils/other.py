@@ -114,6 +114,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
             inspect.signature(model.gradient_checkpointing_enable).parameters
         )
 
+        if not _supports_gc_kwargs and len(gradient_checkpointing_kwargs) >= 1:
+            warnings.warn(
+                "gradient_checkpointing_kwargs is not supported in this version of transformers. The passed kwargs will be ignored.",
+                " if you want to use that feature, please upgrade to the latest version of transformers.",
+                FutureWarning,
+            )
+
         gc_enable_kwargs = (
             {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
         )
