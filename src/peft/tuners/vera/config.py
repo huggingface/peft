@@ -28,7 +28,6 @@ class VeraConfig(PeftConfig):
     Args:
         r (`int`): Vera attention dimension.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Vera to.
-        vera_alpha (`int`): The alpha parameter for Vera scaling.
         vera_dropout (`float`): The dropout probability for Vera layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
@@ -61,7 +60,6 @@ class VeraConfig(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
-    vera_alpha: int = field(default=8, metadata={"help": "Vera alpha"})
     projection_prng_key: Optional[int] = field(default=None, metadata={"help": "Vera PRNG init key"})
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
     d_initial: float = field(default=1.0, metadata={"help": "Initial init value for d vector."})

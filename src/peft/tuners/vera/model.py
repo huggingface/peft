@@ -58,7 +58,6 @@ class VeraModel(BaseTuner):
         >>> config = VeraConfig(
         ...     task_type="SEQ_2_SEQ_LM",
         ...     r=8,
-        ...     vera_alpha=32,
         ...     target_modules=["q", "v"],
         ...     vera_dropout=0.01,
         ... )
@@ -73,7 +72,7 @@ class VeraModel(BaseTuner):
 
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
         >>> config = VeraConfig(
-        ...     r=4, vera_alpha=16, target_modules=target_modules, vera_dropout=0.1, bias="none", task_type="CAUSAL_LM"
+        ...     r=4, target_modules=target_modules, vera_dropout=0.1, bias="none", task_type="CAUSAL_LM"
         ... )
 
         >>> model = transformers.GPTJForCausalLM.from_pretrained(
@@ -136,11 +135,9 @@ class VeraModel(BaseTuner):
         target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
 
         r = vera_config.rank_pattern.get(target_name_key, vera_config.r)
-        alpha = vera_config.alpha_pattern.get(target_name_key, vera_config.vera_alpha)
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
-            "vera_alpha": alpha,
             "vera_dropout": vera_config.vera_dropout,
             "fan_in_fan_out": vera_config.fan_in_fan_out,
             "init_vera_weights": vera_config.init_vera_weights,
@@ -158,7 +155,6 @@ class VeraModel(BaseTuner):
             target.update_layer_conv2d(
                 adapter_name,
                 r,
-                alpha,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 vera_config.projection_prng_key,
@@ -168,7 +164,6 @@ class VeraModel(BaseTuner):
             target.update_layer_embedding(
                 adapter_name,
                 r,
-                alpha,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 vera_config.projection_prng_key,
@@ -179,7 +174,6 @@ class VeraModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r,
-                alpha,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 vera_config.projection_prng_key,
@@ -472,7 +466,6 @@ class VeraModel(BaseTuner):
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
             r=new_rank,
-            vera_alpha=new_rank,
             target_modules=new_target_modules,
         )
         self.inject_adapter(self.model, adapter_name)
@@ -505,7 +498,7 @@ class VeraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         else:
                             continue
-                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
+                        target_lora_A.data += current_adapter_lora_A.data * weight
                         target_lora_B.data += current_adapter_lora_B.data
                 elif combination_type == "cat":
                     loras_A, loras_B = [], []
@@ -518,7 +511,7 @@ class VeraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         else:
                             continue
-                        loras_A.append(current_adapter_lora_A.data * weight * target.scaling[adapter])
+                        loras_A.append(current_adapter_lora_A.data * weight)
                         loras_B.append(current_adapter_lora_B.data)
 
                     if len(loras_A) == 0:
@@ -611,8 +604,6 @@ class VeraModel(BaseTuner):
             if isinstance(target, VeraLayer):
                 for attr in [
                     "r",
-                    "vera_alpha",
-                    "scaling",
                     "vera_A",
                     "vera_B",
                     "vera_lambda_b",
