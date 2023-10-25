@@ -15,6 +15,7 @@
 
 import re
 import warnings
+from abc import abstractmethod
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Dict, Optional, Set, Type, Union
@@ -74,6 +75,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
         self.merged_adapters = []
 
     @property
+    @abstractmethod
     def _available_adapters(self) -> Set[str]:
         ...
 
@@ -96,6 +98,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
     def _op(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
+    @abstractmethod
     def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs):
         ...
 
@@ -129,6 +132,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
         result = result.to(previous_dtype)
         return result
 
+    @abstractmethod
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         ...
 
@@ -143,6 +147,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
+    @abstractmethod
     def reset_adapter_parameters(self, adapter_name: str):
         ...
 
@@ -181,6 +186,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
             else:
                 self.scaling[active_adapter] /= scale
 
+    @abstractmethod
     def update_layer(self, adapter_name: str, r: int, alpha: float, **kwargs):
         ...
 
