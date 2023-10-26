@@ -486,7 +486,6 @@ class Embedding(nn.Embedding, VeraLayer):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO: no dtype conversion here, unlike in Linear, is that correct?
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -611,19 +610,18 @@ class Conv2d(nn.Conv2d, VeraLayer):
         lambda_d = torch.diag(lambda_d)
         lambda_b = torch.diag(lambda_b)
 
-        # TODO: figure out conv weights
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
         if self.weight.size()[2:4] == (1, 1):
             # conv2d 1x1
-            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
+            output_tensor = (lambda_b @ weight_B.squeeze(3).squeeze(2) @ lambda_d @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
                 3
             )
         else:
             # conv2d 3x3
             output_tensor = (
                 F.conv2d(
-                    weight_A.permute(1, 0, 2, 3),
-                    weight_B,
+                    torch.diag(lambda_d).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * weight_A.permute(1, 0, 2, 3),
+                    torch.diag(lambda_b).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * weight_B,
                 ).permute(1, 0, 2, 3)
                 
             )
@@ -664,15 +662,15 @@ class Conv2d(nn.Conv2d, VeraLayer):
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_A.keys():
                     continue
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
+                vera_A = self.vera_A[active_adapter]
+                vera_B = self.vera_B[active_adapter]
 
-                lambda_d = self.vera_lambda_d[active_adapter]
-                lambda_b = self.vera_lambda_b[active_adapter]
+                lambda_d = self.vera_lambda_d[active_adapter].unsqueeze(-1).unsqueeze(-1)
+                lambda_b = self.vera_lambda_b[active_adapter].unsqueeze(-1).unsqueeze(-1)
 
-                dropout = self.lora_dropout[active_adapter]
-                x = x.to(lora_A.weight.dtype)
-                result += lambda_b * lora_B(lambda_d * lora_A(dropout(x))) 
+                dropout = self.vera_dropout[active_adapter]
+                x = x.to(vera_A.weight.dtype)
+                result += lambda_b * vera_B(lambda_d * vera_A(dropout(x))) 
 
         result = result.to(previous_dtype)
         return result
