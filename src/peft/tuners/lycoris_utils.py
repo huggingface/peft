@@ -378,3 +378,30 @@ class LycorisTuner(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+
+    def delete_adapter(self, adapter_name: str):
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (`str`): Name of the adapter to be deleted.
+        """
+        if adapter_name not in list(self.peft_config.keys()):
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, LycorisLayer):
+                for attr in target.adapter_layer_names:
+                    if adapter_name in getattr(target, attr):
+                        getattr(target, attr).pop(adapter_name)
+                if adapter_name in target.active_adapters:
+                    resetting_active_adapter = (
+                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
+                    )
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
+                    )
+                    target.set_adapter(resetting_active_adapter)
