@@ -430,6 +430,26 @@ class PeftCommonTester:
             self.assertTrue(model_from_pretrained.peft_config["default"].inference_mode)
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
+    def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig,):
+            # Merge layers only supported for LoRA and IA³
+            return
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(device="cpu", dtype=torch.float16)
+
+        model.eval()
+
+        # This should simply work
+        _ = model.merge_and_unload()
+
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig):
             # Merge layers only supported for LoRA and IA³
@@ -928,12 +948,14 @@ class PeftCommonTester:
                     elif "cat" in adapter_name:
                         self.assertTrue(target.r[adapter_name] == 28)
 
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
         for adapter_name in new_adapters:
             # ensuring new adapters pass the forward loop
             model.set_adapter(adapter_name)
-            dummy_input = self.prepare_inputs_for_testing()
-            model.eval()
-            _ = model(**dummy_input)[0]
+            self.assertTrue(model.active_adapter == adapter_name)
+            self.assertTrue(model.active_adapters == [adapter_name])
+            model(**dummy_input)[0]
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")

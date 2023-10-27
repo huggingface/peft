@@ -133,6 +133,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             return self._peft_config
         return self.base_model.peft_config
 
+    @property
+    def active_adapters(self):
+        try:
+            adapters = self.base_model.active_adapters
+        except AttributeError:
+            adapters = self.active_adapter
+            if isinstance(adapters, str):
+                adapters = [adapters]
+        return adapters
+
     @peft_config.setter
     def peft_config(self, value: Dict[str, PeftConfig]):
         if self._is_prompt_learning:
@@ -673,7 +683,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model_config = self.config
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config["model_type"] != "custom":
+        if model_config.get("model_type", "custom") != "custom":
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()

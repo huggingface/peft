@@ -161,7 +161,7 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
                 self.hada_t1[adapter_name],
                 self.hada_w1_a[adapter_name],
                 self.hada_w1_b[adapter_name],
-                self.hada_t1[adapter_name],
+                self.hada_t2[adapter_name],
                 self.hada_w2_a[adapter_name],
                 self.hada_w2_b[adapter_name],
                 scale=torch.tensor(self.scaling[adapter_name]),

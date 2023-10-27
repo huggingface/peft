@@ -85,27 +85,26 @@ TEST_CASES = [
         IA3Config,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "feedforward_modules": ["lin0"]},
     ),
-    # TODO: There are errors when trying to merge Conv1D, hence skipping them for now
-    # (
-    #     "transformers Conv1D 1 IA3",
-    #     "EmbConv1D",
-    #     IA3Config,
-    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"]},
-    # ),
-    # (
-    #     "transformers Conv1D 2 IA3",
-    #     "EmbConv1D",
-    #     IA3Config,
-    #     {"target_modules": ["conv1d", "lin0"], "feedforward_modules": ["conv1d", "lin0"]},
-    # ),
-    # (
-    #     "transformers Conv1D 1 IA3",
-    #     "EmbConv1D",
-    #     IA3Config,
-    #     {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin1"]},
-    # ),
-    # ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
-    # ("Conv2d 2 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
+    (
+        "transformers Conv1D 1 IA3",
+        "EmbConv1D",
+        IA3Config,
+        {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"]},
+    ),
+    (
+        "transformers Conv1D 2 IA3",
+        "EmbConv1D",
+        IA3Config,
+        {"target_modules": ["conv1d", "lin0"], "feedforward_modules": ["conv1d", "lin0"]},
+    ),
+    (
+        "transformers Conv1D 1 IA3",
+        "EmbConv1D",
+        IA3Config,
+        {"target_modules": ["conv1d"], "feedforward_modules": ["conv1d"], "modules_to_save": ["lin1"]},
+    ),
+    ("Conv2d 1 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": []}),
+    ("Conv2d 2 IA3", "Conv2d", IA3Config, {"target_modules": ["conv2d"], "feedforward_modules": ["conv2d"]}),
     (
         "Conv2d 3 IA3",
         "Conv2d",
@@ -144,6 +143,8 @@ TEST_CASES = [
     ),
     ("Conv2d 1 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    ("Conv2d 4 LOHA", "Conv2d", LoHaConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -312,18 +313,21 @@ class MockTransformerWrapper:
     """
 
     @classmethod
-    def from_pretrained(cls, model_id):
+    def from_pretrained(cls, model_id, torch_dtype=None):
         # set the seed so that from_pretrained always returns the same model
         torch.manual_seed(0)
 
+        if torch_dtype is None:
+            torch_dtype = torch.float32
+
         if model_id == "MLP":
-            return MLP()
+            return MLP().to(torch_dtype)
 
         if model_id == "EmbConv1D":
-            return ModelEmbConv1D()
+            return ModelEmbConv1D().to(torch_dtype)
 
         if model_id == "Conv2d":
-            return ModelConv2D()
+            return ModelConv2D().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -369,6 +373,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+        config_kwargs = config_kwargs.copy()
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
+        self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
@@ -533,9 +546,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_before = model(**X)
 
         model.train()
-        # EmbConv1D is slow to learn for some reason
-        lr = 0.01 if model_id != "EmbConv1D" else 1.0
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        lr = 0.01
+        # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -557,12 +570,18 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        atol, rtol = 1e-5, 1e-5  # merging introduces some numerical instability
-        if issubclass(config_cls, IA3Config):  # IA³ introduces more instability
+        atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
+
+        if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
             atol, rtol = 1e-3, 1e-3
 
+        # check that there is a difference in results after training
         self.assertFalse(torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol))
+
+        # check that disabling adapters gives the same results as before training
         self.assertTrue(torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol))
+
+        # check that enabling + disabling adapters does not change the results
         self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol))
 
     @parameterized.expand(TEST_CASES)
