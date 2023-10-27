@@ -390,7 +390,7 @@ class LycorisTuner(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, LycorisLayer):
