@@ -74,12 +74,8 @@ def parse_args():
     )
     parser.add_argument('--dataset_name', type=str, default='glue', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
-    parser.add_argument(
-        "--amp",
-        type=str,
-        default='fp16',
-        help="Enable automatic mixed precision training (fp16/bf16/fp8).",
-    )
+    parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
+
     args = parser.parse_args()
 
     assert args.output_dir is not None, "Need an `output_dir` to store the finetune model and verify."
