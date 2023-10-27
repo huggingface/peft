@@ -356,7 +356,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.
 
     Args:
-        config (`LoraConfig` | `LoHaConfig`): A config to match target modules from
+        config (`LoraConfig` | `LycorisConfig`): A config to match target modules from
         key (`str`): A key to search any matches in config
 
     Returns:
