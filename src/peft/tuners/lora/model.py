@@ -382,7 +382,7 @@ class LoraModel(BaseTuner):
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
         # load tensors on aligned devices if required
-        model.AlignDevicesHook.pre_forward()
+        model._hf_hook.pre_forward()
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
