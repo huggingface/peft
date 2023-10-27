@@ -381,7 +381,6 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -390,7 +389,9 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             # load tensors on aligned devices if required
-            self.model._hf_hook.pre_forward(target)
+            if self.model.hasattr("_hf_hook"):
+                target = self.model._hf_hook.pre_forward(target)
+                parent = self.model._hf_hook.pre_forward(parent)
             if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
