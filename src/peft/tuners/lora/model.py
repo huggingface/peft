@@ -370,6 +370,8 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
+        # load tensors on aligned devices if required
+        model.AlignDevicesHook.pre_forward()
         key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -698,8 +700,6 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        # activate pre-forward hook to align sub-modules on device
-        self.pre_forward()
         return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
 
     def unload(self):
