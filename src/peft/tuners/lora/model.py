@@ -389,6 +389,7 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             # load tensors on aligned devices if required
+            print (parent, target)
             target = self.model._hf_hook.pre_forward(target)
             parent = self.model._hf_hook.pre_forward(parent)
             if isinstance(target, LoraLayer):
