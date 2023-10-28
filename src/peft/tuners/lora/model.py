@@ -197,7 +197,6 @@ class LoraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    @torch.no_grad()
     def _replace_module(parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
@@ -443,6 +442,9 @@ class LoraModel(BaseTuner):
                 self._replace_module(parent, target_name, new_module, target)
                 if hasattr(module, "_hf_hook"):
                     module._hf_hook.post_forward(module, torch.tensor([]))
+                if hasattr(new_module, "_hf_hook"):
+                    print ('new module has hook')
+                    new_module._hf_hook.post_forward(new_module, torch.tensor([]))
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
