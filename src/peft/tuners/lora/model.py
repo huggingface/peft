@@ -385,7 +385,8 @@ class LoraModel(BaseTuner):
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for pair in tqdm(km_list, disable=not progressbar, desc=desc):
             key, module = pair[0], pair[1]
-            if module.hasattr("_hf_hook"):
+            # re-load module params if offloaded to the meta device
+            if hasattr(module, "_hf_hook"):
                 module._hf_hook.pre_forward(module)
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
@@ -440,7 +441,8 @@ class LoraModel(BaseTuner):
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
-            if module.hasattr("_hf_hook"):
+            # unload module params
+            if hasattr(module, "_hf_hook"):
                 module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
