@@ -199,7 +199,7 @@ class PeftConfigTester(unittest.TestCase):
             # explicit test that target_modules should be converted to set
             self.assertTrue(isinstance(config_from_pretrained.target_modules, set))
 
-    def test_config_kwargs_lora(self):
+    def test_regex_with_layer_indexing_lora(self):
         # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
         # `layers_pattern` are not None
 

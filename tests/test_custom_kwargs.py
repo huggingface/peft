@@ -19,10 +19,7 @@ import unittest
 from parameterized import parameterized
 from transformers import AutoModel
 
-from peft import AdaLoraConfig, IA3Config, LoraConfig, get_peft_model
-from peft.tuners.adalora import SVDLinear as AdaLoraLinear
-from peft.tuners.ia3 import Linear as IA3Linear
-from peft.tuners.lora import Linear as LoraLinear
+from peft import IA3Config, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import check_target_module_exists
 
 
@@ -91,13 +88,6 @@ TEST_CASES = [
     ("mlp.blocks.1.weight", ["weight"], [1], ["blocks"], True),
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
 ]
-
-
-MODULE_MAPPING = {
-    LoraConfig: LoraLinear,
-    AdaLoraConfig: AdaLoraLinear,
-    IA3Config: IA3Linear,
-}
 
 
 class PeftCustomKwargsTester(unittest.TestCase):
