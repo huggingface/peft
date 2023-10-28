@@ -437,10 +437,10 @@ class LoraModel(BaseTuner):
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
-                if hasattr(module, "_hf_hook"):
-                    print ('module has hook before replacement')
-                    module._hf_hook.post_forward(module, torch.tensor([]))
                 self._replace_module(parent, target_name, new_module, target)
+                if hasattr(module, "_hf_hook"):
+                    print ('module still has hook after merge and replace')
+                    module._hf_hook.post_forward(module, torch.tensor([]))
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
@@ -448,7 +448,6 @@ class LoraModel(BaseTuner):
 
             # unload module params to meta device
             if hasattr(module, "_hf_hook"):
-                print ('module still has hook after replacement')
                 module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
