@@ -197,6 +197,7 @@ class LoraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
+    @torch.no_grad()
     def _replace_module(parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
@@ -219,14 +220,14 @@ class LoraModel(BaseTuner):
                 new_module.base_layer.state = child.state
             else:
                 new_module.state = child.state
-            # new_module.to(child.weight.device)
+            new_module.to(child.weight.device)
 
         # dispatch to correct device
-        # for name, module in new_module.named_modules():
-        #     if "lora_" in name:
-        #         module.to(child.weight.device)
-        #     if "ranknum" in name:
-        #         module.to(child.weight.device)
+        for name, module in new_module.named_modules():
+            if "lora_" in name:
+                module.to(child.weight.device)
+            if "ranknum" in name:
+                module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
