@@ -385,6 +385,8 @@ class LoraModel(BaseTuner):
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for pair in tqdm(km_list, disable=not progressbar, desc=desc):
             key, module = pair[0], pair[1]
+            print (key)
+            print (torch.cuda.max_memory_allocted())
             # re-load module params if offloaded to the meta device
             if hasattr(module, "_hf_hook"):
                 module._hf_hook.pre_forward(module)
