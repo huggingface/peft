@@ -197,7 +197,7 @@ class LoraModel(BaseTuner):
             self._replace_module(parent, target_name, new_module, target)
 
     @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+    def _replace_module(parent, child_name, new_module, child, to_cpu=False):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -219,14 +219,23 @@ class LoraModel(BaseTuner):
                 new_module.base_layer.state = child.state
             else:
                 new_module.state = child.state
-            new_module.to(child.weight.device)
+            if to_cpu:
+                new_module.to("cpu")
+            else:
+                new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "lora_" in name:
-                module.to(child.weight.device)
+                if to_cpu:
+                    module.to("cpu")
+                else:
+                    module.to(child.weight.device)
             if "ranknum" in name:
-                module.to(child.weight.device)
+                if to_cpu:
+                    module.to("cpu")
+                else:
+                    module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
@@ -439,11 +448,9 @@ class LoraModel(BaseTuner):
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
+                self._replace_module(parent, target_name, new_module, target, to_cpu=True)
                 if hasattr(module, "_hf_hook"):
                     module._hf_hook.post_forward(module, torch.tensor([]))
-                if hasattr(new_module, "_hf_hook"):
-                    print ('new module has hook')
                     new_module._hf_hook.post_forward(new_module, torch.tensor([]))
 
             # save any additional trainable modules part of `modules_to_save`
