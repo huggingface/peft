@@ -385,11 +385,13 @@ class LoraModel(BaseTuner):
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for pair in tqdm(km_list, disable=not progressbar, desc=desc):
             key, module = pair[0], pair[1]
+            print (key)
             # re-load module params if offloaded to the meta device
             if hasattr(module, "_hf_hook"):
                 module._hf_hook.pre_forward(module)
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
+                print (target_name)
             except AttributeError:
                 if hasattr(module, "_hf_hook"):
                     module._hf_hook.post_forward(module, torch.tensor([]))
@@ -439,7 +441,6 @@ class LoraModel(BaseTuner):
                     target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
                 if hasattr(module, "_hf_hook"):
-                    print ('module still has hook after merge and replace')
                     module._hf_hook.post_forward(module, torch.tensor([]))
 
             # save any additional trainable modules part of `modules_to_save`
