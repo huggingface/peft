@@ -220,11 +220,12 @@ class IA3Model(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
-    
+
     @staticmethod
     def _check_target_module_feedforward(ia3_config, key) -> bool:
         """
-        A helper private method that checks if the target module `key` matches with a feedforward module specified in `ia3_config`
+        A helper private method that checks if the target module `key` matches with a feedforward module specified in
+        `ia3_config`
         """
         if isinstance(ia3_config.feedforward_modules, str):
             is_feedforward = bool(re.fullmatch(ia3_config.feedforward_modules, key))

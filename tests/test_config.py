@@ -182,3 +182,26 @@ class PeftConfigTester(unittest.TestCase, PeftConfigTestMixin):
             PromptEncoder(config)
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
+
+    def test_config_kwargs_lora(self):
+        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
+        # `layers_pattern` are not None
+
+        invalid_config1 = {"target_modules": "*.foo", "layers_to_transform": [0]}
+        invalid_config2 = {"target_modules": "*.foo", "layers_pattern": ["bar"]}
+
+        valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
+
+        with self.assertRaisesRegex(
+            ValueError,
+            expected_regex="`layers_to_transform` cannot be used when `target_modules` is a regex expression.",
+        ):
+            LoraConfig(**invalid_config1)
+
+        with self.assertRaisesRegex(
+            ValueError, expected_regex="`layers_pattern` cannot be used when `target_modules` is a regex expression."
+        ):
+            LoraConfig(**invalid_config2)
+
+        # should run without errors
+        LoraConfig(**valid_config)
