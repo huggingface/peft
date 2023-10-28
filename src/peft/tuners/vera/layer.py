@@ -29,14 +29,10 @@ from peft.utils.other import transpose
 def _kaiming_init(
     tensor: torch.Tensor,
     generator: torch.Generator,
-    a: float = 0,
-    mode: str = "fan_in",
-    nonlinearity: str = "leaky_relu",
 ):
-    fan = _calculate_correct_fan(tensor, mode)
-    gain = calculate_gain(nonlinearity, a)
+    fan = _calculate_correct_fan(tensor, 'fan_in')
+    gain = math.sqrt(2)
     std = gain / math.sqrt(fan)
-
     bound = math.sqrt(3.0) * std
 
     with torch.no_grad():
