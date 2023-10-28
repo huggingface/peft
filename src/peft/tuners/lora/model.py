@@ -381,9 +381,10 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        km_list = [key for key, module in self.model.named_modules() if "lora" not in key]
+        km_list = [[key, module] for key, module in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for key, module in tqdm(km_list, disable=not progressbar, desc=desc):
+        for pair in tqdm(km_list, disable=not progressbar, desc=desc):
+            key, module = pair[0], pair[1]
             module._hf_hook.pre_forward(module)
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
