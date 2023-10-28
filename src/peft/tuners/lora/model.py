@@ -385,8 +385,6 @@ class LoraModel(BaseTuner):
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for pair in tqdm(km_list, disable=not progressbar, desc=desc):
             key, module = pair[0], pair[1]
-            print (key)
-            print (torch.cuda.max_memory_allocted())
             # re-load module params if offloaded to the meta device
             if hasattr(module, "_hf_hook"):
                 module._hf_hook.pre_forward(module)
@@ -439,6 +437,9 @@ class LoraModel(BaseTuner):
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
+                if hasattr(module, "_hf_hook"):
+                    print ('module has hook before replacement')
+                    module._hf_hook.post_forward(module, torch.tensor([]))
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
@@ -447,7 +448,7 @@ class LoraModel(BaseTuner):
 
             # unload module params to meta device
             if hasattr(module, "_hf_hook"):
-                print ('module still has hook')
+                print ('module still has hook after replacement')
                 module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
