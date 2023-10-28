@@ -51,6 +51,7 @@ class VeraConfig(PeftConfig):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `vera_alpha`.
     """
+    # TODO: add docstring for projection_prng_key
 
     r: int = field(default=8, metadata={"help": "Vera attention dimension"})
     target_modules: Optional[Union[List[str], str]] = field(
@@ -60,7 +61,10 @@ class VeraConfig(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
+    # TODO: improve help message
     projection_prng_key: Optional[int] = field(default=None, metadata={"help": "Vera PRNG init key"})
+    regenerate_projection: bool = field(default=False, metadata={"help": "Set this to True to regenerate VeRA A B projection matrices on the fly rather than storing them as a model parameter. This can help save some memory at the cost of speed."})
+    save_projection: bool = field(default=False, metadata={"help": "Set this to True to save VeRA A B projection matrices alongside the b d adapter weights in saved checkpoints. This will increase the size of the checkpoint, but means we can reliably restore the checkpoint on all system configurations."})
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
     d_initial: float = field(default=1.0, metadata={"help": "Initial init value for d vector."})
     fan_in_fan_out: bool = field(
