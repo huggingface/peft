@@ -391,7 +391,7 @@ class LoraModel(BaseTuner):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
-                if hasattr(model, "_hf_hook"):
+                if hasattr(module, "_hf_hook"):
                     module._hf_hook.post_forward(module, torch.tensor([]))
                 continue
             if isinstance(target, LoraLayer):
