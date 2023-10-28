@@ -439,7 +439,7 @@ class LoraModel(BaseTuner):
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
-            module._hf_hook.post_forward(module)
+            module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
 
