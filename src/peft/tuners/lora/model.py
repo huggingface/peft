@@ -391,6 +391,8 @@ class LoraModel(BaseTuner):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
+                if hasattr(model, "_hf_hook"):
+                    module._hf_hook.post_forward(module, torch.tensor([]))
                 continue
             if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
@@ -441,7 +443,7 @@ class LoraModel(BaseTuner):
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
-            # unload module params
+            # unload module params to meta device
             if hasattr(module, "_hf_hook"):
                 module._hf_hook.post_forward(module, torch.tensor([]))
 
