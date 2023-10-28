@@ -439,7 +439,7 @@ class LoraModel(BaseTuner):
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
+                # self._replace_module(parent, target_name, new_module, target)
                 if hasattr(module, "_hf_hook"):
                     module._hf_hook.post_forward(module, torch.tensor([]))
 
