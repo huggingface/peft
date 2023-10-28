@@ -150,6 +150,7 @@ class IA3Model(BaseTuner):
                 in_features, out_features = (
                     target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
                 )
+                kwargs["is_target_conv_1d_layer"] = True  # useful for unloading later
                 if not kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to False but the target module is `Conv1D`. "
@@ -339,7 +340,10 @@ class IA3Model(BaseTuner):
                 )
             else:
                 bias = target.bias is not None
-                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
+                if getattr(target, "is_target_conv_1d_layer", False):
+                    new_module = Conv1D(target.out_features, target.in_features)
+                else:
+                    new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
 
             target.merge(safe_merge=safe_merge)
             self._replace_module(parent, target_name, new_module, target)
