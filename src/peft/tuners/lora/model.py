@@ -389,9 +389,8 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             # load tensors on aligned devices if required
-            print (parent, target)
-            target = self.model._hf_hook.pre_forward(target)
-            parent = self.model._hf_hook.pre_forward(parent)
+            target = target._hf_hook.pre_forward(target)
+            parent = parent._hf_hook.pre_forward(parent)
             if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
