@@ -189,10 +189,7 @@ class IA3Model(BaseTuner):
         current_key = optional_kwargs["current_key"]
 
         # check if target module is in feedforward_modules
-        if isinstance(ia3_config.feedforward_modules, str):
-            is_feedforward = re.fullmatch(ia3_config.feedforward_modules, current_key)
-        else:
-            is_feedforward = any(current_key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+        is_feedforward = self._check_target_module_feedforward(ia3_config, current_key)
 
         kwargs = {
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
@@ -223,6 +220,17 @@ class IA3Model(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+    
+    @staticmethod
+    def _check_target_module_feedforward(ia3_config, key) -> bool:
+        """
+        A helper private method that checks if the target module `key` matches with a feedforward module specified in `ia3_config`
+        """
+        if isinstance(ia3_config.feedforward_modules, str):
+            is_feedforward = bool(re.fullmatch(ia3_config.feedforward_modules, key))
+        else:
+            is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
+        return is_feedforward
 
     @staticmethod
     def _replace_module(parent, child_name, new_module, child):

@@ -258,7 +258,20 @@ class BaseTuner(nn.Module, ABC):
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 module.unmerge()
-
+    
+    def inspect_matched_modules(self, adapter_name: str = "default") -> dict:
+        """
+        A helper method to inspect the set of matched and unmatched modules for the given adapter.
+        """
+        config = self.peft_config[adapter_name]
+        key_list = [key for key, _ in self.model.named_modules()]
+        module_dict = {"matched": [], "unmatched": []}
+        for key in key_list:
+            if self._check_target_module_exists(config, key):
+                module_dict["matched"].append(key)
+            else:
+                module_dict["unmatched"].append(key)
+        return module_dict
 
 class BaseTunerLayer(ABC):
     r"""
