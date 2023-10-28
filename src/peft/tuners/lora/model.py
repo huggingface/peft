@@ -447,6 +447,7 @@ class LoraModel(BaseTuner):
 
             # unload module params to meta device
             if hasattr(module, "_hf_hook"):
+                print ('module still has hook')
                 module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
