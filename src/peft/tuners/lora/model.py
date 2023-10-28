@@ -451,6 +451,8 @@ class LoraModel(BaseTuner):
                 self._replace_module(parent, target_name, new_module, target, to_cpu=True)
                 if hasattr(module, "_hf_hook"):
                     module._hf_hook.post_forward(module, torch.tensor([]))
+                if hasattr(new_module, "_hf_hook"):
+                    print ('new module has hook')
                     new_module._hf_hook.post_forward(new_module, torch.tensor([]))
 
             # save any additional trainable modules part of `modules_to_save`
