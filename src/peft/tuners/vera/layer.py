@@ -620,7 +620,7 @@ class Conv2d(nn.Conv2d, VeraLayer):
             # conv2d 3x3
             output_tensor = (
                 F.conv2d(
-                    torch.diag(lambda_d).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * weight_A.permute(1, 0, 2, 3),
+                    torch.diag(lambda_d).unsqueeze(-1).unsqueeze(-1) * weight_A.permute(1, 0, 2, 3),
                     torch.diag(lambda_b).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * weight_B,
                 ).permute(1, 0, 2, 3)
                 
@@ -628,6 +628,7 @@ class Conv2d(nn.Conv2d, VeraLayer):
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
+
 
             # cast back the weights
             self.vera_A[adapter].weight.data = weight_A.to(dtype)
