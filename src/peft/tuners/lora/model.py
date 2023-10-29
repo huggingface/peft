@@ -24,6 +24,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
+from accelerate.hooks import AlignDevicesHook
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
@@ -381,12 +382,18 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        km_list = [[key, module] for key, module in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for key in tqdm(key_list, disable=not progressbar, desc=desc):
+        for pair in tqdm(km_list, disable=not progressbar, desc=desc):
+            key, module = pair[0], pair[1]
+            # re-load module params if offloaded to the meta device
+            if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
+                module._hf_hook.pre_forward(module)
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
+                if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
+                    module._hf_hook.post_forward(module, torch.tensor([]))
                 continue
             if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
@@ -431,11 +438,19 @@ class LoraModel(BaseTuner):
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
+
+                if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
+                    module._hf_hook.post_forward(module, torch.tensor([]))
+                else:
+                    self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+
+            # unload module params to meta device
+            if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
+                module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
 
