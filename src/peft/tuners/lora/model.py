@@ -24,6 +24,7 @@ import torch
 from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
+from accelerate.hooks import AlignDevicesHook
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
@@ -228,7 +229,6 @@ class LoraModel(BaseTuner):
             if "ranknum" in name:
                 module.to(child.weight.device)
 
-
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
             if "lora_" not in n:
@@ -386,15 +386,13 @@ class LoraModel(BaseTuner):
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for pair in tqdm(km_list, disable=not progressbar, desc=desc):
             key, module = pair[0], pair[1]
-            print (key)
             # re-load module params if offloaded to the meta device
-            if hasattr(module, "_hf_hook"):
+            if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
                 module._hf_hook.pre_forward(module)
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
-                print (target_name)
             except AttributeError:
-                if hasattr(module, "_hf_hook"):
+                if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
                     module._hf_hook.post_forward(module, torch.tensor([]))
                 continue
             if isinstance(target, LoraLayer):
@@ -441,7 +439,7 @@ class LoraModel(BaseTuner):
                 if merge:
                     target.merge(safe_merge=safe_merge)
 
-                if hasattr(module, "_hf_hook"):
+                if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
                     module._hf_hook.post_forward(module, torch.tensor([]))
                 else:
                     self._replace_module(parent, target_name, new_module, target)
@@ -451,7 +449,7 @@ class LoraModel(BaseTuner):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
             # unload module params to meta device
-            if hasattr(module, "_hf_hook"):
+            if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
                 module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
