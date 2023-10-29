@@ -83,7 +83,7 @@ class LoHaLayer(LycorisLayer, nn.Module):
         rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
-        use_effective_conv2d: bool,
+        use_effective_conv2d: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
@@ -95,7 +95,8 @@ class LoHaLayer(LycorisLayer, nn.Module):
             rank_dropout (`float`): The dropout probability for rank dimension during training.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
-            use_effective_conv2d (`bool`): Use parameter effective decomposition for Conv2d with ksize > 1.
+            use_effective_conv2d (`bool`, *optional*, defaults to `False`):
+                Use parameter effective decomposition for Conv2d with ksize > 1.
         """
 
         self.r[adapter_name] = r
