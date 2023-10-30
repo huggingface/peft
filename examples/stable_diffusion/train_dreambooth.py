@@ -8,7 +8,7 @@ import os
 import threading
 import warnings
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import datasets
 import diffusers
@@ -38,7 +38,7 @@ from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
-from peft import LoHaConfig, get_peft_model
+from peft import LoHaConfig, LoKrConfig, LoraConfig, get_peft_model
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -83,6 +83,86 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
         return RobertaSeriesModelWithTransformation
     else:
         raise ValueError(f"{model_class} is not supported.")
+
+
+def create_unet_adapter_config(args: argparse.Namespace) -> Union[LoraConfig, LoHaConfig, LoKrConfig]:
+    if args.adapter == "full":
+        raise ValueError("Cannot create unet adapter config for full parameter")
+
+    if args.adapter == "lora":
+        config = LoraConfig(
+            r=args.unet_r,
+            lora_alpha=args.unet_alpha,
+            target_modules=UNET_TARGET_MODULES,
+            lora_dropout=args.unet_dropout,
+            bias=args.unet_bias,
+            init_lora_weights=True,
+        )
+    elif args.adapter == "loha":
+        config = LoHaConfig(
+            r=args.unet_r,
+            alpha=args.unet_alpha,
+            target_modules=UNET_TARGET_MODULES,
+            rank_dropout=args.unet_rank_dropout,
+            module_dropout=args.unet_module_dropout,
+            use_effective_conv2d=args.unet_use_effective_conv2d,
+            init_weights=True,
+        )
+    elif args.adapter == "lokr":
+        config = LoKrConfig(
+            r=args.unet_r,
+            alpha=args.unet_alpha,
+            target_modules=UNET_TARGET_MODULES,
+            rank_dropout=args.unet_rank_dropout,
+            module_dropout=args.unet_module_dropout,
+            use_effective_conv2d=args.unet_use_effective_conv2d,
+            decompose_both=args.unet_decompose_both,
+            decompose_factor=args.unet_decompose_factor,
+            init_weights=True,
+        )
+    else:
+        raise ValueError(f"Unknown adapter type {args.adapter}")
+
+    return config
+
+
+def create_text_encoder_adapter_config(args: argparse.Namespace) -> Union[LoraConfig, LoHaConfig, LoKrConfig]:
+    if args.adapter == "full":
+        raise ValueError("Cannot create text_encoder adapter config for full parameter")
+
+    if args.adapter == "lora":
+        config = LoraConfig(
+            r=args.te_r,
+            lora_alpha=args.te_alpha,
+            target_modules=TEXT_ENCODER_TARGET_MODULES,
+            lora_dropout=args.te_dropout,
+            bias=args.te_bias,
+            init_lora_weights=True,
+        )
+    elif args.adapter == "loha":
+        config = LoHaConfig(
+            r=args.te_r,
+            alpha=args.te_alpha,
+            target_modules=TEXT_ENCODER_TARGET_MODULES,
+            rank_dropout=args.te_rank_dropout,
+            module_dropout=args.te_module_dropout,
+            init_weights=True,
+        )
+    elif args.adapter == "lokr":
+        config = LoKrConfig(
+            r=args.te_r,
+            alpha=args.te_alpha,
+            target_modules=TEXT_ENCODER_TARGET_MODULES,
+            rank_dropout=args.te_rank_dropout,
+            module_dropout=args.te_module_dropout,
+            decompose_both=args.te_decompose_both,
+            decompose_factor=args.te_decompose_factor,
+            init_weights=True,
+        )
+    else:
+        raise ValueError(f"Unknown adapter type {args.adapter}")
+
+    return config
 
 
 def parse_args(input_args=None):
@@ -192,41 +272,6 @@ def parse_args(input_args=None):
     )
     parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
 
-    # loha args
-    parser.add_argument("--use_loha", action="store_true", help="Whether to use LoHa for parameter efficient tuning")
-    parser.add_argument("--r", type=int, default=8, help="LoHa rank, only used if use_loha is True")
-    parser.add_argument("--alpha", type=int, default=32, help="LoHa alpha, only used if use_loha is True")
-    parser.add_argument("--rank_dropout", type=float, default=0.0, help="LoHa dropout for rank")
-    parser.add_argument("--module_dropout", type=float, default=0.0, help="LoHa dropout for disabling module at all")
-    parser.add_argument(
-        "--use_effective_conv2d",
-        action="store_true",
-        help="Use parameter effective decomposition for Conv2d 3x3 with ksize > 1",
-    )
-    parser.add_argument(
-        "--loha_text_encoder_r",
-        type=int,
-        default=8,
-        help="LoHa rank for text encoder, only used if `use_loha` and `train_text_encoder` are True",
-    )
-    parser.add_argument(
-        "--loha_text_encoder_alpha",
-        type=int,
-        default=32,
-        help="LoHa alpha for text encoder, only used if `use_loha` and `train_text_encoder` are True",
-    )
-    parser.add_argument(
-        "--loha_text_encoder_rank_dropout",
-        type=float,
-        default=0.0,
-        help="LoHa dropout for text encoder for rank, only used if `use_loha` and `train_text_encoder` are True",
-    )
-    parser.add_argument(
-        "--loha_text_encoder_module_dropout",
-        type=float,
-        default=0.0,
-        help="LoHa dropout for text encoder for modules, only used if `use_loha` and `train_text_encoder` are True",
-    )
     parser.add_argument(
         "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
@@ -379,6 +424,132 @@ def parse_args(input_args=None):
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     parser.add_argument(
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
+    )
+
+    # Adapter arguments
+    subparsers = parser.add_subparsers(dest="adapter")
+
+    # Dummy subparser to train whole model
+    subparsers.add_parser("full", help="Train full model without adapters")
+
+    # LoRA adapter
+    lora = subparsers.add_parser("lora", help="Use LoRA adapter")
+    lora.add_argument("--unet_r", type=int, default=8, help="LoRA rank for unet")
+    lora.add_argument("--unet_alpha", type=int, default=8, help="LoRA alpha for unet")
+    lora.add_argument("--unet_dropout", type=float, default=0.0, help="LoRA dropout probability for unet")
+    lora.add_argument(
+        "--unet_bias",
+        type=str,
+        default="none",
+        help="Bias type for LoRA. Can be 'none', 'all' or 'lora_only'",
+    )
+    lora.add_argument(
+        "--te_r", type=int, default=8, help="LoRA rank for text_encoder, only used if `train_text_encoder` is True"
+    )
+    lora.add_argument(
+        "--te_alpha",
+        type=int,
+        default=8,
+        help="LoRA alpha for text_encoder, only used if `train_text_encoder` is True",
+    )
+    lora.add_argument(
+        "--te_dropout",
+        type=float,
+        default=0.0,
+        help="LoRA dropout probability for text_encoder, only used if `train_text_encoder` is True",
+    )
+    lora.add_argument(
+        "--te_bias",
+        type=str,
+        default="none",
+        help="Bias type for LoRA. Can be 'none', 'all' or 'lora_only', only used if `train_text_encoder` is True",
+    )
+
+    # LoHa adapter
+    loha = subparsers.add_parser("loha", help="Use LoHa adapter")
+    loha.add_argument("--unet_r", type=int, default=8, help="LoHa rank for unet")
+    loha.add_argument("--unet_alpha", type=int, default=8, help="LoHa alpha for unet")
+    loha.add_argument("--unet_rank_dropout", type=float, default=0.0, help="LoHa rank_dropout probability for unet")
+    loha.add_argument(
+        "--unet_module_dropout", type=float, default=0.0, help="LoHa module_dropout probability for unet"
+    )
+    loha.add_argument(
+        "--unet_use_effective_conv2d",
+        action="store_true",
+        help="Use parameter effective decomposition in unet for Conv2d 3x3 with ksize > 1",
+    )
+    loha.add_argument(
+        "--te_r", type=int, default=8, help="LoHa rank for text_encoder, only used if `train_text_encoder` is True"
+    )
+    loha.add_argument(
+        "--te_alpha",
+        type=int,
+        default=8,
+        help="LoHa alpha for text_encoder, only used if `train_text_encoder` is True",
+    )
+    loha.add_argument(
+        "--te_rank_dropout",
+        type=float,
+        default=0.0,
+        help="LoHa rank_dropout probability for text_encoder, only used if `train_text_encoder` is True",
+    )
+    loha.add_argument(
+        "--te_module_dropout",
+        type=float,
+        default=0.0,
+        help="LoHa module_dropout probability for text_encoder, only used if `train_text_encoder` is True",
+    )
+
+    # LoKr adapter
+    lokr = subparsers.add_parser("lokr", help="Use LoKr adapter")
+    lokr.add_argument("--unet_r", type=int, default=8, help="LoKr rank for unet")
+    lokr.add_argument("--unet_alpha", type=int, default=8, help="LoKr alpha for unet")
+    lokr.add_argument("--unet_rank_dropout", type=float, default=0.0, help="LoKr rank_dropout probability for unet")
+    lokr.add_argument(
+        "--unet_module_dropout", type=float, default=0.0, help="LoKr module_dropout probability for unet"
+    )
+    lokr.add_argument(
+        "--unet_use_effective_conv2d",
+        action="store_true",
+        help="Use parameter effective decomposition in unet for Conv2d 3x3 with ksize > 1",
+    )
+    lokr.add_argument(
+        "--unet_decompose_both", action="store_true", help="Decompose left matrix in kronecker product for unet"
+    )
+    lokr.add_argument(
+        "--unet_decompose_factor", type=int, default=-1, help="Decompose factor in kronecker product for unet"
+    )
+    lokr.add_argument(
+        "--te_r", type=int, default=8, help="LoKr rank for text_encoder, only used if `train_text_encoder` is True"
+    )
+    lokr.add_argument(
+        "--te_alpha",
+        type=int,
+        default=8,
+        help="LoKr alpha for text_encoder, only used if `train_text_encoder` is True",
+    )
+    lokr.add_argument(
+        "--te_rank_dropout",
+        type=float,
+        default=0.0,
+        help="LoKr rank_dropout probability for text_encoder, only used if `train_text_encoder` is True",
+    )
+    lokr.add_argument(
+        "--te_module_dropout",
+        type=float,
+        default=0.0,
+        help="LoKr module_dropout probability for text_encoder, only used if `train_text_encoder` is True",
+    )
+    lokr.add_argument(
+        "--te_decompose_both",
+        action="store_true",
+        help="Decompose left matrix in kronecker product for text_encoder, only used if `train_text_encoder` is True",
+    )
+    lokr.add_argument(
+        "--te_decompose_factor",
+        type=int,
+        default=-1,
+        help="Decompose factor in kronecker product for text_encoder, only used if `train_text_encoder` is True",
     )
 
     if input_args is not None:
@@ -723,16 +894,8 @@ def main(args):
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
 
-    if args.use_loha:
-        config = LoHaConfig(
-            r=args.r,
-            alpha=args.alpha,
-            target_modules=UNET_TARGET_MODULES,
-            rank_dropout=args.rank_dropout,
-            module_dropout=args.module_dropout,
-            use_effective_conv2d=args.use_effective_conv2d,
-            init_weights=True,
-        )
+    if args.adapter != "full":
+        config = create_unet_adapter_config(args)
         unet = get_peft_model(unet, config)
         unet.print_trainable_parameters()
         print(unet)
@@ -740,15 +903,8 @@ def main(args):
     vae.requires_grad_(False)
     if not args.train_text_encoder:
         text_encoder.requires_grad_(False)
-    elif args.train_text_encoder and args.use_loha:
-        config = LoHaConfig(
-            r=args.loha_text_encoder_r,
-            alpha=args.loha_text_encoder_alpha,
-            target_modules=TEXT_ENCODER_TARGET_MODULES,
-            rank_dropout=args.loha_text_encoder_rank_dropout,
-            module_dropout=args.loha_text_encoder_module_dropout,
-            init_weights=True,
-        )
+    elif args.train_text_encoder and args.adapter != "full":
+        config = create_text_encoder_adapter_config(args)
         text_encoder = get_peft_model(text_encoder, config)
         text_encoder.print_trainable_parameters()
         print(text_encoder)
@@ -761,7 +917,7 @@ def main(args):
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
-        if args.train_text_encoder and not args.use_loha:
+        if args.train_text_encoder and not args.adapter != "full":
             text_encoder.gradient_checkpointing_enable()
 
     # Enable TF32 for faster training on Ampere GPUs,
@@ -1018,6 +1174,10 @@ def main(args):
                     pipeline = pipeline.to(accelerator.device)
                     pipeline.set_progress_bar_config(disable=True)
 
+                    # Set evaliation mode
+                    pipeline.unet.eval()
+                    pipeline.text_encoder.eval()
+
                     # run inference
                     if args.seed is not None:
                         generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
@@ -1043,6 +1203,10 @@ def main(args):
                                     ]
                                 }
                             )
+
+                    # Set evaliation mode
+                    pipeline.unet.train()
+                    pipeline.text_encoder.train()
 
                     del pipeline
                     torch.cuda.empty_cache()
@@ -1071,7 +1235,7 @@ def main(args):
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        if args.use_loha:
+        if args.adapter != "full":
             unwarpped_unet = accelerator.unwrap_model(unet)
             unwarpped_unet.save_pretrained(
                 os.path.join(args.output_dir, "unet"), state_dict=accelerator.get_state_dict(unet)
