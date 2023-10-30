@@ -126,6 +126,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # behavior we disable that in this line.
         if hasattr(self.base_model, "config") and hasattr(self.base_model.config, "pretraining_tp"):
             self.base_model.config.pretraining_tp = 1
+        model._hf_peft_config_loaded = True
 
     @property
     def peft_config(self) -> Dict[str, PeftConfig]:
