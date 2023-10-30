@@ -43,10 +43,6 @@ class IA3Layer(BaseTunerLayer):
         self.out_features = out_features
         self.is_feedforward = is_feedforward
 
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
         if self.is_feedforward:
