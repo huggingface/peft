@@ -20,7 +20,7 @@ from parameterized import parameterized
 from transformers import AutoModel
 
 from peft import IA3Config, LoraConfig, get_peft_model
-from peft.tuners.tuners_utils import check_target_module_exists
+from peft.tuners.tuners_utils import check_target_module_exists, inspect_matched_modules
 
 
 TEST_CASES = [
@@ -125,7 +125,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         config = LoraConfig()
         peft_model = get_peft_model(model, config)
 
-        output = peft_model.inspect_matched_modules()
+        output = inspect_matched_modules(peft_model)  # inspects default adapter for peft_model
         matched = output["matched"]
         expected = [
             "h.0.self_attention.query_key_value",
@@ -151,7 +151,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         }
         config = IA3Config(base_model_name_or_path=model_id, **config_kwargs)
         peft_model = get_peft_model(model, config)
-        output = peft_model.inspect_matched_modules()
+        output = inspect_matched_modules(peft_model)  # inspects default adapter for peft_model
         matched = output["matched"]
         expected = [
             "encoder.block.0.layer.0.SelfAttention.q",

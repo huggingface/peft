@@ -210,12 +210,12 @@ class PeftConfigTester(unittest.TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            expected_regex="`layers_to_transform` cannot be used when `target_modules` is a regex expression.",
+            expected_regex="`layers_to_transform` cannot be used when `target_modules` is a str.",
         ):
             LoraConfig(**invalid_config1)
 
         with self.assertRaisesRegex(
-            ValueError, expected_regex="`layers_pattern` cannot be used when `target_modules` is a regex expression."
+            ValueError, expected_regex="`layers_pattern` cannot be used when `target_modules` is a str."
         ):
             LoraConfig(**invalid_config2)
 
