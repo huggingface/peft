@@ -21,10 +21,10 @@ from functools import reduce
 from itertools import chain
 
 import torch
+from accelerate.hooks import AlignDevicesHook
 from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
-from accelerate.hooks import AlignDevicesHook
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
