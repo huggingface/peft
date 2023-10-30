@@ -203,8 +203,8 @@ class PeftConfigTester(unittest.TestCase):
         # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
         # `layers_pattern` are not None
 
-        invalid_config1 = {"target_modules": "*.foo", "layers_to_transform": [0]}
-        invalid_config2 = {"target_modules": "*.foo", "layers_pattern": ["bar"]}
+        invalid_config1 = {"target_modules": ".*foo", "layers_to_transform": [0]}
+        invalid_config2 = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
 
         valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
 
