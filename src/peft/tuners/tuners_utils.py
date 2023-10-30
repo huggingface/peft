@@ -386,7 +386,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
 
 def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> dict:
     """
-    A helper function to inspect the set of matched and unmatched modules for the given adapter.
+    A helper function to inspect the set of matched and unmatched modules for a PEFT model and the given adapter.
     """
     config = tuner.peft_config[adapter_name]
     key_list = [key for key, _ in tuner.model.named_modules()]
