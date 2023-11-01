@@ -23,6 +23,9 @@ from peft import IA3Config, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import check_target_module_exists, inspect_matched_modules
 
 
+# Implements tests for regex matching logic common for all BaseTuner subclasses, and also
+# tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc)
+
 TEST_CASES = [
     # tuple of
     # 1. key
