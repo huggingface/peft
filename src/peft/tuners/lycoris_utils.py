@@ -18,7 +18,7 @@ import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Dict, Optional, Set, Type, Union
+from typing import Any, Dict, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -58,12 +58,13 @@ class LycorisConfig(PeftConfig):
     )
 
 
-class LycorisLayer(BaseTunerLayer, nn.Module):
+class LycorisLayer(BaseTunerLayer):
     r"""
     A base layer for LyCORIS like adapters
     """
 
-    def __init__(self):
+    def __init__(self, base_layer: nn.Module) -> None:
+        self.base_layer = base_layer
         self.r = {}
         self.alpha = {}
         self.scaling = {}
@@ -91,42 +92,14 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
         cls.__init__(self, *args, device="meta", **kwargs)
         self.to_empty(device=final_device)
 
-    def _op(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
-
     @abstractmethod
     def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs):
         ...
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        previous_dtype = x.dtype
-
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self._op(x, self.weight)
-        elif self.merged:
-            result = self._op(x, self.weight)
-        else:
-            # Get base weights
-            weight = self.weight.data
-
-            # Execute all the adapters
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self._available_adapters:
-                    continue
-
-                module_dropout = self.module_dropout[active_adapter]
-
-                # Modify current execution weights
-                if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    weight = weight + self.get_delta_weight(active_adapter)
-
-            # Perform actual operation
-            result = self._op(x, weight)
-
-        result = result.to(previous_dtype)
-        return result
+    # TODO: refactor LoRA to use the same approach
+    @abstractmethod
+    def _get_delta_activations(self, adapter_name: str, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """Activations added on top of the base layer output (i.e. after the base layer forward pass)"""
 
     @abstractmethod
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
@@ -140,7 +113,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self._available_adapters:
-                self.weight.data += self.get_delta_weight(active_adapter)
+                self.base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     @abstractmethod
@@ -170,7 +143,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.base_layer.weight.data -= self.get_delta_weight(active_adapter)
 
     def unscale_layer(self, scale=None) -> None:
         for active_adapter in self.active_adapters:
@@ -242,45 +215,40 @@ class LycorisTuner(BaseTuner):
         # Find corresponding subtype of provided target module
         new_module_cls = None
         for subtype, target_cls in cls.layers_mapping.items():
-            if isinstance(target, subtype):
+            if (
+                hasattr(target, "base_layer")
+                and isinstance(target.get_base_layer(), subtype)
+                and isinstance(target, BaseTunerLayer)
+            ):
+                # nested tuner layers are allowed
+                new_module_cls = target_cls
+                break
+            elif isinstance(target, subtype):
                 new_module_cls = target_cls
                 break
 
         # We didn't find corresponding type, so adapter for this layer is not supported
         if new_module_cls is None:
+            supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
             raise ValueError(
-                f"Target module not found, currently only adapters for {', '.join([x.__name__ for x in cls.modules_mapping.keys()])} are supported"
+                f"Target module of type {type(target)} not supported, "
+                f"currently only adapters for {supported_modules} are supported"
             )
 
-        if isinstance(target, torch.nn.Conv2d):
-            new_module = new_module_cls(
-                target.in_channels,
-                target.out_channels,
-                target.weight.size()[2:],
-                stride=target.stride,
-                padding=target.padding,
-                dilation=target.dilation,
-                groups=target.groups,
-                bias=target.bias is not None,
-                padding_mode=target.padding_mode,
-                device=target.weight.device,
-                dtype=target.weight.dtype,
-                adapter_name=adapter_name,
-                **kwargs,
-            )
-        elif isinstance(target, torch.nn.Linear):
-            new_module = new_module_cls(
-                target.in_features,
-                target.out_features,
-                bias=target.bias is not None,
-                device=target.weight.device,
-                dtype=target.weight.dtype,
-                adapter_name=adapter_name,
-                **kwargs,
-            )
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
         else:
+            target_base_layer = target
+
+        if isinstance(target_base_layer, torch.nn.Conv2d):
+            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+        elif isinstance(target_base_layer, torch.nn.Linear):
+            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+        else:
+            supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
             raise ValueError(
-                "Target module not found, currently only adapters for nn.Linear and nn.Conv2d are supported"
+                f"Target module of type {type(target)} not supported, "
+                f"currently only adapters for {supported_modules} are supported"
             )
 
         return new_module

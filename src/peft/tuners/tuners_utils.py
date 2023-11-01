@@ -284,6 +284,18 @@ class BaseTunerLayer(ABC):
     # List all merged adapters
     merged_adapters: list[str] = []
 
+    def get_base_layer(self) -> nn.Module:
+        """
+        (Recursively) get the base_layer.
+
+        This is necessary for the case that the tuner layer wraps another tuner layer.
+
+        """
+        base_layer = self
+        while hasattr(base_layer, "base_layer"):
+            base_layer = base_layer.base_layer
+        return base_layer
+
     def merge(self, *args) -> None:
         raise NotImplementedError
 

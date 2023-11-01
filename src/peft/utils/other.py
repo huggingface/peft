@@ -248,8 +248,22 @@ def _set_trainable(model, adapter_name):
 
 
 def _set_adapter(model, adapter_name):
+    def check_adapter_name(adapter_name):
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) > 1:
+            raise ValueError("Only one adapter can be set at a time for modules_to_save")
+        elif len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+        adapter_name = adapter_name[0]
+        return adapter_name
+
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
+            # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
+            adapter_name = check_adapter_name(adapter_name)
             module.set_adapter(adapter_name)
 
 

@@ -258,7 +258,12 @@ class LoraModel(BaseTuner):
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         bias = kwargs.pop("bias", False)
 
-        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
                 {
@@ -269,7 +274,7 @@ class LoraModel(BaseTuner):
                 }
             )
             new_module = Linear8bitLt(adapter_name, target, **eightbit_kwargs)
-        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
@@ -279,33 +284,24 @@ class LoraModel(BaseTuner):
                 }
             )
             new_module = Linear4bit(adapter_name, target, **fourbit_kwargs)
-        elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
+        elif AutoGPTQQuantLinear is not None and isinstance(target_base_layer, AutoGPTQQuantLinear):
             new_module = QuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
-        elif isinstance(target, torch.nn.Embedding):
+        elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
-            in_features, out_features = target.num_embeddings, target.embedding_dim
-            new_module = Embedding(adapter_name, in_features, out_features, **embedding_kwargs)
-        elif isinstance(target, torch.nn.Conv2d):
-            out_channels, in_channels = target.weight.size()[:2]
-            kernel_size = target.weight.size()[2:]
-            stride = target.stride
-            padding = target.padding
-            new_module = Conv2d(adapter_name, in_channels, out_channels, kernel_size, stride, padding, **kwargs)
+            new_module = Embedding(target, adapter_name, **embedding_kwargs)
+        elif isinstance(target_base_layer, torch.nn.Conv2d):
+            new_module = Conv2d(target, adapter_name, **kwargs)
         else:
-            if isinstance(target, torch.nn.Linear):
-                in_features, out_features = target.in_features, target.out_features
+            if isinstance(target_base_layer, torch.nn.Linear):
                 if kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                         "Setting fan_in_fan_out to False."
                     )
                     kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-            elif isinstance(target, Conv1D):
-                in_features, out_features = (
-                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                )
+            elif isinstance(target_base_layer, Conv1D):
                 kwargs["is_target_conv_1d_layer"] = True
                 if not kwargs["fan_in_fan_out"]:
                     warnings.warn(
@@ -318,7 +314,7 @@ class LoraModel(BaseTuner):
                     f"Target module {target} is not supported. Currently, only the following modules are supported: "
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
-            new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+            new_module = Linear(target, adapter_name, bias=bias, **kwargs)
 
         return new_module
 
@@ -389,17 +385,29 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
             if isinstance(target, LoraLayer):
-                if isinstance(target, nn.Embedding):
+                if isinstance(target, Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
-                elif isinstance(target, nn.Conv2d):
+                elif isinstance(target, Conv2d):
                     new_module = torch.nn.Conv2d(
-                        target.in_channels,
-                        target.out_channels,
-                        kernel_size=target.kernel_size,
-                        stride=target.stride,
-                        padding=target.padding,
-                        dilation=target.dilation,
+                        target.base_layer.in_channels,
+                        target.base_layer.out_channels,
+                        kernel_size=target.base_layer.kernel_size,
+                        stride=target.base_layer.stride,
+                        padding=target.base_layer.padding,
+                        dilation=target.base_layer.dilation,
                     )
+                elif isinstance(target, Linear):
+                    bias = target.base_layer.bias is not None
+                    if getattr(target, "is_target_conv_1d_layer", False):
+                        in_features, out_features = (
+                            target.base_layer.weight.ds_shape
+                            if hasattr(target.base_layer.weight, "ds_shape") else target.base_layer.weight.shape
+                        )
+                        new_module = Conv1D(out_features, in_features)
+                    else:
+                        new_module = torch.nn.Linear(
+                            target.base_layer.in_features, target.base_layer.out_features, bias=bias
+                        )
                 elif is_bnb_available() and isinstance(target, Linear8bitLt):
                     bias = target.base_layer.bias is not None
                     new_module = bnb.nn.Linear8bitLt(
@@ -423,18 +431,11 @@ class LoraModel(BaseTuner):
                         quant_type=target.base_layer.weight.quant_type,
                         device=target.base_layer.weight.device,
                     )
-                else:
-                    bias = target.bias is not None
-                    if getattr(target, "is_target_conv_1d_layer", False):
-                        new_module = Conv1D(target.out_features, target.in_features)
-                    else:
-                        new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
-
             # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+            elif isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model

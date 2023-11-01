@@ -25,6 +25,7 @@ from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, PeftModel, get_peft_model
+from peft.utils import infer_device
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
@@ -463,6 +464,20 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
+    def test_forward_output_finite(self, test_name, model_id, config_cls, config_kwargs):
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+        with torch.no_grad():
+            output = model(**X)
+        self.assertTrue(torch.isfinite(output).all())
+
+    @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using LoRA on a custom model, only the LoRA parameters are updated during training
         X = self.prepare_inputs_for_testing()
@@ -542,7 +557,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
+        outputs_base = model(**X)
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -550,6 +567,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         model.eval()
         outputs_before = model(**X)
+
+        self.assertTrue(torch.allclose(outputs_base, outputs_before))
 
         model.train()
         # EmbConv1D is slow to learn for some reason
@@ -796,8 +815,9 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["lin0"])
         model = get_peft_model(MLP(), config)
         print_output = repr(model.model.lin0)
-        self.assertTrue(print_output.startswith("Linear"))
-        self.assertTrue("in_features=10, out_features=20" in print_output)
+        self.assertTrue(print_output.startswith("lora.Linear"))
+        self.assertTrue("in_features=10" in print_output)
+        self.assertTrue("out_features=20" in print_output)
         self.assertTrue("lora_A" in print_output)
         self.assertTrue("lora_B" in print_output)
         self.assertTrue("default" in print_output)
@@ -806,7 +826,7 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["emb"])
         model = get_peft_model(ModelEmbConv1D(), config)
         print_output = repr(model.model.emb)
-        self.assertTrue(print_output.startswith("Embedding"))
+        self.assertTrue(print_output.startswith("lora.Embedding"))
         self.assertTrue("100, 5" in print_output)
         self.assertTrue("lora_embedding_A" in print_output)
         self.assertTrue("lora_embedding_B" in print_output)
@@ -816,8 +836,9 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["conv1d"])
         model = get_peft_model(ModelEmbConv1D(), config)
         print_output = repr(model.model.conv1d)
-        self.assertTrue(print_output.startswith("Linear"))
-        self.assertTrue("in_features=5, out_features=1" in print_output)
+        self.assertTrue(print_output.startswith("lora.Linear"))
+        self.assertTrue("in_features=5" in print_output)
+        self.assertTrue("out_features=1" in print_output)
         self.assertTrue("lora_A" in print_output)
         self.assertTrue("lora_B" in print_output)
         self.assertTrue("default" in print_output)
@@ -826,7 +847,7 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["conv2d"])
         model = get_peft_model(ModelConv2D(), config)
         print_output = repr(model.model.conv2d)
-        self.assertTrue(print_output.startswith("Conv2d"))
+        self.assertTrue(print_output.startswith("lora.Conv2d"))
         self.assertTrue("5, 10" in print_output)
         self.assertTrue("kernel_size=(3, 3)" in print_output)
         self.assertTrue("stride=(1, 1)" in print_output)
@@ -1251,3 +1272,150 @@ class RequiresGradTester(unittest.TestCase):
         self.assertTrue(peft_model.model.lin0.lora_A.adapter1.requires_grad)
         self.assertTrue(peft_model.model.lin0.lora_B.adapter1.requires_grad)
         self.assertTrue(peft_model.model.lin0.lora_E.adapter1.requires_grad)
+
+
+class SimpleNet(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.lin1 = nn.Linear(20, 2, bias=bias)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.lin1(X)
+        return X
+
+
+class TestMixedAdapterTypes(unittest.TestCase):
+    torch_device = infer_device()
+
+    def _check_mixed_outputs(self, model_cls, config0, config1, input, *, is_commutative):
+        # This test checks different combinations of adapter0, adapter1, or combinations of the two, and whether
+        # outputs are the same/different, depending on context. If we pass is_commutative=True, it means that the order
+        # of adapters does not matter, and we expect the same output regardless of the order in which adapters are
+        # applied.
+        # We have to very careful with resetting the random seed each time it is used, otherwise the adapters may be
+        # initialized with different values, and the test will fail.
+
+        # base model
+        torch.manual_seed(0)
+        output_base = model_cls().eval().to(self.torch_device)(input)
+        self.assertTrue(torch.isfinite(output_base).all())
+
+        # adapter 0
+        torch.manual_seed(0)
+        base_model = model_cls()
+        torch.manual_seed(0)
+        peft_model = get_peft_model(base_model, config0).eval().to(self.torch_device)
+        output_config0 = peft_model(input)
+
+        self.assertTrue(torch.isfinite(output_config0).all())
+        self.assertFalse(torch.allclose(output_base, output_config0))
+
+        # adapter 1
+        torch.manual_seed(0)
+        base_model = model_cls()
+        torch.manual_seed(0)
+        peft_model = get_peft_model(base_model, config1).eval().to(self.torch_device)
+        output_config1 = peft_model(input)
+
+        self.assertTrue(torch.isfinite(output_config1).all())
+        self.assertFalse(torch.allclose(output_base, output_config1))
+        self.assertFalse(torch.allclose(output_config0, output_config1))
+
+        # adapter 0 + 1
+        torch.manual_seed(0)
+        base_model = model_cls()
+        torch.manual_seed(0)
+        peft_model_mixed_01 = get_peft_model(base_model, config0, "adapter0", mixed=True).eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_mixed_01.add_adapter("adapter1", config1)
+        peft_model_mixed_01.set_adapter(["adapter0", "adapter1"])
+        output_mixed_01 = peft_model_mixed_01(input)
+
+        # check the number of tuner layer types
+        tuner_layers = [mod for mod in peft_model_mixed_01.modules() if isinstance(mod, BaseTunerLayer)]
+        tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
+        if type(config0) == type(config1):
+            self.assertEqual(len(tuner_types), 1)
+        else:
+            self.assertEqual(len(tuner_types), 2)
+
+        self.assertEqual(peft_model_mixed_01.active_adapters, ["adapter0", "adapter1"])
+        self.assertTrue(torch.isfinite(output_mixed_01).all())
+        self.assertFalse(torch.allclose(output_config0, output_mixed_01))
+        self.assertFalse(torch.allclose(output_config1, output_mixed_01))
+        if is_commutative:
+            delta0 = output_config0 - output_base
+            delta1 = output_config1 - output_base
+            delta_mixed_01 = output_mixed_01 - output_base
+            self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01))
+
+        # adapter 1 + 0
+        torch.manual_seed(0)
+        base_model = model_cls()
+        torch.manual_seed(0)
+        peft_model_mixed_10 = get_peft_model(base_model, config1, "adapter1", mixed=True).eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_mixed_10.add_adapter("adapter0", config0)
+        peft_model_mixed_10.set_adapter(["adapter1", "adapter0"])
+        output_mixed_10 = peft_model_mixed_10(input)
+
+        # check the number of tuner layer types
+        tuner_layers = [mod for mod in peft_model_mixed_10.modules() if isinstance(mod, BaseTunerLayer)]
+        tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
+        if type(config0) == type(config1):
+            self.assertEqual(len(tuner_types), 1)
+        else:
+            self.assertEqual(len(tuner_types), 2)
+
+        self.assertEqual(peft_model_mixed_10.active_adapters, ["adapter1", "adapter0"])
+        self.assertTrue(torch.isfinite(output_mixed_10).all())
+        self.assertFalse(torch.allclose(output_config0, output_mixed_10))
+        self.assertFalse(torch.allclose(output_config1, output_mixed_10))
+        if is_commutative:
+            self.assertTrue(torch.allclose(output_mixed_01, output_mixed_10))
+
+        # turn around the order of the adapters of the 0 + 1 mixed model, should behave like the 0 + 1 mixed model
+        peft_model_mixed_10.set_adapter(["adapter0", "adapter1"])
+        output_mixed_reversed = peft_model_mixed_10(input)
+
+        # check the number of tuner layer types
+        tuner_layers = [mod for mod in peft_model_mixed_10.modules() if isinstance(mod, BaseTunerLayer)]
+        tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
+        if type(config0) == type(config1):
+            self.assertEqual(len(tuner_types), 1)
+        else:
+            self.assertEqual(len(tuner_types), 2)
+
+        self.assertEqual(peft_model_mixed_10.active_adapters, ["adapter0", "adapter1"])
+        self.assertTrue(torch.isfinite(output_mixed_reversed).all())
+        self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_01))
+        self.assertFalse(torch.allclose(output_mixed_reversed, output_config0))
+        self.assertFalse(torch.allclose(output_mixed_reversed, output_config1))
+        if is_commutative:
+            self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_10))
+
+    def test_target_same_layer(self):
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        lora_config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        loha_config = LoHaConfig(target_modules=["lin0"], init_weights=False)
+        self._check_mixed_outputs(SimpleNet, lora_config, loha_config, input, is_commutative=False)
+
+    def test_target_last_layer(self):
+        # We are targeting the last layer of the SimpleNet. Therefore, since the adapters only add their activations
+        # to the output, the results should be commutative. This would *not* work if the adapters do something more
+        # complex or if we target an earlier layer, because of the non-linearity would destroy the commutativity.
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        lora_config = LoraConfig(target_modules=["lin1"], init_lora_weights=False)
+        loha_config = LoHaConfig(target_modules=["lin1"], init_weights=False)
+        self._check_mixed_outputs(SimpleNet, lora_config, loha_config, input, is_commutative=True)
+
+    def test_target_different_layers(self):
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        lora_config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        loha_config = LoHaConfig(target_modules=["lin1"], init_weights=False)
+        self._check_mixed_outputs(MLP, lora_config, loha_config, input, is_commutative=False)

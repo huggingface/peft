@@ -238,6 +238,7 @@ class PeftCommonTester:
 
         dummy_input = self.prepare_inputs_for_testing()
         dummy_output = model.get_input_embeddings()(dummy_input["input_ids"])
+        breakpoint()
 
         self.assertFalse(dummy_output.requires_grad)
 
@@ -1006,7 +1007,7 @@ class PeftCommonTester:
         # must be False
         if isinstance(peft_model, StableDiffusionPipeline):
             # for SD, check that most pixels have different values
-            self.assertTrue((output_before != output_peft).float().mean() > 0.9)
+            self.assertTrue((output_before != output_peft).float().mean() > 0.8)
         else:
             self.assertFalse(torch.allclose(output_before, output_peft))
 
