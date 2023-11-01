@@ -122,7 +122,7 @@ class TorchTracemalloc:
 
 
 def main(args):
-    accelerator = Accelerator()
+    accelerator = Accelerator(mixed_precision=args.amp)
     model_name_or_path = args.model_name_or_path
     dataset_name = args.dataset_name
     text_column = args.text_column
@@ -409,17 +409,18 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Indexing elasticsearch documents.')
-    parser.add_argument('--model_name_or_path', type=str, default='bigscience/bloomz-7b1', help='Path to pretrained model or model identifier from huggingface.co/models.')
+    parser.add_argument('--model_name_or_path', type=str, default='facebook/opt-125m', help='Path to pretrained model or model identifier from huggingface.co/models.')
     parser.add_argument('--dataset_name', type=str, default='twitter_complaints', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--text_column', type=str, default="Tweet text", help='text column.')
     parser.add_argument('--label_column', type=str, default="text_label", help='label column.')
     parser.add_argument('--lr', type=float, default=3e-3, help='learning rate .')
     parser.add_argument('--num_epochs', type=int, default=1, help='number of epochs .')
-    parser.add_argument('--batch_size', type=int, default=2, help='training batch size .')
+    parser.add_argument('--batch_size', type=int, default=900, help='training batch size .')
     parser.add_argument('--seed', type=int, default=42, help='A seed for reproducible training.')
     parser.add_argument('--max_length', type=int, default=64, help='model max length.')
     parser.add_argument('--do_test', type=bool, default=False, help='do test.')
-    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+    parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
     args = parser.parse_args()
     main(args)

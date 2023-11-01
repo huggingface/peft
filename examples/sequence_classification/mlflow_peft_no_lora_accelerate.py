@@ -1,5 +1,4 @@
 import argparse
-
 import evaluate
 import torch
 from accelerate import Accelerator, DistributedDataParallelKwargs
@@ -8,7 +7,6 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
-
 from peft import (
     PrefixTuningConfig,
     PromptEncoderConfig,
@@ -19,11 +17,12 @@ from peft.utils.other import fsdp_auto_wrap_policy
 import mlflow
 import time
 import os
+
 logging_steps = 100
 
 def parse_args():
     parser = argparse.ArgumentParser(description="PEFT a transformers model on a sequence classification task")
-    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument(
         "--num_virtual_tokens",
         type=int,
@@ -45,7 +44,7 @@ def parse_args():
     parser.add_argument(
         "--per_device_train_batch_size",
         type=int,
-        default=8,
+        default=900,
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument(
@@ -60,7 +59,7 @@ def parse_args():
         default=1e-3,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
-    parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
+    parser.add_argument("--num_train_epochs", type=int, default=1, help="Total number of training epochs to perform.")
     parser.add_argument(
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
@@ -75,6 +74,8 @@ def parse_args():
     )
     parser.add_argument('--dataset_name', type=str, default='glue', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+    parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
+
     args = parser.parse_args()
 
     assert args.output_dir is not None, "Need an `output_dir` to store the finetune model and verify."
@@ -92,8 +93,9 @@ def get_num_parameters(model):
 
 def main():
     args = parse_args()
+    
     ddp_scaler = DistributedDataParallelKwargs(find_unused_parameters=True)
-    accelerator = Accelerator(kwargs_handlers=[ddp_scaler])
+    accelerator = Accelerator(mixed_precision=args.amp, kwargs_handlers=[ddp_scaler])
 
     task = "mrpc"
 

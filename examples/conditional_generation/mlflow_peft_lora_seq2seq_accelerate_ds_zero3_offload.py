@@ -111,7 +111,7 @@ class TorchTracemalloc:
 
 
 def main(args):
-    accelerator = Accelerator()
+    accelerator = Accelerator(mixed_precision=args.amp)
    
     model_name_or_path = args.model_name_or_path
     dataset_name = args.dataset_name
@@ -343,12 +343,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Sequence-to-Sequence Model Training Script")
-    parser.add_argument("--model_name_or_path", type=str, default="facebook/bart-large", help="Pretrained model name or path")
+    parser.add_argument("--model_name_or_path", type=str, default="facebook/bart-base", help="Pretrained model name or path")
     parser.add_argument('--dataset_name', type=str, default='twitter_complaints', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
-    parser.add_argument("--num_epochs", type=int, default=2, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=8, help="Batch size")
-    parser.add_argument('--log_interval', type=int, default=10, help='log interval.')
+    parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
+    parser.add_argument("--batch_size", type=int, default=900, help="Batch size")
+    parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
+    parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
     args = parser.parse_args()
     main(args)

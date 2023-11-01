@@ -19,20 +19,20 @@ import os
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Image Classification with LoRA")
-parser.add_argument("--model_checkpoint", type=str, default="google/vit-base-patch16-224-in21k",
+parser.add_argument("--model_checkpoint", type=str, default="microsoft/swin-base-patch4-window7-224",
                     help="The model checkpoint to use")
 parser.add_argument('--dataset_name', type=str, default='food101', help='The name of the Dataset (from the HuggingFace hub) to train on.')
 parser.add_argument("--batch_size", type=int, default=128,
                     help="Batch size for training and evaluation")
 parser.add_argument("--learning_rate", type=float, default=5e-3,
                     help="Learning rate for training")
-parser.add_argument("--num_train_epochs", type=int, default=5,
+parser.add_argument("--num_train_epochs", type=int, default=1,
                     help="Number of training epochs")
-parser.add_argument("--logging_steps", type=int, default=10,
+parser.add_argument("--logging_steps", type=int, default=1,
                     help="Log metrics every X steps")
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
 parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
-
+parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
 args = parser.parse_args()
 
 
@@ -128,7 +128,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=args.batch_size,
     gradient_accumulation_steps=4,
     per_device_eval_batch_size=args.batch_size,
-    fp16=True,
+    fp16=args.amp,
     num_train_epochs=args.num_train_epochs,
     logging_steps=args.logging_steps,
     load_best_model_at_end=True,
@@ -188,3 +188,4 @@ mlflow.end_run()
 
 # Evaluate the model on the validation set
 trainer.evaluate(val_ds)
+

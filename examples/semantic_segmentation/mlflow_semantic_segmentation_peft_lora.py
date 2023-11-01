@@ -25,6 +25,7 @@ parser.add_argument("--per_device_eval_batch_size", type=int, default=2, help="B
 parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
 parser.add_argument("--logging_steps", type=int, default=10,
                     help="Log metrics every X steps")
+parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="no", help="Choose AMP mode")
 args = parser.parse_args()
 
 # Load dataset
@@ -83,6 +84,7 @@ test_ds.set_transform(val_transforms)
 metric = evaluate.load("mean_iou")
 
 
+
 def compute_metrics(eval_pred):
     with torch.no_grad():
         logits, labels = eval_pred
@@ -129,6 +131,9 @@ model = AutoModelForSemanticSegmentation.from_pretrained(
 )
 print_trainable_parameters(model)
 
+#custom_optimizer
+custom_optimizer = torch.optim.SGD(model.parameters(),lr=args.learning_rate)
+
 config = LoraConfig(
     r=32,
     lora_alpha=32,
@@ -151,6 +156,7 @@ training_args = TrainingArguments(
     num_train_epochs=args.num_train_epochs,
     per_device_train_batch_size=args.per_device_train_batch_size,
     per_device_eval_batch_size=args.per_device_eval_batch_size,
+    fp16=args.amp,
     save_total_limit=3,
     evaluation_strategy="epoch",
     save_strategy="epoch",
@@ -159,6 +165,7 @@ training_args = TrainingArguments(
     push_to_hub=False,
     label_names=["labels"]
 )
+
 trainer = Trainer(
     model=lora_model,
     args=training_args,
@@ -166,6 +173,7 @@ trainer = Trainer(
     eval_dataset=test_ds,
     compute_metrics=compute_metrics,
 )
+trainer.model.set_optimizer(custom_optimizer)
 
 mlflow.start_run()
 train_results =  trainer.train()
