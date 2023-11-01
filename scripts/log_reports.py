@@ -12,10 +12,10 @@ total_num_failed = 0
 empty_file = False or len(list(Path().glob("*.log"))) == 0
 for log in Path().glob("*.log"):
     section_num_failed = 0
+    i = 0
     with open(log, "r") as f:
         for i, line in enumerate(f):
             line = json.loads(line)
-            empty_file = False
             if line.get("nodeid", "") != "":
                 test = line["nodeid"]
                 if line.get("duration", None) is not None:
@@ -26,6 +26,7 @@ for log in Path().glob("*.log"):
                         total_num_failed += 1
                     else:
                         passed.append([test, duration, log.name.split('_')[0]])
+        empty_file = i == 0
     group_info.append([str(log), section_num_failed, failed])
     os.remove(log)
     failed = []
