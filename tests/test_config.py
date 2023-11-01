@@ -198,3 +198,26 @@ class PeftConfigTester(unittest.TestCase):
             self.assertEqual(config.to_dict(), config_from_pretrained.to_dict())
             # explicit test that target_modules should be converted to set
             self.assertTrue(isinstance(config_from_pretrained.target_modules, set))
+
+    def test_regex_with_layer_indexing_lora(self):
+        # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
+        # `layers_pattern` are not None
+
+        invalid_config1 = {"target_modules": ".*foo", "layers_to_transform": [0]}
+        invalid_config2 = {"target_modules": ".*foo", "layers_pattern": ["bar"]}
+
+        valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
+
+        with self.assertRaisesRegex(
+            ValueError,
+            expected_regex="`layers_to_transform` cannot be used when `target_modules` is a str.",
+        ):
+            LoraConfig(**invalid_config1)
+
+        with self.assertRaisesRegex(
+            ValueError, expected_regex="`layers_pattern` cannot be used when `target_modules` is a str."
+        ):
+            LoraConfig(**invalid_config2)
+
+        # should run without errors
+        LoraConfig(**valid_config)

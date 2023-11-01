@@ -88,13 +88,15 @@ class LoraConfig(PeftConfig):
     layers_to_transform: Optional[Union[List[int], int]] = field(
         default=None,
         metadata={
-            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
+            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index. "
+            "This only works when target_modules is a list of str."
         },
     )
-    layers_pattern: Optional[str] = field(
+    layers_pattern: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "This only works when target_modules is a list of str."
         },
     )
     rank_pattern: Optional[dict] = field(
@@ -121,3 +123,10 @@ class LoraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        # if target_modules is a regex expression, then layers_to_transform should be None
+        if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
+        # if target_modules is a regex expression, then layers_pattern should be None
+        if isinstance(self.target_modules, str) and self.layers_pattern is not None:
+            raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
