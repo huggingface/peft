@@ -17,7 +17,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import Any
+from typing import Any, Union
 
 from torch import nn
 from tqdm import tqdm
@@ -36,8 +36,8 @@ from peft.utils import (
 # TODO
 COMPATIBLE_PEFT_TYPES = (PeftType.LORA, PeftType.LOHA)
 PREFIXES = ["lora_", "hada_"]  # TODO should be defined on the tuners themselves
-Configs = lora.LoraConfig | loha.LoHaConfig
-Layers = lora.layer.LoraLayer | loha.layer.LoHaLayer
+Configs = Union[lora.LoraConfig, loha.LoHaConfig]
+Layers = Union[lora.layer.LoraLayer, loha.layer.LoHaLayer]
 
 
 class LycorisModel(BaseTuner):
@@ -191,7 +191,7 @@ class LycorisModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
+    def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         for module in self.model.modules():
             if isinstance(module, Layers):
                 if module.merged:

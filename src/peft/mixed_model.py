@@ -18,7 +18,7 @@ from __future__ import annotations
 import inspect
 import os
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -288,7 +288,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             self.eval()
         return load_result
 
-    def set_adapter(self, adapter_name: str | list[str]) -> None:
+    def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         """
         Sets the active adapter.
         """
