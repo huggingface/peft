@@ -14,8 +14,9 @@ for log in Path().glob("*.log"):
     section_num_failed = 0
     i = 0
     with open(log, "r") as f:
-        for i, line in enumerate(f):
+        for line in f:
             line = json.loads(line)
+            i += 1
             if line.get("nodeid", "") != "":
                 test = line["nodeid"]
                 if line.get("duration", None) is not None:
@@ -28,7 +29,7 @@ for log in Path().glob("*.log"):
                         passed.append([test, duration, log.name.split('_')[0]])
         empty_file = i == 0
     group_info.append([str(log), section_num_failed, failed])
-    os.remove(log)
+    # os.remove(log)
     failed = []
 no_error_payload = {
     "type": "section",
