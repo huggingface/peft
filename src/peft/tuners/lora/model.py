@@ -21,7 +21,6 @@ from functools import reduce
 from itertools import chain
 
 import torch
-from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
@@ -401,7 +400,8 @@ class LoraModel(BaseTuner):
                     if getattr(target, "is_target_conv_1d_layer", False):
                         in_features, out_features = (
                             target.base_layer.weight.ds_shape
-                            if hasattr(target.base_layer.weight, "ds_shape") else target.base_layer.weight.shape
+                            if hasattr(target.base_layer.weight, "ds_shape")
+                            else target.base_layer.weight.shape
                         )
                         new_module = Conv1D(out_features, in_features)
                     else:

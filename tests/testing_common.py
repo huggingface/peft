@@ -238,7 +238,6 @@ class PeftCommonTester:
 
         dummy_input = self.prepare_inputs_for_testing()
         dummy_output = model.get_input_embeddings()(dummy_input["input_ids"])
-        breakpoint()
 
         self.assertFalse(dummy_output.requires_grad)
 

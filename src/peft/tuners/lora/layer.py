@@ -15,7 +15,7 @@
 
 import math
 import warnings
-from typing import Any, Tuple, Union
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -55,8 +55,7 @@ class LoraLayer(BaseTunerLayer):
             in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
         elif isinstance(base_layer, Conv1D):
             in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape")
-                else base_layer.weight.shape
+                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")

@@ -18,14 +18,13 @@ from __future__ import annotations
 import inspect
 import os
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Optional
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
-from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
+from accelerate.hooks import AlignDevicesHook, add_hook_to_module
 from accelerate.utils import get_balanced_memory
 from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
-from safetensors.torch import save_file as safe_save_file
 from torch import nn
 from transformers.utils import PushToHubMixin
 
@@ -38,21 +37,11 @@ from .tuners import (
     LoKrModel,
     LoraModel,
     LycorisModel,
-    MultitaskPromptEmbedding,
-    PrefixEncoder,
-    PromptEmbedding,
-    PromptEncoder,
 )
 from .utils import (
-    SAFETENSORS_WEIGHTS_NAME,
-    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
-    WEIGHTS_NAME,
     PeftType,
-    TaskType,
-    _prepare_prompt_learning_config,
     _set_adapter,
     _set_trainable,
-    get_peft_model_state_dict,
     infer_device,
     load_peft_weights,
     set_peft_model_state_dict,
@@ -271,7 +260,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         hook = AlignDevicesHook(io_same_device=True)
         add_hook_to_module(self.get_base_model(), hook)
 
-
     def load_adapter(
         self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any
     ) -> tuple[list[str], list[str]]:
@@ -363,156 +351,24 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         card.text = "\n".join(lines)
         card.save(filename)
-    # def save_pretrained(
-    #     self,
-    #     save_directory: str,
-    #     safe_serialization: bool = False,
-    #     selected_adapters: Optional[List[str]] = None,
-    #     **kwargs: Any,
-    # ):
-    #     r"""
-    #     This function saves the adapter model and the adapter configuration files to a directory, so that it can be
-    #     reloaded using the [`PeftModel.from_pretrained`] class method, and also used by the [`PeftModel.push_to_hub`]
-    #     method.
 
-    #     Args:
-    #         save_directory (`str`):
-    #             Directory where the adapter model and configuration files will be saved (will be created if it does not
-    #             exist).
-    #         kwargs (additional keyword arguments, *optional*):
-    #             Additional keyword arguments passed along to the `push_to_hub` method.
-    #     """
-    #     if os.path.isfile(save_directory):
-    #         raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
+    def save_pretrained(
+        self,
+        save_directory: str,
+        safe_serialization: bool = False,
+        selected_adapters: Optional[list[str]] = None,
+        **kwargs: Any,
+    ):
+        raise NotImplementedError("TODO")
 
-    #     if selected_adapters is None:
-    #         selected_adapters = list(self.peft_config.keys())
-    #     else:
-    #         if any(
-    #             selected_adapter_name not in list(self.peft_config.keys())
-    #             for selected_adapter_name in selected_adapters
-    #         ):
-    #             raise ValueError(
-    #                 f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
-    #                 f" {list(self.peft_config.keys())} - got {selected_adapters}."
-    #             )
-
-    #     os.makedirs(save_directory, exist_ok=True)
-    #     self.create_or_update_model_card(save_directory)
-
-    #     for adapter_name in selected_adapters:
-    #         peft_config = self.peft_config[adapter_name]
-    #         # save only the trainable weights
-    #         output_state_dict = get_peft_model_state_dict(
-    #             self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
-    #         )
-    #         output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
-    #         os.makedirs(output_dir, exist_ok=True)
-
-    #         if safe_serialization:
-    #             safe_save_file(
-    #                 output_state_dict,
-    #                 os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
-    #                 metadata={"format": "pt"},
-    #             )
-    #         else:
-    #             torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
-
-    #         # save the config and change the inference mode to `True`
-    #         if peft_config.base_model_name_or_path is None:
-    #             peft_config.base_model_name_or_path = (
-    #                 self.base_model.__dict__.get("name_or_path", None)
-    #                 if peft_config.is_prompt_learning
-    #                 else self.base_model.model.__dict__.get("name_or_path", None)
-    #             )
-    #         inference_mode = peft_config.inference_mode
-    #         peft_config.inference_mode = True
-
-    #         if peft_config.task_type is None:
-    #             # deal with auto mapping
-    #             base_model_class = self._get_base_model_class(
-    #                 is_prompt_tuning=peft_config.is_prompt_learning,
-    #             )
-    #             parent_library = base_model_class.__module__
-
-    #             auto_mapping_dict = {
-    #                 "base_model_class": base_model_class.__name__,
-    #                 "parent_library": parent_library,
-    #             }
-    #         else:
-    #             auto_mapping_dict = None
-
-    #         peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
-    #         peft_config.inference_mode = inference_mode
-
-    # @classmethod
-    # def from_pretrained(
-    #     cls,
-    #     model: PreTrainedModel,
-    #     model_id: Union[str, os.PathLike],
-    #     adapter_name: str = "default",
-    #     is_trainable: bool = False,
-    #     config: Optional[PeftConfig] = None,
-    #     **kwargs: Any,
-    # ):
-    #     r"""
-    #     Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
-
-    #     Note that the passed `model` may be modified inplace.
-
-    #     Args:
-    #         model ([`~transformers.PreTrainedModel`]):
-    #             The model to be adapted. The model should be initialized with the
-    #             [`~transformers.PreTrainedModel.from_pretrained`] method from the 🤗 Transformers library.
-    #         model_id (`str` or `os.PathLike`):
-    #             The name of the PEFT configuration to use. Can be either:
-    #                 - A string, the `model id` of a PEFT configuration hosted inside a model repo on the Hugging Face
-    #                   Hub.
-    #                 - A path to a directory containing a PEFT configuration file saved using the `save_pretrained`
-    #                   method (`./my_peft_config_directory/`).
-    #         adapter_name (`str`, *optional*, defaults to `"default"`):
-    #             The name of the adapter to be loaded. This is useful for loading multiple adapters.
-    #         is_trainable (`bool`, *optional*, defaults to `False`):
-    #             Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and use for
-    #             inference
-    #         config ([`~peft.PeftConfig`], *optional*):
-    #             The configuration object to use instead of an automatically loaded configuation. This configuration
-    #             object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
-    #             loaded before calling `from_pretrained`.
-    #         kwargs: (`optional`):
-    #             Additional keyword arguments passed along to the specific PEFT configuration class.
-    #     """
-    #     from .mapping import MODEL_TYPE_TO_PEFT_MODEL_MAPPING, PEFT_TYPE_TO_CONFIG_MAPPING
-
-    #     # load the config
-    #     if config is None:
-    #         config = PEFT_TYPE_TO_CONFIG_MAPPING[
-    #             PeftConfig._get_peft_type(
-    #                 model_id,
-    #                 subfolder=kwargs.get("subfolder", None),
-    #                 revision=kwargs.get("revision", None),
-    #                 cache_dir=kwargs.get("cache_dir", None),
-    #                 use_auth_token=kwargs.get("use_auth_token", None),
-    #             )
-    #         ].from_pretrained(model_id, **kwargs)
-    #     elif isinstance(config, PeftConfig):
-    #         config.inference_mode = not is_trainable
-    #     else:
-    #         raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
-
-    #     if (getattr(model, "hf_device_map", None) is not None) and len(
-    #         set(model.hf_device_map.values()).intersection({"cpu", "disk"})
-    #     ) > 0:
-    #         remove_hook_from_submodules(model)
-
-    #     if config.is_prompt_learning and is_trainable:
-    #         raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
-    #     else:
-    #         config.inference_mode = not is_trainable
-
-    #     if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
-    #         model = cls(model, config, adapter_name)
-    #     else:
-    #         model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
-    #     model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
-    #     return model
+    @classmethod
+    def from_pretrained(
+        cls,
+        model: nn.Module,
+        model_id: str | os.PathLike,
+        adapter_name: str = "default",
+        is_trainable: bool = False,
+        config: Optional[PeftConfig] = None,
+        **kwargs: Any,
+    ):
+        raise NotImplementedError("TODO")

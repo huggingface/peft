@@ -13,16 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from __future__ import annotations
+
 import warnings
 from dataclasses import asdict
 from enum import Enum
 from typing import Any
 
-from tqdm import tqdm
 from torch import nn
+from tqdm import tqdm
 
-from peft.tuners import loha
-from peft.tuners import lora
+from peft.tuners import loha, lora
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -277,8 +277,8 @@ class LycorisModel(BaseTuner):
 
     def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
         r"""
-        This method merges the layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method merges the layers into the base model. This is needed if someone wants to use the base model as a
+        standalone model.
 
         Args:
             progressbar (`bool`):

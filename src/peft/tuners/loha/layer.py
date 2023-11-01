@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import math
-from typing import Any, Optional, Set, Tuple, Union
+from typing import Any, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -131,7 +131,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
             else:
                 shape = (
                     base_layer.out_channels,
-                    base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1]
+                    base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
         else:
             raise TypeError(f"LoHa is not implemented for {type(self).__name__} base_layer")
@@ -239,7 +239,9 @@ class Linear(LoHaLayer):
         self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
         self.set_adapter(adapter_name)
 
-    def _get_delta_activations(self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
         # don't add bias here, because the bias is already included in the output of the base_layer
         return F.linear(input, delta_weight)
@@ -273,7 +275,9 @@ class Conv2d(LoHaLayer):
         )
         self.set_adapter(adapter_name)
 
-    def _get_delta_activations(self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
         # don't add bias here, because the bias is already included in the output of the base_layer
         base_layer = self.get_base_layer()
