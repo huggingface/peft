@@ -10,6 +10,9 @@ group_info = []
 
 total_num_failed = 0
 empty_file = False or len(list(Path().glob("*.log"))) == 0
+
+total_empty_files = []
+
 for log in Path().glob("*.log"):
     section_num_failed = 0
     i = 0
@@ -29,13 +32,14 @@ for log in Path().glob("*.log"):
                         passed.append([test, duration, log.name.split('_')[0]])
         empty_file = i == 0
     group_info.append([str(log), section_num_failed, failed])
-    # os.remove(log)
+    total_empty_files.append(empty_file)
+    os.remove(log)
     failed = []
 no_error_payload = {
     "type": "section",
     "text": {
         "type": "plain_text",
-        "text": "🌞 There were no failures!" if not empty_file else "Something went wrong - please check GH action results.",
+        "text": "🌞 There were no failures!" if not any(total_empty_files) else "Something went wrong there is at least one empty file - please check GH action results.",
         "emoji": True
     }
 }
@@ -51,7 +55,7 @@ payload = [
     },
 ]
 if total_num_failed > 0:
-    for name, num_failed, failed_tests in group_info:
+    for i, (name, num_failed, failed_tests) in enumerate(group_info):
         if num_failed > 0:
             if num_failed == 1:
                 message += f"*{name}: {num_failed} failed test*\n"
@@ -62,6 +66,9 @@ if total_num_failed > 0:
                 failed_table.append(test[0].split("::"))
             failed_table = tabulate(failed_table, headers=["Test Location", "Test Case", "Test Name"], showindex="always", tablefmt="grid", maxcolwidths=[12, 12, 12])
             message += '\n```\n' +failed_table + '\n```'
+        
+        if total_empty_files[i]:
+            message += f"\n*{name}: Warning! Empty file - please check the GitHub action job *\n"
     print(f'### {message}')
 else:
     payload.append(no_error_payload)
