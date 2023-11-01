@@ -8,6 +8,8 @@ on:
 env:
   RUN_SLOW: "yes"
   IS_GITHUB_CI: "1"
+  # To be able to run tests on CUDA 12.2
+  NVIDIA_DISABLE_REQUIRE: "1"
   SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
 
 
