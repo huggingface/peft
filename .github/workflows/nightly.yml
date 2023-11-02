@@ -21,7 +21,7 @@ jobs:
       TEST_TYPE: "single_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         working-directory: peft/
@@ -63,7 +63,7 @@ jobs:
       TEST_TYPE: "multi_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         working-directory: peft/
