@@ -376,7 +376,9 @@ class LoraModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
+    def _unload_and_optionally_merge(
+        self, merge=True, progressbar: bool = False, safe_merge: bool = False, new_vocab_length: int = 0
+    ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
@@ -436,6 +438,10 @@ class LoraModel(BaseTuner):
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+
+            # resize model's embedding layer
+            if new_vocab_length > 0 and new_vocab_length > self.model.config.vocab_size:
+                self.model.resize_token_embeddings(new_vocab_length)
 
         return self.model
 
@@ -685,7 +691,7 @@ class LoraModel(BaseTuner):
                     )
                     target.set_adapter(resetting_active_adapter)
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False, new_vocab_length: int = 0):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -696,6 +702,8 @@ class LoraModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
+            new_vocab_length (`int`):
+                if new tokens were added to the tokenizer whether to resize model's embedding matrix with the new vocab length
 
         Example:
 
@@ -709,7 +717,9 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, new_vocab_length=new_vocab_length
+        )
 
     def unload(self):
         """
