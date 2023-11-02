@@ -885,13 +885,14 @@ class PeftCommonTester:
 
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
-        model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
         if not isinstance(config, (LoraConfig)):
             return
+
+        model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, adapter_list[0])
         model.add_adapter(adapter_list[1], config)
         model.add_adapter(adapter_list[2], replace(config, r=20))

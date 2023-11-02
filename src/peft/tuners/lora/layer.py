@@ -30,7 +30,7 @@ class LoraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = ["lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"]
 
-    def __init__(self, base_layer: nn.Module, **kwargs):
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.r = {}
         self.lora_alpha = {}
@@ -44,7 +44,6 @@ class LoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -82,7 +81,7 @@ class LoraLayer(BaseTunerLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -204,13 +203,13 @@ class Linear(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = fan_in_fan_out
 
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self.set_adapter(adapter_name)
@@ -331,11 +330,11 @@ class Embedding(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
@@ -463,12 +462,12 @@ class Conv2d(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 

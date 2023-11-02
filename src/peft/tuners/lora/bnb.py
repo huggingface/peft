@@ -25,23 +25,21 @@ from .layer import LoraLayer
 
 
 if is_bnb_available():
-    # TODO: use base_layer pattern
     class Linear8bitLt(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
             self,
-            adapter_name,
-            base_layer,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
+            init_lora_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, in_features=base_layer.in_features, out_features=base_layer.out_features)
-            self.base_layer = base_layer
+            LoraLayer.__init__(self, base_layer)
 
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.set_adapter(adapter_name)
 
@@ -69,8 +67,8 @@ if is_bnb_available():
                 )
                 lora_data = self.get_delta_weight(active_adapter)
 
-                weight = self.base_layer.weight
-                state = self.base_layer.state
+                weight = self.get_base_layer().weight
+                state = self.get_base_layer().state
                 if state.SCB is None:
                     state.SCB = weight.SCB
 
@@ -90,7 +88,7 @@ if is_bnb_available():
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                self.base_layer.weight = bnb.nn.Int8Params(
+                self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 state.reset_grads()
@@ -110,8 +108,8 @@ if is_bnb_available():
                 )
                 lora_data = self.get_delta_weight(active_adapter)
 
-                weight = self.base_layer.weight
-                state = self.base_layer.state
+                weight = self.get_base_layer().weight
+                state = self.get_base_layer().state
                 if state.SCB is None:
                     state.SCB = weight.SCB
                 im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
@@ -124,7 +122,7 @@ if is_bnb_available():
                 output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
 
                 w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
-                self.base_layer.weight = bnb.nn.Int8Params(
+                self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
                 state.reset_grads()
@@ -169,25 +167,27 @@ if is_bnb_available():
 
             return result
 
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "lora." + rep
+
 
 if is_bnb_4bit_available():
-    # TODO: use base_layer pattern
     class Linear4bit(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
             self,
-            adapter_name,
-            base_layer,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
+            init_lora_weights: bool = True,
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, in_features=base_layer.in_features, out_features=base_layer.out_features)
-            self.base_layer = base_layer
+            LoraLayer.__init__(self, base_layer)
 
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
             self.set_adapter(adapter_name)
 
@@ -214,7 +214,7 @@ if is_bnb_4bit_available():
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
-                weight = self.base_layer.weight
+                weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
 
@@ -224,7 +224,7 @@ if is_bnb_4bit_available():
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                     weight.device
                 )
                 self.merged_adapters.append(active_adapter)
@@ -241,11 +241,11 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
-                weight = self.base_layer.weight
+                weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
-                self.base_layer.weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                     weight.device
                 )
 
@@ -294,3 +294,7 @@ if is_bnb_4bit_available():
                     result += output
 
             return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "lora." + rep

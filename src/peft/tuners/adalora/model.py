@@ -20,6 +20,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.lora import LoraConfig, LoraModel
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     _freeze_adapter,
@@ -138,7 +139,7 @@ class AdaLoraModel(LoraModel):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
-        # If it is not a LoraLayer, create a new module, else update it with new adapters
+        # If it is not an AdaLoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:
@@ -163,7 +164,12 @@ class AdaLoraModel(LoraModel):
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
 
-        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             kwargs.update(
                 {
                     "has_fp16_weights": target.state.has_fp16_weights,
@@ -172,8 +178,9 @@ class AdaLoraModel(LoraModel):
                     "index": target.index,
                 }
             )
-            new_module = SVDLinear8bitLt(adapter_name, target.in_features, target.out_features, bias=bias, **kwargs)
-        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+            # TODO: adjust
+            new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
@@ -182,25 +189,20 @@ class AdaLoraModel(LoraModel):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = SVDLinear4bit(
-                adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
-            )
+            # TODO: adjust
+            new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
-            new_module = SVDQuantLinear(adapter_name, target, **kwargs)
-            target.weight = target.qweight
+            # TODO: adjust
+            new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
-            if isinstance(target, torch.nn.Linear):
-                in_features, out_features = target.in_features, target.out_features
+            if isinstance(target_base_layer, torch.nn.Linear):
                 if kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                         "Setting fan_in_fan_out to False."
                     )
                     kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-            elif isinstance(target, Conv1D):
-                in_features, out_features = (
-                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                )
+            elif isinstance(target_base_layer, Conv1D):
                 if not kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to False but the target module is `Conv1D`. "
@@ -212,7 +214,7 @@ class AdaLoraModel(LoraModel):
                     f"Target module {target} is not supported. "
                     f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
                 )
-            new_module = SVDLinear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+            new_module = SVDLinear(target, adapter_name, bias=bias, **kwargs)
 
         return new_module
 

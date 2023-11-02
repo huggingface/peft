@@ -134,7 +134,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
                     base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
         else:
-            raise TypeError(f"LoHa is not implemented for {type(self).__name__} base_layer")
+            raise TypeError(f"LoHa is not implemented for base layers of type {type(base_layer).__name__}")
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape)
@@ -146,7 +146,7 @@ class LoHaLayer(nn.Module, LycorisLayer):
             self.reset_adapter_parameters_random(adapter_name)
 
         # Move new weights to device
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -230,10 +230,10 @@ class Linear(LoHaLayer):
         alpha: float = 0.0,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
+        init_weights: bool = True,
         **kwargs,
     ):
-        init_weights = kwargs.pop("init_weights", True)
-        LoHaLayer.__init__(self, base_layer)
+        super().__init__(base_layer)
 
         # Create adapter and set it active
         self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
@@ -264,10 +264,10 @@ class Conv2d(LoHaLayer):
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
+        init_weights: bool = True,
         **kwargs,
     ):
-        init_weights = kwargs.pop("init_weights", True)
-        LoHaLayer.__init__(self, base_layer)
+        super().__init__(base_layer)
 
         # Create adapter and set it active
         self.update_layer(

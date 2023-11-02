@@ -255,7 +255,6 @@ class LoraModel(BaseTuner):
 
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
-        bias = kwargs.pop("bias", False)
 
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
@@ -272,7 +271,7 @@ class LoraModel(BaseTuner):
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(adapter_name, target, **eightbit_kwargs)
+            new_module = Linear8bitLt(target, adapter_name, **eightbit_kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -282,9 +281,9 @@ class LoraModel(BaseTuner):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(adapter_name, target, **fourbit_kwargs)
+            new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target_base_layer, AutoGPTQQuantLinear):
-            new_module = QuantLinear(adapter_name, target, **kwargs)
+            new_module = QuantLinear(target, adapter_name, **kwargs)
             target.weight = target.qweight
         elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
@@ -313,7 +312,7 @@ class LoraModel(BaseTuner):
                     f"Target module {target} is not supported. Currently, only the following modules are supported: "
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
-            new_module = Linear(target, adapter_name, bias=bias, **kwargs)
+            new_module = Linear(target, adapter_name, **kwargs)
 
         return new_module
 
@@ -383,54 +382,75 @@ class LoraModel(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
+
             if isinstance(target, LoraLayer):
-                if isinstance(target, Embedding):
-                    new_module = torch.nn.Embedding(target.in_features, target.out_features)
-                elif isinstance(target, Conv2d):
-                    new_module = torch.nn.Conv2d(
-                        target.base_layer.in_channels,
-                        target.base_layer.out_channels,
-                        kernel_size=target.base_layer.kernel_size,
-                        stride=target.base_layer.stride,
-                        padding=target.base_layer.padding,
-                        dilation=target.base_layer.dilation,
-                    )
-                elif isinstance(target, Linear):
-                    bias = target.base_layer.bias is not None
-                    if getattr(target, "is_target_conv_1d_layer", False):
-                        in_features, out_features = (
-                            target.base_layer.weight.ds_shape
-                            if hasattr(target.base_layer.weight, "ds_shape")
-                            else target.base_layer.weight.shape
-                        )
-                        new_module = Conv1D(out_features, in_features)
-                    else:
-                        new_module = torch.nn.Linear(
-                            target.base_layer.in_features, target.base_layer.out_features, bias=bias
-                        )
-                elif is_bnb_available() and isinstance(target, Linear8bitLt):
-                    bias = target.base_layer.bias is not None
+                target_base_layer = target.get_base_layer()
+                if target_base_layer != target.base_layer:
+                    # TODO: This means that we have different adapter types in the same model. To support this, we need
+                    # to support recursive merging of adapter layers.
+                    raise ValueError("Merging nested adapter layers is not yet supported")
+
+                # check bnb layers first because they can be instances of both bnb layers and normal PyTorch layers and
+                # we want to match the former, not the latter
+                if is_bnb_available() and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
+                    bias = target_base_layer.bias is not None
                     new_module = bnb.nn.Linear8bitLt(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        has_fp16_weights=target.base_layer.state.has_fp16_weights,
-                        memory_efficient_backward=target.base_layer.state.memory_efficient_backward,
-                        threshold=target.base_layer.state.threshold,
-                        index=target.base_layer.index,
-                        device=target.base_layer.weight.device,
+                        has_fp16_weights=target_base_layer.state.has_fp16_weights,
+                        memory_efficient_backward=target_base_layer.state.memory_efficient_backward,
+                        threshold=target_base_layer.state.threshold,
+                        index=target_base_layer.index,
+                        device=target_base_layer.weight.device,
                     )
-                elif is_bnb_4bit_available() and isinstance(target, Linear4bit):
-                    bias = target.base_layer.bias is not None
+                elif is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
+                    bias = target_base_layer.bias is not None
                     new_module = bnb.nn.Linear4bit(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        compute_dtype=target.base_layer.compute_dtype,
-                        compress_statistics=target.base_layer.weight.compress_statistics,
-                        quant_type=target.base_layer.weight.quant_type,
-                        device=target.base_layer.weight.device,
+                        compute_dtype=target_base_layer.compute_dtype,
+                        compress_statistics=target_base_layer.weight.compress_statistics,
+                        quant_type=target_base_layer.weight.quant_type,
+                        device=target_base_layer.weight.device,
                     )
+                elif isinstance(target_base_layer, torch.nn.Embedding):
+                    new_module = torch.nn.Embedding(
+                        target_base_layer.num_embeddings,
+                        target_base_layer.embedding_dim,
+                        padding_idx=target_base_layer.padding_idx,
+                        max_norm=target_base_layer.max_norm,
+                        norm_type=target_base_layer.norm_type,
+                        scale_grad_by_freq=target_base_layer.scale_grad_by_freq,
+                        sparse=target_base_layer.sparse,
+                    )
+                elif isinstance(target_base_layer, torch.nn.Conv2d):
+                    new_module = torch.nn.Conv2d(
+                        target_base_layer.in_channels,
+                        target_base_layer.out_channels,
+                        kernel_size=target_base_layer.kernel_size,
+                        stride=target_base_layer.stride,
+                        padding=target_base_layer.padding,
+                        dilation=target_base_layer.dilation,
+                    )
+                elif isinstance(target_base_layer, (torch.nn.Linear, Conv1D)):
+                    # TODO: checking Linear and Conv1D separately, could we get rid of is_target_conv_1d_layer?
+                    bias = target_base_layer.bias is not None
+                    if getattr(target, "is_target_conv_1d_layer", False):
+                        in_features, out_features = (
+                            target_base_layer.weight.ds_shape
+                            if hasattr(target_base_layer.weight, "ds_shape")
+                            else target_base_layer.weight.shape
+                        )
+                        new_module = Conv1D(out_features, in_features)
+                    else:
+                        new_module = torch.nn.Linear(
+                            target_base_layer.in_features, target_base_layer.out_features, bias=bias
+                        )
+                else:
+                    raise ValueError(f"Unsupported layer type: {type(target_base_layer)}")
+
                 if merge:
                     target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)

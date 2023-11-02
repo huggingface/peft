@@ -21,20 +21,20 @@ from peft.tuners.lora.layer import LoraLayer
 class QuantLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
-        adapter_name,
-        quant_linear_module,
+        base_layer,
+        adapter_name: str,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
+        init_lora_weights: bool = True,
         **kwargs,
     ):
-        torch.nn.Module.__init__(self)
-        LoraLayer.__init__(
-            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
-        )
-        self.quant_linear_module = quant_linear_module
-        self.weight = quant_linear_module.qweight
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        super().__init__()
+        LoraLayer.__init__(base_layer)
+
+        # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
+        # for backwards compatibility
+        self.quant_linear_module = base_layer
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
