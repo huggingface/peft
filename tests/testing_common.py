@@ -567,6 +567,40 @@ class PeftCommonTester:
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
 
+    def _test_offloaded_merge(self):
+        # device map for offloading a subset of parameters
+        device_map = {
+            "transformer.wte": "cpu",
+            "transformer.wpe": "cpu",
+            "transformer.drop": "cpu",
+            "transformer.ln_f": "cpu",
+            "lm_head": "cpu",
+        }
+
+        for i in range(6):
+            device_map[f"transformer.h.{i}"] = "cpu"
+        for i in range(6, 12):
+            device_map[f"transformer.h.{i}"] = "disk"
+
+        model = self.transformers_class.from_pretrained("gpt2", device_map=device_map)
+
+        config = LoraConfig(
+            r=8,
+            lora_alpha=32,
+            target_modules=["wte", "wpe", "lm_head"],  # can't be offloaded modules for custom device map
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        model = get_peft_model(model, config)
+        input_tokens = torch.tensor([[15137, 4776, 290, 3598, 812, 2084]])  # "Four score and seven years ago"
+        pre_merge_olayer = model(input_tokens)[0]
+
+        model = model.merge_and_unload()
+        post_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.all(pre_merge_olayer == post_merge_olayer))
+
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(

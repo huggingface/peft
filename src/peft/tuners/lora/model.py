@@ -439,10 +439,10 @@ class LoraModel(BaseTuner):
                 if merge:
                     target.merge(safe_merge=safe_merge)
 
+                self._replace_module(parent, target_name, new_module, target)
                 if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
                     module._hf_hook.post_forward(module, torch.tensor([]))
-                else:
-                    self._replace_module(parent, target_name, new_module, target)
+
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
