@@ -37,7 +37,7 @@ from peft.utils import (
 COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA)
 PREFIXES = ["lora_", "hada_", "lokr_"]  # TODO should be defined on the tuners themselves
 Configs = Union[lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig]
-Layers = Union[lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer]
+Layers = (lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer)
 
 
 class LycorisModel(BaseTuner):
