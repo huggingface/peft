@@ -13,13 +13,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib
 from collections import namedtuple
 from dataclasses import dataclass, field
+
+from packaging.version import parse
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
 from .utils import llama_compute_query_states
+
+
+MAX_TRANSFORMERS_VERSION = "4.35.0"
+
+
+def is_transformers_version_ge(version: str) -> bool:
+    return parse(importlib.metadata.version("transformers")) >= parse(version)
 
 
 @dataclass
@@ -33,6 +43,13 @@ class AdaptionPromptConfig(PeftConfig):
     adapter_layers: int = field(default=None, metadata={"help": "Number of adapter layers (from the top)"})
 
     def __post_init__(self):
+        # TODO: Remove this check and function once PEFT works again with newest transformers version.
+        # Also remove the skip in test_adaption_prompt.py and uncomment the adaption prompt config in test_config.py.
+        if is_transformers_version_ge(MAX_TRANSFORMERS_VERSION):
+            raise ValueError(
+                f"Adaption prompt is not compatible with transformers >= {MAX_TRANSFORMERS_VERSION}, "
+                "please use an older version of transformers until this is fixed."
+            )
         self.peft_type = PeftType.ADAPTION_PROMPT
 
     @property

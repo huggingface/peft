@@ -8,6 +8,8 @@ on:
 env:
   RUN_SLOW: "yes"
   IS_GITHUB_CI: "1"
+  # To be able to run tests on CUDA 12.2
+  NVIDIA_DISABLE_REQUIRE: "1"
   SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
 
 
@@ -19,7 +21,7 @@ jobs:
       TEST_TYPE: "single_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         working-directory: peft/
@@ -61,7 +63,7 @@ jobs:
       TEST_TYPE: "multi_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         working-directory: peft/
