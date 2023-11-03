@@ -25,6 +25,7 @@ from .layer import LoraLayer
 
 
 if is_bnb_available():
+
     class Linear8bitLt(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
@@ -173,6 +174,7 @@ if is_bnb_available():
 
 
 if is_bnb_4bit_available():
+
     class Linear4bit(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(

@@ -22,7 +22,7 @@ from typing import Any, Union
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners import loha, lora
+from peft.tuners import adalora, loha, lokr, lora
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -34,10 +34,10 @@ from peft.utils import (
 
 
 # TODO
-COMPATIBLE_PEFT_TYPES = (PeftType.LORA, PeftType.LOHA)
-PREFIXES = ["lora_", "hada_"]  # TODO should be defined on the tuners themselves
-Configs = Union[lora.LoraConfig, loha.LoHaConfig]
-Layers = Union[lora.layer.LoraLayer, loha.layer.LoHaLayer]
+COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA)
+PREFIXES = ["lora_", "hada_", "lokr_"]  # TODO should be defined on the tuners themselves
+Configs = Union[lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig]
+Layers = Union[lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer]
 
 
 class LycorisModel(BaseTuner):
@@ -55,7 +55,7 @@ class LycorisModel(BaseTuner):
         """
         if not isinstance(config, Configs):
             raise ValueError(
-                f"{self.__class__.__name__} only supports {COMPATIBLE_PEFT_TYPES} configs, but got {type(config)}."
+                f"{self.__class__.__name__} only supports {COMPATIBLE_TUNER_TYPES} configs, but got {type(config)}."
             )
 
         biases = (getattr(config, "bias", None) for config in self.peft_config)
@@ -76,12 +76,16 @@ class LycorisModel(BaseTuner):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if isinstance(config, lora.LoraConfig):
+        if isinstance(config, adalora.AdaLoraConfig):
+            adalora.AdaLoraModel._create_and_replace(self, config, *args, **kwargs)
+        elif isinstance(config, lora.LoraConfig):
             lora.LoraModel._create_and_replace(self, config, *args, **kwargs)
         elif isinstance(config, loha.LoHaConfig):
             loha.LoHaModel._create_and_replace(self, config, *args, **kwargs)
+        elif isinstance(config, lokr.LoKrConfig):
+            lokr.LoKrModel._create_and_replace(self, config, *args, **kwargs)
         else:
-            raise ValueError(f"Unsupporte config type {type(config)}, should be one of {COMPATIBLE_PEFT_TYPES}.")
+            raise ValueError(f"Unsupporte config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         setattr(parent, child_name, new_module)
@@ -92,6 +96,7 @@ class LycorisModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
         elif hasattr(child, "quant_linear_module"):
+            # TODO maybe not necessary to have special treatment?
             child = child.quant_linear_module
 
         # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
@@ -148,12 +153,16 @@ class LycorisModel(BaseTuner):
         if loaded_in_8bit or loaded_in_4bit:
             raise ValueError("8bit and 4bit quantization not supported for LycorisModel yet")
 
-        if isinstance(config, lora.LoraConfig):
+        if isinstance(config, adalora.AdaLoraConfig):
+            new_module = adalora.AdaLoraModel._create_new_module(config, adapter_name, target, **kwargs)
+        elif isinstance(config, lora.LoraConfig):
             new_module = lora.LoraModel._create_new_module(config, adapter_name, target, **kwargs)
         elif isinstance(config, loha.LoHaConfig):
             new_module = loha.LoHaModel._create_new_module(config, adapter_name, target, **kwargs)
+        elif isinstance(config, lokr.LoKrConfig):
+            new_module = lokr.LoKrModel._create_new_module(config, adapter_name, target, **kwargs)
         else:
-            raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_PEFT_TYPES}.")
+            raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module
 
     def __getattr__(self, name: str):
@@ -222,10 +231,15 @@ class LycorisModel(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, lora.layer.LoraLayer):
+
+            if isinstance(target, adalora.layer.AdaLoraLayer):
+                adalora.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
+            elif isinstance(target, lora.layer.LoraLayer):
                 lora.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
             elif isinstance(target, loha.layer.LoHaLayer):
                 loha.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
+            elif isinstance(target, lokr.layer.LoKrLayer):
+                lokr.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):

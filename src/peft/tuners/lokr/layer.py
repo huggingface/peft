@@ -220,7 +220,7 @@ class LoKrLayer(nn.Module, LycorisLayer):
 
         # Make weights with Kronecker product
         weight = make_kron(w1, w2)
-        weight = weight.reshape(self.weight.shape)
+        weight = weight.reshape(self.get_base_layer().weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]

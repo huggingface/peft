@@ -160,7 +160,6 @@ class AdaLoraModel(LoraModel):
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
         AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
-        bias = target.bias is not None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
 
@@ -168,6 +167,7 @@ class AdaLoraModel(LoraModel):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
+        bias = target_base_layer.bias is not None
 
         if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             kwargs.update(
@@ -178,7 +178,6 @@ class AdaLoraModel(LoraModel):
                     "index": target.index,
                 }
             )
-            # TODO: adjust
             new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
@@ -189,10 +188,8 @@ class AdaLoraModel(LoraModel):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            # TODO: adjust
             new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
-            # TODO: adjust
             new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
             if isinstance(target_base_layer, torch.nn.Linear):

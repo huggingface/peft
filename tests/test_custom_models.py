@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import itertools
 import os
 import tempfile
 import unittest
@@ -1291,6 +1292,8 @@ class SimpleNet(nn.Module):
 
 class TestMixedAdapterTypes(unittest.TestCase):
     torch_device = infer_device()
+    atol = 1e-6
+    rtol = 1e-6
 
     def _check_mixed_outputs(self, model_cls, config0, config1, input, *, is_commutative):
         # This test checks different combinations of adapter0, adapter1, or combinations of the two, and whether
@@ -1313,7 +1316,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_config0 = peft_model(input)
 
         self.assertTrue(torch.isfinite(output_config0).all())
-        self.assertFalse(torch.allclose(output_base, output_config0))
+        self.assertFalse(torch.allclose(output_base, output_config0, atol=self.atol, rtol=self.rtol))
 
         # adapter 1
         torch.manual_seed(0)
@@ -1323,8 +1326,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_config1 = peft_model(input)
 
         self.assertTrue(torch.isfinite(output_config1).all())
-        self.assertFalse(torch.allclose(output_base, output_config1))
-        self.assertFalse(torch.allclose(output_config0, output_config1))
+        self.assertFalse(torch.allclose(output_base, output_config1, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_config0, output_config1, atol=self.atol, rtol=self.rtol))
 
         # adapter 0 + 1
         torch.manual_seed(0)
@@ -1346,13 +1349,13 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         self.assertEqual(peft_model_mixed_01.active_adapters, ["adapter0", "adapter1"])
         self.assertTrue(torch.isfinite(output_mixed_01).all())
-        self.assertFalse(torch.allclose(output_config0, output_mixed_01))
-        self.assertFalse(torch.allclose(output_config1, output_mixed_01))
+        self.assertFalse(torch.allclose(output_config0, output_mixed_01, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_config1, output_mixed_01, atol=self.atol, rtol=self.rtol))
         if is_commutative:
             delta0 = output_config0 - output_base
             delta1 = output_config1 - output_base
             delta_mixed_01 = output_mixed_01 - output_base
-            self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01))
+            self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01, atol=self.atol, rtol=self.rtol))
 
         # adapter 1 + 0
         torch.manual_seed(0)
@@ -1374,10 +1377,10 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         self.assertEqual(peft_model_mixed_10.active_adapters, ["adapter1", "adapter0"])
         self.assertTrue(torch.isfinite(output_mixed_10).all())
-        self.assertFalse(torch.allclose(output_config0, output_mixed_10))
-        self.assertFalse(torch.allclose(output_config1, output_mixed_10))
+        self.assertFalse(torch.allclose(output_config0, output_mixed_10, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_config1, output_mixed_10, atol=self.atol, rtol=self.rtol))
         if is_commutative:
-            self.assertTrue(torch.allclose(output_mixed_01, output_mixed_10))
+            self.assertTrue(torch.allclose(output_mixed_01, output_mixed_10, atol=self.atol, rtol=self.rtol))
 
         # turn around the order of the adapters of the 0 + 1 mixed model, should behave like the 0 + 1 mixed model
         peft_model_mixed_10.set_adapter(["adapter0", "adapter1"])
@@ -1393,29 +1396,97 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         self.assertEqual(peft_model_mixed_10.active_adapters, ["adapter0", "adapter1"])
         self.assertTrue(torch.isfinite(output_mixed_reversed).all())
-        self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_01))
-        self.assertFalse(torch.allclose(output_mixed_reversed, output_config0))
-        self.assertFalse(torch.allclose(output_mixed_reversed, output_config1))
+        self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_01, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_mixed_reversed, output_config0, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_mixed_reversed, output_config1, atol=self.atol, rtol=self.rtol))
         if is_commutative:
-            self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_10))
+            self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_10, atol=self.atol, rtol=self.rtol))
 
-    def test_target_same_layer(self):
+    @parameterized.expand(
+        itertools.combinations(
+            [
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoHaConfig(target_modules=["lin0"], init_weights=False),
+                LoKrConfig(target_modules=["lin0"], init_weights=False),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            ],
+            r=2,
+        )
+    )
+    def test_target_first_layer(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
-        lora_config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
-        loha_config = LoHaConfig(target_modules=["lin0"], init_weights=False)
-        self._check_mixed_outputs(SimpleNet, lora_config, loha_config, input, is_commutative=False)
+        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=False)
 
-    def test_target_last_layer(self):
+    @parameterized.expand(
+        itertools.combinations(
+            [
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                LoHaConfig(target_modules=["lin1"], init_weights=False),
+                LoKrConfig(target_modules=["lin1"], init_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ],
+            r=2,
+        )
+    )
+    def test_target_last_layer(self, config0, config1):
         # We are targeting the last layer of the SimpleNet. Therefore, since the adapters only add their activations
         # to the output, the results should be commutative. This would *not* work if the adapters do something more
         # complex or if we target an earlier layer, because of the non-linearity would destroy the commutativity.
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
-        lora_config = LoraConfig(target_modules=["lin1"], init_lora_weights=False)
-        loha_config = LoHaConfig(target_modules=["lin1"], init_weights=False)
-        self._check_mixed_outputs(SimpleNet, lora_config, loha_config, input, is_commutative=True)
+        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=True)
 
-    def test_target_different_layers(self):
+    @parameterized.expand(
+        [
+            (
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoHaConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                LoHaConfig(target_modules=["lin0"], init_weights=False),
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoKrConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                LoKrConfig(target_modules=["lin0"], init_weights=False),
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                LoHaConfig(target_modules=["lin0"], init_weights=False),
+                LoKrConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                LoKrConfig(target_modules=["lin0"], init_weights=False),
+                LoHaConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                LoHaConfig(target_modules=["lin0"], init_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoHaConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                LoKrConfig(target_modules=["lin0"], init_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoKrConfig(target_modules=["lin1"], init_weights=False),
+            ),
+        ]
+    )
+    def test_target_different_layers(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
-        lora_config = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
-        loha_config = LoHaConfig(target_modules=["lin1"], init_weights=False)
-        self._check_mixed_outputs(MLP, lora_config, loha_config, input, is_commutative=False)
+        self._check_mixed_outputs(MLP, config0, config1, input, is_commutative=False)
