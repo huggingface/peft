@@ -122,7 +122,7 @@ class AdaLoraModel(LoraModel):
         loaded_in_4bit = optional_kwargs.get("loaded_in_4bit", False)
         if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
             raise ImportError(
-                "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
+                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
         kwargs = {

@@ -53,7 +53,7 @@ class LycorisModel(BaseTuner):
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
-        if not isinstance(config, Configs):
+        if not isinstance(config, Configs.__args__):
             raise ValueError(
                 f"{self.__class__.__name__} only supports {COMPATIBLE_TUNER_TYPES} configs, but got {type(config)}."
             )
