@@ -22,7 +22,9 @@ from dataclasses import replace
 
 import torch
 import yaml
+from accelerate import infer_auto_device_map, init_empty_weights
 from diffusers import StableDiffusionPipeline
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
     AdaLoraConfig,
@@ -567,36 +569,23 @@ class PeftCommonTester:
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
 
-    def _test_offloaded_merge(self):
-        # device map for offloading a subset of parameters
-        device_map = {
-            "transformer.wte": "cpu",
-            "transformer.wpe": "cpu",
-            "transformer.drop": "cpu",
-            "transformer.ln_f": "cpu",
-            "lm_head": "cpu",
-        }
+    def _test_offload_merge(self):
+        # assumes access to a GPU with at least 12GB vRAM and CPU with 20GB RAM
+        model_id = "emozilla/LlongMA-2-7b-flash"
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        config = AutoConfig.from_pretrained(model_id)
+        with init_empty_weights():
+            model = AutoModelForCausalLM.from_config(config)
 
-        for i in range(6):
-            device_map[f"transformer.h.{i}"] = "cpu"
-        for i in range(6, 12):
-            device_map[f"transformer.h.{i}"] = "disk"
+        # offload most transformer modules
+        device_map = infer_auto_device_map(model, max_memory={0: "12GIB", "cpu": "50GIB"})
+        model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map)
 
-        model = self.transformers_class.from_pretrained("gpt2", device_map=device_map)
-
-        config = LoraConfig(
-            r=8,
-            lora_alpha=32,
-            target_modules=["wte", "wpe", "lm_head"],  # can't be offloaded modules for custom device map
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM",
-        )
-
-        model = get_peft_model(model, config)
-        input_tokens = torch.tensor([[15137, 4776, 290, 3598, 812, 2084]])  # "Four score and seven years ago"
+        # LoRA parameters for ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'down_proj', 'up_proj']
+        lora_checkpoint = "blbadger/llama2-LoRA"
+        model = PeftModel.from_pretrained(model, lora_checkpoint)
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
         pre_merge_olayer = model(input_tokens)[0]
-
         model = model.merge_and_unload()
         post_merge_olayer = model(input_tokens)[0]
         self.assertTrue(torch.all(pre_merge_olayer == post_merge_olayer))
