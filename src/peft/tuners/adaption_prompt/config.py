@@ -44,6 +44,7 @@ class AdaptionPromptConfig(PeftConfig):
 
     def __post_init__(self):
         # TODO: Remove this check and function once PEFT works again with newest transformers version.
+        # Also remove the skip in test_adaption_prompt.py and uncomment the adaption prompt config in test_config.py.
         if is_transformers_version_ge(MAX_TRANSFORMERS_VERSION):
             raise ValueError(
                 f"Adaption prompt is not compatible with transformers >= {MAX_TRANSFORMERS_VERSION}, "
