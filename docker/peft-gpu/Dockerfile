@@ -50,6 +50,8 @@ RUN source activate peft && \
     python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq && \
     python3 -m pip install -U git+https://github.com/huggingface/transformers
 
+RUN pip freeze | grep transformers
+
 # Install apt libs
 RUN apt-get update && \
     apt-get install -y curl git wget && \
