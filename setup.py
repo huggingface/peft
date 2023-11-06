@@ -66,12 +66,10 @@ setup(
 # 1. Change the version in __init__.py and setup.py to the release version, e.g. from "0.6.0.dev0" to "0.6.0"
 # 2. Check if there are any deprecations that need to be addressed for this release by seaching for "# TODO" in the code
 # 3. Commit these changes with the message: "Release: VERSION", create a PR and merge it.
-# 4. Add a tag in git to mark the release: "git tag VERSION -m 'Adds tag VERSION for pypi' "
+# 4. Add a tag in git to mark the release: "git tag -a VERSION -m 'Adds tag VERSION for pypi' "
 #    Push the tag to git:
 #      git push --tags origin main
 #    It is necessary to work on the original repository, not on a fork.
-#    FIXME should we create an annotated tag: git tag -a ...
-#    FIXME we can also skip this and let GH release create the tag for us
 # 5. Run the following commands in the top-level directory:
 #      python setup.py bdist_wheel
 #      python setup.py sdist
@@ -79,8 +77,6 @@ setup(
 #    files and show the main branch)
 # 6. Upload the package to the pypi test server first:
 #      twine upload dist/* -r pypitest
-#      twine upload dist/* -r pypitest --repository-url=https://test.pypi.org/legacy/
-#    FIXME are both commands needed? I think not
 # 7. Check that you can install it in a virtualenv by running:
 #      pip install -i https://testpypi.python.org/pypi peft
 # 8. Upload the final version to actual pypi:
