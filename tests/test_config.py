@@ -25,7 +25,7 @@ from parameterized import parameterized
 from peft import (
     AdaLoraConfig,
     # TODO: uncomment once PEFT works again with transformers
-    # AdaptionPromptConfig,
+    AdaptionPromptConfig,
     IA3Config,
     LoHaConfig,
     LoraConfig,
@@ -42,7 +42,7 @@ PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
 ALL_CONFIG_CLASSES = (
     # TODO: uncomment once PEFT works again with transformers
-    # AdaptionPromptConfig,
+    AdaptionPromptConfig,
     AdaLoraConfig,
     IA3Config,
     LoHaConfig,
