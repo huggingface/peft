@@ -53,12 +53,6 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
     """
 
     def setUp(self):
-        # TODO: remove the imports and version check once PEFT works again with transformers
-        from peft.tuners.adaption_prompt.config import MAX_TRANSFORMERS_VERSION, is_transformers_version_ge
-
-        if is_transformers_version_ge(MAX_TRANSFORMERS_VERSION):
-            self.skipTest("Adaption prompt is currently failing on transformers 4.35.0, skipping test.")
-
         # Check that llama is available in transformers package before running each test.
         if not is_llama_available():
             self.skipTest("Llama not available in transformers. Skipping test.")
