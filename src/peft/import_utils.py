@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
+import sys
+
 import packaging
-import sys 
+
 
 # The package importlib_metadata is in a different place, depending on the python version.
 if sys.version_info < (3, 8):
@@ -46,6 +48,7 @@ def is_auto_gptq_available():
             raise ImportError(
                 f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, but only version above {AUTOGPTQ_MINIMUM_VERSION} are supported"
             )
+
 
 def is_optimum_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
