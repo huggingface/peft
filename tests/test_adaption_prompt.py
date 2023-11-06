@@ -53,7 +53,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
     """
 
     def setUp(self):
-        """Check that llama is available in transformers package before running each test."""
+        # Check that llama is available in transformers package before running each test.
         if not is_llama_available():
             self.skipTest("Llama not available in transformers. Skipping test.")
 

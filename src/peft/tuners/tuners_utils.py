@@ -281,11 +281,18 @@ class BaseTunerLayer(ABC):
     # the currently active adapter(s)
     _active_adapter: str | list[str] = "default"
 
+    # List all merged adapters
+    merged_adapters: list[str] = []
+
     def merge(self, *args) -> None:
         raise NotImplementedError
 
     def unmerge(self, *args) -> None:
         raise NotImplementedError
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
 
     @property
     def disable_adapters(self) -> bool:
@@ -349,7 +356,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.
 
     Args:
-        config (`LoraConfig` | `LoHaConfig`): A config to match target modules from
+        config (`LoraConfig` | `LycorisConfig`): A config to match target modules from
         key (`str`): A key to search any matches in config
 
     Returns:
@@ -382,3 +389,18 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
                 else:
                     target_module_found = False
     return target_module_found
+
+
+def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> dict:
+    """
+    A helper function to inspect the set of matched and unmatched modules for a PEFT model and the given adapter.
+    """
+    config = tuner.peft_config[adapter_name]
+    key_list = [key for key, _ in tuner.model.named_modules()]
+    module_dict = {"matched": [], "unmatched": []}
+    for key in key_list:
+        if tuner._check_target_module_exists(config, key):
+            module_dict["matched"].append(key)
+        else:
+            module_dict["unmatched"].append(key)
+    return module_dict

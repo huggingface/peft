@@ -64,6 +64,7 @@ CONFIG_TESTING_KWARGS = (
 CLASSES_MAPPING = {
     "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
     "loha": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
+    "lokr": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
 }
 
 
@@ -147,7 +148,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if "loha" not in x[0]],
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr"])],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
@@ -176,6 +177,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
+                "lokr_kwargs": {"init_weights": [False]},
             },
         )
     )

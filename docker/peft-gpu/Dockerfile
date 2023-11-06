@@ -40,7 +40,7 @@ RUN source activate peft && \
     peft[test]@git+https://github.com/huggingface/peft
 
 # Stage 2
-FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 

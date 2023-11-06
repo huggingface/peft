@@ -15,8 +15,9 @@
 Script to close stale issue. Taken in part from the AllenNLP repository.
 https://github.com/allenai/allennlp.
 """
-from datetime import datetime as dt
 import os
+from datetime import datetime as dt
+from datetime import timezone
 
 from github import Github
 
@@ -42,14 +43,14 @@ def main():
         last_comment = comments[0] if len(comments) > 0 else None
         if (
             last_comment is not None and last_comment.user.login == "github-actions[bot]"
-            and (dt.utcnow() - issue.updated_at).days > 7
-            and (dt.utcnow() - issue.created_at).days >= 30
+            and (dt.now(timezone.utc) - issue.updated_at).days > 7
+            and (dt.now(timezone.utc) - issue.created_at).days >= 30
             and not any(label.name.lower() in LABELS_TO_EXEMPT for label in issue.get_labels())
         ):
             issue.edit(state="closed")
         elif (
-            (dt.utcnow() - issue.updated_at).days > 23
-            and (dt.utcnow() - issue.created_at).days >= 30
+            (dt.now(timezone.utc) - issue.updated_at).days > 23
+            and (dt.now(timezone.utc) - issue.created_at).days >= 30
             and not any(label.name.lower() in LABELS_TO_EXEMPT for label in issue.get_labels())
         ):
             issue.create_comment(

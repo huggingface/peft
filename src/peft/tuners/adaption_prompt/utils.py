@@ -39,12 +39,20 @@ def llama_apply_rotary_pos_emb(q, cos, sin, position_ids):
     This function was adapted from:
     https://github.com/huggingface/transformers/blob/1de8ce9ee1191ba761a593ac15d9ccbf5851bfc5/src/transformers/models/llama/modeling_llama.py#L133
 
-    It was modified to remove unnecessary processing of key states.
+    It was modified to remove unnecessary processing of key states. The method is compatible with transformers <=
+    4.34.2 and also with the latest version (>=4.35).
     """
-    gather_indices = position_ids[:, None, :, None]  # [bs, 1, seq_len, 1]
-    gather_indices = gather_indices.repeat(1, cos.shape[1], 1, cos.shape[3])
-    cos = torch.gather(cos.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
-    sin = torch.gather(sin.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+    # In previous transformers version cos/sin cached had a shape of 4D
+    if len(cos.shape) == 4:
+        gather_indices = position_ids[:, None, :, None]  # [bs, 1, seq_len, 1]
+        gather_indices = gather_indices.repeat(1, cos.shape[1], 1, cos.shape[3])
+        cos = torch.gather(cos.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+        sin = torch.gather(sin.repeat(gather_indices.shape[0], 1, 1, 1), 2, gather_indices)
+    # In the new version, it is 2D so we fall back to the new implementation
+    # https://github.com/huggingface/transformers/blame/eef7ea98c31a333bacdc7ae7a2372bde772be8e4/src/transformers/models/llama/modeling_llama.py#L222-L226
+    else:
+        cos = cos[position_ids].unsqueeze(1)
+        sin = sin[position_ids].unsqueeze(1)
     q_embed = (q * cos) + (llama_rotate_half(q) * sin)
     return q_embed
 

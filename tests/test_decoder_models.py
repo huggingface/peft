@@ -119,6 +119,10 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_generate(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 

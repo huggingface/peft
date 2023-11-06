@@ -364,6 +364,7 @@ class LoraModel(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):

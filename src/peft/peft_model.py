@@ -40,6 +40,7 @@ from .tuners import (
     AdaptionPromptModel,
     IA3Model,
     LoHaModel,
+    LoKrModel,
     LoraModel,
     MultitaskPromptEmbedding,
     PrefixEncoder,
@@ -67,6 +68,7 @@ from .utils import (
 PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
     PeftType.LOHA: LoHaModel,
+    PeftType.LOKR: LoKrModel,
     PeftType.PROMPT_TUNING: PromptEmbedding,
     PeftType.P_TUNING: PromptEncoder,
     PeftType.PREFIX_TUNING: PrefixEncoder,
@@ -132,6 +134,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if self._is_prompt_learning:
             return self._peft_config
         return self.base_model.peft_config
+
+    @property
+    def active_adapters(self):
+        try:
+            adapters = self.base_model.active_adapters
+        except AttributeError:
+            adapters = self.active_adapter
+            if isinstance(adapters, str):
+                adapters = [adapters]
+        return adapters
 
     @peft_config.setter
     def peft_config(self, value: Dict[str, PeftConfig]):
@@ -673,7 +685,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model_config = self.config
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config["model_type"] != "custom":
+        if model_config.get("model_type", "custom") != "custom":
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
