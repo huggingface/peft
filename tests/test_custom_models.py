@@ -740,13 +740,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # rough check that the model card is pre-filled
         self.assertGreater(len(model_card), 1000)
 
-    @parameterized.expand([
-        LoraConfig(target_modules=["lin0"], init_lora_weights=False),
-        LoKrConfig(target_modules=["lin0"], init_weights=False),
-        LoHaConfig(target_modules=["lin0"], init_weights=False),
-        AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
-        IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
-    ])
+    @parameterized.expand(
+        [
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            LoKrConfig(target_modules=["lin0"], init_weights=False),
+            LoHaConfig(target_modules=["lin0"], init_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+        ]
+    )
     def test_adapter_name_makes_no_difference(self, config0):
         # It should not matter whether we use the default adapter name or a custom one
         model_cls = MLP
@@ -777,7 +779,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         torch.manual_seed(0)
         base_model = model_cls().eval().to(self.torch_device)
         torch.manual_seed(0)
-        peft_model_custom2 = get_peft_model(base_model, config0, adapter_name="other-name").eval().to(self.torch_device)
+        peft_model_custom2 = (
+            get_peft_model(base_model, config0, adapter_name="other-name").eval().to(self.torch_device)
+        )
         output_custom2 = peft_model_custom2(input)
         sd_custom2 = peft_model_custom2.state_dict()
 
