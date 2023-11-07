@@ -89,7 +89,6 @@ class Linear(nn.Linear, IA3Layer):
 
         nn.Linear.reset_parameters(self)
         self.update_layer(adapter_name, init_ia3_weights)
-        self.set_adapter(adapter_name)
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters
@@ -221,7 +220,6 @@ class Conv2d(nn.Conv2d, IA3Layer):
 
         nn.Conv2d.reset_parameters(self)
         self.update_layer(adapter_name, init_ia3_weights)
-        self.set_adapter(adapter_name)
 
     def update_layer(self, adapter_name, init_ia3_weights):
         # Actual trainable parameters

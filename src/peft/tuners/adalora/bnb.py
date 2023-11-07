@@ -40,7 +40,6 @@ if is_bnb_available():
             self.get_base_layer().weight.requires_grad = False
 
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.set_adapter(adapter_name)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)
@@ -93,7 +92,6 @@ if is_bnb_4bit_available():
             self.get_base_layer().weight.requires_grad = False
 
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.set_adapter(adapter_name)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)

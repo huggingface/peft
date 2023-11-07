@@ -237,7 +237,6 @@ class Linear(LoHaLayer):
 
         # Create adapter and set it active
         self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
-        self.set_adapter(adapter_name)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -273,7 +272,6 @@ class Conv2d(LoHaLayer):
         self.update_layer(
             adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
         )
-        self.set_adapter(adapter_name)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any

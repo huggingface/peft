@@ -117,6 +117,7 @@ class LoraLayer(BaseTunerLayer):
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(base_layer.weight.device, dtype=weight.dtype)
+        self.set_adapter(self.active_adapters)
 
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
@@ -144,6 +145,7 @@ class LoraLayer(BaseTunerLayer):
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(base_layer.weight.device, dtype=weight.dtype)
+        self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -212,7 +214,6 @@ class Linear(nn.Module, LoraLayer):
 
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:
         """
@@ -336,7 +337,6 @@ class Embedding(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:
         """
@@ -469,7 +469,6 @@ class Conv2d(nn.Module, LoraLayer):
         LoraLayer.__init__(self, base_layer)
 
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:
         """

@@ -36,7 +36,6 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         # for backwards compatibility
         self.quant_linear_module = base_layer
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported

@@ -35,7 +35,6 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         self.weight = quant_linear_module.qweight
         init_lora_weights = kwargs.pop("init_lora_weights", True)
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.quant_linear_module(x)

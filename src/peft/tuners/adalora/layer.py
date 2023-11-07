@@ -101,7 +101,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
 
         self.fan_in_fan_out = fan_in_fan_out
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
     @property
     def weight(self) -> torch.Tensor:

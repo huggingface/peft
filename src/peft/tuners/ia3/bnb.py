@@ -51,7 +51,6 @@ if is_bnb_available():
 
             init_ia3_weights = kwargs.pop("init_ia3_weights", True)
             self.update_layer(adapter_name, init_ia3_weights)
-            self.set_adapter(adapter_name)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             if self.disable_adapters:
@@ -109,7 +108,6 @@ if is_bnb_4bit_available():
 
             init_ia3_weights = kwargs.pop("init_ia3_weights", True)
             self.update_layer(adapter_name, init_ia3_weights)
-            self.set_adapter(adapter_name)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             if self.disable_adapters:
