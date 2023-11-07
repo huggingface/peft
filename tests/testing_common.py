@@ -269,6 +269,63 @@ class PeftCommonTester:
 
         self.assertTrue(dummy_output.requires_grad)
 
+    def _test_save_pretrained_regression(self, model_id, config_cls, config_kwargs):
+        # ensure that the weights are randomly initialized
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_lora_weights"] = False
+        if issubclass(config_cls, IA3Config):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_ia3_weights"] = False
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname, safe_serialization=False)
+
+            model_from_pretrained = self.transformers_class.from_pretrained(model_id)
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+
+            # check if the state dicts are equal
+            if issubclass(config_cls, PromptEncoderConfig):
+                # For prompt encoding, when loading the whole state_dict, there are differences, therefore, only load
+                # adapter-specific weights for comparison.
+                # TODO: is this expected?
+                state_dict = get_peft_model_state_dict(model, unwrap_compiled=True)
+                state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained, unwrap_compiled=True)
+            else:
+                state_dict = get_state_dict(model, unwrap_compiled=True)
+                state_dict_from_pretrained = get_state_dict(model_from_pretrained, unwrap_compiled=True)
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                self.assertTrue(
+                    torch.allclose(
+                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                    )
+                )
+
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+
+            # check if `adapter_config.json` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+
+            # check if `config.json` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+
+            self.check_modelcard(tmp_dirname, model)
+            self.check_config_json(tmp_dirname, model)
+
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs):
         # ensure that the weights are randomly initialized
         if issubclass(config_cls, LoraConfig):
@@ -311,14 +368,14 @@ class PeftCommonTester:
                     )
                 )
 
-            # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
 
-            # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
@@ -385,17 +442,17 @@ class PeftCommonTester:
                     )
                 )
 
-            # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
-            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_model.bin")))
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
+            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_model.safetensors")))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
             self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_config.json")))
 
-            # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
-            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "pytorch_model.bin")))
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "model.safetensors")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
