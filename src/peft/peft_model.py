@@ -155,7 +155,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def save_pretrained(
         self,
         save_directory: str,
-        safe_serialization: bool = False,
+        safe_serialization: bool = True,
         selected_adapters: Optional[List[str]] = None,
         **kwargs: Any,
     ):
@@ -168,6 +168,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
                 exist).
+            safe_serialization (`bool`, *optional*):
+                Whether to save the adapter files in safetensors format.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
