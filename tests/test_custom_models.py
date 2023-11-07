@@ -740,6 +740,63 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # rough check that the model card is pre-filled
         self.assertGreater(len(model_card), 1000)
 
+    @parameterized.expand([
+        LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+        LoKrConfig(target_modules=["lin0"], init_weights=False),
+        LoHaConfig(target_modules=["lin0"], init_weights=False),
+        AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+        IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+    ])
+    def test_adapter_name_makes_no_difference(self, config0):
+        # It should not matter whether we use the default adapter name or a custom one
+        model_cls = MLP
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        # base model
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        output_base = base_model(input)
+
+        # default name
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_default = get_peft_model(base_model, config0, adapter_name="default").eval().to(self.torch_device)
+        output_default = peft_model_default(input)
+        sd_default = peft_model_default.state_dict()
+
+        # custom name 1
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_custom1 = get_peft_model(base_model, config0, adapter_name="adapter").eval().to(self.torch_device)
+        output_custom1 = peft_model_custom1(input)
+        sd_custom1 = peft_model_custom1.state_dict()
+
+        # custom name 2
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_custom2 = get_peft_model(base_model, config0, adapter_name="other-name").eval().to(self.torch_device)
+        output_custom2 = peft_model_custom2(input)
+        sd_custom2 = peft_model_custom2.state_dict()
+
+        assert len(sd_default) == len(sd_custom1) == len(sd_custom2)
+        for key in sd_default:
+            key1 = key.replace("default", "adapter")
+            key2 = key.replace("default", "other-name")
+            assert key1 in sd_custom1
+            assert key2 in sd_custom2
+        for k0, k1, k2 in zip(sd_default, sd_custom1, sd_custom2):
+            assert torch.allclose(sd_default[k0], sd_custom1[k1])
+            assert torch.allclose(sd_default[k0], sd_custom2[k2])
+
+        self.assertFalse(torch.allclose(output_base, output_default))
+        self.assertFalse(torch.allclose(output_base, output_custom1))
+        self.assertFalse(torch.allclose(output_base, output_custom2))
+        self.assertTrue(torch.allclose(output_custom1, output_custom2))
+        self.assertTrue(torch.allclose(output_default, output_custom1))
+
 
 class TestMultiRankAdapter(unittest.TestCase):
     """Tests related to multirank LoRA adapters"""

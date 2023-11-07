@@ -100,6 +100,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self.get_base_layer().weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
     @property

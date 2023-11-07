@@ -212,6 +212,7 @@ class Linear(nn.Module, LoraLayer):
         LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = fan_in_fan_out
 
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -336,6 +337,8 @@ class Embedding(nn.Module, LoraLayer):
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
+
+        self._active_adapter = adapter_name
         self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
     def merge(self, safe_merge: bool = False) -> None:
@@ -468,6 +471,7 @@ class Conv2d(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
+        self._active_adapter = adapter_name
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
     def merge(self, safe_merge: bool = False) -> None:

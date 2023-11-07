@@ -236,6 +236,7 @@ class Linear(LoHaLayer):
         super().__init__(base_layer)
 
         # Create adapter and set it active
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
@@ -269,6 +270,7 @@ class Conv2d(LoHaLayer):
         super().__init__(base_layer)
 
         # Create adapter and set it active
+        self._active_adapter = adapter_name
         self.update_layer(
             adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
         )
