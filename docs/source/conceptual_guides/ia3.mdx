@@ -28,10 +28,13 @@ Being similar to LoRA, IA3 carries many of the same advantages:
 * Performance of models fine-tuned using IA3 is comparable to the performance of fully fine-tuned models.
 * IA3 does not add any inference latency because adapter weights can be merged with the base model.
 
-In principle, IA3 can be applied to any subset of weight matrices in a neural network to reduce the number of trainable 
-parameters. Following the authors' implementation, IA3 weights are added to the key, value and feedforward layers 
-of a Transformer model. Given the target layers for injecting IA3 parameters, the number of trainable parameters 
-can be determined based on the size of the weight matrices. 
+In principle, IA3 can be applied to any subset of weight matrices in a neural network to reduce the number of trainable
+parameters. Following the authors' implementation, IA3 weights are added to the key, value and feedforward layers
+of a Transformer model. To be specific, for transformer models, IA3 weights are added to the outputs of key and value layers, and to the input of the second feedforward layer
+in each transformer block.
+
+Given the target layers for injecting IA3 parameters, the number of trainable parameters
+can be determined based on the size of the weight matrices.
 
 
 ## Common IA3 parameters in PEFT
@@ -43,10 +46,19 @@ As with other methods supported by PEFT, to fine-tune a model using IA3, you nee
 3. Wrap the base model with `get_peft_model()` to get a trainable `PeftModel`.
 4. Train the `PeftModel` as you normally would train the base model.
 
-`IA3Config` allows you to control how IA3 is applied to the base model through the following parameters: 
+`IA3Config` allows you to control how IA3 is applied to the base model through the following parameters:
 
 - `target_modules`: The modules (for example, attention blocks) to apply the IA3 vectors.
-- `feedforward_modules`: The list of modules to be treated as feedforward layers in `target_modules`. While learned vectors are multiplied with 
-the output activation for attention blocks, the vectors are multiplied with the input for classic feedforward layers.
+- `feedforward_modules`: The list of modules to be treated as feedforward layers in `target_modules`. While learned vectors are multiplied with
+the output activation for attention blocks, the vectors are multiplied with the input for classic feedforward layers. Note that `feedforward_modules` must be a subset of `target_modules`.
 - `modules_to_save`: List of modules apart from IA3 layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
 
+## Example Usage
+
+For the task of sequence classification, one can initialize the IA3 config for a Llama model as follows:
+
+```py
+peft_config = IA3Config(
+    task_type=TaskType.SEQ_CLS, target_modules=["k_proj", "v_proj", "down_proj"], feedforward_modules=["down_proj"]
+)
+```
