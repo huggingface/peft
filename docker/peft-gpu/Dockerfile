@@ -29,15 +29,6 @@ ENV PATH /opt/conda/envs/peft/bin:$PATH
 # Activate our bash shell
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
-# Activate the conda env and install transformers + accelerate from source
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir \
-    librosa \
-    "soundfile>=0.12.1" \
-    scipy \
-    git+https://github.com/huggingface/transformers \
-    git+https://github.com/huggingface/accelerate \
-    peft[test]@git+https://github.com/huggingface/peft
 
 # Stage 2
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
@@ -47,8 +38,17 @@ ENV PATH /opt/conda/bin:$PATH
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq && \
-    python3 -m pip install -U git+https://github.com/huggingface/transformers
+    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
+
+# Activate the conda env and install transformers + accelerate from source
+RUN source activate peft && \
+    python3 -m pip install -U --no-cache-dir \
+    librosa \
+    "soundfile>=0.12.1" \
+    scipy \
+    git+https://github.com/huggingface/transformers \
+    git+https://github.com/huggingface/accelerate \
+    peft[test]@git+https://github.com/huggingface/peft
 
 RUN pip freeze | grep transformers
 
