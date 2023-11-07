@@ -116,6 +116,10 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         return self.base_model.peft_config
 
     @property
+    def active_adapter(self) -> str:
+        return self.base_model.active_adapter
+
+    @property
     def active_adapters(self) -> list[str]:
         return self.base_model.active_adapters
 

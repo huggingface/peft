@@ -1352,6 +1352,17 @@ class TestMixedAdapterTypes(unittest.TestCase):
     atol = 1e-6
     rtol = 1e-6
 
+    def _get_model(self, model_cls, peft_config=None, adapter_name=None, seed=0):
+        torch.manual_seed(seed)
+        base_model = model_cls().eval().to(self.torch_device)
+        if peft_config is None:
+            return base_model
+
+        torch.manual_seed(seed)
+        assert adapter_name is not None
+        peft_model = get_peft_model(base_model, peft_config, adapter_name=adapter_name, mixed=True)
+        return peft_model.eval().to(self.torch_device)
+
     def _check_mixed_outputs(self, model_cls, config0, config1, input, *, is_commutative):
         # This test checks different combinations of adapter0, adapter1, or combinations of the two, and whether
         # outputs are the same/different, depending on context. If we pass is_commutative=True, it means that the order
@@ -1361,50 +1372,41 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # initialized with different values, and the test will fail.
 
         # base model
-        torch.manual_seed(0)
-        output_base = model_cls().eval().to(self.torch_device)(input)
+        base_model = self._get_model(model_cls)
+        output_base = base_model(input)
         self.assertTrue(torch.isfinite(output_base).all())
 
         # adapter 0
-        torch.manual_seed(0)
-        base_model = model_cls()
-        torch.manual_seed(0)
-        peft_model = get_peft_model(base_model, config0).eval().to(self.torch_device)
-        output_config0 = peft_model(input)
+        peft_model_0 = self._get_model(model_cls, config0, "adapter0")
+        output_config0 = peft_model_0(input)
 
         self.assertTrue(torch.isfinite(output_config0).all())
         self.assertFalse(torch.allclose(output_base, output_config0, atol=self.atol, rtol=self.rtol))
 
         # adapter 1
-        torch.manual_seed(0)
-        base_model = model_cls()
-        torch.manual_seed(0)
-        peft_model = get_peft_model(base_model, config1).eval().to(self.torch_device)
-        output_config1 = peft_model(input)
+        peft_model_1 = self._get_model(model_cls, config1, "adapter1")
+        output_config1 = peft_model_1(input)
 
         self.assertTrue(torch.isfinite(output_config1).all())
         self.assertFalse(torch.allclose(output_base, output_config1, atol=self.atol, rtol=self.rtol))
         self.assertFalse(torch.allclose(output_config0, output_config1, atol=self.atol, rtol=self.rtol))
 
         # adapter 0 + 1
+        peft_model_01 = self._get_model(model_cls, config0, "adapter0")
         torch.manual_seed(0)
-        base_model = model_cls()
-        torch.manual_seed(0)
-        peft_model_mixed_01 = get_peft_model(base_model, config0, "adapter0", mixed=True).eval().to(self.torch_device)
-        torch.manual_seed(0)
-        peft_model_mixed_01.add_adapter("adapter1", config1)
-        peft_model_mixed_01.set_adapter(["adapter0", "adapter1"])
-        output_mixed_01 = peft_model_mixed_01(input)
+        peft_model_01.add_adapter("adapter1", config1)
+        peft_model_01.set_adapter(["adapter0", "adapter1"])
+        output_mixed_01 = peft_model_01(input)
 
         # check the number of tuner layer types
-        tuner_layers = [mod for mod in peft_model_mixed_01.modules() if isinstance(mod, BaseTunerLayer)]
+        tuner_layers = [mod for mod in peft_model_01.modules() if isinstance(mod, BaseTunerLayer)]
         tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
         if type(config0) == type(config1):
             self.assertEqual(len(tuner_types), 1)
         else:
             self.assertEqual(len(tuner_types), 2)
 
-        self.assertEqual(peft_model_mixed_01.active_adapters, ["adapter0", "adapter1"])
+        self.assertEqual(peft_model_01.active_adapters, ["adapter0", "adapter1"])
         self.assertTrue(torch.isfinite(output_mixed_01).all())
         self.assertFalse(torch.allclose(output_config0, output_mixed_01, atol=self.atol, rtol=self.rtol))
         self.assertFalse(torch.allclose(output_config1, output_mixed_01, atol=self.atol, rtol=self.rtol))
@@ -1415,24 +1417,21 @@ class TestMixedAdapterTypes(unittest.TestCase):
             self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01, atol=self.atol, rtol=self.rtol))
 
         # adapter 1 + 0
+        peft_model_10 = self._get_model(model_cls, config1, "adapter1")
         torch.manual_seed(0)
-        base_model = model_cls()
-        torch.manual_seed(0)
-        peft_model_mixed_10 = get_peft_model(base_model, config1, "adapter1", mixed=True).eval().to(self.torch_device)
-        torch.manual_seed(0)
-        peft_model_mixed_10.add_adapter("adapter0", config0)
-        peft_model_mixed_10.set_adapter(["adapter1", "adapter0"])
-        output_mixed_10 = peft_model_mixed_10(input)
+        peft_model_10.add_adapter("adapter0", config0)
+        peft_model_10.set_adapter(["adapter1", "adapter0"])
+        output_mixed_10 = peft_model_10(input)
 
         # check the number of tuner layer types
-        tuner_layers = [mod for mod in peft_model_mixed_10.modules() if isinstance(mod, BaseTunerLayer)]
+        tuner_layers = [mod for mod in peft_model_10.modules() if isinstance(mod, BaseTunerLayer)]
         tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
         if type(config0) == type(config1):
             self.assertEqual(len(tuner_types), 1)
         else:
             self.assertEqual(len(tuner_types), 2)
 
-        self.assertEqual(peft_model_mixed_10.active_adapters, ["adapter1", "adapter0"])
+        self.assertEqual(peft_model_10.active_adapters, ["adapter1", "adapter0"])
         self.assertTrue(torch.isfinite(output_mixed_10).all())
         self.assertFalse(torch.allclose(output_config0, output_mixed_10, atol=self.atol, rtol=self.rtol))
         self.assertFalse(torch.allclose(output_config1, output_mixed_10, atol=self.atol, rtol=self.rtol))
@@ -1440,18 +1439,18 @@ class TestMixedAdapterTypes(unittest.TestCase):
             self.assertTrue(torch.allclose(output_mixed_01, output_mixed_10, atol=self.atol, rtol=self.rtol))
 
         # turn around the order of the adapters of the 0 + 1 mixed model, should behave like the 0 + 1 mixed model
-        peft_model_mixed_10.set_adapter(["adapter0", "adapter1"])
-        output_mixed_reversed = peft_model_mixed_10(input)
+        peft_model_10.set_adapter(["adapter0", "adapter1"])
+        output_mixed_reversed = peft_model_10(input)
 
         # check the number of tuner layer types
-        tuner_layers = [mod for mod in peft_model_mixed_10.modules() if isinstance(mod, BaseTunerLayer)]
+        tuner_layers = [mod for mod in peft_model_10.modules() if isinstance(mod, BaseTunerLayer)]
         tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
         if type(config0) == type(config1):
             self.assertEqual(len(tuner_types), 1)
         else:
             self.assertEqual(len(tuner_types), 2)
 
-        self.assertEqual(peft_model_mixed_10.active_adapters, ["adapter0", "adapter1"])
+        self.assertEqual(peft_model_10.active_adapters, ["adapter0", "adapter1"])
         self.assertTrue(torch.isfinite(output_mixed_reversed).all())
         self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_01, atol=self.atol, rtol=self.rtol))
         self.assertFalse(torch.allclose(output_mixed_reversed, output_config0, atol=self.atol, rtol=self.rtol))
