@@ -13,11 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, Type
+import re
+from itertools import chain
+from typing import Dict, Type, Union
 
 import torch
+from torch import nn
 
-from ..lycoris_utils import LycorisTuner
+from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
+
 from .layer import Conv2d, Linear, LoHaLayer
 
 
@@ -82,3 +86,31 @@ class LoHaModel(LycorisTuner):
         torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,
     }
+
+    def _create_and_replace(
+        self,
+        config: LycorisConfig,
+        adapter_name: str,
+        target: Union[LoHaLayer, nn.Module],
+        target_name: str,
+        parent: nn.Module,
+        current_key: str,
+        **optional_kwargs,
+    ) -> None:
+        """
+        A private method to create and replace the target module with the adapter module.
+        """
+
+        # Regexp matching - Find key which matches current target_name in patterns provided
+        pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(f"(.*\.)?{key}$", current_key), pattern_keys), target_name)
+
+        kwargs = config.to_dict()
+        kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
+        kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
+
+        if isinstance(target, LoHaLayer):
+            target.update_layer(adapter_name, **kwargs)
+        else:
+            new_module = self._create_new_module(config, adapter_name, target, **kwargs)
+            self._replace_module(parent, target_name, new_module, target)

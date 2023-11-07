@@ -163,7 +163,7 @@ class LoraModel(BaseTuner):
             kwargs["gptq_quantization_config"] = quantization_config
 
         # TODO: better deal with that
-        if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
+        if isinstance(target, Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
                 r,
@@ -171,7 +171,7 @@ class LoraModel(BaseTuner):
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
-        elif isinstance(target, LoraLayer) and isinstance(target, torch.nn.Embedding):
+        elif isinstance(target, Embedding):
             target.update_layer_embedding(
                 adapter_name,
                 r,
@@ -179,8 +179,7 @@ class LoraModel(BaseTuner):
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
-
-        elif isinstance(target, LoraLayer):
+        elif isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
                 r,

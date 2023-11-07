@@ -13,11 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from itertools import chain
 from typing import Any, Dict, Optional, Set, Type, Union
 
 import torch
@@ -182,6 +180,7 @@ class LycorisTuner(BaseTuner):
     def _check_target_module_exists(config, key):
         return check_target_module_exists(config, key)
 
+    @abstractmethod
     def _create_and_replace(
         self,
         config: LycorisConfig,
@@ -192,23 +191,7 @@ class LycorisTuner(BaseTuner):
         current_key,
         **optional_kwargs,
     ):
-        """
-        A private method to create and replace the target module with the adapter module.
-        """
-
-        # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f"(.*\.)?{key}$", current_key), pattern_keys), target_name)
-
-        kwargs = config.to_dict()
-        kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
-        kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
-
-        if isinstance(target, LycorisLayer):
-            target.update_layer(adapter_name, **kwargs)
-        else:
-            new_module = self._create_new_module(config, adapter_name, target, **kwargs)
-            self._replace_module(parent, target_name, new_module, target)
+        ...
 
     @classmethod
     def _create_new_module(cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs) -> LycorisLayer:
