@@ -13,16 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
-import sys
+import importlib.metadata as importlib_metadata
 
-import packaging
-
-
-# The package importlib_metadata is in a different place, depending on the python version.
-if sys.version_info < (3, 8):
-    import importlib_metadata
-else:
-    import importlib.metadata as importlib_metadata
+import packaging.version
 
 
 def is_bnb_available() -> bool:
@@ -46,7 +39,8 @@ def is_auto_gptq_available():
             return True
         else:
             raise ImportError(
-                f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, but only version above {AUTOGPTQ_MINIMUM_VERSION} are supported"
+                f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, "
+                "but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
             )
 
 

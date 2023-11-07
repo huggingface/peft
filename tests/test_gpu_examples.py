@@ -658,6 +658,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
+        # TODO : check if it works for Exllamav2 kernels
         self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
