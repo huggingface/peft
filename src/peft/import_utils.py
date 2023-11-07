@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import importlib
+import importlib.metadata as importlib_metadata
+
+import packaging.version
 
 
 def is_bnb_available() -> bool:
@@ -28,8 +31,17 @@ def is_bnb_4bit_available() -> bool:
     return hasattr(bnb.nn, "Linear4bit")
 
 
-def is_auto_gptq_available() -> bool:
-    return importlib.util.find_spec("auto_gptq") is not None
+def is_auto_gptq_available():
+    if importlib.util.find_spec("auto_gptq") is not None:
+        AUTOGPTQ_MINIMUM_VERSION = packaging.version.parse("0.5.0")
+        version_autogptq = packaging.version.parse(importlib_metadata.version("auto_gptq"))
+        if AUTOGPTQ_MINIMUM_VERSION <= version_autogptq:
+            return True
+        else:
+            raise ImportError(
+                f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, "
+                "but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
+            )
 
 
 def is_optimum_available() -> bool:
