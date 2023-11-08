@@ -40,7 +40,7 @@ def is_auto_gptq_available():
         else:
             raise ImportError(
                 f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, "
-                "but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
+                f"but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
             )
 
 
