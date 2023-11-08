@@ -34,6 +34,7 @@ from peft.utils import (
     get_auto_gptq_quant_linear,
 )
 
+
 if is_bnb_available():
     import bitsandbytes as bnb
 

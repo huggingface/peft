@@ -105,6 +105,7 @@ class LoraModel(BaseTuner):
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
+
     prefix: str = "lora_"
 
     def __init__(self, model, config, adapter_name) -> None:
