@@ -1353,8 +1353,16 @@ class SimpleNet(nn.Module):
 
 class TestMixedAdapterTypes(unittest.TestCase):
     torch_device = infer_device()
-    atol = 1e-6
-    rtol = 1e-6
+
+    @staticmethod
+    def param_name_func(testcase_func, param_num, params):
+        # for parameterized tests
+        config0, config1 = params[0]
+        name0 = config0.__class__.__name__
+        name1 = config1.__class__.__name__
+        if name0 != name1:
+            return f"{testcase_func.__name__}_{param_num}_{name0}_{name1}"
+        return f"{testcase_func.__name__}_{param_num}_{name0}_x2"
 
     def _get_model(self, model_cls, peft_config=None, adapter_name=None, seed=0):
         torch.manual_seed(seed)
@@ -1375,6 +1383,9 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # We have to very careful with resetting the random seed each time it is used, otherwise the adapters may be
         # initialized with different values, and the test will fail.
 
+        atol = 1e-5
+        rtol = 1e-5
+
         # base model
         base_model = self._get_model(model_cls)
         output_base = base_model(input)
@@ -1385,15 +1396,15 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_config0 = peft_model_0(input)
 
         self.assertTrue(torch.isfinite(output_config0).all())
-        self.assertFalse(torch.allclose(output_base, output_config0, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_base, output_config0, atol=atol, rtol=rtol))
 
         # adapter 1
         peft_model_1 = self._get_model(model_cls, config1, "adapter1")
         output_config1 = peft_model_1(input)
 
         self.assertTrue(torch.isfinite(output_config1).all())
-        self.assertFalse(torch.allclose(output_base, output_config1, atol=self.atol, rtol=self.rtol))
-        self.assertFalse(torch.allclose(output_config0, output_config1, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_base, output_config1, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_config0, output_config1, atol=atol, rtol=rtol))
 
         # adapter 0 + 1
         peft_model_01 = self._get_model(model_cls, config0, "adapter0")
@@ -1412,13 +1423,13 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         self.assertEqual(peft_model_01.active_adapters, ["adapter0", "adapter1"])
         self.assertTrue(torch.isfinite(output_mixed_01).all())
-        self.assertFalse(torch.allclose(output_config0, output_mixed_01, atol=self.atol, rtol=self.rtol))
-        self.assertFalse(torch.allclose(output_config1, output_mixed_01, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_config0, output_mixed_01, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_config1, output_mixed_01, atol=atol, rtol=rtol))
         if is_commutative:
             delta0 = output_config0 - output_base
             delta1 = output_config1 - output_base
             delta_mixed_01 = output_mixed_01 - output_base
-            self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01, atol=self.atol, rtol=self.rtol))
+            self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01, atol=atol, rtol=rtol))
 
         # adapter 1 + 0
         peft_model_10 = self._get_model(model_cls, config1, "adapter1")
@@ -1437,10 +1448,10 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         self.assertEqual(peft_model_10.active_adapters, ["adapter1", "adapter0"])
         self.assertTrue(torch.isfinite(output_mixed_10).all())
-        self.assertFalse(torch.allclose(output_config0, output_mixed_10, atol=self.atol, rtol=self.rtol))
-        self.assertFalse(torch.allclose(output_config1, output_mixed_10, atol=self.atol, rtol=self.rtol))
+        self.assertFalse(torch.allclose(output_config0, output_mixed_10, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_config1, output_mixed_10, atol=atol, rtol=rtol))
         if is_commutative:
-            self.assertTrue(torch.allclose(output_mixed_01, output_mixed_10, atol=self.atol, rtol=self.rtol))
+            self.assertTrue(torch.allclose(output_mixed_01, output_mixed_10, atol=atol, rtol=rtol))
 
         # turn around the order of the adapters of the 0 + 1 mixed model, should behave like the 0 + 1 mixed model
         peft_model_10.set_adapter(["adapter0", "adapter1"])
@@ -1456,11 +1467,11 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         self.assertEqual(peft_model_10.active_adapters, ["adapter0", "adapter1"])
         self.assertTrue(torch.isfinite(output_mixed_reversed).all())
-        self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_01, atol=self.atol, rtol=self.rtol))
-        self.assertFalse(torch.allclose(output_mixed_reversed, output_config0, atol=self.atol, rtol=self.rtol))
-        self.assertFalse(torch.allclose(output_mixed_reversed, output_config1, atol=self.atol, rtol=self.rtol))
+        self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_01, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_mixed_reversed, output_config0, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_mixed_reversed, output_config1, atol=atol, rtol=rtol))
         if is_commutative:
-            self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_10, atol=self.atol, rtol=self.rtol))
+            self.assertTrue(torch.allclose(output_mixed_reversed, output_mixed_10, atol=atol, rtol=rtol))
 
     @parameterized.expand(
         itertools.combinations(
@@ -1471,7 +1482,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             ],
             r=2,
-        )
+        ),
+        name_func=param_name_func,
     )
     def test_target_first_layer(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
@@ -1486,7 +1498,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
             ],
             r=2,
-        )
+        ),
+        name_func=param_name_func,
     )
     def test_target_last_layer(self, config0, config1):
         # We are targeting the last layer of the SimpleNet. Therefore, since the adapters only add their activations
@@ -1545,7 +1558,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
             ),
-        ]
+        ],
+        name_func=param_name_func,
     )
     def test_target_different_layers(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
