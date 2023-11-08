@@ -103,7 +103,7 @@ class LycorisLayer(BaseTunerLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         ...
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -111,7 +111,20 @@ class LycorisLayer(BaseTunerLayer):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self._available_adapters:
-                self.base_layer.weight.data += self.get_delta_weight(active_adapter)
+                base_layer = self.get_base_layer()
+
+                if safe_merge:
+                    orig_weights = base_layer.weight.data
+                    orig_weights += self.get_delta_weight(active_adapter)
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    base_layer.weight.data = orig_weights
+                else:
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     @abstractmethod
@@ -269,7 +282,7 @@ class LycorisTuner(BaseTuner):
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOHA layers when the model is gptq quantized")
@@ -301,10 +314,11 @@ class LycorisTuner(BaseTuner):
                     )
                 else:
                     raise ValueError(
-                        "Cannot convert current module to torch module, currently only adapters for nn.Linear and nn.Conv2d are supported"
+                        "Cannot convert current module to torch module, currently only adapters for nn.Linear and "
+                        "nn.Conv2d are supported"
                     )
                 if merge:
-                    target.merge()
+                    target.merge(safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
@@ -319,8 +333,16 @@ class LycorisTuner(BaseTuner):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-    def merge_and_unload(self, progressbar: bool = False):
-        return self._unload_and_optionally_merge(progressbar=progressbar)
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+        """TODO"""
+        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+
+    def unload(self):
+        """
+        Gets back the base model by removing all the lora modules without merging. This gives back the original base
+        model.
+        """
+        return self._unload_and_optionally_merge(merge=False)
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():

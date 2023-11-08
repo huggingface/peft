@@ -377,3 +377,11 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         **kwargs: Any,
     ):
         raise NotImplementedError("TODO")
+
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+        r"""TODO"""
+        return self.base_model._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+
+    def unload(self):
+        """TODO"""
+        return self.base_model._unload_and_optionally_merge(merge=False)

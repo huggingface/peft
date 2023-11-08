@@ -105,6 +105,7 @@ class LoraModel(BaseTuner):
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
+    prefix: str = "lora_"
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
@@ -194,8 +195,7 @@ class LoraModel(BaseTuner):
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
-    @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -203,6 +203,9 @@ class LoraModel(BaseTuner):
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
             child = child.base_layer
+            if hasattr(child, "base_layer"):
+                # FIXME should get_base_layer be called?
+                breakpoint()
         elif hasattr(child, "quant_linear_module"):
             child = child.quant_linear_module
 
@@ -221,14 +224,14 @@ class LoraModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "lora_" in name:
+            if self.prefix in name:
                 module.to(child.weight.device)
             if "ranknum" in name:
                 module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
-            if "lora_" not in n:
+            if self.prefix not in n:
                 p.requires_grad = False
 
         for active_adapter in self.active_adapters:

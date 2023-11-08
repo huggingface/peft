@@ -21,7 +21,9 @@ from typing import Any, Union
 
 from torch import nn
 from tqdm import tqdm
+from transformers.pytorch_utils import Conv1D
 
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners import adalora, loha, lokr, lora
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
@@ -32,10 +34,13 @@ from peft.utils import (
     get_auto_gptq_quant_linear,
 )
 
+if is_bnb_available():
+    import bitsandbytes as bnb
 
-# TODO
+
+# Collection of constants used for all tuners
 COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA)
-PREFIXES = ["lora_", "hada_", "lokr_"]  # TODO should be defined on the tuners themselves
+PREFIXES = [lora.LoraModel.prefix, lokr.LoKrModel.prefix, loha.LoHaModel.prefix]
 Configs = Union[lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig]
 Layers = (lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer)
 
@@ -224,7 +229,7 @@ class LycorisModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge layers when the model is gptq quantized")
 
-        key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in self.prefixes)]
+        key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
@@ -232,17 +237,87 @@ class LycorisModel(BaseTuner):
             except AttributeError:
                 continue
 
-            if isinstance(target, adalora.layer.AdaLoraLayer):
-                adalora.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
-            elif isinstance(target, lora.layer.LoraLayer):
-                lora.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
-            elif isinstance(target, loha.layer.LoHaLayer):
-                loha.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
-            elif isinstance(target, lokr.layer.LoKrLayer):
-                lokr.Model._unload_and_optionally_merge(target, merge=merge, safe_merge=safe_merge)
+            if isinstance(target, Layers):
+                target_base_layer = target.get_base_layer()
+                # Careful: Below, we need to check *all* possible layers to be merged, i.e. the union of all supported
+                # layers for all tuner methods.
 
+                # check bnb layers first because they can be instances of both bnb layers and normal PyTorch layers and
+                # we want to match the former, not the latter
+                if is_bnb_available() and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
+                    bias = target_base_layer.bias is not None
+                    new_module = bnb.nn.Linear8bitLt(
+                        target.in_features,
+                        target.out_features,
+                        bias=bias,
+                        has_fp16_weights=target_base_layer.state.has_fp16_weights,
+                        memory_efficient_backward=target_base_layer.state.memory_efficient_backward,
+                        threshold=target_base_layer.state.threshold,
+                        index=target_base_layer.index,
+                        device=target_base_layer.weight.device,
+                    )
+                elif is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
+                    bias = target_base_layer.bias is not None
+                    new_module = bnb.nn.Linear4bit(
+                        target.in_features,
+                        target.out_features,
+                        bias=bias,
+                        compute_dtype=target_base_layer.compute_dtype,
+                        compress_statistics=target_base_layer.weight.compress_statistics,
+                        quant_type=target_base_layer.weight.quant_type,
+                        device=target_base_layer.weight.device,
+                    )
+                elif isinstance(target_base_layer, nn.Embedding):
+                    new_module = nn.Embedding(
+                        target_base_layer.num_embeddings,
+                        target_base_layer.embedding_dim,
+                        padding_idx=target_base_layer.padding_idx,
+                        max_norm=target_base_layer.max_norm,
+                        norm_type=target_base_layer.norm_type,
+                        scale_grad_by_freq=target_base_layer.scale_grad_by_freq,
+                        sparse=target_base_layer.sparse,
+                    )
+                elif isinstance(target_base_layer, nn.Conv2d):
+                    new_module = nn.Conv2d(
+                        target_base_layer.in_channels,
+                        target_base_layer.out_channels,
+                        kernel_size=target_base_layer.kernel_size,
+                        stride=target_base_layer.stride,
+                        padding=target_base_layer.padding,
+                        dilation=target_base_layer.dilation,
+                    )
+                elif isinstance(target_base_layer, (nn.Linear, Conv1D)):
+                    # TODO: checking Linear and Conv1D separately, could we get rid of is_target_conv_1d_layer?
+                    bias = target_base_layer.bias is not None
+                    if getattr(target, "is_target_conv_1d_layer", False):
+                        in_features, out_features = (
+                            target_base_layer.weight.ds_shape
+                            if hasattr(target_base_layer.weight, "ds_shape")
+                            else target_base_layer.weight.shape
+                        )
+                        new_module = Conv1D(out_features, in_features)
+                    else:
+                        new_module = nn.Linear(
+                            target_base_layer.in_features, target_base_layer.out_features, bias=bias
+                        )
+                else:
+                    raise ValueError(f"Unsupported layer type: {type(target_base_layer)}")
+
+                if merge:
+                    # buckle in: here we recursively merge the base_layer of the target, starting from the lowest level
+                    path = []
+                    layer = target
+                    while hasattr(layer, "base_layer"):
+                        path.append(layer)
+                        layer = layer.base_layer
+                    for layer_before, layer_after in zip(path[:-1], path[1:]):
+                        layer_after.merge(safe_merge=safe_merge)
+                        layer_before.base_layer = layer_after.base_layer
+
+                    target.merge(safe_merge=safe_merge)
+                self._replace_module(parent, target_name, new_module, target)
             # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+            elif isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
@@ -262,7 +337,7 @@ class LycorisModel(BaseTuner):
 
         del self.peft_config[adapter_name]
 
-        key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in self.prefixes)]
+        key_list = [key for key, _ in self.model.named_modules() if not any(prefix in key for prefix in PREFIXES)]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, lora.layer.LoraLayer):
