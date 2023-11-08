@@ -23,11 +23,11 @@ __all__ = ["LoftQConfig", "LoftQModel"]
 
 
 if is_bnb_available():
-    from .bnb import Linear8bitLt
+    from peft.tuners.lora.bnb import Linear8bitLt
 
     __all__ += ["Linear8bitLt"]
 
 if is_bnb_4bit_available():
-    from .bnb import Linear4bit
+    from peft.tuners.lora.bnb import Linear4bit
 
     __all__ += ["Linear4bit"]
