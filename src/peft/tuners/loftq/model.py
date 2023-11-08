@@ -138,7 +138,7 @@ class LoftQModel(LoraModel):
                 new_module = Linear8bitLt(adapter_name, target, **eightbit_kwargs)
             elif isinstance(target, nn.Linear):
                 # Apply LoftQ algorithm to original 32/16-bit models for the first time
-                if not loftq_config.loftq_init:
+                if loftq_config.loftq_init:
                     qweight, lora_A, lora_B = loftq_init(target.weight,
                                                          loftq_config.bits,
                                                          loftq_config.r,
@@ -190,7 +190,7 @@ class LoftQModel(LoraModel):
 
             elif isinstance(target, nn.Linear):
                 # Apply LoftQ algorithm to original 32/16-bit models for the first time
-                if not loftq_config.loftq_init:
+                if loftq_config.loftq_init:
                     qweight, lora_A, lora_B = loftq_init(target.weight,
                                                          loftq_config.bits,
                                                          loftq_config.r,
