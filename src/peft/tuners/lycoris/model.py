@@ -100,7 +100,7 @@ class LycorisModel(BaseTuner):
 
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
-            child = child.base_layer
+            child = child.get_base_layer()
         elif hasattr(child, "quant_linear_module"):
             # TODO maybe not necessary to have special treatment?
             child = child.quant_linear_module

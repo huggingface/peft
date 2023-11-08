@@ -1738,6 +1738,43 @@ class TestMixedAdapterTypes(unittest.TestCase):
         self._check_unload(SimpleNet, config0, config1, input)
         self._check_disable(SimpleNet, config1, config0, input)
 
-    def test_mixing_all_adapter_types(self):
-        # TODO: create an absurdly nested PEFT model using all adapter types at once
-        pass
+    def test_deeply_nested(self):
+        # a somewhat absurdly nested model using different adapter types
+        atol = 1e-5
+        rtol = 1e-5
+        torch.manual_seed(0)
+
+        model = SimpleNet().eval().to(self.torch_device)
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        output_base = model(input)
+
+        config0 = LoraConfig(r=4, lora_alpha=4, target_modules=["lin0", "lin1"])
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+
+        config1 = LoHaConfig(r=4, alpha=4, target_modules=["lin0"])
+        peft_model.add_adapter("adapter1", config1)
+
+        config2 = AdaLoraConfig(r=4, lora_alpha=4, target_modules=["lin1"])
+        peft_model.add_adapter("adapter2", config2)
+
+        config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"])
+        peft_model.add_adapter("adapter3", config3)
+
+        config4 = LoraConfig(r=4, lora_alpha=4, target_modules=["lin0", "lin1"])
+        peft_model.add_adapter("adapter4", config4)
+
+        peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
+        output_mixed = peft_model(input)
+        self.assertTrue(torch.isfinite(output_base).all())
+        self.assertFalse(torch.allclose(output_base, output_mixed, atol=atol, rtol=rtol))
+
+        with peft_model.disable_adapter():
+            output_disabled = peft_model(input)
+        self.assertTrue(torch.isfinite(output_disabled).all())
+        self.assertTrue(torch.allclose(output_base, output_disabled, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_mixed, output_disabled, atol=atol, rtol=rtol))
+
+        model = peft_model.merge_and_unload("adapter0")
+        output_merged = model(input)
+        self.assertTrue(torch.isfinite(output_merged).all())
+        self.assertTrue(torch.allclose(output_mixed, output_merged, atol=atol, rtol=rtol))
