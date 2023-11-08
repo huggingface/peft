@@ -158,8 +158,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
 
         opt_ia3_config = IA3Config(
-            target_modules=["q_proj", "v_proj"],
-            feedforward_modules=["down_proj"],
+            target_modules=["q_proj", "v_proj", "fc2"],
+            feedforward_modules=["fc2"],
             task_type="CAUSAL_LM",
         )
 
