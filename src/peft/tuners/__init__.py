@@ -33,4 +33,5 @@ TUNERS_MAPPING = {
     "LORA": LoraModel,
     "IA3": IA3Model,
     "ADALORA": AdaLoraModel,
+    "LOFTQ": LoftQModel,
 }
