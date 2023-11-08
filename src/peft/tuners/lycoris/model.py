@@ -315,7 +315,9 @@ class LycorisModel(BaseTuner):
                         layer_before.base_layer = layer_after.base_layer
 
                     target.merge(safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
+                    self._replace_module(parent, target_name, new_module, target)
+                else:
+                    self._replace_module(parent, target_name, new_module, target.get_base_layer())
             # save any additional trainable modules part of `modules_to_save`
             elif isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])

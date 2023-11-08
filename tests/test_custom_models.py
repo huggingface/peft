@@ -1504,6 +1504,30 @@ class TestMixedAdapterTypes(unittest.TestCase):
         output_merged_10 = model_merged_10(input)
         self.assertTrue(torch.allclose(output_mixed_10, output_merged_10, atol=atol, rtol=rtol))
 
+    def _check_unload(self, model_cls, config0, config1, input):
+        # Ensure that we can unload the base model without merging
+        atol = 1e-5
+        rtol = 1e-5
+        seed0 = 0
+        seed1 = 1
+
+        base_model = self._get_model(model_cls)
+        output_base = base_model(input)
+
+        # adapter 0 + 1
+        peft_model_01 = self._get_model(model_cls, config0, "adapter0", seed=seed0)
+        torch.manual_seed(seed1)
+        peft_model_01.add_adapter("adapter1", config1)
+        peft_model_01.set_adapter(["adapter0", "adapter1"])
+        output_mixed = peft_model_01(input)
+
+        # unload
+        model_unloaded = peft_model_01.unload()
+        output_unloaded = model_unloaded(input)
+
+        self.assertFalse(torch.allclose(output_mixed, output_unloaded, atol=atol, rtol=rtol))
+        self.assertTrue(torch.allclose(output_base, output_unloaded, atol=atol, rtol=rtol))
+
     @parameterized.expand(
         itertools.combinations(
             [
@@ -1520,6 +1544,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=False)
         self._check_merging(SimpleNet, config0, config1, input)
+        self._check_unload(SimpleNet, config0, config1, input)
 
     @parameterized.expand(
         itertools.combinations(
@@ -1540,6 +1565,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=True)
         self._check_merging(SimpleNet, config0, config1, input)
+        self._check_unload(SimpleNet, config0, config1, input)
 
     @parameterized.expand(
         [
@@ -1598,6 +1624,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         self._check_mixed_outputs(MLP, config0, config1, input, is_commutative=False)
         self._check_merging(SimpleNet, config0, config1, input)
+        self._check_unload(SimpleNet, config0, config1, input)
 
     @parameterized.expand(
         [
@@ -1624,6 +1651,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=True)
         self._check_merging(SimpleNet, config0, config1, input)
+        self._check_unload(SimpleNet, config0, config1, input)
 
     @parameterized.expand(
         [
@@ -1650,6 +1678,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=False)
         self._check_merging(SimpleNet, config0, config1, input)
+        self._check_unload(SimpleNet, config0, config1, input)
 
     def test_mixing_all_adapter_types(self):
         # TODO: create an absurdly nested PEFT model using all adapter types at once
