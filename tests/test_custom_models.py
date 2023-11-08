@@ -1365,7 +1365,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
     torch_device = infer_device()
 
     def _get_model(self, model_cls, peft_config=None, adapter_name=None, seed=0):
-        torch.manual_seed(seed)
+        torch.manual_seed(0)  # always use seed 0 for base model, seed for adapters may differ
         base_model = model_cls().eval().to(self.torch_device)
         if peft_config is None:
             return base_model
@@ -1385,6 +1385,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         atol = 1e-5
         rtol = 1e-5
+        seed0 = 0
+        seed1 = 1
 
         # base model
         base_model = self._get_model(model_cls)
@@ -1392,14 +1394,14 @@ class TestMixedAdapterTypes(unittest.TestCase):
         self.assertTrue(torch.isfinite(output_base).all())
 
         # adapter 0
-        peft_model_0 = self._get_model(model_cls, config0, "adapter0")
+        peft_model_0 = self._get_model(model_cls, config0, "adapter0", seed=seed0)
         output_config0 = peft_model_0(input)
 
         self.assertTrue(torch.isfinite(output_config0).all())
         self.assertFalse(torch.allclose(output_base, output_config0, atol=atol, rtol=rtol))
 
         # adapter 1
-        peft_model_1 = self._get_model(model_cls, config1, "adapter1")
+        peft_model_1 = self._get_model(model_cls, config1, "adapter1", seed=seed1)
         output_config1 = peft_model_1(input)
 
         self.assertTrue(torch.isfinite(output_config1).all())
@@ -1407,8 +1409,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
         self.assertFalse(torch.allclose(output_config0, output_config1, atol=atol, rtol=rtol))
 
         # adapter 0 + 1
-        peft_model_01 = self._get_model(model_cls, config0, "adapter0")
-        torch.manual_seed(0)
+        peft_model_01 = self._get_model(model_cls, config0, "adapter0", seed=seed0)
+        torch.manual_seed(seed1)
         peft_model_01.add_adapter("adapter1", config1)
         peft_model_01.set_adapter(["adapter0", "adapter1"])
         output_mixed_01 = peft_model_01(input)
@@ -1432,8 +1434,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
             self.assertTrue(torch.allclose(delta0 + delta1, delta_mixed_01, atol=atol, rtol=rtol))
 
         # adapter 1 + 0
-        peft_model_10 = self._get_model(model_cls, config1, "adapter1")
-        torch.manual_seed(0)
+        peft_model_10 = self._get_model(model_cls, config1, "adapter1", seed=seed1)
+        torch.manual_seed(seed0)
         peft_model_10.add_adapter("adapter0", config0)
         peft_model_10.set_adapter(["adapter1", "adapter0"])
         output_mixed_10 = peft_model_10(input)
@@ -1564,3 +1566,53 @@ class TestMixedAdapterTypes(unittest.TestCase):
     def test_target_different_layers(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         self._check_mixed_outputs(MLP, config0, config1, input, is_commutative=False)
+
+    @parameterized.expand(
+        [
+            (
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+            (
+                LoHaConfig(target_modules=["lin1"], init_weights=False),
+                LoHaConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                LoKrConfig(target_modules=["lin1"], init_weights=False),
+                LoKrConfig(target_modules=["lin1"], init_weights=False),
+            ),
+            (
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
+            ),
+        ],
+        name_func=_param_name_func,
+    )
+    def test_target_last_layer_same_type(self, config0, config1):
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=True)
+
+    @parameterized.expand(
+        [
+            (
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            ),
+            (
+                LoHaConfig(target_modules=["lin0"], init_weights=False),
+                LoHaConfig(target_modules=["lin0"], init_weights=False),
+            ),
+            (
+                LoKrConfig(target_modules=["lin0"], init_weights=False),
+                LoKrConfig(target_modules=["lin0"], init_weights=False),
+            ),
+            (
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+                AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            ),
+        ],
+        name_func=_param_name_func,
+    )
+    def test_target_first_layer_same_type(self, config0, config1):
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+        self._check_mixed_outputs(SimpleNet, config0, config1, input, is_commutative=False)
