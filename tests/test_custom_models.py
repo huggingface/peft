@@ -1351,18 +1351,18 @@ class SimpleNet(nn.Module):
         return X
 
 
+def _param_name_func(testcase_func, param_num, params):
+    # for parameterized tests in TextMixedAdapterTypes
+    config0, config1 = params[0]
+    name0 = config0.__class__.__name__
+    name1 = config1.__class__.__name__
+    if name0 != name1:
+        return f"{testcase_func.__name__}_{param_num}_{name0}_{name1}"
+    return f"{testcase_func.__name__}_{param_num}_{name0}_x2"
+
+
 class TestMixedAdapterTypes(unittest.TestCase):
     torch_device = infer_device()
-
-    @staticmethod
-    def param_name_func(testcase_func, param_num, params):
-        # for parameterized tests
-        config0, config1 = params[0]
-        name0 = config0.__class__.__name__
-        name1 = config1.__class__.__name__
-        if name0 != name1:
-            return f"{testcase_func.__name__}_{param_num}_{name0}_{name1}"
-        return f"{testcase_func.__name__}_{param_num}_{name0}_x2"
 
     def _get_model(self, model_cls, peft_config=None, adapter_name=None, seed=0):
         torch.manual_seed(seed)
@@ -1483,7 +1483,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
             ],
             r=2,
         ),
-        name_func=param_name_func,
+        name_func=_param_name_func,
     )
     def test_target_first_layer(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
@@ -1499,7 +1499,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
             ],
             r=2,
         ),
-        name_func=param_name_func,
+        name_func=_param_name_func,
     )
     def test_target_last_layer(self, config0, config1):
         # We are targeting the last layer of the SimpleNet. Therefore, since the adapters only add their activations
@@ -1559,7 +1559,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 LoKrConfig(target_modules=["lin1"], init_weights=False),
             ),
         ],
-        name_func=param_name_func,
+        name_func=_param_name_func,
     )
     def test_target_different_layers(self, config0, config1):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
