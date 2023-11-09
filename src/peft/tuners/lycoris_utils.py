@@ -294,35 +294,13 @@ class LycorisTuner(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, LycorisLayer):
-                if isinstance(target, nn.Conv2d):
-                    new_module = torch.nn.Conv2d(
-                        target.in_channels,
-                        target.out_channels,
-                        kernel_size=target.kernel_size,
-                        stride=target.stride,
-                        padding=target.padding,
-                        dilation=target.dilation,
-                    )
-                elif isinstance(target, nn.Linear):
-                    bias = target.bias is not None
-                    new_module = torch.nn.Linear(
-                        target.in_features,
-                        target.out_features,
-                        bias=bias,
-                        device=target.weight.device,
-                    )
-                else:
-                    raise ValueError(
-                        "Cannot convert current module to torch module, currently only adapters for nn.Linear and "
-                        "nn.Conv2d are supported"
-                    )
+
+            if hasattr(target, "base_layer"):
                 if merge:
                     target.merge(safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
-
-            # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
+            elif isinstance(target, ModulesToSaveWrapper):
+                # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
