@@ -401,5 +401,4 @@ class LycorisTuner(BaseTuner):
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
 
-        if new_adapter:
-            self.active_adapter = new_adapter
+        self.active_adapter = new_adapter or []

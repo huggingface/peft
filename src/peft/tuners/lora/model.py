@@ -669,8 +669,7 @@ class LoraModel(BaseTuner):
                 if new_adapter is None:
                     new_adapter = target.active_adapters[:]
 
-        if new_adapter:
-            self.active_adapter = new_adapter
+        self.active_adapter = new_adapter or []
 
     def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
         r"""

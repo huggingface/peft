@@ -393,14 +393,14 @@ class BaseTunerLayer(ABC):
                 # here we get the list of all adapters existing adapter names and choose the first one
                 remaining_adapters = self._all_available_adapter_names()
                 if not remaining_adapters:
-                    raise ValueError("You tried to delete the only adapter in the model, this is not possible.")
-
-                new_active_adapter = remaining_adapters[0]
-                warnings.warn(
-                    f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
-                    f"{new_active_adapter}."
-                )
-                self.set_adapter(remaining_adapters[0])
+                    self.set_adapter([])
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.set_adapter(remaining_adapters[0])
 
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:

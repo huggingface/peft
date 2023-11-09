@@ -847,6 +847,15 @@ class PeftCommonTester:
             for attr in attributes_to_check:
                 self.assertFalse(adapter_to_delete in getattr(target, attr))
 
+        # check that we can also delete the last remaining adapter
+        model.delete_adapter("default")
+        self.assertFalse("default" in model.peft_config)
+        self.assertEqual(model.active_adapters, [])
+
+        input = self.prepare_inputs_for_testing()
+        # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
+        model.base_model(**input)  # should not raise an error
+
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         # same as test_delete_adapter, but this time an inactive adapter is deleted
         supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
@@ -879,6 +888,15 @@ class PeftCommonTester:
             attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
             for attr in attributes_to_check:
                 self.assertFalse(adapter_to_delete in getattr(target, attr))
+
+        # check that we can also delete the last remaining adapter
+        model.delete_adapter("default")
+        self.assertFalse("default" in model.peft_config)
+        self.assertEqual(model.active_adapters, [])
+
+        input = self.prepare_inputs_for_testing()
+        # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
+        model.base_model(**input)  # should not raise an error
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
