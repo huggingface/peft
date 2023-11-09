@@ -203,6 +203,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             os.makedirs(output_dir, exist_ok=True)
 
             if safe_serialization:
+                # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
                 # Safetensors does not allow tensor aliasing.
                 # We're going to remove aliases before saving
                 ptrs = collections.defaultdict(list)
@@ -219,6 +220,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
 
                 for _, names in shared_ptrs.items():
+                    # Here we just clone the shared tensors to avoid tensor aliasing which is
+                    # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
 
