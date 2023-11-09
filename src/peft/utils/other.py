@@ -419,13 +419,21 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
             desc_act = gptq_quantization_config.desc_act
             group_size = gptq_quantization_config.group_size
             bits = gptq_quantization_config.bits
-            disable_exllama = gptq_quantization_config.disable_exllama
+            if hasattr(gptq_quantization_config, "use_exllama"):
+                use_exllama = gptq_quantization_config.use_exllama
+            else:
+                use_exllama = not gptq_quantization_config.disable_exllama
+            if hasattr(gptq_quantization_config, "exllama_config"):
+                exllama_version = gptq_quantization_config.exllama_config["version"]
+            else:
+                exllama_version = 1
             AutoGPTQQuantLinear = dynamically_import_QuantLinear(
                 use_triton=False,
                 desc_act=desc_act,
                 group_size=group_size,
                 bits=bits,
-                disable_exllama=disable_exllama,
+                disable_exllama=not (use_exllama and exllama_version == 1),
+                disable_exllamav2=not (use_exllama and exllama_version == 2),
             )
             return AutoGPTQQuantLinear
     return None
@@ -478,9 +486,9 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "bert": ["key", "value", "output.dense"],
     "deberta-v2": ["key_proj", "value_proj", "output.dense"],
     "deberta": ["in_proj", "output.dense"],
-    "RefinedWebModel": ["query_key_value"],
-    "RefinedWeb": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWebModel": ["query_key_value", "dense_4h_to_h"],
+    "RefinedWeb": ["query_key_value", "dense_4h_to_h"],
+    "falcon": ["query_key_value", "dense_4h_to_h"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -499,9 +507,9 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "bert": ["output.dense"],
     "deberta-v2": ["output.dense"],
     "deberta": ["output.dense"],
-    "RefinedWeb": ["query_key_value"],
-    "RefinedWebModel": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWeb": ["dense_4h_to_h"],
+    "RefinedWebModel": ["dense_4h_to_h"],
+    "falcon": ["dense_4h_to_h"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]

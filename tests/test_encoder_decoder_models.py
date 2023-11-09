@@ -12,11 +12,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import tempfile
 import unittest
 
 import torch
 from parameterized import parameterized
-from transformers import AutoModelForSeq2SeqLM
+from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
+
+from peft import LoraConfig, TaskType, get_peft_model
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -180,3 +183,20 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
+
+
+class PeftEncoderDecoderCustomModelTester(unittest.TestCase):
+    """
+    A custom class to write any custom test related with Enc-Dec models
+    """
+
+    def test_save_shared_tensors(self):
+        model_id = "hf-internal-testing/tiny-random-RobertaModel"
+        peft_config = LoraConfig(
+            task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
+        )
+        model = AutoModelForTokenClassification.from_pretrained(model_id, num_labels=11)
+        model = get_peft_model(model, peft_config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # This should work fine
+            model.save_pretrained(tmp_dir, safe_serialization=True)
