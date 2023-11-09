@@ -62,6 +62,8 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
     r"""
     A base layer for LyCORIS like adapters
     """
+    # adapter_layer_names needs to be defined on the child class
+    other_param_names = ("r", "alpha", "scaling", "rank_dropout", "module_dropout")
 
     def __init__(self):
         self.r = {}
@@ -391,17 +393,13 @@ class LycorisTuner(BaseTuner):
         del self.peft_config[adapter_name]
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, LycorisLayer):
-                for attr in target.adapter_layer_names:
-                    if adapter_name in getattr(target, attr):
-                        getattr(target, attr).pop(adapter_name)
-                if adapter_name in target.active_adapters:
-                    resetting_active_adapter = (
-                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
-                    )
-                    warnings.warn(
-                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
-                    )
-                    target.set_adapter(resetting_active_adapter)
+                target.delete_adapter(adapter_name)
+                if new_adapter is None:
+                    new_adapter = target.active_adapters[:]
+
+        if new_adapter:
+            self.active_adapter = new_adapter

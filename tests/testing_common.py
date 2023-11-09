@@ -29,6 +29,7 @@ from peft import (
     IA3Config,
     LoraConfig,
     PeftModel,
+    PeftType,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
@@ -815,42 +816,69 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, AdaLoraConfig):
-            # AdaLora does not support adding more than 1 adapter
-            return
-
-        model = self.transformers_class.from_pretrained(model_id)
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
+        # IA3 does not support deleting adapters yet, but it just needs to be added
+        # AdaLora does not support multiple adapters
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        if config.peft_type not in supported_peft_types:
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        if isinstance(config.target_modules, str):
+            # TODO this should be doable
+            self.skipTest("Multiple adapters cannot currently be added when target_modules is a string.")
+
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)
         model.set_adapter(adapter_to_delete)
         model = model.to(self.torch_device)
+        model.delete_adapter(adapter_to_delete)
+        self.assertFalse(adapter_to_delete in model.peft_config)
+        self.assertEqual(model.active_adapters, ["default"])
 
-        if config.peft_type not in ("LORA"):
-            with self.assertRaises(AttributeError):
-                model.delete_adapter(adapter_to_delete)
-        else:
-            model.delete_adapter(adapter_to_delete)
-            self.assertFalse(adapter_to_delete in model.peft_config)
-            key_list = [key for key, _ in model.named_modules() if "lora" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(model, key)
-                if isinstance(target, LoraLayer):
-                    for attr in [
-                        "r",
-                        "lora_alpha",
-                        "scaling",
-                        "lora_A",
-                        "lora_B",
-                        "lora_embedding_A",
-                        "lora_embedding_B",
-                        "lora_dropout",
-                    ]:
-                        self.assertFalse(adapter_to_delete in getattr(target, attr))
+        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(model, key)
+            attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
+            for attr in attributes_to_check:
+                self.assertFalse(adapter_to_delete in getattr(target, attr))
+
+    def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
+        # same as test_delete_adapter, but this time an inactive adapter is deleted
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
+        # IA3 does not support deleting adapters yet, but it just needs to be added
+        # AdaLora does not support multiple adapters
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if config.peft_type not in supported_peft_types:
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        if isinstance(config.target_modules, str):
+            # TODO this should be doable
+            self.skipTest("Multiple adapters cannot currently be added when target_modules is a string.")
+
+        adapter_to_delete = "delete_me"
+        model = get_peft_model(model, config)
+        model.add_adapter(adapter_to_delete, config)
+        # "delete_me" is added but not activated
+        model = model.to(self.torch_device)
+        model.delete_adapter(adapter_to_delete)
+        self.assertFalse(adapter_to_delete in model.peft_config)
+        self.assertEqual(model.active_adapters, ["default"])
+
+        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(model, key)
+            attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
+            for attr in attributes_to_check:
+                self.assertFalse(adapter_to_delete in getattr(target, attr))
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
