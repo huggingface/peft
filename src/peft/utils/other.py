@@ -486,9 +486,9 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "bert": ["key", "value", "output.dense"],
     "deberta-v2": ["key_proj", "value_proj", "output.dense"],
     "deberta": ["in_proj", "output.dense"],
-    "RefinedWebModel": ["query_key_value"],
-    "RefinedWeb": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWebModel": ["query_key_value", "dense_4h_to_h"],
+    "RefinedWeb": ["query_key_value", "dense_4h_to_h"],
+    "falcon": ["query_key_value", "dense_4h_to_h"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -507,9 +507,9 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "bert": ["output.dense"],
     "deberta-v2": ["output.dense"],
     "deberta": ["output.dense"],
-    "RefinedWeb": ["query_key_value"],
-    "RefinedWebModel": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWeb": ["dense_4h_to_h"],
+    "RefinedWebModel": ["dense_4h_to_h"],
+    "falcon": ["dense_4h_to_h"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
