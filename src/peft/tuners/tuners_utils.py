@@ -371,8 +371,8 @@ class BaseTunerLayer(ABC):
 
         This should be called on all adapter layers, or else we will get an inconsistent state.
 
-        This method will also set a new active adapter if the deleted adapter was an active adapter. It is important that
-        the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+        This method will also set a new active adapter if the deleted adapter was an active adapter. It is important
+        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
 
         Args:
             adapter_name (`str`): The name of the adapter to delete
