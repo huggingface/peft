@@ -540,6 +540,27 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
 
+TRANSFORMERS_MODELS_TO_LOFTQ_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "k", "v", "o", "wi", "wo"],
+    "mt5": ["q", "k", "v", "o", "wi_0", "wi_1", "wo"],
+    "bart": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
+    "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "llama": ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"],
+    "bert": ["query", "key", "value"],
+    "roberta": ["query", "key", "value", "dense"],
+    # "xlm-roberta": ["query", "value"],
+    # "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
+    "gpt_bigcode": ["c_attn"],
+    "deberta": ["in_proj"],
+    # "layoutlm": ["query", "value"],
+}
+
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
