@@ -214,6 +214,10 @@ def parse_args(input_args=None):
     )
 
     parser.add_argument(
+        "--num_dataloader_workers", type=int, default=1, help="Num of workers for the training dataloader."
+    )
+
+    parser.add_argument(
         "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
     parser.add_argument(
@@ -799,7 +803,7 @@ def main(args):
         batch_size=args.train_batch_size,
         shuffle=True,
         collate_fn=lambda examples: collate_fn(examples, args.with_prior_preservation),
-        num_workers=1,
+        num_workers=args.num_dataloader_workers,
     )
 
     # Scheduler and math around the number of training steps.
