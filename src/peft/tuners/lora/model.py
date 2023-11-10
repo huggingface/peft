@@ -384,8 +384,7 @@ class LoraModel(BaseTuner):
 
         km_list = [[key, module] for key, module in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for pair in tqdm(km_list, disable=not progressbar, desc=desc):
-            key, module = pair[0], pair[1]
+        for key, module in tqdm(km_list, disable=not progressbar, desc=desc):
             # re-load module params if offloaded to the meta device
             if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
                 module._hf_hook.pre_forward(module)
