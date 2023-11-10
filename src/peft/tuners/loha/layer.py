@@ -24,8 +24,9 @@ from peft.tuners.lycoris_utils import LycorisLayer
 
 
 class LoHaLayer(LycorisLayer, nn.Module):
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names = ["hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2"]
+    # All names of layers that may contain adapter weights
+    adapter_layer_names = ("hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2")
+    # other_param_names is defined on parent class
 
     def __init__(self):
         LycorisLayer.__init__(self)
