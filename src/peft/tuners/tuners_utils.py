@@ -25,7 +25,7 @@ from torch import nn
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
-from ..utils import _get_submodules, ModulesToSaveWrapper
+from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,6 @@ class BaseTuner(nn.Module, ABC):
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
-
 
     @property
     def active_adapters(self) -> list[str]:

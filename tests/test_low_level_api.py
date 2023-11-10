@@ -74,7 +74,7 @@ class TestPeft(unittest.TestCase):
             r=64,
             bias="none",
             target_modules=["linear"],
-            modules_to_save=["embedding"]
+            modules_to_save=["embedding"],
         )
 
         self.model = inject_adapter_in_model(lora_config, self.model)
