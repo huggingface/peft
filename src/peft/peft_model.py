@@ -32,7 +32,6 @@ from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
-from transformers.pytorch_utils import id_tensor_storage
 from transformers.utils import PushToHubMixin
 
 from . import __version__
@@ -60,6 +59,7 @@ from .utils import (
     _set_adapter,
     _set_trainable,
     get_peft_model_state_dict,
+    id_tensor_storage,
     infer_device,
     load_peft_weights,
     set_peft_model_state_dict,
