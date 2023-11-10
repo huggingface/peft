@@ -227,8 +227,13 @@ class BaseTuner(nn.Module, ABC):
             ):
                 # Optionally set the modules to save
                 parent, target, target_name = _get_submodules(model, key)
-                new_module = ModulesToSaveWrapper(target, adapter_name)
-                setattr(parent, target_name, new_module)
+
+                if not isinstance(target, ModulesToSaveWrapper):
+                    new_module = ModulesToSaveWrapper(target, adapter_name)
+                    setattr(parent, target_name, new_module)
+                else:
+                    target.update(adapter_name)
+
                 _has_modules_to_save = True
                 continue
 
@@ -259,7 +264,10 @@ class BaseTuner(nn.Module, ABC):
                     p.requires_grad = False
 
         if _has_modules_to_save:
-            model.modules_to_save = set(peft_config.modules_to_save)
+            if not hasattr(model, "modules_to_save"):
+                model.modules_to_save = set(peft_config.modules_to_save)
+            else:
+                model.modules_to_save.update(set(peft_config.modules_to_save))
 
     def merge_adapter(self):
         """
