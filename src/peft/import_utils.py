@@ -14,6 +14,7 @@
 # limitations under the License.
 import importlib
 import importlib.metadata as importlib_metadata
+from functools import lru_cache
 
 import packaging.version
 
@@ -46,3 +47,20 @@ def is_auto_gptq_available():
 
 def is_optimum_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
+
+
+@lru_cache()
+def is_torch_tpu_available(check_device=True):
+    "Checks if `torch_xla` is installed and potentially if a TPU is in the environment"
+    if importlib.util.find_spec("torch_xla") is not None:
+        if check_device:
+            # We need to check if `xla_device` can be found, will raise a RuntimeError if not
+            try:
+                import torch_xla.core.xla_model as xm
+
+                _ = xm.xla_device()
+                return True
+            except RuntimeError:
+                return False
+        return True
+    return False
