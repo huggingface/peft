@@ -1,0 +1,22 @@
+{
+  "auto_mapping": {
+    "base_model_class": "OPTForCausalLM",
+    "parent_library": "transformers.models.opt.modeling_opt"
+  },
+  "base_model_name_or_path": "facebook/opt-350m",
+  "fan_in_fan_out": false,
+  "feedforward_modules": [
+    "fc2"
+  ],
+  "inference_mode": true,
+  "init_ia3_weights": false,
+  "modules_to_save": null,
+  "peft_type": "IA3",
+  "revision": null,
+  "target_modules": [
+    "q_proj",
+    "k_proj",
+    "fc2"
+  ],
+  "task_type": null
+}
