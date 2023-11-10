@@ -83,6 +83,7 @@ accelerate launch train_dreambooth.py \
   --output_dir=$OUTPUT_DIR \
   --train_text_encoder \
   --with_prior_preservation --prior_loss_weight=1.0 \
+  --num_dataloader_workers=1 \
   --instance_prompt="a photo of sks dog" \
   --class_prompt="a photo of dog" \
   --resolution=512 \
@@ -100,6 +101,8 @@ accelerate launch train_dreambooth.py \
   --gradient_checkpointing \
   --max_train_steps=800
 ```
+
+If you are running this script on Windows, you may need to set the `--num_dataloader_workers` to 0.
 
 ## Inference with a single adapter
 

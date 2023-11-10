@@ -24,8 +24,8 @@ from peft.tuners.lycoris_utils import LycorisLayer
 
 
 class LoKrLayer(nn.Module, LycorisLayer):
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names = [
+    # All names of layers that may contain adapter weights
+    adapter_layer_names = (
         "lokr_w1",
         "lokr_w1_a",
         "lokr_w1_b",
@@ -33,7 +33,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
         "lokr_w2_a",
         "lokr_w2_b",
         "lokr_t2",
-    ]
+    )
+    # other_param_names is defined on parent class
 
     def __init__(self, base_layer: nn.Module) -> None:
         super().__init__()

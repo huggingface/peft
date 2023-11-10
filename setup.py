@@ -22,7 +22,7 @@ extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "param
 
 setup(
     name="peft",
-    version="0.7.0.dev0",
+    version="0.6.2.dev0",
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),
@@ -63,19 +63,23 @@ setup(
 )
 
 # Release checklist
-# 1. Change the version in __init__.py and setup.py.
-# 2. Commit these changes with the message: "Release: VERSION"
-# 3. Add a tag in git to mark the release: "git tag VERSION -m 'Adds tag VERSION for pypi' "
-#    Push the tag to git: git push --tags origin main
-# 4. Run the following commands in the top-level directory:
+# 1. Change the version in __init__.py and setup.py to the release version, e.g. from "0.6.0.dev0" to "0.6.0"
+# 2. Check if there are any deprecations that need to be addressed for this release by seaching for "# TODO" in the code
+# 3. Commit these changes with the message: "Release: VERSION", create a PR and merge it.
+# 4. Add a tag in git to mark the release: "git tag -a VERSION -m 'Adds tag VERSION for pypi' "
+#    Push the tag to git:
+#      git push --tags origin main
+#    It is necessary to work on the original repository, not on a fork.
+# 5. Run the following commands in the top-level directory:
 #      python setup.py bdist_wheel
 #      python setup.py sdist
-# 5. Upload the package to the pypi test server first:
+#    Ensure that you are on the clean and up-to-date main branch (git status --untracked-files=no should not list any
+#    files and show the main branch)
+# 6. Upload the package to the pypi test server first:
 #      twine upload dist/* -r pypitest
-#      twine upload dist/* -r pypitest --repository-url=https://test.pypi.org/legacy/
-# 6. Check that you can install it in a virtualenv by running:
+# 7. Check that you can install it in a virtualenv by running:
 #      pip install -i https://testpypi.python.org/pypi peft
-# 7. Upload the final version to actual pypi:
+# 8. Upload the final version to actual pypi:
 #      twine upload dist/* -r pypi
-# 8. Add release notes to the tag in github once everything is looking hunky-dory.
-# 9. Update the version in __init__.py, setup.py to the new version "-dev" and push to master
+# 9. Add release notes to the tag on https://github.com/huggingface/peft/releases once everything is looking hunky-dory.
+# 10. Update the version in __init__.py, setup.py to the bumped minor version + ".dev0" (e.g. from "0.6.0" to "0.7.0.dev0")

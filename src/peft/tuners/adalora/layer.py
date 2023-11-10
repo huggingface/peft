@@ -27,7 +27,8 @@ from peft.utils import transpose
 class AdaLoraLayer(LoraLayer):
     # List all names of layers that may contain adapter weights
     # Note: ranknum doesn't need to be included as it is not an nn.Module
-    adapter_layer_names = ["lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B"]
+    adapter_layer_names = ("lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B")
+    # other_param_names is defined in LoraLayer
 
     def __init__(self, base_layer: nn.Module) -> None:
         super().__init__(base_layer)

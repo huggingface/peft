@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
@@ -272,8 +273,10 @@ class BaseTunerLayer(ABC):
     """
     active_adapter = None
 
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names: list[str] = []
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str] = ()
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names: tuple[str] = ()
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -362,6 +365,54 @@ class BaseTunerLayer(ABC):
                     layer.requires_grad_(False)
 
         self._active_adapter = adapter_names
+
+    def _all_available_adapter_names(self) -> list[str]:
+        """Return a sorted list of all available adapter names"""
+        adapter_names = set()
+        for name in self.adapter_layer_names + self.other_param_names:
+            # we check each possible attribute and if it's a dict or ModuleDict, we assume that the keys are the adapter
+            # names
+            attr = getattr(self, name)
+            if hasattr(attr, "keys"):
+                adapter_names.update(attr.keys())
+        return sorted(adapter_names)
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """
+        Delete an adapter from the layer
+
+        This should be called on all adapter layers, or else we will get an inconsistent state.
+
+        This method will also set a new active adapter if the deleted adapter was an active adapter. It is important
+        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+
+        Args:
+            adapter_name (`str`): The name of the adapter to delete
+
+        """
+        for attr in self.adapter_layer_names + self.other_param_names:
+            if adapter_name in getattr(self, attr):
+                del getattr(self, attr)[adapter_name]
+
+        if adapter_name in self.active_adapters:
+            # choose a new active adapter
+            active_adapters = self.active_adapters[:]
+            active_adapters.remove(adapter_name)
+            if active_adapters:
+                self.set_adapter(active_adapters)
+            else:
+                # no active adapters left, set a new default adapter
+                # here we get the list of all adapters existing adapter names and choose the first one
+                remaining_adapters = self._all_available_adapter_names()
+                if not remaining_adapters:
+                    self.set_adapter([])
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.set_adapter(remaining_adapters[0])
 
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:

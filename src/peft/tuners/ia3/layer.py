@@ -25,8 +25,10 @@ from peft.utils import transpose
 
 
 class IA3Layer(BaseTunerLayer):
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names = ["ia3_l"]
+    # All names of layers that may contain adapter weights
+    adapter_layer_names = ("ia3_l",)
+    # All names of other parameters that may contain adapter-related parameters
+    other_layer_names = ("scaling",)
 
     def __init__(
         self,

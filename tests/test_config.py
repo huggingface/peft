@@ -25,7 +25,7 @@ from parameterized import parameterized
 from peft import (
     AdaLoraConfig,
     # TODO: uncomment once PEFT works again with transformers
-    # AdaptionPromptConfig,
+    AdaptionPromptConfig,
     IA3Config,
     LoHaConfig,
     LoraConfig,
@@ -42,7 +42,7 @@ PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
 ALL_CONFIG_CLASSES = (
     # TODO: uncomment once PEFT works again with transformers
-    # AdaptionPromptConfig,
+    AdaptionPromptConfig,
     AdaLoraConfig,
     IA3Config,
     LoHaConfig,
@@ -223,3 +223,31 @@ class PeftConfigTester(unittest.TestCase):
 
         # should run without errors
         LoraConfig(**valid_config)
+
+    def test_ia3_is_feedforward_subset_invalid_config(self):
+        # This test checks that the IA3 config raises a value error if the feedforward_modules argument
+        # is not a subset of the target_modules argument
+
+        # an example invalid config
+        invalid_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
+
+        with self.assertRaisesRegex(
+            ValueError, expected_regex="^`feedforward_modules` should be a subset of `target_modules`$"
+        ):
+            IA3Config(**invalid_config)
+
+    def test_ia3_is_feedforward_subset_valid_config(self):
+        # This test checks that the IA3 config is created without errors with valid arguments.
+        # feedforward_modules should be a subset of target_modules if both are lists
+
+        # an example valid config with regex expressions.
+        valid_config_regex_exp = {
+            "target_modules": ".*.(SelfAttention|EncDecAttention|DenseReluDense).*(q|v|wo)$",
+            "feedforward_modules": ".*.DenseReluDense.wo$",
+        }
+        # an example valid config with module lists.
+        valid_config_list = {"target_modules": ["k", "v", "wo"], "feedforward_modules": ["wo"]}
+
+        # should run without errors
+        IA3Config(**valid_config_regex_exp)
+        IA3Config(**valid_config_list)

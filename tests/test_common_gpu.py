@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import gc
+import tempfile
 import unittest
 
 import pytest
@@ -22,6 +23,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     AutoTokenizer,
     BitsAndBytesConfig,
     LlamaForCausalLM,
@@ -33,6 +35,7 @@ from peft import (
     IA3Config,
     LoraConfig,
     PeftModel,
+    TaskType,
     get_peft_model,
     prepare_model_for_kbit_training,
 )
@@ -158,12 +161,12 @@ class PeftGPUCommonTests(unittest.TestCase):
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
 
         opt_ia3_config = IA3Config(
-            target_modules=["q_proj", "v_proj"],
-            feedforward_modules=["down_proj"],
+            target_modules=["q_proj", "v_proj", "fc2"],
+            feedforward_modules=["fc2"],
             task_type="CAUSAL_LM",
         )
 
-        config = IA3Config(target_modules=["q_proj", "v_proj"], feedforward_modules=["down_proj"])
+        config = IA3Config(target_modules=["q_proj", "v_proj", "fc2"], feedforward_modules=["fc2"])
 
         flan_8bit = get_peft_model(flan_8bit, flan_ia3_config)
         self.assertTrue(
@@ -276,12 +279,12 @@ class PeftGPUCommonTests(unittest.TestCase):
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
 
         opt_ia3_config = IA3Config(
-            target_modules=["q_proj", "v_proj"],
-            feedforward_modules=["down_proj"],
+            target_modules=["q_proj", "v_proj", "fc2"],
+            feedforward_modules=["fc2"],
             task_type="CAUSAL_LM",
         )
 
-        config = IA3Config(target_modules=["q_proj", "v_proj"], feedforward_modules=["down_proj"])
+        config = IA3Config(target_modules=["q_proj", "v_proj", "fc2"], feedforward_modules=["fc2"])
 
         flan_4bit = get_peft_model(flan_4bit, flan_ia3_config)
         self.assertTrue(
@@ -631,3 +634,16 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.assertTrue(isinstance(model, PeftModel))
         self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit))
         self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit))
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_serialization_shared_tensors(self):
+        model_checkpoint = "roberta-base"
+        peft_config = LoraConfig(
+            task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
+        )
+        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to("cuda")
+        model = get_peft_model(model, peft_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir, safe_serialization=True)
