@@ -682,6 +682,14 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             self.fail("There should be no warning when bias is set to 'none'")
 
     @parameterized.expand(TEST_CASES)
+    def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_delete_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
