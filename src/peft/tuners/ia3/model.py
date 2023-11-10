@@ -206,7 +206,7 @@ class IA3Model(BaseTuner):
                     "New adapter should have the same value for `is_feedforward` as previously added adapter."
                 )
             if isinstance(target, torch.nn.Conv2d):
-                target.update_layer_conv2d(
+                target.update_layer(
                     adapter_name,
                     ia3_config.init_ia3_weights,
                 )
