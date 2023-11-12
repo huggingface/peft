@@ -61,6 +61,7 @@ class LoraLayer(BaseTunerLayer):
         self.to_empty(device=final_device)
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        # Here we create Lora layers 
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r

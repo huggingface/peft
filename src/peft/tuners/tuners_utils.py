@@ -224,12 +224,23 @@ class BaseTuner(nn.Module, ABC):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
 
+            print(target)
+
+            exit()
+
             optional_kwargs = {
                 "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
                 "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
                 "current_key": key,
             }
+            print(parent, key)
+            print("===")
+        
+     
+         
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optional_kwargs)
+        
+        exit("===")
 
         if not is_target_modules_in_base_model:
             raise ValueError(
@@ -351,7 +362,6 @@ class BaseTunerLayer(ABC):
                     layer.requires_grad_(True)
                 else:
                     layer.requires_grad_(False)
-
         self._active_adapter = adapter_names
 
     def _all_available_adapter_names(self) -> list[str]:

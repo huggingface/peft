@@ -163,6 +163,7 @@ class LoraModel(BaseTuner):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
+
         # TODO: better deal with that
         if isinstance(target, LoraLayer) and isinstance(target, torch.nn.Conv2d):
             target.update_layer_conv2d(
@@ -201,6 +202,7 @@ class LoraModel(BaseTuner):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
+
 
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
@@ -318,6 +320,7 @@ class LoraModel(BaseTuner):
                     f"Target module {target} is not supported. Currently, only the following modules are supported: "
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
+
             new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
 
         return new_module

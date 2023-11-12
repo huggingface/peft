@@ -119,6 +119,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self._peft_config = None
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
+            exit("*********")
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
         self.config = getattr(self.base_model, "config", {"model_type": "custom"})
