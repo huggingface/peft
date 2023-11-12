@@ -224,19 +224,18 @@ class BaseTuner(nn.Module, ABC):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
 
-            print(target)
+            print(model)
+            print("**************")
 
-            exit()
 
             optional_kwargs = {
                 "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
                 "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
                 "current_key": key,
             }
-            print(parent, key)
-            print("===")
-        
-     
+         
+
+            # this is where we combine lora layers to the pre-trained model.
          
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optional_kwargs)
         
