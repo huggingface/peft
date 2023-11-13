@@ -16,13 +16,14 @@ import evaluate
 from peft import LoraConfig, get_peft_model
 import mlflow
 import os
+from transformers.optimization import Adafactor, AdafactorSchedule
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Image Classification with LoRA")
 parser.add_argument("--model_checkpoint", type=str, default="microsoft/swin-base-patch4-window7-224",
                     help="The model checkpoint to use")
 parser.add_argument('--dataset_name', type=str, default='food101', help='The name of the Dataset (from the HuggingFace hub) to train on.')
-parser.add_argument("--batch_size", type=int, default=128,
+parser.add_argument("--batch_size", type=int, default=152,
                     help="Batch size for training and evaluation")
 parser.add_argument("--learning_rate", type=float, default=5e-3,
                     help="Learning rate for training")
@@ -30,9 +31,11 @@ parser.add_argument("--num_train_epochs", type=int, default=1,
                     help="Number of training epochs")
 parser.add_argument("--logging_steps", type=int, default=1,
                     help="Log metrics every X steps")
-parser.add_argument("--output_dir", type=str, default="./outputs", help="Output dir")
 parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
-parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
+parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="no", help="Choose AMP mode")
+parser.add_argument('--checkpoint_dir', type=str, default="/nas/kimng/repo_clean/peft/examples/image_classification/swin-base-patch4-window7-224/10epoch.pt", help='Directory to save checkpoints.')
+parser.add_argument('--load_checkpoint', type=str, default=False, help='Load checkpoint or not.')
+parser.add_argument('--save_checkpoint', type=str, default=False, help='Save checkpoint or not.')
 args = parser.parse_args()
 
 
@@ -119,8 +122,16 @@ print_trainable_parameters(lora_model)
 
 # Define training arguments
 model_name = args.model_checkpoint.split("/")[-1]
-training_args = TrainingArguments(
-    f"{model_name}-finetuned-lora-food101",
+
+# optimizer = Adafactor(model.parameters(), scale_parameter=True, relative_step=True, warmup_init=True, lr=None)
+# lr_scheduler = AdafactorSchedule(optimizer)
+# optimizers = (optimizer, lr_scheduler)
+
+if args.save_checkpoint=="True":
+    training_args = TrainingArguments(
+    output_dir=args.checkpoint_dir,
+    overwrite_output_dir=True,
+    save_total_limit=1,
     remove_unused_columns=False,
     evaluation_strategy="epoch",
     save_strategy="epoch",
@@ -136,6 +147,24 @@ training_args = TrainingArguments(
     push_to_hub=False,
     label_names=["labels"],
 )
+else:
+    training_args = TrainingArguments(
+        f"{model_name}-finetuned-lora-food101",
+        remove_unused_columns=False,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        learning_rate=args.learning_rate,
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=4,
+        per_device_eval_batch_size=args.batch_size,
+        fp16=args.amp,
+        num_train_epochs=args.num_train_epochs,
+        logging_steps=args.logging_steps,
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
+        push_to_hub=False,
+        label_names=["labels"],
+    )
 
 
 # Compute evaluation metrics
@@ -159,11 +188,20 @@ trainer = Trainer(
     tokenizer=image_processor,
     compute_metrics=compute_metrics,
     data_collator=collate_fn
+    # optimizers=optimizers
 )
 
 # Train the model
 mlflow.start_run()
-train_results = trainer.train()
+if args.load_checkpoint and os.path.exists(args.checkpoint_dir):
+    try:
+        train_results = trainer.train(resume_from_checkpoint=args.checkpoint_dir)
+    except ValueError as e:
+        print(f"Error: {e}")
+        print("No valid checkpoint found, training from scratch.")
+        train_results = trainer.train()
+else:
+    train_results = trainer.train()
 trainer.log_metrics("train", train_results.metrics)
 trainer.save_metrics("train", train_results.metrics)
 trainer.save_model()

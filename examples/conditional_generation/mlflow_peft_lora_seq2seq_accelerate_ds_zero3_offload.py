@@ -181,7 +181,14 @@ def main(args):
     model.print_trainable_parameters()
 
     # optimizer
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    if args.optimize == "AdamW":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    elif args.optimize == "SGD":
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    elif args.optimize == "Adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    elif args.optimize == "RMSprop":
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
 
     # lr scheduler
     lr_scheduler = get_linear_schedule_with_warmup(
@@ -189,6 +196,17 @@ def main(args):
         num_warmup_steps=0,
         num_training_steps=(len(train_dataloader) * num_epochs),
     )
+
+# Load checkpoint
+    if args.load_checkpoint == "True":
+        if os.path.exists(checkpoint_dir):
+            checkpoint = torch.load(checkpoint_dir)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            epoch = checkpoint['epoch']
+            loss = checkpoint['loss']
+        else:
+            pass
 
     model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler = accelerator.prepare(
         model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler
@@ -339,6 +357,19 @@ def main(args):
 
     
     accelerator.wait_for_everyone()
+    if args.save_checkpoint == "True":
+        if epoch == num_epochs - 1:
+            checkpoint_dir = args.checkpoint_dir
+            os.makedirs(os.path.dirname(checkpoint_dir), exist_ok=True)
+            torch.save({
+            'epoch': num_epochs - 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'lr_scheduler_state_dict': lr_scheduler.state_dict(),
+            'loss': loss,
+            'accuracy': accuracy,
+            }, checkpoint_dir)
+
 
 
 if __name__ == "__main__":
@@ -350,6 +381,10 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=900, help="Batch size")
     parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
-    parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
+    parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="no  ", help="Choose AMP mode")
+    parser.add_argument("--optimize", type=str, default="AdamW", help="Choose the optimization computation method")
+    parser.add_argument('--checkpoint_dir', type=str, default='/nas/test_case_set_{set#}/a100/{benchmark}/{task}/{model_name}/10epoch', help='Directory to save checkpoints.')
+    parser.add_argument('--load_checkpoint', type=str, default="False", help='Load checkpoint or not.')
+    parser.add_argument('--save_checkpoint', type=str, default="False", help='Save checkpoint or not.')
     args = parser.parse_args()
     main(args)

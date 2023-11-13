@@ -75,6 +75,7 @@ def parse_args():
     parser.add_argument('--dataset_name', type=str, default='glue', help='The name of the Dataset (from the HuggingFace hub) to train on.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
+    parser.add_argument("--optimize", type=str, default="AdamW", help="Choose the optimization computation method")
 
     args = parser.parse_args()
 
@@ -170,7 +171,15 @@ def main():
         accelerator.state.fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(model)
         model = accelerator.prepare(model)
 
-    optimizer = AdamW(params=model.parameters(), lr=args.learning_rate)
+    
+    if args.optimize == "AdamW":
+        optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.learning_rate)
+    elif args.optimize == "SGD":
+        optimizer = torch.optim.SGD(params=model.parameters(), lr=args.learning_rate)
+    elif args.optimize == "Adam":
+        optimizer = torch.optim.Adam(params=model.parameters(), lr=args.learning_rate)
+    elif args.optimize == "RMSprop":
+        optimizer = torch.optim.RMSprop(params=model.parameters(), lr=args.learning_rate)
 
     # Instantiate scheduler
     lr_scheduler = get_linear_schedule_with_warmup(

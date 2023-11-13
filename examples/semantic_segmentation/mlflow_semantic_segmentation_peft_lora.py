@@ -12,6 +12,7 @@ from peft import LoraConfig, get_peft_model
 from huggingface_hub import cached_download, hf_hub_url
 import mlflow
 import os
+from transformers.optimization import Adafactor, AdafactorSchedule
 
 # Argument parsing
 parser = argparse.ArgumentParser()
@@ -26,6 +27,7 @@ parser.add_argument("--output_dir", type=str, default="./outputs", help="Output 
 parser.add_argument("--logging_steps", type=int, default=10,
                     help="Log metrics every X steps")
 parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="no", help="Choose AMP mode")
+parser.add_argument("--optimize", type=str, default="AdamW", help="Choose the optimization computation method")
 args = parser.parse_args()
 
 # Load dataset
@@ -131,9 +133,6 @@ model = AutoModelForSemanticSegmentation.from_pretrained(
 )
 print_trainable_parameters(model)
 
-#custom_optimizer
-custom_optimizer = torch.optim.SGD(model.parameters(),lr=args.learning_rate)
-
 config = LoraConfig(
     r=32,
     lora_alpha=32,
@@ -150,6 +149,12 @@ for name, param in lora_model.named_parameters():
 
 model_name = args.checkpoint.split("/")[-1]
 
+
+if args.optimize == "Adafactor":
+    optimizer = Adafactor(model.parameters(), scale_parameter=True, relative_step=True, warmup_init=True, lr=None)
+    lr_scheduler = AdafactorSchedule(optimizer)
+    optimizers = (optimizer, lr_scheduler)
+
 training_args = TrainingArguments(
     output_dir=args.output_dir,
     learning_rate=args.learning_rate,
@@ -165,15 +170,23 @@ training_args = TrainingArguments(
     push_to_hub=False,
     label_names=["labels"]
 )
-
-trainer = Trainer(
+if args.optimize == "AdamW":
+    trainer = Trainer(
     model=lora_model,
     args=training_args,
     train_dataset=train_ds,
     eval_dataset=test_ds,
     compute_metrics=compute_metrics,
 )
-trainer.model.set_optimizer(custom_optimizer)
+elif args.optimize == "Adafactor":
+    trainer = Trainer(
+        model=lora_model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=test_ds,
+        compute_metrics=compute_metrics,
+        optimizers=optimizers
+    )
 
 mlflow.start_run()
 train_results =  trainer.train()
