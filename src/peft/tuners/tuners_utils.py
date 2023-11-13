@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
@@ -24,7 +25,7 @@ from torch import nn
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
-from ..utils import _get_submodules
+from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,9 @@ class BaseTuner(nn.Module, ABC):
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
 
+        _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
+        _has_modules_to_save = False
+
         model_config = getattr(model, "config", {"model_type": "custom"})
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
@@ -217,6 +221,22 @@ class BaseTuner(nn.Module, ABC):
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
         for key in key_list:
+            # Check for modules_to_save in case
+            if _check_for_modules_to_save and any(
+                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+            ):
+                # Optionally set the modules to save
+                parent, target, target_name = _get_submodules(model, key)
+
+                if not isinstance(target, ModulesToSaveWrapper):
+                    new_module = ModulesToSaveWrapper(target, adapter_name)
+                    setattr(parent, target_name, new_module)
+                else:
+                    target.update(adapter_name)
+
+                _has_modules_to_save = True
+                continue
+
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
@@ -242,6 +262,12 @@ class BaseTuner(nn.Module, ABC):
             for n, p in self.model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
+
+        if _has_modules_to_save:
+            if not hasattr(model, "modules_to_save"):
+                model.modules_to_save = set(peft_config.modules_to_save)
+            else:
+                model.modules_to_save.update(set(peft_config.modules_to_save))
 
     def merge_adapter(self):
         """
@@ -272,8 +298,10 @@ class BaseTunerLayer(ABC):
     """
     active_adapter = None
 
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names: list[str] = []
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str] = ()
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names: tuple[str] = ()
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -350,6 +378,54 @@ class BaseTunerLayer(ABC):
                     layer.requires_grad_(False)
 
         self._active_adapter = adapter_names
+
+    def _all_available_adapter_names(self) -> list[str]:
+        """Return a sorted list of all available adapter names"""
+        adapter_names = set()
+        for name in self.adapter_layer_names + self.other_param_names:
+            # we check each possible attribute and if it's a dict or ModuleDict, we assume that the keys are the adapter
+            # names
+            attr = getattr(self, name)
+            if hasattr(attr, "keys"):
+                adapter_names.update(attr.keys())
+        return sorted(adapter_names)
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """
+        Delete an adapter from the layer
+
+        This should be called on all adapter layers, or else we will get an inconsistent state.
+
+        This method will also set a new active adapter if the deleted adapter was an active adapter. It is important
+        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+
+        Args:
+            adapter_name (`str`): The name of the adapter to delete
+
+        """
+        for attr in self.adapter_layer_names + self.other_param_names:
+            if adapter_name in getattr(self, attr):
+                del getattr(self, attr)[adapter_name]
+
+        if adapter_name in self.active_adapters:
+            # choose a new active adapter
+            active_adapters = self.active_adapters[:]
+            active_adapters.remove(adapter_name)
+            if active_adapters:
+                self.set_adapter(active_adapters)
+            else:
+                # no active adapters left, set a new default adapter
+                # here we get the list of all adapters existing adapter names and choose the first one
+                remaining_adapters = self._all_available_adapter_names()
+                if not remaining_adapters:
+                    self.set_adapter([])
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.set_adapter(remaining_adapters[0])
 
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
