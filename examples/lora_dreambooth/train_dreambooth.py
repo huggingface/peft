@@ -222,7 +222,7 @@ def parse_args(input_args=None):
         "--trace_memory_allocation",
         default=True,
         action="store_true",
-        help="Flag to track memory allocation during training.",
+        help="Flag to track memory allocation during training. This could slow down training on Windows.",
     )
 
     parser.add_argument(
