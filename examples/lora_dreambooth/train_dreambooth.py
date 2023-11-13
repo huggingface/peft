@@ -219,10 +219,10 @@ def parse_args(input_args=None):
     )
 
     parser.add_argument(
-        "--trace_memory_allocation",
-        default=True,
+        "--no_tracemalloc",
+        default=False,
         action="store_true",
-        help="Flag to track memory allocation during training. This could slow down training on Windows.",
+        help="Flag to stop memory allocation tracing during training. This could speed up training on Windows.",
     )
 
     parser.add_argument(
@@ -905,7 +905,7 @@ def main(args):
         unet.train()
         if args.train_text_encoder:
             text_encoder.train()
-        with TorchTracemalloc() if args.trace_memory_allocation else nullcontext() as tracemalloc:
+        with TorchTracemalloc() if not args.no_tracemalloc else nullcontext() as tracemalloc:
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
                 if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
@@ -1047,7 +1047,7 @@ def main(args):
                     break
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
 
-        if args.trace_memory_allocation:
+        if not args.no_tracemalloc:
             accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
             accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
             accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
