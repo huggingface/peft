@@ -570,20 +570,27 @@ class PeftCommonTester:
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
 
     def _test_offload_merge(self):
-        # assumes access to a GPU with at least 12GB vRAM and CPU with 20GB RAM
-        model_id = "emozilla/LlongMA-2-7b-flash"
-        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        # assumes access to a GPU with at least 1GB vRAM and CPU with 10GB RAM
+        model_id = "blbadger/llama-400M"
+        tokenizer_id = "huggyllama/llama-7b"
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
         config = AutoConfig.from_pretrained(model_id)
         with init_empty_weights():
             model = AutoModelForCausalLM.from_config(config)
 
+        memory_limits = {0: "1GIB", "cpu": "10GIB"}
         # offload most transformer modules
-        device_map = infer_auto_device_map(model, max_memory={0: "12GIB", "cpu": "50GIB"})
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        assert 0 in device_map.values()
+        assert "cpu" in device_map.values()
         model = AutoModelForCausalLM.from_pretrained(model_id, device_map=device_map)
+        assert len({p.device for p in model.parameters()}) == 2
 
-        # LoRA parameters for ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'down_proj', 'up_proj']
-        lora_checkpoint = "blbadger/llama2-LoRA"
-        model = PeftModel.from_pretrained(model, lora_checkpoint)
+        # LoRA adapters on ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'down_proj', 'up_proj']
+        lora_checkpoint = "blbadger/llama400M-lora"
+
+        # max_memory must be specified again to avoid defaulting to 'auto' device map
+        model = PeftModel.from_pretrained(model, lora_checkpoint, max_memory=memory_limits)
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
         pre_merge_olayer = model(input_tokens)[0]
         model = model.merge_and_unload()
