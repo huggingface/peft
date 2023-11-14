@@ -244,13 +244,13 @@ def main(args):
     model.print_trainable_parameters()
 
     # optimizer
-    if args.optimize == "AdamW":
+    if args.optimizer == "AdamW":
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    elif args.optimize == "SGD":
+    elif args.optimizer == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-    elif args.optimize == "Adam":
+    elif args.optimizer == "Adam":
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    elif args.optimize == "RMSprop":
+    elif args.optimizer == "RMSprop":
         optimizer = torch.optim.RMSprop(model.parameters(), lr=lr)
 
     # lr scheduler
@@ -453,7 +453,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_interval', type=int, default=1, help='log interval.')
     parser.add_argument('--cache_dir', type=str, default=None, help='Directory to read/write data.')
     parser.add_argument("--amp", type=str, choices=["bf16", "fp16", "no"], default="fp16", help="Choose AMP mode")
-    parser.add_argument("--optimize", type=str, default="AdamW", help="Choose the optimization computation method")
+    parser.add_argument("--optimizer", type=str, default="AdamW", help="Choose the optimization computation method")
     parser.add_argument('--checkpoint_dir', type=str, default='/nas/test_case_set_{set#}/a100/{benchmark}/{task}/{model_name}/10epoch', help='Directory to save checkpoints.')
     parser.add_argument('--load_checkpoint', type=str, default="False", help='Load checkpoint or not.')
     parser.add_argument('--save_checkpoint', type=str, default="False", help='Save checkpoint or not.')
