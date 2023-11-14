@@ -32,7 +32,6 @@ from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
-from transformers.pytorch_utils import id_tensor_storage
 from transformers.utils import PushToHubMixin
 
 from . import __version__
@@ -60,6 +59,7 @@ from .utils import (
     _set_adapter,
     _set_trainable,
     get_peft_model_state_dict,
+    id_tensor_storage,
     infer_device,
     load_peft_weights,
     set_peft_model_state_dict,
@@ -573,7 +573,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
                 self.peft_config[adapter_name] = peft_config
-                self.base_model.inject_adapter(self, adapter_name)
+                self.base_model.inject_adapter(self.base_model.model, adapter_name)
         except Exception:  # somthing went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
