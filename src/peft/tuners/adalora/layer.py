@@ -18,7 +18,6 @@ from typing import Any
 
 import torch
 from torch import nn
-from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.lora import LoraLayer
 from peft.utils import transpose
@@ -36,18 +35,6 @@ class AdaLoraLayer(LoraLayer):
         self.lora_A = nn.ParameterDict({})
         self.lora_B = nn.ParameterDict({})
         self.ranknum = nn.ParameterDict({})
-
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            in_features, out_features = base_layer.in_features, base_layer.out_features
-        elif isinstance(base_layer, Conv1D):
-            in_features, out_features = (
-                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
-            )
-        else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
-        self.in_features = in_features
-        self.out_features = out_features
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         self.r[adapter_name] = r
@@ -72,7 +59,12 @@ class AdaLoraLayer(LoraLayer):
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
-        self.to(self.get_base_layer().weight.device)
+
+        if hasattr(self.get_base_layer(), "qweight"):
+            # QuantLinear
+            self.to(self.get_base_layer().qweight.device)
+        else:
+            self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):
@@ -103,10 +95,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-
-    @property
-    def weight(self) -> torch.Tensor:
-        return self.get_base_layer().weight
 
     def merge(self, safe_merge: bool = False) -> None:
         """

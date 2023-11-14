@@ -290,7 +290,6 @@ class Linear(LoKrLayer):
         return F.linear(input, delta_weight)
 
     def __repr__(self) -> str:
-        # TODO add to all relevant layer types
         rep = super().__repr__()
         return "lokr." + rep
 
@@ -336,7 +335,6 @@ class Conv2d(LoKrLayer):
         )
 
     def __repr__(self) -> str:
-        # TODO add to all relevant layer types
         rep = super().__repr__()
         return "lokr." + rep
 

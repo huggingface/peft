@@ -68,6 +68,8 @@ class AdaLoraModel(LoraModel):
         - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
 
+    # Note: don't redefine prefix here, it should be inherited from LoraModel
+
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
 
@@ -167,7 +169,6 @@ class AdaLoraModel(LoraModel):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
-        bias = target_base_layer.bias is not None
 
         if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             kwargs.update(
@@ -211,7 +212,7 @@ class AdaLoraModel(LoraModel):
                     f"Target module {target} is not supported. "
                     f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
                 )
-            new_module = SVDLinear(target, adapter_name, bias=bias, **kwargs)
+            new_module = SVDLinear(target, adapter_name, **kwargs)
 
         return new_module
 

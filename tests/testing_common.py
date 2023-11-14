@@ -892,12 +892,12 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
         else:
             dummy_input = self.prepare_inputs_for_testing()
-            logits_with_lora = model(**dummy_input)[0]
+            logits_with_adapter = model(**dummy_input)[0]
 
             transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             logits_transformers = transformers_model(**dummy_input)[0]
@@ -906,7 +906,7 @@ class PeftCommonTester:
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
 
-            self.assertFalse(torch.allclose(logits_with_lora, logits_unload, atol=1e-10, rtol=1e-10))
+            self.assertFalse(torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10))
             self.assertTrue(torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4))
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):

@@ -58,6 +58,9 @@ class LoraLayer(BaseTunerLayer):
             in_features, out_features = (
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
+        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
+            # QuantLinear
+            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
@@ -320,7 +323,6 @@ class Linear(nn.Module, LoraLayer):
         return result
 
     def __repr__(self) -> str:
-        # TODO add to all relevant layer types
         rep = super().__repr__()
         return "lora." + rep
 

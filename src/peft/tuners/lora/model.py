@@ -204,10 +204,7 @@ class LoraModel(BaseTuner):
         # child layer wraps the original module, unpack it
         if hasattr(child, "base_layer"):
             child = child.base_layer
-        elif hasattr(child, "quant_linear_module"):
-            child = child.quant_linear_module
 
-        # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
         if not hasattr(new_module, "base_layer"):
             new_module.weight = child.weight
             if hasattr(child, "bias"):
@@ -222,10 +219,9 @@ class LoraModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if self.prefix in name:
-                module.to(child.weight.device)
-            if "ranknum" in name:
-                module.to(child.weight.device)
+            if (self.prefix in name) or ("ranknum" in name):
+                weight = child.qweight if hasattr(child, "qweight") else child.weight
+                module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
@@ -291,28 +287,27 @@ class LoraModel(BaseTuner):
             new_module = Embedding(target, adapter_name, **embedding_kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, **kwargs)
-        else:
-            if isinstance(target_base_layer, torch.nn.Linear):
-                if kwargs["fan_in_fan_out"]:
-                    warnings.warn(
-                        "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                        "Setting fan_in_fan_out to False."
-                    )
-                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-            elif isinstance(target_base_layer, Conv1D):
-                kwargs["is_target_conv_1d_layer"] = True
-                if not kwargs["fan_in_fan_out"]:
-                    warnings.warn(
-                        "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                        "Setting fan_in_fan_out to True."
-                    )
-                    kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
-            else:
-                raise ValueError(
-                    f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                    "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+        elif isinstance(target_base_layer, torch.nn.Linear):
+            if kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                    "Setting fan_in_fan_out to False."
                 )
+                kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
             new_module = Linear(target, adapter_name, **kwargs)
+        elif isinstance(target_base_layer, Conv1D):
+            if not kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                    "Setting fan_in_fan_out to True."
+                )
+                kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+            new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
+        else:
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+            )
 
         return new_module
 
@@ -375,7 +370,7 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
@@ -490,7 +485,7 @@ class LoraModel(BaseTuner):
         # Do we really need that?
         _freeze_adapter(self.model, adapter_name)
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, LoraLayer):
@@ -614,7 +609,7 @@ class LoraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)

@@ -262,11 +262,11 @@ if is_bnb_4bit_available():
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = self.base_layer.forward(x, *args, **kwargs)
+                result = self.base_layer(x, *args, **kwargs)
             elif self.merged:
-                result = self.base_layer.forward(x, *args, **kwargs)
+                result = self.base_layer(x, *args, **kwargs)
             else:
-                result = self.base_layer.forward(x, *args, **kwargs)
+                result = self.base_layer(x, *args, **kwargs)
                 # As per Tim Dettmers, for 4bit, we need to defensively clone here.
                 # The reason is that in some cases, an error can occur that backprop
                 # does not work on a manipulated view. This issue may be solved with

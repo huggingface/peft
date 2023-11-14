@@ -248,7 +248,6 @@ class Linear(LoHaLayer):
         return F.linear(input, delta_weight)
 
     def __repr__(self) -> str:
-        # TODO add to all relevant layer types
         rep = super().__repr__()
         return "loha." + rep
 
@@ -292,7 +291,6 @@ class Conv2d(LoHaLayer):
         )
 
     def __repr__(self) -> str:
-        # TODO add to all relevant layer types
         rep = super().__repr__()
         return "loha." + rep
 

@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Any
+
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -43,7 +45,7 @@ if is_bnb_available():
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)
-            result = self.base_layer.forward(x)
+            result = self.base_layer(x)
 
             if self.disable_adapters:
                 return result
@@ -71,6 +73,10 @@ if is_bnb_available():
                 result += output
             return result
 
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "adalora." + rep
+
 
 if is_bnb_4bit_available():
 
@@ -93,9 +99,9 @@ if is_bnb_4bit_available():
 
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
             # note: no check for self.merged because merging is not supported (yet)
-            result = self.base_layer.forward(x)
+            result = self.base_layer(x, *args, **kwargs)
 
             if self.disable_adapters:
                 return result
@@ -131,3 +137,7 @@ if is_bnb_4bit_available():
                 output = output * scaling / ranknum
                 result += output
             return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "adalora." + rep

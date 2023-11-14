@@ -20,6 +20,7 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
+import torch
 from torch import nn
 
 from peft.utils import COMMON_LAYERS_PATTERN
@@ -323,6 +324,22 @@ class BaseTunerLayer(ABC):
         while hasattr(base_layer, "base_layer"):
             base_layer = base_layer.base_layer
         return base_layer
+
+    @property
+    def weight(self) -> torch.Tensor:
+        # This is required for some transformers code, e.g. for T5, weight is accessed as:
+        #     self.wo.weight
+        # where "wo" is the adapter layer.
+        # https://github.com/huggingface/transformers/blob/78f6ed6c70b29c1560780e3869a7ad4c6b3d2710/src/transformers
+        # /models/t5/modeling_t5.py#L292
+        base_layer = self.get_base_layer()
+        if hasattr(base_layer, "qweight"):
+            # QuantLinear
+            weight = base_layer.qweight
+        else:
+            # Other layers
+            weight = base_layer.weight
+        return weight
 
     def merge(self, *args) -> None:
         raise NotImplementedError

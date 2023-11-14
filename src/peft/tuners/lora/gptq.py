@@ -30,7 +30,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         **kwargs,
     ):
         super().__init__()
-        LoraLayer.__init__(base_layer)
+        LoraLayer.__init__(self, base_layer)
 
         # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
         # for backwards compatibility
@@ -63,6 +63,10 @@ class QuantLinear(torch.nn.Module, LoraLayer):
             output = output * scaling
             result += output
         return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "lora." + rep
 
     # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
     # def reset_lora_parameters(self, adapter_name):
