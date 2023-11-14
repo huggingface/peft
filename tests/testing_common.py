@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import json
 import os
 import pickle
@@ -560,6 +561,48 @@ class PeftCommonTester:
 
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
+
+    def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
+        if config_cls not in (LoraConfig, IA3Config):
+            # Merge layers only supported for LoRA and IA³
+            return
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.add_adapter("adapter-2", config)
+
+        model = model.to(self.torch_device)
+
+        model_copy = copy.deepcopy(model)
+
+        if config.peft_type not in ("IA3", "LORA"):
+            with self.assertRaises(AttributeError):
+                model = model.merge_and_unload()
+
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+
+        with torch.no_grad():
+            logits_all_adapters = model(**dummy_input)[0]
+
+        model_merged_1 = model.merge_and_unload(adapter_names=["adapter-2"])
+
+        with torch.no_grad():
+            logits_merged_1 = model_merged_1(**dummy_input)[0]
+
+        model_fully_merged = model_copy.merge_and_unload()
+
+        with torch.no_grad():
+            logits_fully_merged = model_fully_merged(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_all_adapters, logits_fully_merged, atol=1e-4, rtol=1e-4))
+        self.assertFalse(torch.allclose(logits_all_adapters, logits_merged_1, atol=1e-4, rtol=1e-4))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
