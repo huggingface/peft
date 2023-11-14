@@ -827,10 +827,6 @@ class PeftCommonTester:
             return
 
         model = self.transformers_class.from_pretrained(model_id)
-        if isinstance(config.target_modules, str):
-            # TODO this should be doable
-            self.skipTest("Multiple adapters cannot currently be added when target_modules is a string.")
-
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)
@@ -869,10 +865,6 @@ class PeftCommonTester:
             return
 
         model = self.transformers_class.from_pretrained(model_id)
-        if isinstance(config.target_modules, str):
-            # TODO this should be doable
-            self.skipTest("Multiple adapters cannot currently be added when target_modules is a string.")
-
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)

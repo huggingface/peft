@@ -573,7 +573,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
                 self.peft_config[adapter_name] = peft_config
-                self.base_model.inject_adapter(self, adapter_name)
+                self.base_model.inject_adapter(self.base_model.model, adapter_name)
         except Exception:  # somthing went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
