@@ -123,20 +123,18 @@ class Linear(nn.Module, IA3Layer):
         for active_adapter in self.active_adapters:
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
+                ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out)
                 if safe_merge:
-                    orig_weights = transpose(base_layer.weight, self.fan_in_fan_out).clone()
-                    orig_weights = torch.mul(orig_weights.data, self.ia3_l[active_adapter].data)
+                    orig_weights = base_layer.weight.data
+                    orig_weights = torch.mul(orig_weights, ia3_l)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
                     base_layer.weight.data = orig_weights
-                    base_layer.weight = transpose(base_layer.weight, self.fan_in_fan_out)
                 else:
-                    base_layer.weight = transpose(base_layer.weight, self.fan_in_fan_out)
-                    base_layer.weight.data = torch.mul(base_layer.weight.data, self.ia3_l[active_adapter].data)
-                    base_layer.weight = transpose(base_layer.weight, self.fan_in_fan_out)
+                    base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_l)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
@@ -154,10 +152,9 @@ class Linear(nn.Module, IA3Layer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
-                base_layer.weight = transpose(base_layer.weight, self.fan_in_fan_out)
-                # divide by (IA)^3 vector. Add tolerace to avoid division by zero
-                base_layer.weight.data = torch.div(base_layer.weight.data, self.ia3_l[active_adapter].data + 1e-8)
-                base_layer.weight = transpose(base_layer.weight, self.fan_in_fan_out)
+                # Add tolerace to avoid division by zero
+                ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out) + 1e-8
+                base_layer.weight.data = torch.div(base_layer.weight.data, ia3_l)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
