@@ -50,6 +50,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    PolyModel,
 )
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
@@ -81,6 +82,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
+    PeftType.POLY: PolyModel,
 }
 
 
@@ -577,7 +579,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Returns the base model.
         """
-        return self.base_model if self.active_peft_config.is_prompt_learning else self.base_model.model
+        return (
+            self.base_model
+            if self.active_peft_config.is_prompt_learning or self.active_peft_config.peft_type == PeftType.POLY
+            else self.base_model.model
+        )
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
         """
@@ -883,6 +889,18 @@ class PeftModelForSequenceClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    task_ids=task_ids,
+                    **kwargs,
+                )
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1070,6 +1088,18 @@ class PeftModelForCausalLM(PeftModel):
                     **kwargs,
                 )
 
+            if peft_config.peft_type == PeftType.POLY:
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    task_ids=task_ids,
+                    **kwargs,
+                )
+
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1246,6 +1276,22 @@ class PeftModelForSeq2SeqLM(PeftModel):
     ):
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    decoder_input_ids=decoder_input_ids,
+                    decoder_attention_mask=decoder_attention_mask,
+                    decoder_inputs_embeds=decoder_inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    task_ids=task_ids,
+                    **kwargs,
+                )
+
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1502,6 +1548,18 @@ class PeftModelForTokenClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    task_ids=task_ids,
+                    **kwargs,
+                )
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1669,12 +1727,26 @@ class PeftModelForQuestionAnswering(PeftModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    start_positions=start_positions,
+                    end_positions=end_positions,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    task_ids=task_ids,
+                    **kwargs,
+                )
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1842,10 +1914,22 @@ class PeftModelForFeatureExtraction(PeftModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    task_ids=task_ids,
+                    **kwargs,
+                )
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,

@@ -1,0 +1,129 @@
+from dataclasses import asdict
+from enum import Enum
+from typing import Any
+
+import torch
+from torch import nn
+
+from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.utils import (
+    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    ModulesToSaveWrapper,
+)
+
+from .config import PolyConfig
+from .layer import Linear, PolyLayer
+
+
+class PolyModel(BaseTuner):
+    def __init__(self, model, config, adapter_name) -> None:
+        self.task_id_ptr = dict()
+        super().__init__(model, config, adapter_name)
+
+    @staticmethod
+    def _check_target_module_exists(poly_config, key):
+        return check_target_module_exists(poly_config, key)
+
+    def _create_and_replace(
+        self,
+        poly_config: PolyConfig,
+        adapter_name: str,
+        target: nn.Module,
+        target_name: str,
+        parent: nn.Module,
+        **optional_kwargs: Any,
+    ):
+        if isinstance(target, PolyLayer):
+            target.update_layer(adapter_name, poly_config)
+        else:
+            new_module = self._create_new_module(
+                poly_config,
+                adapter_name,
+                target,
+                task_id_ptr=self.task_id_ptr,
+            )
+            if adapter_name != self.active_adapter:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
+            self._replace_module(parent, target_name, new_module, target)
+
+    @staticmethod
+    def _replace_module(parent, child_name, new_module, child):
+        setattr(parent, child_name, new_module)
+        new_module.weight = child.weight
+        if hasattr(child, "bias"):
+            new_module.bias = child.bias
+        if getattr(child, "state", None) is not None:
+            new_module.state = child.state
+            new_module.to(child.weight.device)
+
+        # dispatch to correct device
+        for name, module in new_module.named_modules():
+            if "poly_" in name:
+                module.to(child.weight.device)
+
+    def _mark_only_adapters_as_trainable(self) -> None:
+        for n, p in self.model.named_parameters():
+            if "poly_" not in n:
+                p.requires_grad = False
+
+    @staticmethod
+    def _create_new_module(poly_config, adapter_name, target, **kwargs):
+        if isinstance(target, torch.nn.Linear):
+            in_features, out_features = target.in_features, target.out_features
+            return Linear(adapter_name, in_features, out_features, poly_config, **kwargs)
+        else:
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+            )
+
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.model, name)
+
+    def get_peft_config_as_dict(self, inference: bool = False):
+        config_dict = {}
+        for key, value in self.peft_config.items():
+            config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
+            if inference:
+                config["inference_mode"] = True
+        config_dict[key] = config
+        return config
+
+    def _set_adapter_layers(self, enabled=True):
+        for module in self.model.modules():
+            if isinstance(module, (PolyLayer, ModulesToSaveWrapper)):
+                module.enable_adapters(enabled)
+
+    def enable_adapter_layers(self):
+        self._set_adapter_layers(enabled=True)
+
+    def disable_adapter_layers(self):
+        self._set_adapter_layers(enabled=False)
+
+    def set_adapter(self, adapter_name):
+        for module in self.model.modules():
+            if isinstance(module, PolyLayer):
+                module.set_adapter(adapter_name)
+
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        if peft_config.target_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+                raise ValueError("Please specify `target_modules` in `peft_config`")
+            peft_config.target_modules = set(
+                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            )
+        return peft_config
+
+    def forward(self, *args: Any, **kwargs: Any):
+        self.task_id_ptr["task_ids"] = kwargs.pop("task_ids", None)
+        return self.model(*args, **kwargs)
+
+    def generate(self, *args: Any, **kwargs: Any):
+        self.task_id_ptr["task_ids"] = kwargs.pop("task_ids", None)
+        return self.model.generate(*args, **kwargs)

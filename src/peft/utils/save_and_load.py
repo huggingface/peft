@@ -115,6 +115,8 @@ def get_peft_model_state_dict(
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
     elif config.peft_type == PeftType.OFT:
         to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
+    elif config.peft_type == PeftType.POLY:
+        to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
     else:
         raise NotImplementedError
     if getattr(model, "modules_to_save", None) is not None:
@@ -168,7 +170,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3, PeftType.OFT):
+    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3, PeftType.OFT, PeftType.POLY):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",
@@ -177,6 +179,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.LOHA: "hada_",
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
+            PeftType.POLY: "poly_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:

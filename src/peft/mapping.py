@@ -48,6 +48,8 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    PolyConfig,
+    PolyModel,
 )
 from .utils import _prepare_prompt_learning_config
 
@@ -77,6 +79,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: Dict[str, PeftConfig] = {
     "IA3": IA3Config,
     "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
     "OFT": OFTConfig,
+    "POLY": PolyConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {
@@ -86,6 +89,7 @@ PEFT_TYPE_TO_TUNER_MAPPING = {
     "ADALORA": AdaLoraModel,
     "IA3": IA3Model,
     "OFT": OFTModel,
+    "POLY": PolyModel,
 }
 
 
