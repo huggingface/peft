@@ -1058,8 +1058,12 @@ def main(args):
             )
 
             accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-            accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-            accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
+            accelerator.print(
+                "CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used)
+            )
+            accelerator.print(
+                "CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked)
+            )
             accelerator.print(
                 "CPU Total Peak Memory consumed during the train (max): {}".format(
                     tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
