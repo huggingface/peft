@@ -564,7 +564,7 @@ class PeftCommonTester:
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
         supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
 
-        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+        if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
         model = self.transformers_class.from_pretrained(model_id)
