@@ -602,15 +602,16 @@ class PeftCommonTester:
 
         self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
-        copy.deepcopy(model)
+        model_copy = copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
         with torch.no_grad():
             logits_merged_all = model_merged_all(**dummy_input)[0]
 
         self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
-        model_merged_adapter_2 = model.merge_and_unload(adapter_names=["adapter-2"])
+        model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
         model_merged_adapter_2.eval()
 
         with torch.no_grad():
