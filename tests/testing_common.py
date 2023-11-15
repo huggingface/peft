@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import json
 import os
 import pickle
@@ -601,13 +602,21 @@ class PeftCommonTester:
 
         self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
-        # TODO: do it for "adapter-2" only.
+        copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
         with torch.no_grad():
             logits_merged_all = model_merged_all(**dummy_input)[0]
 
         self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_2 = model.merge_and_unload(adapter_names=["adapter-2"])
+        model_merged_adapter_2.eval()
+
+        with torch.no_grad():
+            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
