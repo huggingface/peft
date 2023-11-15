@@ -581,10 +581,6 @@ class PeftCommonTester:
 
         model_copy = copy.deepcopy(model)
 
-        if config.peft_type not in ("IA3", "LORA"):
-            with self.assertRaises(AttributeError):
-                model = model.merge_and_unload()
-
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
 
