@@ -263,7 +263,7 @@ class PeftCommonTester:
 
         self.assertTrue(dummy_output.requires_grad)
 
-    def _test_save_pretrained(self, model_id, config_cls, config_kwargs):
+    def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         # ensure that the weights are randomly initialized
         if issubclass(config_cls, LoraConfig):
             config_kwargs = config_kwargs.copy()
@@ -281,7 +281,10 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            if safe_serialization:
+                model.save_pretrained(tmp_dirname)
+            else:
+                model.save_pretrained(tmp_dirname, safe_serialization=False)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
@@ -305,14 +308,16 @@ class PeftCommonTester:
                     )
                 )
 
-            # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            target_adapter_filename = "adapter_model.safetensors" if safe_serialization else "adapter_model.bin"
+
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, target_adapter_filename)))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
 
-            # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
@@ -320,7 +325,7 @@ class PeftCommonTester:
             self.check_modelcard(tmp_dirname, model)
             self.check_config_json(tmp_dirname, model)
 
-    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             return
@@ -349,7 +354,10 @@ class PeftCommonTester:
         model.add_adapter("new_adapter", new_adapter_config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            if safe_serialization:
+                model.save_pretrained(tmp_dirname)
+            else:
+                model.save_pretrained(tmp_dirname, safe_serialization=False)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
@@ -379,17 +387,19 @@ class PeftCommonTester:
                     )
                 )
 
-            # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
-            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_model.bin")))
+            target_adapter_filename = "adapter_model.safetensors" if safe_serialization else "adapter_model.bin"
+
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, target_adapter_filename)))
+            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, target_adapter_filename)))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
             self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_config.json")))
 
-            # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
-            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "pytorch_model.bin")))
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "model.safetensors")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
