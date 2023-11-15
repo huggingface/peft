@@ -167,6 +167,32 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             },
         )
     )
+    def test_merge_layers_multi_1(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_merge_layers_multi_1(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    def test_merge_layers_multi_2(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_merge_layers_multi_2(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
     def test_merge_layers_nan(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers_nan(model_id, config_cls, config_kwargs)
 

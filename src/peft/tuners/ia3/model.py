@@ -283,6 +283,7 @@ class IA3Model(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
