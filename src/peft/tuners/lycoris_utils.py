@@ -18,7 +18,7 @@ import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
 from itertools import chain
-from typing import Dict, Optional, Set, Type, Union
+from typing import Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -134,13 +134,16 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         ...
 
-    def merge(self) -> None:
+    def merge(self, adapter_names: Optional[List[str]] = None) -> None:
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self._available_adapters:
                 self.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
@@ -320,7 +323,9 @@ class LycorisTuner(BaseTuner):
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
+    def _unload_and_optionally_merge(
+        self, merge=True, progressbar: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOHA layers when the model is gptq quantized")
@@ -355,7 +360,7 @@ class LycorisTuner(BaseTuner):
                         "Cannot convert current module to torch module, currently only adapters for nn.Linear and nn.Conv2d are supported"
                     )
                 if merge:
-                    target.merge()
+                    target.merge(adapter_names=adapter_names)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
@@ -370,8 +375,8 @@ class LycorisTuner(BaseTuner):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-    def merge_and_unload(self, progressbar: bool = False):
-        return self._unload_and_optionally_merge(progressbar=progressbar)
+    def merge_and_unload(self, progressbar: bool = False, adapter_names: Optional[List[str]] = None):
+        return self._unload_and_optionally_merge(progressbar=progressbar, adapter_names=adapter_names)
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
