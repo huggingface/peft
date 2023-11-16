@@ -13,12 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from itertools import chain
-from typing import Dict, List, Optional, Set, Type, Union
+from typing import Any, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -58,14 +56,15 @@ class LycorisConfig(PeftConfig):
     )
 
 
-class LycorisLayer(BaseTunerLayer, nn.Module):
+class LycorisLayer(BaseTunerLayer):
     r"""
     A base layer for LyCORIS like adapters
     """
     # adapter_layer_names needs to be defined on the child class
     other_param_names = ("r", "alpha", "scaling", "rank_dropout", "module_dropout")
 
-    def __init__(self):
+    def __init__(self, base_layer: nn.Module) -> None:
+        self.base_layer = base_layer
         self.r = {}
         self.alpha = {}
         self.scaling = {}
@@ -93,48 +92,20 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
         cls.__init__(self, *args, device="meta", **kwargs)
         self.to_empty(device=final_device)
 
-    def _op(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
-
     @abstractmethod
     def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs):
         ...
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        previous_dtype = x.dtype
-
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self._op(x, self.weight)
-        elif self.merged:
-            result = self._op(x, self.weight)
-        else:
-            # Get base weights
-            weight = self.weight.data
-
-            # Execute all the adapters
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self._available_adapters:
-                    continue
-
-                module_dropout = self.module_dropout[active_adapter]
-
-                # Modify current execution weights
-                if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    weight = weight + self.get_delta_weight(active_adapter)
-
-            # Perform actual operation
-            result = self._op(x, weight)
-
-        result = result.to(previous_dtype)
-        return result
+    # TODO: refactor LoRA to use the same approach
+    @abstractmethod
+    def _get_delta_activations(self, adapter_name: str, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        """Activations added on top of the base layer output (i.e. after the base layer forward pass)"""
 
     @abstractmethod
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         ...
 
-    def merge(self, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -145,7 +116,20 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
 
         for active_adapter in adapter_names:
             if active_adapter in self._available_adapters:
-                self.weight.data += self.get_delta_weight(active_adapter)
+                base_layer = self.get_base_layer()
+
+                if safe_merge:
+                    orig_weights = base_layer.weight.data
+                    orig_weights += self.get_delta_weight(active_adapter)
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    base_layer.weight.data = orig_weights
+                else:
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     @abstractmethod
@@ -175,7 +159,7 @@ class LycorisLayer(BaseTunerLayer, nn.Module):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.base_layer.weight.data -= self.get_delta_weight(active_adapter)
 
     def unscale_layer(self, scale=None) -> None:
         for active_adapter in self.active_adapters:
@@ -214,6 +198,7 @@ class LycorisTuner(BaseTuner):
     def _check_target_module_exists(config, key):
         return check_target_module_exists(config, key)
 
+    @abstractmethod
     def _create_and_replace(
         self,
         config: LycorisConfig,
@@ -224,68 +209,47 @@ class LycorisTuner(BaseTuner):
         current_key,
         **optional_kwargs,
     ):
-        """
-        A private method to create and replace the target module with the adapter module.
-        """
-
-        # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f"(.*\.)?{key}$", current_key), pattern_keys), target_name)
-
-        kwargs = config.to_dict()
-        kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
-        kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
-
-        if isinstance(target, LycorisLayer):
-            target.update_layer(adapter_name, **kwargs)
-        else:
-            new_module = self._create_new_module(config, adapter_name, target, **kwargs)
-            self._replace_module(parent, target_name, new_module, target)
+        ...
 
     @classmethod
     def _create_new_module(cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs) -> LycorisLayer:
         # Find corresponding subtype of provided target module
         new_module_cls = None
         for subtype, target_cls in cls.layers_mapping.items():
-            if isinstance(target, subtype):
+            if (
+                hasattr(target, "base_layer")
+                and isinstance(target.get_base_layer(), subtype)
+                and isinstance(target, BaseTunerLayer)
+            ):
+                # nested tuner layers are allowed
+                new_module_cls = target_cls
+                break
+            elif isinstance(target, subtype):
                 new_module_cls = target_cls
                 break
 
         # We didn't find corresponding type, so adapter for this layer is not supported
         if new_module_cls is None:
+            supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
             raise ValueError(
-                f"Target module not found, currently only adapters for {', '.join([x.__name__ for x in cls.modules_mapping.keys()])} are supported"
+                f"Target module of type {type(target)} not supported, "
+                f"currently only adapters for {supported_modules} are supported"
             )
 
-        if isinstance(target, torch.nn.Conv2d):
-            new_module = new_module_cls(
-                target.in_channels,
-                target.out_channels,
-                target.weight.size()[2:],
-                stride=target.stride,
-                padding=target.padding,
-                dilation=target.dilation,
-                groups=target.groups,
-                bias=target.bias is not None,
-                padding_mode=target.padding_mode,
-                device=target.weight.device,
-                dtype=target.weight.dtype,
-                adapter_name=adapter_name,
-                **kwargs,
-            )
-        elif isinstance(target, torch.nn.Linear):
-            new_module = new_module_cls(
-                target.in_features,
-                target.out_features,
-                bias=target.bias is not None,
-                device=target.weight.device,
-                dtype=target.weight.dtype,
-                adapter_name=adapter_name,
-                **kwargs,
-            )
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
         else:
+            target_base_layer = target
+
+        if isinstance(target_base_layer, torch.nn.Conv2d):
+            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+        elif isinstance(target_base_layer, torch.nn.Linear):
+            new_module = new_module_cls(target, adapter_name=adapter_name, **kwargs)
+        else:
+            supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
             raise ValueError(
-                "Target module not found, currently only adapters for nn.Linear and nn.Conv2d are supported"
+                f"Target module of type {type(target)} not supported, "
+                f"currently only adapters for {supported_modules} are supported"
             )
 
         return new_module
@@ -305,12 +269,17 @@ class LycorisTuner(BaseTuner):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
-        new_module.weight = child.weight
-        if hasattr(child, "bias"):
-            new_module.bias = child.bias
+
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
-            new_module.state = child.state
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
@@ -324,47 +293,30 @@ class LycorisTuner(BaseTuner):
                 module.enable_adapters(enabled)
 
     def _unload_and_optionally_merge(
-        self, merge=True, progressbar: bool = False, adapter_names: Optional[List[str]] = None
+        self,
+        merge: bool = True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[List[str]] = None,
     ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOHA layers when the model is gptq quantized")
 
-        key_list = [key for key, _ in self.model.named_modules() if "hada" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, LycorisLayer):
-                if isinstance(target, nn.Conv2d):
-                    new_module = torch.nn.Conv2d(
-                        target.in_channels,
-                        target.out_channels,
-                        kernel_size=target.kernel_size,
-                        stride=target.stride,
-                        padding=target.padding,
-                        dilation=target.dilation,
-                    )
-                elif isinstance(target, nn.Linear):
-                    bias = target.bias is not None
-                    new_module = torch.nn.Linear(
-                        target.in_features,
-                        target.out_features,
-                        bias=bias,
-                        device=target.weight.device,
-                    )
-                else:
-                    raise ValueError(
-                        "Cannot convert current module to torch module, currently only adapters for nn.Linear and nn.Conv2d are supported"
-                    )
-                if merge:
-                    target.merge(adapter_names=adapter_names)
-                self._replace_module(parent, target_name, new_module, target)
 
-            # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+            if hasattr(target, "base_layer"):
+                if merge:
+                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
+            elif isinstance(target, ModulesToSaveWrapper):
+                # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
@@ -375,8 +327,34 @@ class LycorisTuner(BaseTuner):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-    def merge_and_unload(self, progressbar: bool = False, adapter_names: Optional[List[str]] = None):
-        return self._unload_and_optionally_merge(progressbar=progressbar, adapter_names=adapter_names)
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
+        r"""
+        This method merges the adapter layers into the base model. This is needed if someone wants to use the base
+        model as a standalone model.
+
+        Args:
+            progressbar (`bool`):
+                whether to show a progressbar indicating the unload and merge process
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+
+        """
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
+
+    def unload(self):
+        """
+        Gets back the base model by removing all the lora modules without merging. This gives back the original base
+        model.
+        """
+        return self._unload_and_optionally_merge(merge=False)
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():

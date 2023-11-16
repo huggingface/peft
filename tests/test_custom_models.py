@@ -467,6 +467,20 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
+    def test_forward_output_finite(self, test_name, model_id, config_cls, config_kwargs):
+        X = self.prepare_inputs_for_testing()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model.eval()
+        with torch.no_grad():
+            output = model(**X)
+        self.assertTrue(torch.isfinite(output).all())
+
+    @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
         # An explicit test that when using LoRA on a custom model, only the LoRA parameters are updated during training
         X = self.prepare_inputs_for_testing()
@@ -546,7 +560,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
+        outputs_base = model(**X)
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -554,6 +570,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         model.eval()
         outputs_before = model(**X)
+
+        self.assertTrue(torch.allclose(outputs_base, outputs_before))
 
         model.train()
         # EmbConv1D is slow to learn for some reason
@@ -732,6 +750,67 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # rough check that the model card is pre-filled
         self.assertGreater(len(model_card), 1000)
 
+    @parameterized.expand(
+        [
+            LoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            LoKrConfig(target_modules=["lin0"], init_weights=False),
+            LoHaConfig(target_modules=["lin0"], init_weights=False),
+            AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
+            IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+        ]
+    )
+    def test_adapter_name_makes_no_difference(self, config0):
+        # It should not matter whether we use the default adapter name or a custom one
+        model_cls = MLP
+        input = torch.arange(90).reshape(9, 10).to(self.torch_device)
+
+        # base model
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        output_base = base_model(input)
+
+        # default name
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_default = get_peft_model(base_model, config0, adapter_name="default").eval().to(self.torch_device)
+        output_default = peft_model_default(input)
+        sd_default = peft_model_default.state_dict()
+
+        # custom name 1
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_custom1 = get_peft_model(base_model, config0, adapter_name="adapter").eval().to(self.torch_device)
+        output_custom1 = peft_model_custom1(input)
+        sd_custom1 = peft_model_custom1.state_dict()
+
+        # custom name 2
+        torch.manual_seed(0)
+        base_model = model_cls().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model_custom2 = (
+            get_peft_model(base_model, config0, adapter_name="other-name").eval().to(self.torch_device)
+        )
+        output_custom2 = peft_model_custom2(input)
+        sd_custom2 = peft_model_custom2.state_dict()
+
+        assert len(sd_default) == len(sd_custom1) == len(sd_custom2)
+        for key in sd_default:
+            key1 = key.replace("default", "adapter")
+            key2 = key.replace("default", "other-name")
+            assert key1 in sd_custom1
+            assert key2 in sd_custom2
+        for k0, k1, k2 in zip(sd_default, sd_custom1, sd_custom2):
+            assert torch.allclose(sd_default[k0], sd_custom1[k1])
+            assert torch.allclose(sd_default[k0], sd_custom2[k2])
+
+        self.assertFalse(torch.allclose(output_base, output_default))
+        self.assertFalse(torch.allclose(output_base, output_custom1))
+        self.assertFalse(torch.allclose(output_base, output_custom2))
+        self.assertTrue(torch.allclose(output_custom1, output_custom2))
+        self.assertTrue(torch.allclose(output_default, output_custom1))
+
 
 class TestMultiRankAdapter(unittest.TestCase):
     """Tests related to multirank LoRA adapters"""
@@ -808,8 +887,9 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["lin0"])
         model = get_peft_model(MLP(), config)
         print_output = repr(model.model.lin0)
-        self.assertTrue(print_output.startswith("Linear"))
-        self.assertTrue("in_features=10, out_features=20" in print_output)
+        self.assertTrue(print_output.startswith("lora.Linear"))
+        self.assertTrue("in_features=10" in print_output)
+        self.assertTrue("out_features=20" in print_output)
         self.assertTrue("lora_A" in print_output)
         self.assertTrue("lora_B" in print_output)
         self.assertTrue("default" in print_output)
@@ -818,7 +898,7 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["emb"])
         model = get_peft_model(ModelEmbConv1D(), config)
         print_output = repr(model.model.emb)
-        self.assertTrue(print_output.startswith("Embedding"))
+        self.assertTrue(print_output.startswith("lora.Embedding"))
         self.assertTrue("100, 5" in print_output)
         self.assertTrue("lora_embedding_A" in print_output)
         self.assertTrue("lora_embedding_B" in print_output)
@@ -828,8 +908,9 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["conv1d"])
         model = get_peft_model(ModelEmbConv1D(), config)
         print_output = repr(model.model.conv1d)
-        self.assertTrue(print_output.startswith("Linear"))
-        self.assertTrue("in_features=5, out_features=1" in print_output)
+        self.assertTrue(print_output.startswith("lora.Linear"))
+        self.assertTrue("in_features=5" in print_output)
+        self.assertTrue("out_features=1" in print_output)
         self.assertTrue("lora_A" in print_output)
         self.assertTrue("lora_B" in print_output)
         self.assertTrue("default" in print_output)
@@ -838,7 +919,7 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["conv2d"])
         model = get_peft_model(ModelConv2D(), config)
         print_output = repr(model.model.conv2d)
-        self.assertTrue(print_output.startswith("Conv2d"))
+        self.assertTrue(print_output.startswith("lora.Conv2d"))
         self.assertTrue("5, 10" in print_output)
         self.assertTrue("kernel_size=(3, 3)" in print_output)
         self.assertTrue("stride=(1, 1)" in print_output)
