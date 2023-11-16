@@ -16,7 +16,6 @@
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from itertools import chain
 from typing import Any, Dict, List, Optional, Set, Type, Union
 
 import torch
@@ -294,7 +293,11 @@ class LycorisTuner(BaseTuner):
                 module.enable_adapters(enabled)
 
     def _unload_and_optionally_merge(
-        self, merge: bool = True, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self,
+        merge: bool = True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[List[str]] = None,
     ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
@@ -324,10 +327,12 @@ class LycorisTuner(BaseTuner):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         r"""
-        This method merges the adapter layers into the base model. This is needed if someone wants to use the base model
-        as a standalone model.
+        This method merges the adapter layers into the base model. This is needed if someone wants to use the base
+        model as a standalone model.
 
         Args:
             progressbar (`bool`):
@@ -340,7 +345,9 @@ class LycorisTuner(BaseTuner):
                 to `None`.
 
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names)
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
 
     def unload(self):
         """

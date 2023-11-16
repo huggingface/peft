@@ -276,7 +276,9 @@ class IA3Model(BaseTuner):
             ]
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+    def _unload_and_optionally_merge(
+        self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         r"""
         This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, List, Optional
 
 import torch
 import torch.nn as nn
