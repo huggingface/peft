@@ -17,6 +17,7 @@ import re
 import warnings
 from dataclasses import asdict
 from enum import Enum
+from typing import List, Optional
 
 import torch
 from transformers.pytorch_utils import Conv1D
@@ -297,7 +298,7 @@ class IA3Model(BaseTuner):
             ]
         return peft_config
 
-    def merge_and_unload(self, safe_merge: bool = False):
+    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
         r"""
         This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -307,6 +308,9 @@ class IA3Model(BaseTuner):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if getattr(self.model, "is_loaded_in_8bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 8-bit mode")
@@ -345,7 +349,7 @@ class IA3Model(BaseTuner):
                 else:
                     new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
 
-            target.merge(safe_merge=safe_merge)
+            target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
             self._replace_module(parent, target_name, new_module, target)
 
         return self.model

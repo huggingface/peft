@@ -934,6 +934,62 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         self.assertTrue(torch.allclose(disabled_adapter_output, base_output, atol=1e-4))
 
+    @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
+    def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        model = MLP(bias=tuner_method != "ia3")
+        model.eval()
+
+        config_1 = config_cls(**config_kwargs_1)
+        config_2 = config_cls(**config_kwargs_2)
+
+        model = get_peft_model(model, config_1)
+
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+
+        with torch.inference_mode():
+            logits_adapter_1 = model(**dummy_input)[0]
+
+        model.add_adapter("adapter-2", config_2)
+        model.set_adapter("adapter-2")
+        model.eval()
+
+        with torch.inference_mode():
+            logits_adapter_2 = model(**dummy_input)[0]
+
+        self.assertFalse(torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model.set_adapter("default")
+
+        with torch.inference_mode():
+            logits_adapter_1_after_set = model(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+        model_copy = copy.deepcopy(model)
+        model_copy_2 = copy.deepcopy(model)
+        model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
+
+        with torch.inference_mode():
+            logits_merged_all = model_merged_all(**dummy_input)[0]
+
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
 
 class RequiresGradTester(unittest.TestCase):
     """Test that requires_grad is set correctly in specific circumstances
