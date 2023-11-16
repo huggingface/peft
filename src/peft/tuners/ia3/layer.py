@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Any
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -104,7 +104,7 @@ class Linear(nn.Module, IA3Layer):
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -113,6 +113,9 @@ class Linear(nn.Module, IA3Layer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
@@ -120,7 +123,10 @@ class Linear(nn.Module, IA3Layer):
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
 
-        for active_adapter in self.active_adapters:
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
                 ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out)
@@ -220,7 +226,7 @@ class Conv2d(nn.Module, IA3Layer):
         self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -229,6 +235,9 @@ class Conv2d(nn.Module, IA3Layer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
@@ -236,7 +245,10 @@ class Conv2d(nn.Module, IA3Layer):
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
 
-        for active_adapter in self.active_adapters:
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
                 ia3_scaling = self.ia3_l[active_adapter].data

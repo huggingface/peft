@@ -16,7 +16,8 @@
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Set, Type, Union
+from itertools import chain
+from typing import Any, Dict, List, Optional, Set, Type, Union
 
 import torch
 import torch.nn as nn
@@ -105,13 +106,16 @@ class LycorisLayer(BaseTunerLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         ...
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self._available_adapters:
                 base_layer = self.get_base_layer()
 
@@ -289,12 +293,14 @@ class LycorisTuner(BaseTuner):
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
+    def _unload_and_optionally_merge(
+        self, merge: bool = True, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOHA layers when the model is gptq quantized")
 
-        key_list = [key for key, _ in self.model.named_modules() if "hada" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
@@ -304,7 +310,7 @@ class LycorisTuner(BaseTuner):
 
             if hasattr(target, "base_layer"):
                 if merge:
-                    target.merge(safe_merge=safe_merge)
+                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
@@ -318,9 +324,23 @@ class LycorisTuner(BaseTuner):
     def disable_adapter_layers(self):
         self._set_adapter_layers(enabled=False)
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
-        """TODO"""
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+        r"""
+        This method merges the adapter layers into the base model. This is needed if someone wants to use the base model
+        as a standalone model.
+
+        Args:
+            progressbar (`bool`):
+                whether to show a progressbar indicating the unload and merge process
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+
+        """
+        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names)
 
     def unload(self):
         """

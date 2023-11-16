@@ -19,6 +19,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
+from typing import List, Optional
 
 import torch
 from tqdm import tqdm
@@ -365,7 +366,13 @@ class LoraModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
+    def _unload_and_optionally_merge(
+        self,
+        merge=True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[List[str]] = None,
+    ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
@@ -380,7 +387,7 @@ class LoraModel(BaseTuner):
 
             if hasattr(target, "base_layer"):
                 if merge:
-                    target.merge(safe_merge=safe_merge)
+                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
@@ -620,7 +627,9 @@ class LoraModel(BaseTuner):
 
         self.active_adapter = new_adapter or []
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -631,7 +640,9 @@ class LoraModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
-
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         Example:
 
         ```py
@@ -644,7 +655,9 @@ class LoraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
 
     def unload(self):
         """

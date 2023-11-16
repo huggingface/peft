@@ -137,8 +137,16 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
@@ -156,6 +164,19 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+        )
+    )
+    def test_merge_layers_multi(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_merge_layers_multi(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(

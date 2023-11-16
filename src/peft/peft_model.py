@@ -157,7 +157,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def save_pretrained(
         self,
         save_directory: str,
-        safe_serialization: bool = False,
+        safe_serialization: bool = True,
         selected_adapters: Optional[List[str]] = None,
         **kwargs: Any,
     ):
