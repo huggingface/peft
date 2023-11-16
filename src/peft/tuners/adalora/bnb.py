@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import bitsandbytes as bnb
+from typing import Any
+
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -23,38 +24,28 @@ from .layer import AdaLoraLayer
 
 if is_bnb_available():
 
-    class SVDLinear8bitLt(bnb.nn.Linear8bitLt, AdaLoraLayer):
+    class SVDLinear8bitLt(torch.nn.Module, AdaLoraLayer):
         # Low-rank matrix for SVD-based adaptation
         def __init__(
             self,
-            adapter_name,
-            in_features,
-            out_features,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
+            init_lora_weights: bool = True,
             **kwargs,
         ) -> None:
-            bnb.nn.Linear8bitLt.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                has_fp16_weights=kwargs.get("has_fp16_weights", True),
-                memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-                threshold=kwargs.get("threshold", 0.0),
-                index=kwargs.get("index", None),
-            )
-            AdaLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+            super().__init__()
+            AdaLoraLayer.__init__(self, base_layer)
             # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
+            self.get_base_layer().weight.requires_grad = False
 
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.set_adapter(adapter_name)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            result = super().forward(x)
+            # note: no check for self.merged because merging is not supported (yet)
+            result = self.base_layer(x)
 
             if self.disable_adapters:
                 return result
@@ -82,40 +73,35 @@ if is_bnb_available():
                 result += output
             return result
 
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "adalora." + rep
+
 
 if is_bnb_4bit_available():
 
-    class SVDLinear4bit(bnb.nn.Linear4bit, AdaLoraLayer):
+    class SVDLinear4bit(torch.nn.Module, AdaLoraLayer):
         # Low-rank matrix for SVD-based adaptation
         def __init__(
             self,
-            adapter_name,
-            in_features,
-            out_features,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
             r: int = 0,
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
+            init_lora_weights: bool = True,
             **kwargs,
         ) -> None:
-            bnb.nn.Linear4bit.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                compute_dtype=kwargs.get("compute_dtype", torch.float32),
-                compress_statistics=kwargs.get("compress_statistics", True),
-                quant_type=kwargs.get("quant_type", "nf4"),
-            )
-            AdaLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+            super().__init__()
+            AdaLoraLayer.__init__(self, base_layer)
             # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
+            self.get_base_layer().weight.requires_grad = False
 
-            init_lora_weights = kwargs.pop("init_lora_weights", True)
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-            self.set_adapter(adapter_name)
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            result = super().forward(x)
+        def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+            # note: no check for self.merged because merging is not supported (yet)
+            result = self.base_layer(x, *args, **kwargs)
 
             if self.disable_adapters:
                 return result
@@ -151,3 +137,7 @@ if is_bnb_4bit_available():
                 output = output * scaling / ranknum
                 result += output
             return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "adalora." + rep
