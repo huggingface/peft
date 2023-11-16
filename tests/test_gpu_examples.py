@@ -177,7 +177,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -235,7 +235,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -296,7 +296,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -357,7 +357,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -421,7 +421,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -481,7 +481,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -542,7 +542,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -640,7 +640,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -719,7 +719,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -781,7 +781,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -844,7 +844,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue("adapter_model.safetensors" in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
