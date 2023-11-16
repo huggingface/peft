@@ -20,12 +20,13 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Union
 
+import torch
 from torch import nn
 
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
-from ..utils import _get_submodules
+from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
@@ -211,6 +212,9 @@ class BaseTuner(nn.Module, ABC):
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
 
+        _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
+        _has_modules_to_save = False
+
         model_config = getattr(model, "config", {"model_type": "custom"})
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
@@ -218,6 +222,22 @@ class BaseTuner(nn.Module, ABC):
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
         for key in key_list:
+            # Check for modules_to_save in case
+            if _check_for_modules_to_save and any(
+                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+            ):
+                # Optionally set the modules to save
+                parent, target, target_name = _get_submodules(model, key)
+
+                if not isinstance(target, ModulesToSaveWrapper):
+                    new_module = ModulesToSaveWrapper(target, adapter_name)
+                    setattr(parent, target_name, new_module)
+                else:
+                    target.update(adapter_name)
+
+                _has_modules_to_save = True
+                continue
+
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
@@ -243,6 +263,12 @@ class BaseTuner(nn.Module, ABC):
             for n, p in self.model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
+
+        if _has_modules_to_save:
+            if not hasattr(model, "modules_to_save"):
+                model.modules_to_save = set(peft_config.modules_to_save)
+            else:
+                model.modules_to_save.update(set(peft_config.modules_to_save))
 
     def merge_adapter(self):
         """
@@ -286,6 +312,34 @@ class BaseTunerLayer(ABC):
 
     # List all merged adapters
     merged_adapters: list[str] = []
+
+    def get_base_layer(self) -> nn.Module:
+        """
+        (Recursively) get the base_layer.
+
+        This is necessary for the case that the tuner layer wraps another tuner layer.
+
+        """
+        base_layer = self
+        while hasattr(base_layer, "base_layer"):
+            base_layer = base_layer.base_layer
+        return base_layer
+
+    @property
+    def weight(self) -> torch.Tensor:
+        # This is required for some transformers code, e.g. for T5, weight is accessed as:
+        #     self.wo.weight
+        # where "wo" is the adapter layer.
+        # https://github.com/huggingface/transformers/blob/78f6ed6c70b29c1560780e3869a7ad4c6b3d2710/src/transformers
+        # /models/t5/modeling_t5.py#L292
+        base_layer = self.get_base_layer()
+        if hasattr(base_layer, "qweight"):
+            # QuantLinear
+            weight = base_layer.qweight
+        else:
+            # Other layers
+            weight = base_layer.weight
+        return weight
 
     def merge(self, *args) -> None:
         raise NotImplementedError

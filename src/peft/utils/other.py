@@ -15,14 +15,15 @@
 import copy
 import inspect
 import warnings
-from typing import Optional
+from typing import Optional, Tuple
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
+from safetensors.torch import storage_ptr, storage_size
 
-from ..import_utils import is_auto_gptq_available
+from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
 
 
 # Get current device name based on available devices
@@ -276,8 +277,22 @@ def _set_trainable(model, adapter_name):
 
 
 def _set_adapter(model, adapter_name):
+    def check_adapter_name(adapter_name):
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) > 1:
+            raise ValueError("Only one adapter can be set at a time for modules_to_save")
+        elif len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+        adapter_name = adapter_name[0]
+        return adapter_name
+
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
+            # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
+            adapter_name = check_adapter_name(adapter_name)
             module.set_adapter(adapter_name)
 
 
@@ -436,6 +451,31 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
         )
         return AutoGPTQQuantLinear
     return None
+
+
+def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
+    """
+    Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
+    example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is
+    guaranteed to be unique and constant for this tensor's storage during its lifetime. Two tensor storages with
+    non-overlapping lifetimes may have the same id.
+
+    This method is the exact same copy of
+    https://github.com/huggingface/transformers/blob/main/src/transformers/pytorch_utils.py#L282C1-L300C58 but we added
+    it here manually to avoid import issue with old versions of transformers.
+    """
+    if tensor.device.type == "xla" and is_torch_tpu_available():
+        # NOTE: xla tensors dont have storage
+        # use some other unique id to distinguish.
+        # this is a XLA tensor, it must be created using torch_xla's
+        # device. So the following import is safe:
+        import torch_xla
+
+        unique_id = torch_xla._XLAC._xla_get_tensor_id(tensor)
+    else:
+        unique_id = storage_ptr(tensor)
+
+    return tensor.device, unique_id, storage_size(tensor)
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
