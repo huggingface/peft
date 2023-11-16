@@ -15,6 +15,8 @@ env:
 
 jobs:
   run_all_tests_single_gpu:
+    strategy:
+      fail-fast: false
     runs-on: [self-hosted, docker-gpu, multi-gpu]
     env:
       CUDA_VISIBLE_DEVICES: "0"
@@ -57,6 +59,8 @@ jobs:
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
+    strategy:
+      fail-fast: false
     runs-on: [self-hosted, docker-gpu, multi-gpu]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
