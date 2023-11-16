@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import json
 import os
 import pickle
@@ -570,6 +571,71 @@ class PeftCommonTester:
 
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
+
+    def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+
+        if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        if config.peft_type not in supported_peft_types:
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config)
+
+        model = model.to(self.torch_device)
+
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+
+        with torch.inference_mode():
+            logits_adapter_1 = model(**dummy_input)[0]
+
+        model.add_adapter("adapter-2", config)
+        model.set_adapter("adapter-2")
+        model.eval()
+
+        with torch.inference_mode():
+            logits_adapter_2 = model(**dummy_input)[0]
+
+        self.assertFalse(torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model.set_adapter("default")
+
+        with torch.inference_mode():
+            logits_adapter_1_after_set = model(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+        model_copy = copy.deepcopy(model)
+        model_copy_2 = copy.deepcopy(model)
+        model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
+
+        with torch.inference_mode():
+            logits_merged_all = model_merged_all(**dummy_input)[0]
+
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)

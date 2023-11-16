@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import warnings
+from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -100,7 +101,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -109,13 +110,19 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
