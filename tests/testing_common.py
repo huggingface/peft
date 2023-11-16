@@ -568,7 +568,6 @@ class PeftCommonTester:
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
-        model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -577,6 +576,7 @@ class PeftCommonTester:
         if config.peft_type not in supported_peft_types:
             return
 
+        model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config)
 
         model = model.to(self.torch_device)
@@ -604,6 +604,7 @@ class PeftCommonTester:
         self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
         model_copy = copy.deepcopy(model)
+        model_copy_2 = copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
         with torch.inference_mode():
@@ -618,6 +619,13 @@ class PeftCommonTester:
             logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
 
         self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
