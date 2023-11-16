@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import warnings
+from typing import List, Optional
 
 import bitsandbytes as bnb
 import torch
@@ -43,7 +44,7 @@ if is_bnb_available():
 
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
-        def merge(self, safe_merge: bool = False):
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -52,6 +53,9 @@ if is_bnb_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
+                adapter_names (`List[str]`, *optional*):
+                    The list of adapter names that should be merged. If None, all active adapters will be merged.
+                    Defaults to `None`.
             """
             if self.merged:
                 warnings.warn(
@@ -59,7 +63,10 @@ if is_bnb_available():
                     f"You are now additionally merging {','.join(self.active_adapters)}."
                 )
 
-            for active_adapter in self.active_adapters:
+            if adapter_names is None:
+                adapter_names = self.active_adapters
+
+            for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
                     continue
                 warnings.warn(
@@ -191,7 +198,7 @@ if is_bnb_4bit_available():
 
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
-        def merge(self, safe_merge: bool = False):
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -200,6 +207,9 @@ if is_bnb_4bit_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
+                adapter_names (`List[str]`, *optional*):
+                    The list of adapter names that should be merged. If None, all active adapters will be merged.
+                    Defaults to `None`.
             """
             if self.merged:
                 warnings.warn(
@@ -207,7 +217,10 @@ if is_bnb_4bit_available():
                     f"You are now additionally merging {','.join(self.active_adapters)}."
                 )
 
-            for active_adapter in self.active_adapters:
+            if adapter_names is None:
+                adapter_names = self.active_adapters
+
+            for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
                     continue
                 warnings.warn(
