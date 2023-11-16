@@ -1,8 +1,9 @@
 name: Self-hosted runner with slow tests (scheduled)
 
 on:
-  push:
-    branches: [test-nightly-failure]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
 
 env:
   RUN_SLOW: "yes"
