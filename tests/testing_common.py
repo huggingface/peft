@@ -584,20 +584,21 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             logits_adapter_1 = model(**dummy_input)[0]
 
         model.add_adapter("adapter-2", config)
         model.set_adapter("adapter-2")
+        model.eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             logits_adapter_2 = model(**dummy_input)[0]
 
         self.assertFalse(torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3))
 
         model.set_adapter("default")
 
-        with torch.no_grad():
+        with torch.inference_mode():
             logits_adapter_1_after_set = model(**dummy_input)[0]
 
         self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
@@ -605,16 +606,15 @@ class PeftCommonTester:
         model_copy = copy.deepcopy(model)
         model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
 
-        with torch.no_grad():
+        with torch.inference_mode():
             logits_merged_all = model_merged_all(**dummy_input)[0]
 
         self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
         self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
         model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
-        model_merged_adapter_2.eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
 
         self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
