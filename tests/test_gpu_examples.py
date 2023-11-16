@@ -21,8 +21,10 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
+from accelerate import infer_auto_device_map, init_empty_weights
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -40,10 +42,12 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     LoraConfig,
+    PeftModel,
     get_peft_model,
     prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
 )
+from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 from .testing_utils import (
     require_auto_gptq,
@@ -177,7 +181,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -235,7 +239,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -296,7 +300,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -357,7 +361,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -421,7 +425,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -481,7 +485,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -542,7 +546,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -640,7 +644,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -658,7 +662,8 @@ class PeftGPTQGPUTests(unittest.TestCase):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        self.quantization_config = GPTQConfig(bits=4, disable_exllama=True)
+        # TODO : check if it works for Exllamav2 kernels
+        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -718,7 +723,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -780,7 +785,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -843,7 +848,53 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+@require_torch_gpu
+class OffloadSaveTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "gpt2"
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_offload_merge(self):
+        r"""
+        Test merging and unloading of a model with offloaded modules.
+        """
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        config = AutoConfig.from_pretrained(self.causal_lm_model_id)
+        with init_empty_weights():
+            model = AutoModelForCausalLM.from_config(config)
+
+        memory_limits = {0: "0.5GIB", "cpu": "5GIB"}
+        # offloads around half of all transformer modules
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        assert 0 in device_map.values()
+        assert "cpu" in device_map.values()
+
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map)
+        assert len({p.device for p in model.parameters()}) == 2
+
+        # LoRA adapters on ['c_attn', 'c_proj', 'c_fc']
+        lora_checkpoint = "blbadger/gpt2-lora"
+
+        # max_memory must be specified again to avoid defaulting to 'auto' device map
+        model = PeftModel.from_pretrained(model, lora_checkpoint, max_memory=memory_limits)
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        pre_merge_olayer = model(input_tokens)[0]
+        model = model.merge_and_unload()
+        post_merge_olayer = model(input_tokens)[0]
+
+        self.assertTrue(torch.all(pre_merge_olayer == post_merge_olayer))

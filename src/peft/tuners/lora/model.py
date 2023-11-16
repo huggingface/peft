@@ -21,7 +21,6 @@ from functools import reduce
 from itertools import chain
 
 import torch
-from accelerate.hooks import AlignDevicesHook
 from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
@@ -202,24 +201,12 @@ class LoraModel(BaseTuner):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
-
-        # child layer wraps the original module, unpack it
-        if hasattr(child, "base_layer"):
-            child = child.base_layer
-        elif hasattr(child, "quant_linear_module"):
-            child = child.quant_linear_module
-
-        # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
+        new_module.weight = child.weight
+        if hasattr(child, "bias"):
+            new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
+            new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
@@ -269,7 +256,9 @@ class LoraModel(BaseTuner):
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(adapter_name, target, **eightbit_kwargs)
+            new_module = Linear8bitLt(
+                adapter_name, target.in_features, target.out_features, bias=bias, **eightbit_kwargs
+            )
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
@@ -279,7 +268,7 @@ class LoraModel(BaseTuner):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(adapter_name, target, **fourbit_kwargs)
+            new_module = Linear4bit(adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
             new_module = QuantLinear(adapter_name, target, **kwargs)
             target.weight = target.qweight
@@ -365,7 +354,6 @@ class LoraModel(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
-        self.active_adapter = adapter_name
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
@@ -382,17 +370,12 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        km_list = [[key, module] for key, module in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for key, module in tqdm(km_list, disable=not progressbar, desc=desc):
-            # re-load module params if offloaded to the meta device
-            if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
-                module._hf_hook.pre_forward(module)
+        for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
-                if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
-                    module._hf_hook.post_forward(module, torch.tensor([]))
                 continue
             if isinstance(target, LoraLayer):
                 if isinstance(target, nn.Embedding):
@@ -406,28 +389,28 @@ class LoraModel(BaseTuner):
                         padding=target.padding,
                         dilation=target.dilation,
                     )
-                elif is_bnb_available() and isinstance(target, Linear8bitLt):
-                    bias = target.base_layer.bias is not None
+                elif is_bnb_available() and isinstance(target, bnb.nn.Linear8bitLt):
+                    bias = target.bias is not None
                     new_module = bnb.nn.Linear8bitLt(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        has_fp16_weights=target.base_layer.state.has_fp16_weights,
-                        memory_efficient_backward=target.base_layer.state.memory_efficient_backward,
-                        threshold=target.base_layer.state.threshold,
-                        index=target.base_layer.index,
-                        device=target.base_layer.weight.device,
+                        has_fp16_weights=target.state.has_fp16_weights,
+                        memory_efficient_backward=target.state.memory_efficient_backward,
+                        threshold=target.state.threshold,
+                        index=target.index,
+                        device=target.weight.device,
                     )
-                elif is_bnb_4bit_available() and isinstance(target, Linear4bit):
-                    bias = target.base_layer.bias is not None
+                elif is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+                    bias = target.bias is not None
                     new_module = bnb.nn.Linear4bit(
                         target.in_features,
                         target.out_features,
                         bias=bias,
-                        compute_dtype=target.base_layer.compute_dtype,
-                        compress_statistics=target.base_layer.weight.compress_statistics,
-                        quant_type=target.base_layer.weight.quant_type,
-                        device=target.base_layer.weight.device,
+                        compute_dtype=target.compute_dtype,
+                        compress_statistics=target.weight.compress_statistics,
+                        quant_type=target.weight.quant_type,
+                        device=target.weight.device,
                     )
                 else:
                     bias = target.bias is not None
@@ -437,19 +420,11 @@ class LoraModel(BaseTuner):
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
                     target.merge(safe_merge=safe_merge)
-
-                if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
-                    module._hf_hook.post_forward(module, torch.tensor([]))
-                else:
-                    self._replace_module(parent, target_name, new_module, target)
+                self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
             if isinstance(target, ModulesToSaveWrapper):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
-
-            # unload module params to meta device
-            if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook):
-                module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
 
