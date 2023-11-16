@@ -1,9 +1,8 @@
 name: Self-hosted runner with slow tests (scheduled)
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * *"
+  push:
+    branches: [test-nightly-failure]
 
 env:
   RUN_SLOW: "yes"
@@ -15,6 +14,8 @@ env:
 
 jobs:
   run_all_tests_single_gpu:
+    strategy:
+      fail-fast: false
     runs-on: [self-hosted, docker-gpu, multi-gpu]
     env:
       CUDA_VISIBLE_DEVICES: "0"
@@ -57,6 +58,8 @@ jobs:
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
+    strategy:
+      fail-fast: false
     runs-on: [self-hosted, docker-gpu, multi-gpu]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
