@@ -23,12 +23,16 @@
 # regression tests not to be skipped.
 #
 # To create new regression tests, run:
-# `REGRESSION_CREATION_MODE=True pytest tests/regression/test_regression.py -s --regression`
+# `HF_TOKEN=<token> REGRESSION_CREATION_MODE=True pytest tests/regression/test_regression.py -s --regression`
 #
 # This will *fail* if:
 #
 # 1. the git worktree is dirty
 # 2. the git commit is not tagged
+#
+# Note: A Hugging Face Hub token is required to upload the regression artifacts to our
+# https://huggingface.co/peft-internal-testing repo. This can be done by anyone with write access to the repo but
+# apparently it is not possible to create a technical token with write access.
 #
 # This is important to ensure that the regression artifacts correspond to a specific released version of PEFT.
 # Therefore, it is recommended to checkout the tag before running the regression tests, e.g. by running:
@@ -36,7 +40,7 @@
 # `git checkout v0.1.0`
 #
 # To override these checks, run:
-# `REGRESSION_CREATION_MODE=True REGRESSION_FORCE_MODE=True pytest tests/regression/test_regression.py -s --regression`
+# ``HF_TOKEN=<token> REGRESSION_CREATION_MODE=True REGRESSION_FORCE_MODE=True pytest tests/regression/test_regression.py -s --regression`
 #
 # In REGRESSION_CREATION_MODE, one directory will be created in tests/regression/<TEST_NAME>/<PEFT_VERSION>/ for each
 # test. This will contain the saved adapter, as well as the output of the test of the model for that version.
@@ -47,12 +51,15 @@
 # When implementing new tests, check the existing ones as well as the description in the docstring of RegressionTester.
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 import pytest
 import torch
+from huggingface_hub import snapshot_download, upload_folder
 from torch import nn
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from transformers.pytorch_utils import Conv1D
@@ -63,7 +70,38 @@ from peft.utils import infer_device
 
 
 PEFT_VERSION = peft.__version__
-REGRESSION_DIR = os.path.join(os.getcwd(), "tests", "regression")
+REGRESSION_DIR = tempfile.mkdtemp(prefix="peft_regression_")
+HF_TOKEN = os.environ.get("HF_TOKEN")
+# the repo has to be created manually once, it is not automatically created
+HF_REPO = "peft-internal-testing/regression-tests"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_tearndown():
+    # Use a pytest session-scoped fixture to setup and teardown exactly once per session. AFAICT, unittest does not
+    # provide such a feature
+
+    # download regression artifacts from Hugging Face Hub at the start
+    snapshot_download(
+        repo_id=HF_REPO,
+        local_dir=REGRESSION_DIR,
+        # Don't use symlink, because this prevents us from properly cleaning up the files once finished
+        local_dir_use_symlinks=False,
+    )
+
+    yield
+
+    # delete regression artifacts at the end of the test session; optionally, upload them first if in creation mode
+    creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
+    if creation_mode:
+        # upload the regression directory to Hugging Face Hub, will overwrite by default
+        upload_folder(
+            repo_id=HF_REPO,
+            folder_path=REGRESSION_DIR,
+            token=HF_TOKEN,
+        )
+
+    shutil.rmtree(REGRESSION_DIR)
 
 
 def strtobool(val):
@@ -122,13 +160,14 @@ def save_output(output, name, force=False):
 
 def save_model(model, name, force=False):
     path = os.path.join(REGRESSION_DIR, name, PEFT_VERSION)
-    if os.path.exists(os.path.join(path, "adapter_model.bin")) and not force:
+    filename = os.path.join(path, peft.utils.SAFETENSORS_WEIGHTS_NAME)
+    if os.path.exists(filename) and not force:
         return
 
     if not os.path.exists(path):
         os.makedirs(path)
 
-    if os.path.exists(path) and force:
+    if os.path.exists(filename) and force:
         print(f"Overriding existing model in {path}", file=sys.stderr)
 
     model.save_pretrained(path)
@@ -157,6 +196,8 @@ class RegressionTester(unittest.TestCase):
             raise RuntimeError("REGRESSION_FORCE_MODE can only be used together with REGRESSION_CREATION_MODE")
         if self.creation_mode:
             self.check_clean_git_status(self.force_mode)
+            if HF_TOKEN is None:
+                raise RuntimeError("HF_TOKEN environment variable must be set in creation mode")
 
     def fix_seed(self):
         torch.manual_seed(0)
@@ -195,7 +236,7 @@ class RegressionTester(unittest.TestCase):
                 raise RuntimeError(f"Model output for {name} is not deterministic")
 
             save_output(output, name, force=self.force_mode)
-            save_model(model, name)
+            save_model(model, name, force=self.force_mode)
 
     def _assert_results_equal(self, name):
         # TODO: abstract
