@@ -70,7 +70,8 @@ if is_bnb_available():
                 if requires_conversion:
                     output = output.to(expected_dtype)
                 output = output * scaling / ranknum
-                result += output
+                # inplace operation on view is forbidden for MatMul8bitLtBackward, so avoid it
+                result = result + output
             return result
 
         def __repr__(self) -> str:
@@ -127,7 +128,7 @@ if is_bnb_4bit_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    compute_dtype = lora_A.weight.dtype
+                    compute_dtype = lora_A.dtype
                     if x.dtype != compute_dtype:
                         x = x.to(compute_dtype)
 
