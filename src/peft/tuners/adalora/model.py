@@ -236,7 +236,7 @@ class AdaLoraModel(LoraModel):
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 
-        if getattr(outputs, "loss", None) is not None:
+        if (getattr(outputs, "loss", None) is not None) and isinstance(outputs.loss, torch.Tensor):
             # Calculate the orthogonal regularization
             orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 
