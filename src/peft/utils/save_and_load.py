@@ -83,7 +83,7 @@ def get_peft_model_state_dict(
                 raise ValueError(f"{base_model_layers_to_save} should be a list of strings")
             for k, v in state_dict.items():
                 if any(f"{module_name}.base_layer" in k for module_name in base_model_layers_to_save):
-                    to_return[k.replace(".base_layer", "")] = v
+                    to_return[k] = v
 
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
