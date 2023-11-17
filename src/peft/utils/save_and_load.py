@@ -16,7 +16,7 @@ import os
 from typing import Optional
 
 import torch
-from huggingface_hub import hf_hub_download, file_exists
+from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
