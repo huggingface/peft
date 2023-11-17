@@ -25,7 +25,9 @@ from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
 
-def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", unwrap_compiled=False):
+def get_peft_model_state_dict(
+    model, state_dict=None, adapter_name="default", unwrap_compiled=False, base_model_layers_to_save=None
+):
     """
     Get the state dict of the Peft model.
 
@@ -38,6 +40,8 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
             The name of the adapter whose state dict should be returned.
         unwrap_compiled (`bool`, *optional*, defaults to `False`):
             Whether to unwrap the model if torch.compile was used.
+        base_model_layers_to_save (`list(str)`, *optional*, defaults to `None`):
+            The list of base model layers to save. For example, ["embed_tokens", "lm_head"]
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -71,6 +75,15 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+
+        # save the corresponding base embedding layers when loras are applied to the embedding layers
+        # support from version >= 0.6.2
+        if base_model_layers_to_save is not None:
+            if not isinstance(base_model_layers_to_save, list):
+                raise ValueError(f"{base_model_layers_to_save} should be a list of strings")
+            for k, v in state_dict.items():
+                if any(f"{module_name}.base_layer" in k for module_name in base_model_layers_to_save):
+                    to_return[k.replace(".base_layer", "")] = v
 
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
