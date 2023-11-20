@@ -885,7 +885,7 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -905,7 +905,7 @@ class PeftCommonTester:
         self.assertFalse(adapter_to_delete in model.peft_config)
         self.assertEqual(model.active_adapters, ["default"])
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
@@ -923,7 +923,7 @@ class PeftCommonTester:
 
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         # same as test_delete_adapter, but this time an inactive adapter is deleted
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -943,7 +943,7 @@ class PeftCommonTester:
         self.assertFalse(adapter_to_delete in model.peft_config)
         self.assertEqual(model.active_adapters, ["default"])
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
@@ -1038,7 +1038,7 @@ class PeftCommonTester:
         for new_adapter in new_adapters:
             self.assertTrue(new_adapter in model.peft_config)
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             if isinstance(target, LoraLayer):

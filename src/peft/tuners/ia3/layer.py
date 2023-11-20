@@ -27,12 +27,9 @@ from peft.utils import transpose
 class IA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("ia3_l",)
-    # All names of other parameters that may contain adapter-related parameters
-    other_layer_names = ("scaling",)
 
     def __init__(self, base_layer: nn.Module, is_feedforward: bool, **kwargs) -> None:
         self.base_layer = base_layer
-        self.scaling = {}
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -294,7 +291,7 @@ class Conv2d(nn.Module, IA3Layer):
                     base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        previous_dtype = x.dtype
+        dtype = previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
