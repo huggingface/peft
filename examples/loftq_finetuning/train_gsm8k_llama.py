@@ -814,15 +814,18 @@ def main():
                 repo.push_to_hub(commit_message="End of training", auto_lfs_prune=True)
 
 
+PATTERN_NUMBER = re.compile(r"-?\d+\.?\d*")
+
+
 def extract_answer_number(sentence: str) -> float:
     sentence = sentence.replace(",", "")
-    pred = [s for s in re.findall(r"-?\d+\.?\d*", sentence)]
+    pred = PATTERN_NUMBER.findall(sentence)
     if not pred:
         return float("inf")
     segment = sentence.split("The final answer is ")
     if len(segment) > 1:
         pred_answer = segment[1]
-        pred_answer = [s for s in re.findall(r"-?\d+\.?\d*", pred_answer)]
+        pred_answer = PATTERN_NUMBER.findall(pred_answer)
         if len(pred_answer) > 0:
             pred_answer = pred_answer[0]
         else:
