@@ -8,6 +8,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
+    BitsAndBytesConfig,
 )
 
 from peft import LoftQConfig, LoraConfig, PeftModel, TaskType, get_peft_model
@@ -171,11 +172,40 @@ def quantize_and_save():
 
 def load_loftq(base_model_path, lora_adapter_path):
     if "llama" in base_model_path.lower():
-        model = AutoModelForCausalLM.from_pretrained(base_model_path, device_map="auto", load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model_path,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=False,
+                bnb_4bit_quant_type="nf4",
+            ),
+        )
     elif "bart" in base_model_path.lower():
-        model = AutoModelForSeq2SeqLM.from_pretrained(base_model_path, device_map="auto", load_in_4bit=True)
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            base_model_path,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=False,
+                bnb_4bit_quant_type="nf4",
+            ),
+        )
     elif "deberta" in base_model_path.lower():
-        model = AutoModelForSequenceClassification.from_pretrained(base_model_path, load_in_4bit=True)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            base_model_path,
+            low_cpu_mem_usage=True,
+            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=False,
+                bnb_4bit_quant_type="nf4",
+            ),
+        )
     else:
         raise NotImplementedError("Other models not supported yet.")
 

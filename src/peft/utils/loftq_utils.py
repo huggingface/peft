@@ -182,7 +182,9 @@ def loftq_init(weight, num_bits: int, reduced_rank: int, num_iter: int, quiet=Fa
         torch.cuda.empty_cache()
         # Quantization
         if num_bits == 4 and is_bnb_4bit_available():
-            qweight = bnb.nn.Params4bit(res.to("cpu"), requires_grad=False, compress_statistics=False).to(device)
+            qweight = bnb.nn.Params4bit(
+                res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type="nf4"
+            ).to(device)
             dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
         else:
             quantized_weight, max_abs, shape = quantizer.quantize_block(res)
