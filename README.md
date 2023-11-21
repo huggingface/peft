@@ -34,6 +34,7 @@ Supported methods:
 7. MultiTask Prompt Tuning: [Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning](https://arxiv.org/abs/2303.02861)
 8. LoHa: [FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning](https://arxiv.org/abs/2108.06098)
 9. LoKr: [KronA: Parameter Efficient Tuning with Kronecker Adapter](https://arxiv.org/abs/2212.10650) based on [Navigating Text-To-Image Customization:From LyCORIS Fine-Tuning to Model Evaluation](https://arxiv.org/abs/2309.14859) implementation
+10. OFT: [Controlling Text-to-Image Diffusion by Orthogonal Finetuning](https://arxiv.org/abs/2306.07280)
 
 ## Getting started
 
@@ -274,9 +275,9 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 
 ### Text-to-Image Generation
 
-|   Model         | LoRA | LoHa | LoKr | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
-| Stable Diffusion           | ✅  | ✅  | ✅  |  |   |   |
+|   Model         | LoRA | LoHa | LoKr | OFT | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
+| Stable Diffusion           | ✅  | ✅  | ✅  | ✅  |  |   |   |
 
 
 ### Image Classification
