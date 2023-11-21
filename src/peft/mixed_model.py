@@ -76,7 +76,7 @@ def _prepare_model_for_gradient_checkpointing(model: nn.Module) -> None:
 def _check_config_compatible(peft_config: PeftConfig) -> None:
     if peft_config.peft_type not in COMPATIBLE_TUNER_TYPES:
         raise ValueError(
-            f"The provided `peft_type` '{peft_config.peft_type}' is not compatible with the `PeftMixedModel`. "
+            f"The provided `peft_type` '{peft_config.peft_type.value}' is not compatible with the `PeftMixedModel`. "
             f"Compatible types are: {COMPATIBLE_TUNER_TYPES}"
         )
 
