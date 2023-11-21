@@ -17,12 +17,13 @@ import re
 import warnings
 from dataclasses import asdict
 from enum import Enum
+from typing import List, Optional
 
 import torch
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
@@ -77,17 +78,23 @@ class IA3Model(BaseTuner):
         - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
     """
 
+    prefix: str = "ia3_"
+
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
-        bias = hasattr(target, "bias") and target.bias is not None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
 
-        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
                 {
@@ -97,15 +104,8 @@ class IA3Model(BaseTuner):
                     "index": target.index,
                 }
             )
-            new_module = Linear8bitLt(
-                adapter_name,
-                target.in_features,
-                target.out_features,
-                is_feedforward,
-                bias=bias,
-                **eightbit_kwargs,
-            )
-        elif loaded_in_4bit and isinstance(target, bnb.nn.Linear4bit):
+            new_module = Linear8bitLt(target, adapter_name, is_feedforward=is_feedforward, **eightbit_kwargs)
+        elif loaded_in_4bit and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
@@ -114,56 +114,31 @@ class IA3Model(BaseTuner):
                     "quant_type": target.weight.quant_type,
                 }
             )
-            new_module = Linear4bit(
-                adapter_name,
-                target.in_features,
-                target.out_features,
-                is_feedforward,
-                bias=bias,
-                **fourbit_kwargs,
-            )
+            new_module = Linear4bit(target, adapter_name, is_feedforward=is_feedforward, **fourbit_kwargs)
         elif isinstance(target, torch.nn.Conv2d):
-            out_channels, in_channels = target.weight.size()[:2]
-            kernel_size = target.weight.size()[2:]
-            stride = target.stride
-            padding = target.padding
-            new_module = Conv2d(
-                adapter_name=adapter_name,
-                in_channels=in_channels,
-                out_channels=out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                is_feedforward=is_feedforward,
-                **kwargs,
+            new_module = Conv2d(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+        elif isinstance(target_base_layer, torch.nn.Linear):
+            if kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                    "Setting fan_in_fan_out to False."
+                )
+                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
+            new_module = Linear(target, adapter_name, is_feedforward=is_feedforward, **kwargs)
+        elif isinstance(target_base_layer, Conv1D):
+            if not kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                    "Setting fan_in_fan_out to True."
+                )
+                kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = True
+            new_module = Linear(
+                target, adapter_name, is_feedforward=is_feedforward, is_target_conv_1d_layer=True, **kwargs
             )
         else:
-            if isinstance(target, torch.nn.Linear):
-                in_features, out_features = target.in_features, target.out_features
-                if kwargs["fan_in_fan_out"]:
-                    warnings.warn(
-                        "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                        "Setting fan_in_fan_out to False."
-                    )
-                    kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = False
-            elif isinstance(target, Conv1D):
-                in_features, out_features = (
-                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                )
-                kwargs["is_target_conv_1d_layer"] = True  # useful for unloading later
-                if not kwargs["fan_in_fan_out"]:
-                    warnings.warn(
-                        "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                        "Setting fan_in_fan_out to True."
-                    )
-                    kwargs["fan_in_fan_out"] = ia3_config.fan_in_fan_out = True
-            else:
-                raise ValueError(
-                    f"Target module {target} is not supported. "
-                    f"Currently, only `torch.nn.Linear`, `torch.nn.Conv2d`, and `Conv1D` are supported."
-                )
-            new_module = Linear(
-                adapter_name, in_features, out_features, is_feedforward=is_feedforward, bias=bias, **kwargs
+            raise ValueError(
+                f"Target module {target} is not supported. "
+                f"Currently, only `torch.nn.Linear`, `torch.nn.Conv2d`, and `Conv1D` are supported."
             )
         return new_module
 
@@ -173,7 +148,7 @@ class IA3Model(BaseTuner):
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
-            if "ia3_" not in n:
+            if self.prefix not in n:
                 p.requires_grad = False
 
     def _create_and_replace(
@@ -200,21 +175,16 @@ class IA3Model(BaseTuner):
             "is_feedforward": is_feedforward,
         }
 
-        if isinstance(target, IA3Layer):
-            if target.is_feedforward != is_feedforward:
-                raise ValueError(
-                    "New adapter should have the same value for `is_feedforward` as previously added adapter."
-                )
-            if isinstance(target, torch.nn.Conv2d):
-                target.update_layer(
-                    adapter_name,
-                    ia3_config.init_ia3_weights,
-                )
-            else:  # Linear
-                target.update_layer(
-                    adapter_name,
-                    ia3_config.init_ia3_weights,
-                )
+        if isinstance(target, Conv2d):
+            target.update_layer(
+                adapter_name,
+                ia3_config.init_ia3_weights,
+            )
+        elif isinstance(target, Linear):
+            target.update_layer(
+                adapter_name,
+                ia3_config.init_ia3_weights,
+            )
         else:
             new_module = self._create_new_module(ia3_config, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:
@@ -234,19 +204,29 @@ class IA3Model(BaseTuner):
             is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
         return is_feedforward
 
-    @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
-        new_module.weight = child.weight
-        if child.bias is not None:
-            new_module.bias = child.bias
+
+        # child layer wraps the original module, unpack it
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+
+        # layers with base_layer don't need the weight to be copied, as they have a reference already
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
+
         if getattr(child, "state", None) is not None:
-            new_module.state = child.state
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "ia3_" in name:
+            if self.prefix in name:
                 module.to(child.weight.device)
 
     def __getattr__(self, name: str):
@@ -297,7 +277,9 @@ class IA3Model(BaseTuner):
             ]
         return peft_config
 
-    def merge_and_unload(self, safe_merge: bool = False):
+    def _unload_and_optionally_merge(
+        self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         r"""
         This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -307,6 +289,9 @@ class IA3Model(BaseTuner):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if getattr(self.model, "is_loaded_in_8bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 8-bit mode")
@@ -314,38 +299,75 @@ class IA3Model(BaseTuner):
         if getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
 
-        key_list = [key for key, _ in self.model.named_modules() if "ia3" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
 
-            # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+            if hasattr(target, "base_layer"):
+                if merge:
+                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
+            elif isinstance(target, ModulesToSaveWrapper):
+                # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
-                continue
-
-            if not isinstance(target, IA3Layer):
-                continue
-
-            if isinstance(target, torch.nn.Conv2d):
-                new_module = torch.nn.Conv2d(
-                    target.in_channels,
-                    target.out_channels,
-                    kernel_size=target.kernel_size,
-                    stride=target.stride,
-                    padding=target.padding,
-                    dilation=target.dilation,
-                )
-            else:
-                bias = target.bias is not None
-                if getattr(target, "is_target_conv_1d_layer", False):
-                    new_module = Conv1D(target.out_features, target.in_features)
-                else:
-                    new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
-
-            target.merge(safe_merge=safe_merge)
-            self._replace_module(parent, target_name, new_module, target)
 
         return self.model
+
+    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+        r"""
+        This method merges the IA³ layers into the base model. This is needed if someone wants to use the base model as
+        a standalone model.
+
+        Args:
+            safe_merge (`bool`):
+                whether to activate the safe merging check to check if there is any potential Nan in the adapter
+                weights
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+
+        Example:
+
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import PeftModel
+
+        >>> base_model = AutoModelForCausalLM.from_pretrained("tiiuae/falcon-40b")
+        >>> peft_model_id = "smangrul/falcon-40B-int4-peft-lora-sfttrainer-sample"
+        >>> model = PeftModel.from_pretrained(base_model, peft_model_id)
+        >>> merged_model = model.merge_and_unload()
+        ```
+        """
+        return self._unload_and_optionally_merge(safe_merge=safe_merge, adapter_names=adapter_names)
+
+    def unload(self):
+        """
+        Gets back the base model by removing all the IA³ modules without merging. This gives back the original base
+        model.
+        """
+        return self._unload_and_optionally_merge(merge=False)
+
+    def delete_adapter(self, adapter_name: str):
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (str): Name of the adapter to be deleted.
+        """
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        new_adapter = None
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, IA3Layer):
+                target.delete_adapter(adapter_name)
+                if new_adapter is None:
+                    new_adapter = target.active_adapters[:]
+
+        self.active_adapter = new_adapter or []
