@@ -125,11 +125,21 @@ def main():
         accelerator.print(f"{eval_preds[:10]=}")
         accelerator.print(f"{dataset['validation'][label_column][:10]=}")
         accelerator.wait_for_everyone()
+        """Option1: Pushing the model to the hub
         model.push_to_hub(
-            "smangrul/" + f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
+            f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
             state_dict=accelerator.get_state_dict(model),
-            use_auth_token=True,
+            token = "hf_..."
         )
+        token (`bool` or `str`, *optional*):
+            The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
+            when running `huggingface-cli login` (stored in `~/.huggingface`). Will default to `True` if `repo_url`
+            is not specified.
+            Or you can get your token from https://huggingface.co/settings/token
+        """
+        """Option2: Saving the model locally"""
+        peft_model_id = f"{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_")
+        model.save_pretrained(peft_model_id)
         accelerator.wait_for_everyone()
 
 
