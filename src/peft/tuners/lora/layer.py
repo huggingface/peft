@@ -176,7 +176,6 @@ class LoraLayer(BaseTunerLayer):
             "num_bits": self.kwargs.get("loftq_bits", 4),
             "reduced_rank": self.r[adapter_name],
             "num_iter": self.kwargs.get("loftq_iter", 1),
-            "quiet": False,
         }
 
         qweight, lora_A, lora_B = loftq_init(weight, **kwargs)

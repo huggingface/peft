@@ -1,3 +1,5 @@
+import logging
+
 import torch
 from scipy.stats import norm
 
@@ -162,21 +164,22 @@ def _low_rank_decomposition(weight, reduced_rank=32):
 
 
 @torch.no_grad()
-def loftq_init(weight, num_bits: int, reduced_rank: int, num_iter: int, quiet=False):
+def loftq_init(weight, num_bits: int, reduced_rank: int, num_iter: int):
     assert num_bits in [2, 4, 8], "Only support 2, 4, 8 bits quantization"
     assert num_iter > 0, "Number of iterations must be greater than 0"
 
     out_feature, in_feature = weight.size()
     device = weight.device
     dtype = weight.dtype
-    if not quiet:
-        print(
-            f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} "
-            f"| Num Iter: {num_iter} | Num Bits: {num_bits}"
-        )
+
+    logging.info(
+        f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} "
+        f"| Num Iter: {num_iter} | Num Bits: {num_bits}"
+    )
     if not is_bnb_4bit_available():
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
 
+    weight = weight.to(torch.float32)
     res = weight.clone()
     for i in range(num_iter):
         torch.cuda.empty_cache()

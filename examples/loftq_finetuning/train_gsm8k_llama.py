@@ -467,6 +467,7 @@ def main():
                 load_in_4bit=True,
                 bnb_4bit_use_double_quant=False,
                 bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=config.torch_dtype,
             ),
         )
     else:
@@ -477,8 +478,9 @@ def main():
     #       Peft Model       #
     ##########################
     if args.adapter_name_or_path is None:
-        args.adapter_name_or_path = args.model_name_or_path
-    model = PeftModel.from_pretrained(model, args.adapter_name_or_path, is_trainable=True)
+        model = PeftModel.from_pretrained(model, args.model_name_or_path, subfolder="loftq_init", is_trainable=True)
+    else:
+        model = PeftModel.from_pretrained(model, args.adapter_name_or_path, is_trainable=True)
     model.print_trainable_parameters()
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
