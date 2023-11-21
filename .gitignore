@@ -5,9 +5,7 @@ __pycache__/
 
 # C extensions
 *.so
-/examples/causal_language_modeling/AI-ModelScope
-/examples/causal_language_modeling/ds_zero3_cpu.yaml
-/examples/causal_language_modeling/load_model.py
+
 # Distribution / packaging
 .Python
 build/
