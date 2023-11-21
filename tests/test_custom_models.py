@@ -24,7 +24,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, PeftModel, get_peft_model
+from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
@@ -191,6 +191,26 @@ TEST_CASES = [
             "decompose_factor": 4,
         },
     ),
+    ########
+    # OFT #
+    ########
+    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 OFT", "MLP", OFTConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 OFT", "MLP", OFTConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 OFT",
+        "MLP",
+        OFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "alpha": 4,
+            "module_dropout": 0.1,
+        },
+    ),
+    ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d", "lin0"]}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -258,6 +278,7 @@ PREFIXES = {
     LoraConfig: "lora_",
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
+    OFTConfig: "oft_",
 }
 
 
@@ -757,6 +778,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+            OFTConfig(target_modules=["lin0"], init_weights=False),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -1775,4 +1797,81 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin0.lokr_w1.adapter1",
             "base_model.model.lin0.lokr_w2.adapter1",
+        )
+
+    def test_requires_grad_oft_different_targets(self):
+        # test two different OFT adapters that target different modules
+        config0 = OFTConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = OFTConfig(target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active pter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.oft_r.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.oft_r.adapter1",
+        )
+
+    def test_requires_grad_oft_same_targets(self):
+        # same as previous test, except that OFT adapters target the same layer
+        config0 = OFTConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = OFTConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.adapter1",
         )

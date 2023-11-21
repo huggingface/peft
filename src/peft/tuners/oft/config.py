@@ -28,10 +28,7 @@ class OFTConfig(LycorisConfig):
     Args:
         r (`int`): OFT rank.
         alpha (`int`): The alpha parameter for OFT scaling.
-        rank_dropout (`int`): The dropout probability for rank dimension during training.
         module_dropout (`int`): The dropout probability for disabling OFT modules during training.
-        use_effective_conv2d (`bool`):
-            Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
         target_modules (`Union[List[str],str]`): The names of the modules to apply OFT to.
         init_weights (`bool`): Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int],int]`):
@@ -55,17 +52,8 @@ class OFTConfig(LycorisConfig):
 
     r: int = field(default=8, metadata={"help": "OFT rank"})
     alpha: int = field(default=1, metadata={"help": "OFT alpha"})
-    rank_dropout: float = field(
-        default=0.0, metadata={"help": "The dropout probability for rank dimension during training"}
-    )
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling OFT modules during training"}
-    )
-    use_effective_conv2d: bool = field(
-        default=False,
-        metadata={
-            "help": 'Use parameter effective decomposition for Conv2d 3x3 with ksize > 1 ("Proposition 3" from FedPara paper)'
-        },
     )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,

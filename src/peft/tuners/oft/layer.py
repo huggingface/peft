@@ -45,9 +45,9 @@ class OFTLayer(nn.Module, LycorisLayer):
 
     def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...], block_share: bool):
         if block_share:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, shape[1] // r, shape[1] // r))
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(shape[1] / r), math.ceil(shape[1] / r)))
         else:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, shape[1] // r, shape[1] // r))
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[1] / r), math.ceil(shape[1] / r)))
 
     def reset_adapter_parameters(self, adapter_name: str):
         nn.init.zeros_(self.oft_r[adapter_name])
@@ -60,10 +60,8 @@ class OFTLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
-        use_effective_conv2d: bool = False,
         coft: bool = False,
         eps: float = 6e-5,
         block_share: bool = False,
@@ -75,11 +73,8 @@ class OFTLayer(nn.Module, LycorisLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             alpha (`float`): Alpha for the added adapter.
-            rank_dropout (`float`): The dropout probability for rank dimension during training.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
-            use_effective_conv2d (`bool`, *optional*, defaults to `False`):
-                Use parameter effective decomposition for Conv2d with ksize > 1.
             coft (`bool`): Whether to use the constrainted variant of OFT or not.
             eps (`float`): The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
             block_share (`bool`): Whether to share the OFT parameters between blocks or not.
@@ -88,7 +83,6 @@ class OFTLayer(nn.Module, LycorisLayer):
         self.r[adapter_name] = r
         self.alpha[adapter_name] = alpha
         self.scaling[adapter_name] = alpha / r
-        self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
         self.coft[adapter_name] = coft
         self.eps[adapter_name] = eps
@@ -99,14 +93,10 @@ class OFTLayer(nn.Module, LycorisLayer):
         if isinstance(base_layer, nn.Linear):
             shape = tuple(base_layer.weight.shape)
         elif isinstance(base_layer, nn.Conv2d):
-            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
-            if use_effective_conv2d:
-                shape = (base_layer.out_channels, base_layer.in_channels, *base_layer.kernel_size)
-            else:
-                shape = (
-                    base_layer.out_channels,
-                    base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
-                )
+            shape = (
+                base_layer.out_channels,
+                base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
+            )
         else:
             raise TypeError(f"OFT is not implemented for base layers of type {type(base_layer).__name__}")
 
@@ -152,7 +142,11 @@ class OFTLayer(nn.Module, LycorisLayer):
                             base_layer.out_channels,
                         ]
                     )
-                orig_weights = torch.mm(self.get_delta_weight(active_adapter), orig_weights)
+                delta_weight = self.get_delta_weight(active_adapter)
+                if orig_weights.shape[0] != delta_weight.shape[1]:
+                    # when in channels is not divisible by r
+                    delta_weight = delta_weight[: orig_weights.shape[0], : orig_weights.shape[0]]
+                orig_weights = torch.mm(delta_weight, orig_weights)
                 if isinstance(base_layer, nn.Linear):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                 elif isinstance(base_layer, nn.Conv2d):
@@ -191,12 +185,15 @@ class OFTLayer(nn.Module, LycorisLayer):
                             base_layer.out_channels,
                         ]
                     )
-                delta_weight_inv = torch.inverse(self.get_delta_weight(active_adapter))
-                orig_weights = torch.mm(orig_weights, delta_weight_inv)
+                delta_weight = self.get_delta_weight(active_adapter)
+                if orig_weights.shape[0] != delta_weight.shape[1]:
+                    # when in channels is not divisible by r
+                    delta_weight = delta_weight[: orig_weights.shape[0], : orig_weights.shape[0]]
+                orig_weights = torch.linalg.solve(delta_weight, orig_weights)
                 if isinstance(base_layer, nn.Linear):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                 elif isinstance(base_layer, nn.Conv2d):
-                    orig_weights = orig_weights.view(
+                    orig_weights = orig_weights.reshape(
                         [
                             base_layer.out_channels,
                             base_layer.in_channels,
@@ -216,17 +213,6 @@ class OFTLayer(nn.Module, LycorisLayer):
         if coft:
             with torch.no_grad():
                 opt_r.copy_(self._project_batch(opt_r, eps=eps))
-
-        # Perform rank dropout during training - drop rows of addition weights
-        rank_dropout = self.rank_dropout[adapter_name]
-        if self.training and rank_dropout:
-            drop = (torch.rand(opt_r.size(0)) > rank_dropout).to(opt_r.dtype)
-            drop = drop.view(-1, *[1] * len(opt_r.shape[1:])).to(opt_r.device)
-            # TODO: Investigate if there should be a scaler like in normal dropout during training
-            # Original implementation doesn't have it
-            # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/OFT.py#L193
-            drop /= drop.mean()
-            opt_r *= drop
 
         orth_rotate = self._cayley_batch(opt_r * scaling)
         weight = self._block_diagonal(orth_rotate, rank)
@@ -305,7 +291,6 @@ class Linear(OFTLayer):
         adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         init_weights: bool = True,
         **kwargs,
@@ -314,7 +299,7 @@ class Linear(OFTLayer):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -325,6 +310,9 @@ class Linear(OFTLayer):
 
         base_weight = base_layer.weight.data
         base_weight = torch.transpose(base_weight, 0, 1)
+        if base_weight.shape[0] != delta_weight.shape[1]:
+            # when in channels is not divisible by r
+            delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
         weight = torch.mm(delta_weight, base_weight)
         weight = torch.transpose(weight, 0, 1)
 
@@ -346,9 +334,7 @@ class Conv2d(OFTLayer):
         adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
-        rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
         init_weights: bool = True,
         **kwargs,
     ):
@@ -356,9 +342,7 @@ class Conv2d(OFTLayer):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
-        )
+        self.update_layer(adapter_name, r, alpha, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -371,6 +355,9 @@ class Conv2d(OFTLayer):
         base_weight = base_weight.view(
             [base_layer.kernel_size[0] * base_layer.kernel_size[1] * base_layer.in_channels, base_layer.out_channels]
         )
+        if base_weight.shape[0] != delta_weight.shape[1]:
+            # when in channels is not divisible by r
+            delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
         weight = torch.mm(delta_weight, base_weight)
         weight = weight.view(
             [base_layer.out_channels, base_layer.in_channels, base_layer.kernel_size[0], base_layer.kernel_size[1]]
