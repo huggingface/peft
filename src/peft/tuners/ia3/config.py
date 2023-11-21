@@ -29,7 +29,9 @@ class IA3Config(PeftConfig):
         target_modules (`Union[List[str],str]`):
             The names of the modules to apply (IA)^3 to.
         feedforward_modules (`Union[List[str],str]`):
-            The names of the modules to be treated as feedforward modules, as in the original paper.
+            The names of the modules to be treated as feedforward modules, as in the original paper. These modules will
+            have (IA)^3 vectors multiplied to the input, instead of the output. feedforward_modules must be a name or a
+            subset of names present in target_modules.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
@@ -78,3 +80,8 @@ class IA3Config(PeftConfig):
         self.feedforward_modules = (
             set(self.feedforward_modules) if isinstance(self.feedforward_modules, list) else self.feedforward_modules
         )
+
+        # check if feedforward_modules is a subset of target_modules. run the check only if both are sets
+        if isinstance(self.feedforward_modules, set) and isinstance(self.target_modules, set):
+            if not self.feedforward_modules.issubset(self.target_modules):
+                raise ValueError("`feedforward_modules` should be a subset of `target_modules`")

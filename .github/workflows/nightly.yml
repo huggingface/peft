@@ -8,18 +8,22 @@ on:
 env:
   RUN_SLOW: "yes"
   IS_GITHUB_CI: "1"
+  # To be able to run tests on CUDA 12.2
+  NVIDIA_DISABLE_REQUIRE: "1"
   SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
 
 
 jobs:
   run_all_tests_single_gpu:
+    strategy:
+      fail-fast: false
     runs-on: [self-hosted, docker-gpu, multi-gpu]
     env:
       CUDA_VISIBLE_DEVICES: "0"
       TEST_TYPE: "single_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         working-directory: peft/
@@ -55,13 +59,15 @@ jobs:
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
+    strategy:
+      fail-fast: false
     runs-on: [self-hosted, docker-gpu, multi-gpu]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
       TEST_TYPE: "multi_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         working-directory: peft/

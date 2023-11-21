@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.6.0.dev0"
+__version__ = "0.6.3.dev0"
 
 from .auto import (
     AutoPeftModel,
@@ -51,6 +51,8 @@ from .tuners import (
     LoraModel,
     LoHaConfig,
     LoHaModel,
+    LoKrConfig,
+    LoKrModel,
     IA3Config,
     IA3Model,
     AdaLoraConfig,

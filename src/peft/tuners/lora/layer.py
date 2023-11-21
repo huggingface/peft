@@ -15,21 +15,25 @@
 
 import math
 import warnings
-from typing import Optional, Tuple, Union
+from typing import Any, List, Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
 
 
 class LoraLayer(BaseTunerLayer):
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names = ["lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B"]
+    # All names of layers that may contain (trainable) adapter weights
+    adapter_layer_names = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B")
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout")
 
-    def __init__(self, in_features: int, out_features: int, **kwargs):
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+        self.base_layer = base_layer
         self.r = {}
         self.lora_alpha = {}
         self.scaling = {}
@@ -42,25 +46,26 @@ class LoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.Linear):
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, nn.Conv2d):
+            in_features, out_features = base_layer.in_channels, base_layer.out_channels
+        elif isinstance(base_layer, nn.Embedding):
+            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
+        elif isinstance(base_layer, Conv1D):
+            in_features, out_features = (
+                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
+            )
+        elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
+            # QuantLinear
+            in_features, out_features = base_layer.infeatures, base_layer.outfeatures
+        else:
+            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+
         self.in_features = in_features
         self.out_features = out_features
-        self.kwargs = kwargs
-
-    @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
-
-    def _init_empty_weights(self, cls, *args, **kwargs) -> None:
-        # A helper method that allows to initialize the layer of the given class without spending time to initialize the
-        # model weights. The implementation is inspired by
-        # https://pytorch.org/docs/stable/generated/torch.nn.utils.skip_init.html but this function cannot be used
-        # directly.
-        # Instead of this approach, it would be possible to bypass the __init__ of the class but that runs the risk of
-        # omitting important logic inside that __init__.
-        kwargs = kwargs.copy()
-        final_device = kwargs.pop("device", "cpu")
-        cls.__init__(self, *args, device="meta", **kwargs)
-        self.to_empty(device=final_device)
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
@@ -81,7 +86,7 @@ class LoraLayer(BaseTunerLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -102,20 +107,22 @@ class LoraLayer(BaseTunerLayer):
 
         self.lora_dropout[adapter_name] = lora_dropout_layer
         # Actual trainable parameters
+        base_layer = self.get_base_layer()
         if r > 0:
-            kernel_size = self.kwargs["kernel_size"]
-            stride = self.kwargs["stride"]
-            padding = self.kwargs["padding"]
+            kernel_size = base_layer.kernel_size
+            stride = base_layer.stride
+            padding = base_layer.padding
             self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
             self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
             self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        weight = getattr(self, "weight", None)
+        weight = getattr(base_layer, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
-            self.to(self.weight.device, dtype=weight.dtype)
+            self.to(base_layer.weight.device, dtype=weight.dtype)
+        self.set_adapter(self.active_adapters)
 
     def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
@@ -138,10 +145,12 @@ class LoraLayer(BaseTunerLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        weight = getattr(self, "weight", None)
+        base_layer = self.get_base_layer()
+        weight = getattr(base_layer, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
-            self.to(self.weight.device, dtype=weight.dtype)
+            self.to(base_layer.weight.device, dtype=weight.dtype)
+        self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
@@ -190,37 +199,29 @@ class LoraLayer(BaseTunerLayer):
 #  ------------------------------------------------------------------------------------------
 
 
-class Linear(nn.Linear, LoraLayer):
+class Linear(nn.Module, LoraLayer):
     # Lora implemented in a dense layer
     def __init__(
         self,
+        base_layer,
         adapter_name: str,
-        in_features: int,
-        out_features: int,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        # this gets the init from nn.Linear's super perspective, i.e.
-        # nn.Module.__init__, which should always be called
-        super(nn.Linear, self).__init__()
-        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
-        # added robustness is not big enough for Linear.
-
-        LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
-        # Freezing the pre-trained weight matrix
-
+        super().__init__()
+        LoraLayer.__init__(self, base_layer)
         self.fan_in_fan_out = fan_in_fan_out
 
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -229,18 +230,26 @@ class Linear(nn.Linear, LoraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
+                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = self.weight.data.clone()
+                    orig_weights = base_layer.weight.data.clone()
                     orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
@@ -248,9 +257,9 @@ class Linear(nn.Linear, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights
                 else:
-                    self.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -260,7 +269,7 @@ class Linear(nn.Linear, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -296,20 +305,17 @@ class Linear(nn.Linear, LoraLayer):
 
         return output_tensor
 
-    def _linear(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -323,26 +329,30 @@ class Linear(nn.Linear, LoraLayer):
         result = result.to(previous_dtype)
         return result
 
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
 
-class Embedding(nn.Embedding, LoraLayer):
+
+class Embedding(nn.Module, LoraLayer):
     # LoRA implemented in a Embedding layer
     def __init__(
         self,
+        base_layer: nn.Module,
         adapter_name: str,
-        num_embeddings: int,
-        embedding_dim: int,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
-        LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
-        self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
+        super().__init__()
+        LoraLayer.__init__(self, base_layer)
 
-    def merge(self, safe_merge: bool = False) -> None:
+        self._active_adapter = adapter_name
+        self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -351,18 +361,26 @@ class Embedding(nn.Embedding, LoraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
+                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = self.weight.data.copy()
+                    orig_weights = base_layer.weight.data.copy()
                     orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
@@ -370,9 +388,9 @@ class Embedding(nn.Embedding, LoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights
                 else:
-                    self.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -382,7 +400,7 @@ class Embedding(nn.Embedding, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_embedding_A.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -418,28 +436,28 @@ class Embedding(nn.Embedding, LoraLayer):
 
         return output_tensor
 
-    def _embed(self, input: torch.Tensor, weight: Optional[torch.Tensor] = None) -> torch.Tensor:
-        weight = self.weight if weight is None else weight
+    def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        base_layer = self.get_base_layer()
         return F.embedding(
             input,
             weight,
-            padding_idx=self.padding_idx,
-            max_norm=self.max_norm,
-            norm_type=self.norm_type,
-            scale_grad_by_freq=self.scale_grad_by_freq,
-            sparse=self.sparse,
+            padding_idx=base_layer.padding_idx,
+            max_norm=base_layer.max_norm,
+            norm_type=base_layer.norm_type,
+            scale_grad_by_freq=base_layer.scale_grad_by_freq,
+            sparse=base_layer.sparse,
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._embed(x)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._embed(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._embed(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_embedding_A:
                     continue
@@ -451,38 +469,30 @@ class Embedding(nn.Embedding, LoraLayer):
 
         return result
 
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
 
-class Conv2d(nn.Conv2d, LoraLayer):
+
+class Conv2d(nn.Module, LoraLayer):
     # Lora implemented in a conv2d layer
     def __init__(
         self,
+        base_layer: nn.Module,
         adapter_name: str,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: Union[int, Tuple[int]],
-        stride: Union[int, Tuple[int]] = 1,
-        padding: Union[int, Tuple[int]] = 0,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        self._init_empty_weights(nn.Conv2d, in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        super().__init__()
+        LoraLayer.__init__(self, base_layer)
 
-        LoraLayer.__init__(
-            self,
-            in_features=in_channels,
-            out_features=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-        )
-
+        self._active_adapter = adapter_name
         self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights inside the base weights
 
@@ -491,27 +501,35 @@ class Conv2d(nn.Conv2d, LoraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
+                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = self.weight.data.copy()
+                    orig_weights = base_layer.weight.data.copy()
                     orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-                    self.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights
                 else:
-                    self.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -521,7 +539,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -547,7 +565,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
             weight_B = weight_B.float()
 
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
-        if self.weight.size()[2:4] == (1, 1):
+        if self.get_base_layer().weight.size()[2:4] == (1, 1):
             # conv2d 1x1
             output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
                 3
@@ -571,28 +589,17 @@ class Conv2d(nn.Conv2d, LoraLayer):
 
         return output_tensor
 
-    def _conv2d(self, input: torch.Tensor) -> torch.Tensor:
-        return F.conv2d(
-            input,
-            self.weight,
-            bias=self.bias,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._conv2d(x)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._conv2d(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._conv2d(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -605,3 +612,7 @@ class Conv2d(nn.Conv2d, LoraLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep

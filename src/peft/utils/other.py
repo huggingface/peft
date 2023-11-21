@@ -15,14 +15,15 @@
 import copy
 import inspect
 import warnings
-from typing import Optional
+from typing import Optional, Tuple
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
+from safetensors.torch import storage_ptr, storage_size
 
-from ..import_utils import is_auto_gptq_available
+from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
 
 
 # Get current device name based on available devices
@@ -63,18 +64,29 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
     return tuple(result)
 
 
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
     r"""
+    Note this method only works for `transformers` models.
+
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
         head to fp32
 
     Args:
-        model, (`transformers.PreTrainedModel`):
+        model (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
+        use_gradient_checkpointing (`bool`, *optional*, defaults to `True`):
+            If True, use gradient checkpointing to save memory at the expense of slower backward pass.
+        gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
+            Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
+            `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
+            Note this is only available in the latest transformers versions (> 4.34.1).
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
+    if gradient_checkpointing_kwargs is None:
+        gradient_checkpointing_kwargs = {}
+
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -86,19 +98,36 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
                 param.data = param.data.to(torch.float32)
 
     if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
-        # For backward compatibility
-        if hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        else:
+        # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
+        if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
+            # For backward compatibility
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            else:
 
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
+                def make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
 
-            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+                model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+        # To support older transformers versions, check if the model supports gradient_checkpointing_kwargs
+        _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
+            inspect.signature(model.gradient_checkpointing_enable).parameters
+        )
+
+        if not _supports_gc_kwargs and len(gradient_checkpointing_kwargs) > 0:
+            warnings.warn(
+                "gradient_checkpointing_kwargs is not supported in this version of transformers. The passed kwargs will be ignored."
+                " if you want to use that feature, please upgrade to the latest version of transformers.",
+                FutureWarning,
+            )
+
+        gc_enable_kwargs = (
+            {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
+        )
 
         # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable()
-
+        model.gradient_checkpointing_enable(**gc_enable_kwargs)
     return model
 
 
@@ -248,8 +277,22 @@ def _set_trainable(model, adapter_name):
 
 
 def _set_adapter(model, adapter_name):
+    def check_adapter_name(adapter_name):
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) > 1:
+            raise ValueError("Only one adapter can be set at a time for modules_to_save")
+        elif len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+        adapter_name = adapter_name[0]
+        return adapter_name
+
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
+            # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
+            adapter_name = check_adapter_name(adapter_name)
             module.set_adapter(adapter_name)
 
 
@@ -384,23 +427,55 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
     """
     Get the right AutoGPTQQuantLinear class based on the quantization config file
     """
-    if is_auto_gptq_available():
+    if gptq_quantization_config is not None and is_auto_gptq_available():
         from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
 
-        if gptq_quantization_config is not None:
-            desc_act = gptq_quantization_config.desc_act
-            group_size = gptq_quantization_config.group_size
-            bits = gptq_quantization_config.bits
-            disable_exllama = gptq_quantization_config.disable_exllama
-            AutoGPTQQuantLinear = dynamically_import_QuantLinear(
-                use_triton=False,
-                desc_act=desc_act,
-                group_size=group_size,
-                bits=bits,
-                disable_exllama=disable_exllama,
-            )
-            return AutoGPTQQuantLinear
+        desc_act = gptq_quantization_config.desc_act
+        group_size = gptq_quantization_config.group_size
+        bits = gptq_quantization_config.bits
+        if hasattr(gptq_quantization_config, "use_exllama"):
+            use_exllama = gptq_quantization_config.use_exllama
+        else:
+            use_exllama = not gptq_quantization_config.disable_exllama
+        if hasattr(gptq_quantization_config, "exllama_config"):
+            exllama_version = gptq_quantization_config.exllama_config["version"]
+        else:
+            exllama_version = 1
+        AutoGPTQQuantLinear = dynamically_import_QuantLinear(
+            use_triton=False,
+            desc_act=desc_act,
+            group_size=group_size,
+            bits=bits,
+            disable_exllama=not (use_exllama and exllama_version == 1),
+            disable_exllamav2=not (use_exllama and exllama_version == 2),
+        )
+        return AutoGPTQQuantLinear
     return None
+
+
+def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
+    """
+    Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
+    example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is
+    guaranteed to be unique and constant for this tensor's storage during its lifetime. Two tensor storages with
+    non-overlapping lifetimes may have the same id.
+
+    This method is the exact same copy of
+    https://github.com/huggingface/transformers/blob/main/src/transformers/pytorch_utils.py#L282C1-L300C58 but we added
+    it here manually to avoid import issue with old versions of transformers.
+    """
+    if tensor.device.type == "xla" and is_torch_tpu_available():
+        # NOTE: xla tensors dont have storage
+        # use some other unique id to distinguish.
+        # this is a XLA tensor, it must be created using torch_xla's
+        # device. So the following import is safe:
+        import torch_xla
+
+        unique_id = torch_xla._XLAC._xla_get_tensor_id(tensor)
+    else:
+        unique_id = storage_ptr(tensor)
+
+    return tensor.device, unique_id, storage_size(tensor)
 
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
@@ -450,9 +525,9 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "bert": ["key", "value", "output.dense"],
     "deberta-v2": ["key_proj", "value_proj", "output.dense"],
     "deberta": ["in_proj", "output.dense"],
-    "RefinedWebModel": ["query_key_value"],
-    "RefinedWeb": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWebModel": ["query_key_value", "dense_4h_to_h"],
+    "RefinedWeb": ["query_key_value", "dense_4h_to_h"],
+    "falcon": ["query_key_value", "dense_4h_to_h"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -471,9 +546,9 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "bert": ["output.dense"],
     "deberta-v2": ["output.dense"],
     "deberta": ["output.dense"],
-    "RefinedWeb": ["query_key_value"],
-    "RefinedWebModel": ["query_key_value"],
-    "falcon": ["query_key_value"],
+    "RefinedWeb": ["dense_4h_to_h"],
+    "RefinedWebModel": ["dense_4h_to_h"],
+    "falcon": ["dense_4h_to_h"],
 }
 
 COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import collections
 import inspect
 import os
 import warnings
@@ -40,6 +41,7 @@ from .tuners import (
     AdaptionPromptModel,
     IA3Model,
     LoHaModel,
+    LoKrModel,
     LoraModel,
     MultitaskPromptEmbedding,
     PrefixEncoder,
@@ -57,6 +59,7 @@ from .utils import (
     _set_adapter,
     _set_trainable,
     get_peft_model_state_dict,
+    id_tensor_storage,
     infer_device,
     load_peft_weights,
     set_peft_model_state_dict,
@@ -67,6 +70,7 @@ from .utils import (
 PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
     PeftType.LOHA: LoHaModel,
+    PeftType.LOKR: LoKrModel,
     PeftType.PROMPT_TUNING: PromptEmbedding,
     PeftType.P_TUNING: PromptEncoder,
     PeftType.PREFIX_TUNING: PrefixEncoder,
@@ -153,7 +157,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def save_pretrained(
         self,
         save_directory: str,
-        safe_serialization: bool = False,
+        safe_serialization: bool = True,
         selected_adapters: Optional[List[str]] = None,
         **kwargs: Any,
     ):
@@ -166,6 +170,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             save_directory (`str`):
                 Directory where the adapter model and configuration files will be saved (will be created if it does not
                 exist).
+            safe_serialization (`bool`, *optional*):
+                Whether to save the adapter files in safetensors format.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
@@ -197,6 +203,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             os.makedirs(output_dir, exist_ok=True)
 
             if safe_serialization:
+                # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
+                # Safetensors does not allow tensor aliasing.
+                # We're going to remove aliases before saving
+                ptrs = collections.defaultdict(list)
+                for name, tensor in output_state_dict.items():
+                    # Sometimes in the state_dict we have non-tensor objects.
+                    # e.g. in bitsandbytes we have some `str` objects in the state_dict
+                    if isinstance(tensor, torch.Tensor):
+                        ptrs[id_tensor_storage(tensor)].append(name)
+                    else:
+                        # In the non-tensor case, fall back to the pointer of the object itself
+                        ptrs[id(tensor)].append(name)
+
+                # These are all the pointers of shared tensors.
+                shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
+
+                for _, names in shared_ptrs.items():
+                    # Here we just clone the shared tensors to avoid tensor aliasing which is
+                    # not supported in safetensors.
+                    for shared_tensor_name in names[1:]:
+                        output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
+
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
@@ -545,7 +573,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
                 self.peft_config[adapter_name] = peft_config
-                self.base_model.inject_adapter(self, adapter_name)
+                self.base_model.inject_adapter(self.base_model.model, adapter_name)
         except Exception:  # somthing went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]

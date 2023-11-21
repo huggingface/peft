@@ -47,6 +47,7 @@ from peft import (
     prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
 )
+from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 from .testing_utils import (
     require_auto_gptq,
@@ -127,6 +128,14 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             torch.cuda.empty_cache()
         gc.collect()
 
+    def _check_inference_finite(self, model, batch):
+        # try inference without Trainer class
+        training = model.training
+        model.eval()
+        output = model(**batch.to(model.device))
+        self.assertTrue(torch.isfinite(output.logits).all())
+        model.train(training)
+
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training(self):
         r"""
@@ -180,7 +189,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -238,7 +247,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -299,7 +308,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -337,6 +346,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
         data = load_dataset("ybelkada/english_quotes_copy")
         data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+        batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
+        self._check_inference_finite(model, batch)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
@@ -360,7 +371,70 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_8bit_adalora_causalLM(self):
+        r"""
+        Tests the 8bit training with adalora
+        """
+        model_id = "facebook/opt-350m"
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_8bit=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+        model.gradient_checkpointing_enable()
+        model = prepare_model_for_kbit_training(model)
+
+        peft_config = AdaLoraConfig(
+            init_r=6,
+            target_r=4,
+            tinit=50,
+            tfinal=100,
+            deltaT=5,
+            beta1=0.3,
+            beta2=0.3,
+            orth_reg_weight=0.2,
+            lora_alpha=32,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        model = get_peft_model(model, peft_config)
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+        batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
+        self._check_inference_finite(model, batch)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -424,7 +498,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -484,7 +558,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -545,7 +619,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -643,7 +717,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -661,7 +735,8 @@ class PeftGPTQGPUTests(unittest.TestCase):
         from transformers import GPTQConfig
 
         self.causal_lm_model_id = "marcsun13/opt-350m-gptq-4bit"
-        self.quantization_config = GPTQConfig(bits=4, disable_exllama=True)
+        # TODO : check if it works for Exllamav2 kernels
+        self.quantization_config = GPTQConfig(bits=4, use_exllama=False)
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 
     def tearDown(self):
@@ -671,6 +746,14 @@ class PeftGPTQGPUTests(unittest.TestCase):
         """
         gc.collect()
         torch.cuda.empty_cache()
+
+    def _check_inference_finite(self, model, batch):
+        # try inference without Trainer class
+        training = model.training
+        model.eval()
+        output = model(**batch.to(model.device))
+        self.assertTrue(torch.isfinite(output.logits).all())
+        model.train(training)
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training(self):
@@ -721,7 +804,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -739,6 +822,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             quantization_config=self.quantization_config,
         )
 
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
         model = prepare_model_for_kbit_training(model)
 
         peft_config = AdaLoraConfig(
@@ -760,6 +844,8 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
         data = load_dataset("ybelkada/english_quotes_copy")
         data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+        batch = tokenizer(data["train"][:3]["quote"], return_tensors="pt", padding=True)
+        self._check_inference_finite(model, batch)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
@@ -783,7 +869,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
@@ -846,7 +932,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
             model.cpu().save_pretrained(tmp_dir)
 
             self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue("adapter_model.bin" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])

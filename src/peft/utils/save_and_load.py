@@ -16,11 +16,10 @@ import os
 from typing import Optional
 
 import torch
-from huggingface_hub import hf_hub_download
+from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
-from .hub_utils import hub_file_exists
 from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
@@ -75,6 +74,9 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
 
+    elif config.peft_type == PeftType.LOKR:
+        to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
+
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
     elif config.is_prompt_learning:
@@ -123,13 +125,14 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.ADALORA, PeftType.IA3):
+    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",
             PeftType.LORA: "lora_",
             PeftType.ADALORA: "lora_",
             PeftType.LOHA: "hada_",
+            PeftType.LOKR: "lokr_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
@@ -190,9 +193,9 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         filename = os.path.join(path, WEIGHTS_NAME)
         use_safetensors = False
     else:
-        has_remote_safetensors_file = hub_file_exists(
-            model_id,
-            SAFETENSORS_WEIGHTS_NAME,
+        has_remote_safetensors_file = file_exists(
+            repo_id=model_id,
+            filename=SAFETENSORS_WEIGHTS_NAME,
             revision=hf_hub_download_kwargs.get("revision", None),
             repo_type=hf_hub_download_kwargs.get("repo_type", None),
         )

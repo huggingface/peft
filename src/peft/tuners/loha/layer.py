@@ -14,57 +14,37 @@
 # limitations under the License.
 
 import math
-import warnings
-from typing import Optional, Tuple, Union
+from typing import Any, Set, Tuple
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.lycoris_utils import LycorisLayer
 
 
-class LoHaLayer(BaseTunerLayer, nn.Module):
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names = ["hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2"]
+class LoHaLayer(nn.Module, LycorisLayer):
+    # All names of layers that may contain adapter weights
+    adapter_layer_names = ("hada_w1_a", "hada_w1_b", "hada_w2_a", "hada_w2_b", "hada_t1", "hada_t2")
+    # other_param_names is defined on parent class
 
-    def __init__(self):
-        super(nn.Module, self).__init__()
+    def __init__(self, base_layer: nn.Module):
+        super().__init__()
+        LycorisLayer.__init__(self, base_layer)
 
         # LoHa info
-        self.r = {}
-        self.alpha = {}
-        self.scaling = {}
         self.hada_w1_a = nn.ParameterDict({})
         self.hada_w1_b = nn.ParameterDict({})
         self.hada_w2_a = nn.ParameterDict({})
         self.hada_w2_b = nn.ParameterDict({})
         self.hada_t1 = nn.ParameterDict({})
         self.hada_t2 = nn.ParameterDict({})
-        self.rank_dropout = {}
-        self.module_dropout = {}
-
-        # Tuner info
-        self._disable_adapters = False
-        self.merged_adapters = []
 
     @property
-    def merged(self) -> bool:
-        return bool(self.merged_adapters)
+    def _available_adapters(self) -> Set[str]:
+        return {*self.hada_w1_a, *self.hada_w1_b, *self.hada_w2_a, *self.hada_w2_b, *self.hada_t1, *self.hada_t2}
 
-    def _init_empty_weights(self, cls, *args, **kwargs) -> None:
-        # A helper method that allows to initialize the layer of the given class without spending time to initialize the
-        # model weights. The implementation is inspired by
-        # https://pytorch.org/docs/stable/generated/torch.nn.utils.skip_init.html but this function cannot be used
-        # directly.
-        # Instead of this approach, it would be possible to bypass the __init__ of the class but that runs the risk of
-        # omitting important logic inside that __init__.
-        kwargs = kwargs.copy()
-        final_device = kwargs.pop("device", "cpu")
-        cls.__init__(self, *args, device="meta", **kwargs)
-        self.to_empty(device=final_device)
-
-    def create_loha_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
+    def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L130C9-L143C75
         if len(shape) == 4:
             self.hada_t1[adapter_name] = nn.Parameter(torch.empty(r, r, shape[2], shape[3]))
@@ -81,7 +61,7 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
             self.hada_w2_a[adapter_name] = nn.Parameter(torch.empty(shape[0], r))
             self.hada_w2_b[adapter_name] = nn.Parameter(torch.empty(r, shape[1]))
 
-    def reset_loha_parameters(self, adapter_name: str):
+    def reset_adapter_parameters(self, adapter_name: str):
         # Original implementation performs initialization with normal distribution
         # https://github.com/KohakuBlueleaf/LyCORIS/blob/3549fdef8f564761d68b695a08ef88b1122fdedc/lycoris/modules/loha.py#L158
 
@@ -96,6 +76,21 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
             nn.init.kaiming_uniform_(self.hada_t1[adapter_name], a=math.sqrt(5))
             nn.init.kaiming_uniform_(self.hada_t2[adapter_name], a=math.sqrt(5))
 
+    def reset_adapter_parameters_random(self, adapter_name: str):
+        # Original implementation performs initialization with normal distribution
+        # https://github.com/KohakuBlueleaf/LyCORIS/blob/3549fdef8f564761d68b695a08ef88b1122fdedc/lycoris/modules/loha.py#L158
+
+        # FedPara paper proposes to perform He initialization, let's stick with it
+        # It is enough to initialize only single matrix with zeros to make adapter do nothing after initialization
+        if adapter_name in self.hada_w1_a.keys():
+            nn.init.kaiming_uniform_(self.hada_w1_a[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_w1_b[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_w2_a[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_w2_b[adapter_name], a=math.sqrt(5))
+        if adapter_name in self.hada_t1.keys():
+            nn.init.kaiming_uniform_(self.hada_t1[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.hada_t2[adapter_name], a=math.sqrt(5))
+
     def update_layer(
         self,
         adapter_name: str,
@@ -104,19 +99,20 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
         rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
-        use_effective_conv2d: bool,
+        use_effective_conv2d: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
 
         Args:
-            shape (`Tuple[int, ...]`): Shape of weights to produce
-            adapter_name (`str`): Name for the adapter to add
-            r (`int`): Rank for the added adapter
-            alpha (`float`): Alpha for the added adapter
-            rank_dropout (`float`): The dropout probability for rank dimension during training
+            adapter_name (`str`): Name for the adapter to add.
+            r (`int`): Rank for the added adapter.
+            alpha (`float`): Alpha for the added adapter.
+            rank_dropout (`float`): The dropout probability for rank dimension during training.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights
+            init_weights (`bool`): Whether to initialize weights.
+            use_effective_conv2d (`bool`, *optional*, defaults to `False`):
+                Use parameter effective decomposition for Conv2d with ksize > 1.
         """
 
         self.r[adapter_name] = r
@@ -126,26 +122,32 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
         self.module_dropout[adapter_name] = module_dropout
 
         # Determine shape of LoHa weights
-        if isinstance(self, nn.Linear):
-            shape = tuple(self.weight.shape)
-        elif isinstance(self, nn.Conv2d):
-            use_effective_conv2d = use_effective_conv2d and self.kernel_size != (1, 1)
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.Linear):
+            shape = tuple(base_layer.weight.shape)
+        elif isinstance(base_layer, nn.Conv2d):
+            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
             if use_effective_conv2d:
-                shape = (self.out_channels, self.in_channels, *self.kernel_size)
+                shape = (base_layer.out_channels, base_layer.in_channels, *base_layer.kernel_size)
             else:
-                shape = (self.out_channels, self.in_channels * self.kernel_size[0] * self.kernel_size[1])
+                shape = (
+                    base_layer.out_channels,
+                    base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
+                )
         else:
-            raise NotImplementedError(f"LoHa is not implemented for {type(self).__name__} layer")
+            raise TypeError(f"LoHa is not implemented for base layers of type {type(base_layer).__name__}")
 
         # Create weights with provided shape
-        self.create_loha_parameters(adapter_name, r, shape)
+        self.create_adapter_parameters(adapter_name, r, shape)
 
         # Initialize weights
         if init_weights:
-            self.reset_loha_parameters(adapter_name)
+            self.reset_adapter_parameters(adapter_name)
+        else:
+            self.reset_adapter_parameters_random(adapter_name)
 
         # Move new weights to device
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -175,7 +177,8 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
                 scale=torch.tensor(self.scaling[adapter_name]),
             )
 
-        weight = weight.reshape(self.weight.shape)
+        base_layer = self.get_base_layer()
+        weight = weight.reshape(base_layer.weight.shape)
 
         # Perform rank dropout during training - drop rows of addition weights
         rank_dropout = self.rank_dropout[adapter_name]
@@ -190,161 +193,106 @@ class LoHaLayer(BaseTunerLayer, nn.Module):
 
         return weight
 
-    def merge(self) -> None:
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-        for active_adapter in self.active_adapters:
-            if active_adapter in self.hada_w1_a.keys():
-                self.weight.data += self.get_delta_weight(active_adapter)
-                self.merged_adapters.append(active_adapter)
-
-    def unmerge(self) -> None:
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.hada_w1_a.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
-
-    def _op(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._op(x, self.weight)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._op(x, self.weight)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            # Get base weights
-            weight = self.weight.data
+            result = self.base_layer(x, *args, **kwargs)
 
             # Execute all the adapters
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.hada_w1_a.keys():
+                if active_adapter not in self._available_adapters:
                     continue
 
                 module_dropout = self.module_dropout[active_adapter]
 
                 # Modify current execution weights
                 if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    weight = weight + self.get_delta_weight(active_adapter)
-
-            # Perform actual operation
-            result = self._op(x, weight)
+                    result = result + self._get_delta_activations(active_adapter, x, *args, **kwargs)
 
         result = result.to(previous_dtype)
         return result
 
-    def scale_layer(self, scale_factor: float) -> None:
-        if scale_factor != 1:
-            for active_adapter in self.active_adapters:
-                alpha = self.alpha[active_adapter]
-                r = self.r[active_adapter]
-                self.scaling[active_adapter] = (alpha / r) * scale_factor
 
-    def unscale_layer(self) -> None:
-        for active_adapter in self.active_adapters:
-            alpha = self.alpha[active_adapter]
-            r = self.r[active_adapter]
-            self.scaling[active_adapter] = alpha / r
-
-
-class Linear(LoHaLayer, nn.Linear):
+class Linear(LoHaLayer):
     """LoHa implemented in Linear layer"""
 
     def __init__(
         self,
-        in_features: int,
-        out_features: int,
-        bias: bool = True,
-        device: Optional[Union[str, torch.device]] = None,
-        dtype: Optional[torch.dtype] = None,
+        base_layer: nn.Module,
         adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
+        init_weights: bool = True,
         **kwargs,
     ):
-        init_weights = kwargs.pop("init_weights", True)
-        self._init_empty_weights(nn.Linear, in_features, out_features, bias, device=device, dtype=dtype)
-
-        LoHaLayer.__init__(self)
+        super().__init__(base_layer)
 
         # Create adapter and set it active
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
-        self.set_adapter(adapter_name)
 
-    def _op(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, weight, bias=self.bias)
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        delta_weight = self.get_delta_weight(adapter_name)
+        # don't add bias here, because the bias is already included in the output of the base_layer
+        return F.linear(input, delta_weight)
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "loha." + rep
 
 
-class Conv2d(LoHaLayer, nn.Conv2d):
+class Conv2d(LoHaLayer):
     """LoHa implemented in Conv2d layer"""
 
     def __init__(
         self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: Union[int, Tuple[int]],
-        stride: Union[int, Tuple[int]] = 1,
-        padding: Union[int, Tuple[int]] = 0,
-        dilation: int = 1,
-        groups: int = 1,
-        bias: bool = True,
-        padding_mode: str = "zeros",
-        device: Optional[Union[str, torch.device]] = None,
-        dtype: Optional[torch.dtype] = None,
+        base_layer: nn.Module,
         adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
+        init_weights: bool = True,
         **kwargs,
     ):
-        init_weights = kwargs.pop("init_weights", True)
-        self._init_empty_weights(
-            nn.Conv2d,
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=bias,
-            padding_mode=padding_mode,
-            device=device,
-            dtype=dtype,
-        )
-
-        LoHaLayer.__init__(self)
+        super().__init__(base_layer)
 
         # Create adapter and set it active
+        self._active_adapter = adapter_name
         self.update_layer(
             adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
         )
-        self.set_adapter(adapter_name)
 
-    def _op(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        delta_weight = self.get_delta_weight(adapter_name)
+        # don't add bias here, because the bias is already included in the output of the base_layer
+        base_layer = self.get_base_layer()
         return F.conv2d(
             input,
-            weight,
-            bias=self.bias,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups,
+            delta_weight,
+            stride=base_layer.stride,
+            padding=base_layer.padding,
+            dilation=base_layer.dilation,
+            groups=base_layer.groups,
         )
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "loha." + rep
 
 
 # Below code is a direct copy from https://github.com/KohakuBlueleaf/LyCORIS/blob/eb460098187f752a5d66406d3affade6f0a07ece/lycoris/modules/loha.py#L9

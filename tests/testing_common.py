@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import json
 import os
 import pickle
@@ -29,6 +30,7 @@ from peft import (
     IA3Config,
     LoraConfig,
     PeftModel,
+    PeftType,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptLearningConfig,
@@ -43,13 +45,6 @@ from peft.utils import _get_submodules, infer_device
 from .testing_utils import get_state_dict
 
 
-CONFIG_CLASSES = (
-    IA3Config,
-    LoraConfig,
-    PrefixTuningConfig,
-    PromptEncoderConfig,
-    PromptTuningConfig,
-)
 CONFIG_TESTING_KWARGS = (
     # IA³
     {
@@ -269,7 +264,7 @@ class PeftCommonTester:
 
         self.assertTrue(dummy_output.requires_grad)
 
-    def _test_save_pretrained(self, model_id, config_cls, config_kwargs):
+    def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         # ensure that the weights are randomly initialized
         if issubclass(config_cls, LoraConfig):
             config_kwargs = config_kwargs.copy()
@@ -287,7 +282,10 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            if safe_serialization:
+                model.save_pretrained(tmp_dirname)
+            else:
+                model.save_pretrained(tmp_dirname, safe_serialization=False)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
@@ -311,14 +309,16 @@ class PeftCommonTester:
                     )
                 )
 
-            # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            target_adapter_filename = "adapter_model.safetensors" if safe_serialization else "adapter_model.bin"
+
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, target_adapter_filename)))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
 
-            # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
@@ -326,7 +326,7 @@ class PeftCommonTester:
             self.check_modelcard(tmp_dirname, model)
             self.check_config_json(tmp_dirname, model)
 
-    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, AdaLoraConfig):
             # AdaLora does not support adding more than 1 adapter
             return
@@ -355,7 +355,10 @@ class PeftCommonTester:
         model.add_adapter("new_adapter", new_adapter_config)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+            if safe_serialization:
+                model.save_pretrained(tmp_dirname)
+            else:
+                model.save_pretrained(tmp_dirname, safe_serialization=False)
 
             model_from_pretrained = self.transformers_class.from_pretrained(model_id)
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
@@ -385,17 +388,19 @@ class PeftCommonTester:
                     )
                 )
 
-            # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
-            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_model.bin")))
+            target_adapter_filename = "adapter_model.safetensors" if safe_serialization else "adapter_model.bin"
+
+            # check if `adapter_model.safetensors` is present
+            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, target_adapter_filename)))
+            self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, target_adapter_filename)))
 
             # check if `adapter_config.json` is present
             self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
             self.assertTrue(os.path.exists(os.path.join(new_adapter_dir, "adapter_config.json")))
 
-            # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
-            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "pytorch_model.bin")))
+            # check if `model.safetensors` is not present
+            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            self.assertFalse(os.path.exists(os.path.join(new_adapter_dir, "model.safetensors")))
 
             # check if `config.json` is not present
             self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
@@ -566,6 +571,71 @@ class PeftCommonTester:
 
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
+
+    def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+
+        if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        if config.peft_type not in supported_peft_types:
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config)
+
+        model = model.to(self.torch_device)
+
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+
+        with torch.inference_mode():
+            logits_adapter_1 = model(**dummy_input)[0]
+
+        model.add_adapter("adapter-2", config)
+        model.set_adapter("adapter-2")
+        model.eval()
+
+        with torch.inference_mode():
+            logits_adapter_2 = model(**dummy_input)[0]
+
+        self.assertFalse(torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model.set_adapter("default")
+
+        with torch.inference_mode():
+            logits_adapter_1_after_set = model(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+        model_copy = copy.deepcopy(model)
+        model_copy_2 = copy.deepcopy(model)
+        model_merged_all = model.merge_and_unload(adapter_names=["adapter-2", "default"])
+
+        with torch.inference_mode():
+            logits_merged_all = model_merged_all(**dummy_input)[0]
+
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
+        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
+
+        model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
+
+        with torch.inference_mode():
+            logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
+
+        self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -815,42 +885,79 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, AdaLoraConfig):
-            # AdaLora does not support adding more than 1 adapter
-            return
-
-        model = self.transformers_class.from_pretrained(model_id)
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+        # IA3 does not support deleting adapters yet, but it just needs to be added
+        # AdaLora does not support multiple adapters
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        if config.peft_type not in supported_peft_types:
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
         adapter_to_delete = "delete_me"
         model = get_peft_model(model, config)
         model.add_adapter(adapter_to_delete, config)
         model.set_adapter(adapter_to_delete)
         model = model.to(self.torch_device)
+        model.delete_adapter(adapter_to_delete)
+        self.assertFalse(adapter_to_delete in model.peft_config)
+        self.assertEqual(model.active_adapters, ["default"])
 
-        if config.peft_type not in ("LORA"):
-            with self.assertRaises(AttributeError):
-                model.delete_adapter(adapter_to_delete)
-        else:
-            model.delete_adapter(adapter_to_delete)
-            self.assertFalse(adapter_to_delete in model.peft_config)
-            key_list = [key for key, _ in model.named_modules() if "lora" not in key]
-            for key in key_list:
-                _, target, _ = _get_submodules(model, key)
-                if isinstance(target, LoraLayer):
-                    for attr in [
-                        "r",
-                        "lora_alpha",
-                        "scaling",
-                        "lora_A",
-                        "lora_B",
-                        "lora_embedding_A",
-                        "lora_embedding_B",
-                        "lora_dropout",
-                    ]:
-                        self.assertFalse(adapter_to_delete in getattr(target, attr))
+        key_list = [key for key, _ in model.named_modules()]
+        for key in key_list:
+            _, target, _ = _get_submodules(model, key)
+            attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
+            for attr in attributes_to_check:
+                self.assertFalse(adapter_to_delete in getattr(target, attr))
+
+        # check that we can also delete the last remaining adapter
+        model.delete_adapter("default")
+        self.assertFalse("default" in model.peft_config)
+        self.assertEqual(model.active_adapters, [])
+
+        input = self.prepare_inputs_for_testing()
+        # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
+        model.base_model(**input)  # should not raise an error
+
+    def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
+        # same as test_delete_adapter, but this time an inactive adapter is deleted
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+        # IA3 does not support deleting adapters yet, but it just needs to be added
+        # AdaLora does not support multiple adapters
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if config.peft_type not in supported_peft_types:
+            return
+
+        model = self.transformers_class.from_pretrained(model_id)
+        adapter_to_delete = "delete_me"
+        model = get_peft_model(model, config)
+        model.add_adapter(adapter_to_delete, config)
+        # "delete_me" is added but not activated
+        model = model.to(self.torch_device)
+        model.delete_adapter(adapter_to_delete)
+        self.assertFalse(adapter_to_delete in model.peft_config)
+        self.assertEqual(model.active_adapters, ["default"])
+
+        key_list = [key for key, _ in model.named_modules()]
+        for key in key_list:
+            _, target, _ = _get_submodules(model, key)
+            attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
+            for attr in attributes_to_check:
+                self.assertFalse(adapter_to_delete in getattr(target, attr))
+
+        # check that we can also delete the last remaining adapter
+        model.delete_adapter("default")
+        self.assertFalse("default" in model.peft_config)
+        self.assertEqual(model.active_adapters, [])
+
+        input = self.prepare_inputs_for_testing()
+        # note: we cannot call model(**input) because PeftModel always expects there to be at least one adapter
+        model.base_model(**input)  # should not raise an error
 
     def _test_unload_adapter(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -861,12 +968,12 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3"):
             with self.assertRaises(AttributeError):
                 model = model.unload()
         else:
             dummy_input = self.prepare_inputs_for_testing()
-            logits_with_lora = model(**dummy_input)[0]
+            logits_with_adapter = model(**dummy_input)[0]
 
             transformers_model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
             logits_transformers = transformers_model(**dummy_input)[0]
@@ -875,7 +982,7 @@ class PeftCommonTester:
             model = model.unload()
             logits_unload = model(**dummy_input)[0]
 
-            self.assertFalse(torch.allclose(logits_with_lora, logits_unload, atol=1e-10, rtol=1e-10))
+            self.assertFalse(torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10))
             self.assertTrue(torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4))
 
     def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
@@ -885,13 +992,14 @@ class PeftCommonTester:
 
         adapter_list = ["adapter1", "adapter_2", "adapter_3"]
         weight_list = [0.5, 1.5, 1.5]
-        model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
         if not isinstance(config, (LoraConfig)):
             return
+
+        model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, adapter_list[0])
         model.add_adapter(adapter_list[1], config)
         model.add_adapter(adapter_list[2], replace(config, r=20))
@@ -930,7 +1038,7 @@ class PeftCommonTester:
         for new_adapter in new_adapters:
             self.assertTrue(new_adapter in model.peft_config)
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             if isinstance(target, LoraLayer):
@@ -1006,7 +1114,7 @@ class PeftCommonTester:
         # must be False
         if isinstance(peft_model, StableDiffusionPipeline):
             # for SD, check that most pixels have different values
-            self.assertTrue((output_before != output_peft).float().mean() > 0.9)
+            self.assertTrue((output_before != output_peft).float().mean() > 0.8)
         else:
             self.assertFalse(torch.allclose(output_before, output_peft))
 

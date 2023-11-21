@@ -83,6 +83,7 @@ accelerate launch train_dreambooth.py \
   --output_dir=$OUTPUT_DIR \
   --train_text_encoder \
   --with_prior_preservation --prior_loss_weight=1.0 \
+  --num_dataloader_workers=1 \
   --instance_prompt="a photo of sks dog" \
   --class_prompt="a photo of dog" \
   --resolution=512 \
@@ -100,6 +101,8 @@ accelerate launch train_dreambooth.py \
   --gradient_checkpointing \
   --max_train_steps=800
 ```
+
+If you are running this script on Windows, you may need to set the `--num_dataloader_workers` to 0.
 
 ## Inference with a single adapter
 
@@ -171,7 +174,7 @@ image.save("DESTINATION_PATH_FOR_THE_IMAGE")
 ## Multi-adapter inference
 
 With PEFT you can combine multiple adapters for inference. In the previous example you have fine-tuned Stable Diffusion on 
-some dog images. The pipeline created based on these weights got a name - `adapter_name="dog`. Now, suppose you also fine-tuned 
+some dog images. The pipeline created based on these weights got a name - `adapter_name="dog"`. Now, suppose you also fine-tuned 
 this base model on images of a crochet toy. Let's see how we can use both adapters. 
 
 First, you'll need to perform all the steps as in the single adapter inference example:
