@@ -131,11 +131,6 @@ for k, v in dtypes.items():
 
 """### Training"""
 
-
-data = load_dataset("Abirate/english_quotes")
-data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
-
-
 data = load_dataset("Abirate/english_quotes")
 data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
 
