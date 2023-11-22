@@ -19,6 +19,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
+from functools import partial
 
 import torch
 from torch import nn
@@ -35,6 +36,32 @@ from peft.utils import (
 
 from .config import VeraConfig
 from .layer import Conv2d, Embedding, Linear, VeraLayer
+from torch.nn.init import _calculate_correct_fan
+import math
+from typing import Union
+
+
+def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
+    kwargs["vera_A"] = vera_A
+    kwargs["vera_B"] = vera_B
+    return args, kwargs
+
+
+def _kaiming_init(
+    tensor_or_shape: Union[torch.Tensor, tuple],
+    generator: torch.Generator,
+):
+    if isinstance(tensor_or_shape, tuple):
+        tensor = torch.empty(tensor_or_shape)
+    else:
+        tensor = tensor_or_shape
+    fan = _calculate_correct_fan(tensor, "fan_in")
+    gain = math.sqrt(2)
+    std = gain / math.sqrt(fan)
+    bound = math.sqrt(3.0) * std
+
+    with torch.no_grad():
+        return tensor.uniform_(-bound, bound, generator=generator)
 
 
 class VeraModel(BaseTuner):
@@ -95,6 +122,20 @@ class VeraModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
+        generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
+
+        self.vera_A = _kaiming_init((config.r, config.in_rank), generator=generator)
+        self.vera_B = _kaiming_init((config.out_rank, config.r), generator=generator)
+
+        self.vera_A = self.register_buffer("vera_A", self.vera_A, persistent=config.save_projection)
+        self.vera_B = self.register_buffer("vera_B", self.vera_B, persistent=config.save_projection)
+
+        assert self.vera_A.requires_grad == False
+
+        if not config.save_projection:
+            # TODO: would like to raise warning here but unsure what the "peft-y" way is
+            # specifically, warning about prng potentially not being reliable at restoring exactly the same weights.
+            pass
 
     def _check_new_adapter_config(self, config: VeraConfig) -> None:
         """
@@ -246,14 +287,29 @@ class VeraModel(BaseTuner):
             embedding_kwargs.pop("fan_in_fan_out", None)
             in_features, out_features = target.num_embeddings, target.embedding_dim
             new_module = Embedding(
-                adapter_name, in_features, out_features, vera_config.projection_prng_key, d_initial=vera_config.d_initial, **embedding_kwargs
+                adapter_name,
+                in_features,
+                out_features,
+                vera_config.projection_prng_key,
+                d_initial=vera_config.d_initial,
+                **embedding_kwargs,
             )
         elif isinstance(target, torch.nn.Conv2d):
             out_channels, in_channels = target.weight.size()[:2]
             kernel_size = target.weight.size()[2:]
             stride = target.stride
             padding = target.padding
-            new_module = Conv2d(adapter_name, vera_config.projection_prng_key, in_channels, out_channels, kernel_size, stride, padding, d_initial=vera_config.d_initial, **kwargs)
+            new_module = Conv2d(
+                adapter_name,
+                vera_config.projection_prng_key,
+                in_channels,
+                out_channels,
+                kernel_size,
+                stride,
+                padding,
+                d_initial=vera_config.d_initial,
+                **kwargs,
+            )
         else:
             if isinstance(target, torch.nn.Linear):
                 in_features, out_features = target.in_features, target.out_features
@@ -280,7 +336,13 @@ class VeraModel(BaseTuner):
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(
-                adapter_name, in_features, out_features, vera_config.projection_prng_key, bias=bias, d_initial=vera_config.d_initial, **kwargs
+                adapter_name,
+                in_features,
+                out_features,
+                vera_config.projection_prng_key,
+                bias=bias,
+                d_initial=vera_config.d_initial,
+                **kwargs,
             )
 
         return new_module
@@ -655,3 +717,19 @@ class VeraModel(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def forward(self, *args, **kwargs):
+        hook_handles = []
+        for module in self.modules():
+            if isinstance(module, VeraLayer):
+                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+        try:
+            outputs = super().forward(*args, **kwargs)
+        finally:
+            for handle in hook_handles:
+                handle.remove()
+
+        return outputs

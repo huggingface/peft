@@ -54,6 +54,11 @@ class VeraConfig(PeftConfig):
     # TODO: add docstring for projection_prng_key
 
     r: int = field(default=8, metadata={"help": "Vera attention dimension"})
+
+    # TODO: support automatically determining in and out rank
+    in_rank: int = field(default=1024, metadata={"help": "Vera input dimension size"})
+    out_rank: int = field(default=1024, metadata={"help": "Vera output dimension size"})
+
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
@@ -63,8 +68,7 @@ class VeraConfig(PeftConfig):
     )
     # TODO: improve help message
     projection_prng_key: Optional[int] = field(default=None, metadata={"help": "Vera PRNG init key"})
-    regenerate_projection: bool = field(default=False, metadata={"help": "Set this to True to regenerate VeRA A B projection matrices on the fly rather than storing them as a model parameter. This can help save some memory at the cost of speed."})
-    save_projection: bool = field(default=False, metadata={"help": "Set this to True to save VeRA A B projection matrices alongside the b d adapter weights in saved checkpoints. This will increase the size of the checkpoint, but means we can reliably restore the checkpoint on all system configurations."})
+    save_projection: bool = field(default=True, metadata={"help": "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on all system configurations."})
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
     d_initial: float = field(default=1.0, metadata={"help": "Initial init value for d vector."})
     fan_in_fan_out: bool = field(
