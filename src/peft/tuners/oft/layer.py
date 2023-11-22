@@ -86,7 +86,6 @@ class OFTLayer(nn.Module, LycorisLayer):
         self.scaling[adapter_name] = alpha / r
         self.module_dropout[adapter_name] = module_dropout
         self.coft[adapter_name] = coft
-        self.eps[adapter_name] = eps
         self.block_share[adapter_name] = block_share
 
         # Determine shape of OFT weights
@@ -100,6 +99,8 @@ class OFTLayer(nn.Module, LycorisLayer):
             )
         else:
             raise TypeError(f"OFT is not implemented for base layers of type {type(base_layer).__name__}")
+
+        self.eps[adapter_name] = eps * math.ceil(shape[1] / r) * math.ceil(shape[1] / r)
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape, block_share)

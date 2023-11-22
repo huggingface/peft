@@ -209,8 +209,14 @@ TEST_CASES = [
             "module_dropout": 0.1,
         },
     ),
+    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"target_modules": ["lin0", "lin1"], "coft": True}),
+    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"target_modules": ["lin0", "lin1"], "block_share": True}),
+    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"target_modules": ["lin0", "lin1"], "coft": True, "block_share": True}),
     ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d", "lin0"], "coft": True}),
+    ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d", "lin0"], "block_share": True}),
+    ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d", "lin0"], "coft": True, "block_share": True}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
