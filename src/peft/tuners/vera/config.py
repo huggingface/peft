@@ -51,6 +51,7 @@ class VeraConfig(PeftConfig):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `vera_alpha`.
     """
+
     # TODO: add docstring for projection_prng_key
 
     r: int = field(default=8, metadata={"help": "Vera attention dimension"})
@@ -68,7 +69,12 @@ class VeraConfig(PeftConfig):
     )
     # TODO: improve help message
     projection_prng_key: Optional[int] = field(default=None, metadata={"help": "Vera PRNG init key"})
-    save_projection: bool = field(default=True, metadata={"help": "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on all system configurations."})
+    save_projection: bool = field(
+        default=True,
+        metadata={
+            "help": "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on all system configurations."
+        },
+    )
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
     d_initial: float = field(default=1.0, metadata={"help": "Initial init value for d vector."})
     fan_in_fan_out: bool = field(

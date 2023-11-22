@@ -353,8 +353,9 @@ class Linear(nn.Linear, VeraLayer):
                 lambda_b = self.vera_lambda_b[active_adapter]
 
                 dropout = self.vera_dropout[active_adapter]
-                x = x.to(vera_A.weight.dtype)
-                result += lambda_b * vera_B(lambda_d * vera_A(dropout(x)))
+                x = x.to(lambda_d.dtype)
+                # TODO: replace with bmm?
+                result += lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)
 
         result = result.to(previous_dtype)
         return result

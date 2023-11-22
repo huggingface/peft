@@ -22,6 +22,7 @@ from transformers import (
     AutoConfig,
 )
 from tqdm import tqdm
+from transformers.models.roberta.modeling_roberta import RobertaAttention
 
 experiment_configs = {
     "sst2": dict(
@@ -50,7 +51,7 @@ task = "mrpc"
 batch_size = experiment_configs[task]["batch_size"]
 model_name_or_path = "roberta-base"
 peft_type = PeftType.VERA
-device = "cuda"
+device = "mps"
 num_epochs = experiment_configs[task]["num_epochs"]
 dropout = experiment_configs[task]["dropout"]
 
@@ -130,15 +131,6 @@ test_accuracies = []
 # for key in [1234, 123456789, 1234567890]:
 for key in [1234, 123456789, 1234567890, 0xFFFF, 0, 1, 666]:
     best_accuracy = 0.0
-    peft_config = VeraConfig(
-        task_type="SEQ_CLS",
-        inference_mode=False,
-        r=r,
-        vera_dropout=dropout,
-        projection_prng_key=key,
-        d_initial=d_initial,
-        target_modules=["RobertaSelfAttention"]
-    )
 
     if task in ["stsb"]:
         model = AutoModelForSequenceClassification.from_pretrained(
@@ -148,6 +140,20 @@ for key in [1234, 123456789, 1234567890, 0xFFFF, 0, 1, 666]:
         model = AutoModelForSequenceClassification.from_pretrained(
             model_name_or_path, return_dict=True, max_length=max_length
         )
+
+    peft_config = VeraConfig(
+        task_type="SEQ_CLS",
+        inference_mode=False,
+        r=r,
+        vera_dropout=dropout,
+        projection_prng_key=key,
+        d_initial=d_initial,
+        in_rank=model.config.hidden_size,
+        out_rank=model.config.hidden_size,
+        target_modules=["attention.query", "attention.key", "attention.value", "attention.output.dense"],
+    )
+
+    # import ipdb; ipdb.set_trace()
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 

@@ -122,15 +122,14 @@ class VeraModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
+        config = config[adapter_name]
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
 
-        self.vera_A = _kaiming_init((config.r, config.in_rank), generator=generator)
-        self.vera_B = _kaiming_init((config.out_rank, config.r), generator=generator)
+        vera_A = _kaiming_init((config.r, config.in_rank), generator=generator)
+        vera_B = _kaiming_init((config.out_rank, config.r), generator=generator)
 
-        self.vera_A = self.register_buffer("vera_A", self.vera_A, persistent=config.save_projection)
-        self.vera_B = self.register_buffer("vera_B", self.vera_B, persistent=config.save_projection)
-
-        assert self.vera_A.requires_grad == False
+        self.register_buffer("vera_A", vera_A, persistent=config.save_projection)
+        self.register_buffer("vera_B", vera_B, persistent=config.save_projection)
 
         if not config.save_projection:
             # TODO: would like to raise warning here but unsure what the "peft-y" way is
