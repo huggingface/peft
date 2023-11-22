@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import math
 import operator
 import re
 import warnings
@@ -517,8 +518,8 @@ class LoraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         else:
                             continue
-                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data
+                        target_lora_A.data += current_adapter_lora_A.data * math.sqrt(weight) * target.scaling[adapter]
+                        target_lora_B.data += current_adapter_lora_B.data * math.sqrt(weight)
                 elif combination_type == "cat":
                     loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):
