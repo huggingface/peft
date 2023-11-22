@@ -308,6 +308,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     revision=kwargs.get("revision", None),
                     cache_dir=kwargs.get("cache_dir", None),
                     use_auth_token=kwargs.get("use_auth_token", None),
+                    token=kwargs.get("token", None),
                 )
             ].from_pretrained(model_id, **kwargs)
         elif isinstance(config, PeftConfig):
