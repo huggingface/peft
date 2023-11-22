@@ -978,7 +978,6 @@ class PeftModelForCausalLM(PeftModel):
         input_ids=None,
         attention_mask=None,
         inputs_embeds=None,
-        labels=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
@@ -993,7 +992,6 @@ class PeftModelForCausalLM(PeftModel):
                 return self.base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
-                    labels=labels,
                     output_attentions=output_attentions,
                     output_hidden_states=output_hidden_states,
                     return_dict=return_dict,
@@ -1004,7 +1002,6 @@ class PeftModelForCausalLM(PeftModel):
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 inputs_embeds=inputs_embeds,
-                labels=labels,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
@@ -1026,7 +1023,6 @@ class PeftModelForCausalLM(PeftModel):
         kwargs.update(
             {
                 "attention_mask": attention_mask,
-                "labels": labels,
                 "output_attentions": output_attentions,
                 "output_hidden_states": output_hidden_states,
                 "return_dict": return_dict,
@@ -1042,6 +1038,7 @@ class PeftModelForCausalLM(PeftModel):
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
             # concat prompt labels
+            labels = kwargs["labels"] if "labels" in kwargs else None
             if labels is not None:
                 prefix_labels = torch.full((batch_size, peft_config.num_virtual_tokens), -100).to(labels.device)
                 kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
