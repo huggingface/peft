@@ -1022,7 +1022,7 @@ class PeftCommonTester:
             adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
         )
 
-        # test linear re-weighting with multiple adapters with only single adapter having weight 1.0
+        # test linear re-weighting with multiple adapters with only first adapter having non zero weight
         model.add_weighted_adapter(
             adapter_list[:2],
             [weight_list[0], 0],
