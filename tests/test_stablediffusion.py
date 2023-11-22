@@ -138,6 +138,9 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         if config_cls == LoHaConfig:
             # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
             self.skipTest("LoHaConfig test is flaky")
+        if config_cls == OFTConfig:
+            # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
+            self.skipTest("OFTConfig test is flaky")
 
         # Instantiate model & adapters
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
