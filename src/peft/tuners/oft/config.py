@@ -32,8 +32,8 @@ class OFTConfig(LycorisConfig):
         target_modules (`Union[List[str],str]`): The names of the modules to apply OFT to.
         init_weights (`bool`): Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the OFT transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the OFT
+            The layer indexes to transform, if this argument is specified, it will apply the OFT transformations on the
+            layer indexes that are specified in this list. If a single integer is passed, it will apply the OFT
             transformations on the layer at this index.
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
@@ -46,7 +46,8 @@ class OFTConfig(LycorisConfig):
             specified by `alpha`.
         modules_to_save (`List[str]`): The names of modules to be set as trainable except OFT parameters.
         coft (`bool`): Whether to use the constrainted variant of OFT or not.
-        eps (`float`): The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
+        eps (`float`):
+            The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
         block_share (`bool`): Whether to share the OFT parameters between blocks or not.
     """
 
