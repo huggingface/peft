@@ -163,6 +163,7 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
+
     torch_device = infer_device()
     transformers_class = None
 
@@ -1021,6 +1022,14 @@ class PeftCommonTester:
             adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
         )
 
+        # test linear re-weighting with multiple adapters with only first adapter having non zero weight
+        model.add_weighted_adapter(
+            adapter_list[:2],
+            [weight_list[0], 0],
+            "multi_adapter_linear_reweighting_single_enabled",
+            combination_type="linear",
+        )
+
         with self.assertRaises(ValueError):
             model.add_weighted_adapter(
                 adapter_list[1:],
@@ -1034,6 +1043,7 @@ class PeftCommonTester:
             "multi_adapter_svd_reweighting",
             "multi_adapter_cat_reweighting",
             "multi_adapter_linear_reweighting",
+            "multi_adapter_linear_reweighting_single_enabled",
         ]
         for new_adapter in new_adapters:
             self.assertTrue(new_adapter in model.peft_config)
