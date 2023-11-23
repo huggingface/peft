@@ -380,6 +380,9 @@ class LoraModel(BaseTuner):
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
+            if hasattr(module, "_hf_hook"):
+                module._hf_hook.pre_forward(module)
+
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
@@ -392,6 +395,9 @@ class LoraModel(BaseTuner):
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                
+            if hasattr(module, "_hf_hook"):
+                module._hf_hook.post_forward(module, torch.tensor([]))
 
         return self.model
 
