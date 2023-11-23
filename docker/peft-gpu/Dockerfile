@@ -56,7 +56,8 @@ RUN source activate peft && \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft
 
-RUN pip freeze | grep transformers
+RUN source activate peft && \ 
+    pip freeze | grep transformers
 
 RUN echo "source activate peft" >> ~/.profile
 
