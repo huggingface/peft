@@ -45,15 +45,14 @@ class OFTModel(LycorisTuner):
 
         >>> config_te = OFTConfig(
         ...     r=8,
-        ...     lora_alpha=32,
+        ...     alpha=32,
         ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-        ...     rank_dropout=0.0,
         ...     module_dropout=0.0,
         ...     init_weights=True,
         ... )
         >>> config_unet = OFTConfig(
         ...     r=8,
-        ...     lora_alpha=32,
+        ...     alpha=32,
         ...     target_modules=[
         ...         "proj_in",
         ...         "proj_out",
@@ -64,10 +63,8 @@ class OFTModel(LycorisTuner):
         ...         "ff.net.0.proj",
         ...         "ff.net.2",
         ...     ],
-        ...     rank_dropout=0.0,
         ...     module_dropout=0.0,
         ...     init_weights=True,
-        ...     use_effective_conv2d=True,
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
