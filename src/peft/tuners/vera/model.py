@@ -120,21 +120,29 @@ class VeraModel(BaseTuner):
         - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
     """
 
+    def _find_first_dim(self) -> int:
+        for module in self.base_model.modules():
+            # TODO: check this is correct also for conv and embedding as base weight shape may be different
+            # TODO: could expand to return "first dim of each layer type"
+            if isinstance(module, VeraLayer):
+                return module.weight.shape[-1]
+
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
         config = config[adapter_name]
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
 
-        vera_A = _kaiming_init((config.r, config.in_rank), generator=generator)
-        vera_B = _kaiming_init((config.out_rank, config.r), generator=generator)
+        first_vera_dim = self._find_first_dim()
+        vera_A = _kaiming_init((config.r, first_vera_dim), generator=generator)
+        vera_B = _kaiming_init((first_vera_dim, config.r), generator=generator)
 
         self.register_buffer("vera_A", vera_A, persistent=config.save_projection)
         self.register_buffer("vera_B", vera_B, persistent=config.save_projection)
 
         if not config.save_projection:
-            # TODO: would like to raise warning here but unsure what the "peft-y" way is
-            # specifically, warning about prng potentially not being reliable at restoring exactly the same weights.
-            pass
+            warnings.warn(
+                "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection` to `True` to guarantee restoring the checkpoint correctly on all system configurations."
+            )
 
     def _check_new_adapter_config(self, config: VeraConfig) -> None:
         """

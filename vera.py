@@ -148,8 +148,6 @@ for key in [1234, 123456789, 1234567890, 0xFFFF, 0, 1, 666]:
         vera_dropout=dropout,
         projection_prng_key=key,
         d_initial=d_initial,
-        in_rank=model.config.hidden_size,
-        out_rank=model.config.hidden_size,
         target_modules=["attention.query", "attention.key", "attention.value", "attention.output.dense"],
         save_projection=True,
     )

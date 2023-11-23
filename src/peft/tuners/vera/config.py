@@ -52,13 +52,7 @@ class VeraConfig(PeftConfig):
             specified by `vera_alpha`.
     """
 
-    # TODO: add docstring for projection_prng_key
-
     r: int = field(default=8, metadata={"help": "Vera attention dimension"})
-
-    # TODO: support automatically determining in and out rank
-    in_rank: int = field(default=1024, metadata={"help": "Vera input dimension size"})
-    out_rank: int = field(default=1024, metadata={"help": "Vera output dimension size"})
 
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
