@@ -49,7 +49,7 @@ def get_closest_label(eval_pred, classes):
 
 # Converting Bytes to Megabytes
 def b2mb(x):
-    return int(x / 2**20)
+    return int(x / 2 ** 20)
 
 
 # This context manager is used to track the peak memory usage of the process
@@ -120,9 +120,7 @@ def main():
     dataset = load_dataset("ought/raft", dataset_name)
     classes = [k.replace("_", " ") for k in dataset["train"].features["Label"].names]
     dataset = dataset.map(
-        lambda x: {"text_label": [classes[label] for label in x["Label"]]},
-        batched=True,
-        num_proc=1,
+        lambda x: {"text_label": [classes[label] for label in x["Label"]]}, batched=True, num_proc=1,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
@@ -174,9 +172,7 @@ def main():
 
     # lr scheduler
     lr_scheduler = get_linear_schedule_with_warmup(
-        optimizer=optimizer,
-        num_warmup_steps=0,
-        num_training_steps=(len(train_dataloader) * num_epochs),
+        optimizer=optimizer, num_warmup_steps=0, num_training_steps=(len(train_dataloader) * num_epochs),
     )
 
     model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler = accelerator.prepare(
@@ -298,20 +294,21 @@ def main():
         pred_df.to_csv(f"data/{dataset_name}/predictions.csv", index=False)
 
     accelerator.wait_for_everyone()
-    """Option1: Pushing the model to the hub
-    model.push_to_hub(
-        f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
-        state_dict=accelerator.get_state_dict(model),
-        token = "hf_..."
+    # Option1: Pushing the model to Hugging Face Hub
+    # model.push_to_hub(
+    #     f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
+    #     token = "hf_..."
+    # )
+    # token (`bool` or `str`, *optional*):
+    #     `token` is to be used for HTTP Bearer authorization when accessing remote files. If `True`, will use the token generated
+    #     when running `huggingface-cli login` (stored in `~/.huggingface`). Will default to `True` if `repo_url`
+    #     is not specified.
+    #     Or you can get your token from https://huggingface.co/settings/token
+
+    # Option2: Saving the model locally
+    peft_model_id = f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace(
+        "/", "_"
     )
-    token (`bool` or `str`, *optional*):
-        The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
-        when running `huggingface-cli login` (stored in `~/.huggingface`). Will default to `True` if `repo_url`
-        is not specified.
-        Or you can get your token from https://huggingface.co/settings/token
-    """
-    """Option2: Saving the model locally"""
-    peft_model_id = f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_")
     model.save_pretrained(peft_model_id)
     accelerator.wait_for_everyone()
 
