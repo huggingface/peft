@@ -118,11 +118,11 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
       as the adapters are commutative, the order does not matter for the final result.
 
     Args:
-        model (:obj:`torch.nn.Module`):
+        model (`torch.nn.Module`):
             The model to be tuned.
-        config (:obj:`PeftConfig`):
+        config (`PeftConfig`):
             The config of the model to be tuned. The adapter type must be compatible.
-        adapter_name (:obj:`str`, `optional`, defaults to :obj:`"default"`):
+        adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
     """
 

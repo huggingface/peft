@@ -96,7 +96,7 @@ class MixedModel(BaseTuner):
         elif isinstance(config, lokr.LoKrConfig):
             lokr.LoKrModel._create_and_replace(self, config, *args, **kwargs)
         else:
-            raise ValueError(f"Unsupporte config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
+            raise ValueError(f"Unsupported config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
 
     def _replace_module(self, parent, child_name, new_module, child) -> None:
         setattr(parent, child_name, new_module)
