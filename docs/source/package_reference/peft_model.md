@@ -1,3 +1,7 @@
+<!--⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+rendered properly in your Markdown viewer.
+-->
+
 # Models
 
 [`PeftModel`] is the base model class for specifying the base Transformer model and configuration to apply a PEFT method to. The base `PeftModel` contains methods for loading and saving models from the Hub, and supports the [`PromptEncoder`] for prompt learning.
