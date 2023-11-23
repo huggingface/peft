@@ -386,7 +386,7 @@ class VeraModel(BaseTuner):
             if isinstance(module, VeraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge()
+                    module.unmerge(self.vera_A, self.vera_B)
                 module.set_adapter(adapter_name)
 
     @staticmethod
@@ -426,7 +426,7 @@ class VeraModel(BaseTuner):
                     else:
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
-                    target.merge(safe_merge=safe_merge)
+                    target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`

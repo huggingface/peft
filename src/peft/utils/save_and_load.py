@@ -19,6 +19,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
+import warnings
 
 from .hub_utils import hub_file_exists
 from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
@@ -73,6 +74,13 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
     elif config.peft_type == PeftType.VERA:
         to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
+        if config.save_projection:
+            if "base_model.vera_A" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection! Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.vera_A"] = state_dict["base_model.vera_A"]
+            to_return["base_model.vera_B"] = state_dict["base_model.vera_B"]
 
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
@@ -149,6 +157,20 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        elif config.peft_type == PeftType.VERA:
+            if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
+                raise ValueError(
+                    "Specified to load vera_A and vera_B from state dictionary however they were not present!"
+                )
+            elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
+                warnings.warn(
+                    "Specified to not load vera_A and vera_B from state dictionary however they are present in state dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using `peft_config.save_projection = True`"
+                )
+            elif not config.save_projection:  # and no vera_A in state dictionary
+                warnings.warn(
+                    "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on PRNG initialisation to restore these projections using `config.projection_prng_key`, which may not be accurate on all system configurations."
+                )
+
     elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
     else:

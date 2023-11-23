@@ -45,13 +45,13 @@ experiment_configs = {
     ),
 }
 
-task = "mrpc"
+task = "stsb"
 
 # hparams
 batch_size = experiment_configs[task]["batch_size"]
 model_name_or_path = "roberta-base"
 peft_type = PeftType.VERA
-device = "mps"
+device = "cuda"
 num_epochs = experiment_configs[task]["num_epochs"]
 dropout = experiment_configs[task]["dropout"]
 
@@ -151,6 +151,7 @@ for key in [1234, 123456789, 1234567890, 0xFFFF, 0, 1, 666]:
         in_rank=model.config.hidden_size,
         out_rank=model.config.hidden_size,
         target_modules=["attention.query", "attention.key", "attention.value", "attention.output.dense"],
+        save_projection=True,
     )
 
     # import ipdb; ipdb.set_trace()

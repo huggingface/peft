@@ -236,7 +236,7 @@ class Linear(nn.Linear, VeraLayer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -258,8 +258,7 @@ class Linear(nn.Linear, VeraLayer):
                     # because of the copy operation.
                     orig_weights = self.weight.data.clone()
 
-                    # TODO: pass vera_A/B here
-                    orig_weights += self.get_delta_weight(active_adapter)
+                    orig_weights += self.get_delta_weight(active_adapter, vera_A, vera_B)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -268,11 +267,10 @@ class Linear(nn.Linear, VeraLayer):
 
                     self.weight.data = orig_weights
                 else:
-                    # TODO: pass vera_A/B here
-                    self.weight.data += self.get_delta_weight(active_adapter)
+                    self.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
                 self.merged_adapters.append(active_adapter)
 
-    def unmerge(self) -> None:
+    def unmerge(self, vera_A: torch.Tensor, vera_B: torch.Tensor) -> None:
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -281,7 +279,7 @@ class Linear(nn.Linear, VeraLayer):
             if active_adapter in self.vera_lambda_d.keys():
 
                 # TODO: pass vera_A/B here
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.weight.data -= self.get_delta_weight(active_adapter, vera_A, vera_B)
 
     def get_delta_weight(self, adapter, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
         """
@@ -291,16 +289,16 @@ class Linear(nn.Linear, VeraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = vera_B.weight.device
-        dtype = vera_B.weight.dtype
+        device = vera_B.device
+        dtype = vera_B.dtype
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
         # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
-        weight_A = vera_A.weight
-        weight_B = vera_B.weight
+        weight_A = vera_A
+        weight_B = vera_B
         lambda_d = self.vera_lambda_d[adapter]
         lambda_b = self.vera_lambda_b[adapter]
 
