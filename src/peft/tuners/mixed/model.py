@@ -257,7 +257,7 @@ class MixedModel(BaseTuner):
         return self.model
 
     def add_weighted_adapter(self, *args: Any, **kwargs: Any) -> None:
-        raise NotImplementedError(f"Weighted adapters are not supported yet for {self.__class__.__name__} (yet).")
+        raise NotImplementedError(f"Weighted adapters are not supported for {self.__class__.__name__} (yet).")
 
     def delete_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         """

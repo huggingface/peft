@@ -237,7 +237,16 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
     def set_adapter(self, adapter_name: Union[str, list[str]]) -> None:
         """
-        Sets the active adapter.
+        Sets the active adapter(s) for the model.
+
+        Note that the order in which the adapters are applied during the forward pass may not be the same as the order
+        in which they are passed to this function. Instead, the order during the forward pass is determined by the
+        order in which the adapters were loaded into the model. The active adapters only determine which adapters are
+        active during the forward pass, but not the order in which they are applied.
+
+        Args:
+            adapter_name (`str` or `List[str]`):
+                The name of the adapter(s) to be activated.
         """
         if isinstance(adapter_name, str):
             adapter_name = [adapter_name]
