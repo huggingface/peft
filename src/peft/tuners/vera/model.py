@@ -121,23 +121,57 @@ class VeraModel(BaseTuner):
     """
 
     def _find_first_dim(self) -> int:
-        for module in self.base_model.modules():
-            # TODO: check this is correct also for conv and embedding as base weight shape may be different
-            # TODO: could expand to return "first dim of each layer type"
-            if isinstance(module, VeraLayer):
-                return module.weight.shape[-1]
+        first_linear, first_embedding = None, None
+        for module in self.model.modules():
+            if isinstance(module, Linear):
+                if first_linear is not None and tuple(module.weight.shape) != first_linear:
+                    raise ValueError(
+                        "Multiple target linear layers with different dimensions were specified! Vera only supports a single dimension size."
+                    )
+                first_linear = tuple(module.weight.shape)
+
+            elif isinstance(module, Embedding):
+                if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
+                    raise ValueError(
+                        "Multiple target embedding layers with different dimensions or vocabulary sizes were specified! Vera only supports a single size."
+                    )
+                first_embedding = tuple(module.weight.shape)
+
+            if first_linear is not None and first_embedding is not None:
+                return first_linear, first_embedding
+
+        return first_linear, first_embedding
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
         config = config[adapter_name]
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
 
-        first_vera_dim = self._find_first_dim()
-        vera_A = _kaiming_init((config.r, first_vera_dim), generator=generator)
-        vera_B = _kaiming_init((first_vera_dim, config.r), generator=generator)
+        first_linear, first_embedding = self._find_first_dim()
 
-        self.register_buffer("vera_A", vera_A, persistent=config.save_projection)
-        self.register_buffer("vera_B", vera_B, persistent=config.save_projection)
+        if first_embedding is not None:
+            first_embedding_vocab_size, first_embedding_dim = first_embedding
+        if first_linear is not None:
+            first_linear_out_dim, first_linear_in_dim = first_linear
+
+        if first_linear is not None:
+            vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
+            vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
+
+            self.register_buffer("vera_A", vera_A, persistent=config.save_projection)
+            self.register_buffer("vera_B", vera_B, persistent=config.save_projection)
+        else:
+            self.vera_A = None
+            self.vera_B = None
+
+        if first_embedding is not None:
+            vera_embedding_A = torch.randn((first_embedding_vocab_size, config.r), generator=generator)
+            vera_embedding_B = torch.randn((first_embedding_dim, config.r), generator=generator)
+            self.register_buffer("vera_embedding_A", vera_embedding_A, persistent=config.save_projection)
+            self.register_buffer("vera_embedding_B", vera_embedding_B, persistent=config.save_projection)
+        else:
+            self.vera_embedding_A = None
+            self.vera_embedding_B = None
 
         if not config.save_projection:
             warnings.warn(
@@ -160,6 +194,7 @@ class VeraModel(BaseTuner):
                 "set bias to 'none' for all adapters."
             )
 
+        # TODO: check this in conjunction with save_projection
         if config.projection_prng_key is None:
             raise ValueError("Vera PRNG initialisation key cannot be `None`. Set `VeraConfig.projection_prng_key`.")
 
@@ -191,8 +226,10 @@ class VeraModel(BaseTuner):
             "fan_in_fan_out": vera_config.fan_in_fan_out,
             "init_vera_weights": vera_config.init_vera_weights,
         }
-        kwargs["loaded_in_8bit"] = False
-        kwargs["loaded_in_4bit"] = False
+
+        # TODO: add back once we have quant support
+        # kwargs["loaded_in_8bit"] = False
+        # kwargs["loaded_in_4bit"] = False
         kwargs["bias"] = bias
 
         # TODO: add in quant?
@@ -208,7 +245,6 @@ class VeraModel(BaseTuner):
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
-                vera_config.projection_prng_key,
                 d_initial=vera_config.d_initial,
             )
         elif isinstance(target, VeraLayer) and isinstance(target, torch.nn.Embedding):
@@ -217,7 +253,6 @@ class VeraModel(BaseTuner):
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
-                vera_config.projection_prng_key,
                 d_initial=vera_config.d_initial,
             )
 
@@ -227,7 +262,6 @@ class VeraModel(BaseTuner):
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
-                vera_config.projection_prng_key,
                 d_initial=vera_config.d_initial,
             )
         else:
@@ -301,7 +335,6 @@ class VeraModel(BaseTuner):
                 adapter_name,
                 in_features,
                 out_features,
-                vera_config.projection_prng_key,
                 d_initial=vera_config.d_initial,
                 **embedding_kwargs,
             )
@@ -312,7 +345,6 @@ class VeraModel(BaseTuner):
             padding = target.padding
             new_module = Conv2d(
                 adapter_name,
-                vera_config.projection_prng_key,
                 in_channels,
                 out_channels,
                 kernel_size,
@@ -350,7 +382,6 @@ class VeraModel(BaseTuner):
                 adapter_name,
                 in_features,
                 out_features,
-                vera_config.projection_prng_key,
                 bias=bias,
                 d_initial=vera_config.d_initial,
                 **kwargs,
@@ -398,7 +429,10 @@ class VeraModel(BaseTuner):
             if isinstance(module, VeraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    module.unmerge(self.vera_A, self.vera_B)
+                    if isinstance(module, Linear):
+                        module.unmerge(self.vera_A, self.vera_B)
+                    elif isinstance(module, Embedding):
+                        module.unmerge(self.vera_embedding_A, self.vera_embedding_B)
                 module.set_adapter(adapter_name)
 
     @staticmethod
@@ -438,7 +472,10 @@ class VeraModel(BaseTuner):
                     else:
                         new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
                 if merge:
-                    target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge)
+                    if isinstance(target, Linear):
+                        target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge)
+                    elif isinstance(target, Embedding):
+                        target.merge(self.vera_embedding_A, self.vera_embedding_B, safe_merge=safe_merge)
                 self._replace_module(parent, target_name, new_module, target)
 
             # save any additional trainable modules part of `modules_to_save`
@@ -732,8 +769,13 @@ class VeraModel(BaseTuner):
     def forward(self, *args, **kwargs):
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, VeraLayer):
+            if isinstance(module, Linear):
                 pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+            elif isinstance(module, Embedding):
+                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A, vera_B=self.vera_embedding_B)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
