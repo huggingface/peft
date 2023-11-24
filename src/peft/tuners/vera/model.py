@@ -151,6 +151,7 @@ class VeraModel(BaseTuner):
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
         """
+        # the below todo is copied from LoRA
         # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
         # does not fully correspond to the error message.
         if (len(self.peft_config) > 1) and (config.bias != "none"):
@@ -194,10 +195,12 @@ class VeraModel(BaseTuner):
         kwargs["loaded_in_4bit"] = False
         kwargs["bias"] = bias
 
+        # TODO: add in quant?
         # quantization_config = get_quantization_config(self.model, method="gptq")
         # if quantization_config is not None:
         # kwargs["gptq_quantization_config"] = quantization_config
 
+        # the below todo is copied from LoRA
         # TODO: better deal with that
         if isinstance(target, VeraLayer) and isinstance(target, torch.nn.Conv2d):
             target.update_layer_conv2d(
@@ -244,6 +247,7 @@ class VeraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
+        # the below todo is copied from LoRA
         # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
         if not hasattr(new_module, "base_layer"):
             new_module.weight = child.weight

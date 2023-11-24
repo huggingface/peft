@@ -27,28 +27,17 @@ from peft.utils.other import transpose
 class VeraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
     adapter_layer_names = [
-        # "vera_A",
-        # "vera_B",
         "vera_lambda_b",
         "vera_lambda_d",
-        # "vera_embedding_A",
-        # "vera_embedding_B",
     ]
 
     def __init__(self, in_features: int, out_features: int, **kwargs):
         self.r = {}
         self.vera_dropout = nn.ModuleDict({})
 
-        # For storing random projections
-        # self.vera_A = nn.ModuleDict({})
-        # self.vera_B = nn.ModuleDict({})
-
         # For storing vector scale
         self.vera_lambda_b = nn.ParameterDict({})
         self.vera_lambda_d = nn.ParameterDict({})
-        # For Embedding layer
-        # self.vera_embedding_A = nn.ParameterDict({})
-        # self.vera_embedding_B = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -72,7 +61,7 @@ class VeraLayer(BaseTunerLayer):
         cls.__init__(self, *args, device="meta", **kwargs)
         self.to_empty(device=final_device)
 
-    def update_layer(self, adapter_name, r, vera_dropout, init_vera_weights, prng_key, d_initial: float = 1.0):
+    def update_layer(self, adapter_name, r, vera_dropout, init_vera_weights, d_initial: float = 1.0):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -84,15 +73,11 @@ class VeraLayer(BaseTunerLayer):
         self.vera_dropout.update(nn.ModuleDict({adapter_name: vera_dropout_layer}))
         # Actual trainable parameters
         if r > 0:
-            # TODO: these need to be frozen and initialised correctly somewhere
-            # self.vera_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-            # self.vera_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
-
             self.vera_lambda_b[adapter_name] = nn.Parameter(torch.zeros(self.out_features), requires_grad=True)
             self.vera_lambda_d[adapter_name] = nn.Parameter(torch.zeros(r), requires_grad=True)
 
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name, prng_key, d_initial=d_initial)
+            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
@@ -103,7 +88,7 @@ class VeraLayer(BaseTunerLayer):
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
 
-    def update_layer_conv2d(self, adapter_name, r, vera_dropout, init_vera_weights, prng_key, d_initial: float = 1.0):
+    def update_layer_conv2d(self, adapter_name, r, vera_dropout, init_vera_weights, d_initial: float = 1.0):
         raise NotImplementedError("Not implemented for new memory efficient implementation yet.")
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -128,16 +113,14 @@ class VeraLayer(BaseTunerLayer):
             self.vera_lambda_d[adapter_name] = nn.Parameter(torch.zeros(r), requires_grad=True)
 
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name, prng_key, d_initial=d_initial)
+            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
 
-    def update_layer_embedding(
-        self, adapter_name, r, vera_dropout, init_vera_weights, prng_key, d_initial: float = 1.0
-    ):
+    def update_layer_embedding(self, adapter_name, r, vera_dropout, init_vera_weights, d_initial: float = 1.0):
         raise NotImplementedError("Not implemented for new memory efficient implementation yet.")
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -161,38 +144,18 @@ class VeraLayer(BaseTunerLayer):
             self.vera_lambda_d[adapter_name] = nn.Parameter(torch.zeros(r), requires_grad=True)
 
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name, prng_key, d_initial=d_initial)
+            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
 
-    def reset_vera_parameters(self, adapter_name, prng_key, d_initial: float = 1.0):
-        # TODO: generator no longer needed, remove along with prng key
-        generator = torch.Generator(device="cpu").manual_seed(prng_key)
+    def reset_vera_parameters(self, adapter_name, d_initial: float = 1.0):
         if adapter_name in self.vera_lambda_d.keys():
-            # _kaiming_init(self.vera_A[adapter_name].weight, generator)
-            # _kaiming_init(self.vera_B[adapter_name].weight, generator)
-
-            # TODO: probably don't need as this is set in `mark_only_adapters_as_trainable`
-            # self.vera_A[adapter_name].weight.requires_grad = False
-            # self.vera_B[adapter_name].weight.requires_grad = False
-
             with torch.no_grad():
                 nn.init.zeros_(self.vera_lambda_d[adapter_name]).fill_(d_initial)
                 nn.init.zeros_(self.vera_lambda_b[adapter_name])
-
-        # if adapter_name in self.vera_embedding_A.keys():
-        #     # _kaiming_init(self.vera_embedding_A[adapter_name], generator)
-        #     # _kaiming_init(self.vera_embedding_B[adapter_name], generator)
-
-        #     self.vera_embedding_A[adapter_name].requires_grad = False
-        #     self.vera_embedding_B[adapter_name].requires_grad = False
-
-        #     with torch.no_grad():
-        #         nn.init.zeros_(self.vera_lambda_d[adapter_name]).fill_(d_initial)
-        #         nn.init.zeros_(self.vera_lambda_b[adapter_name])
 
 
 # TODO: add attribution to HF LoRA
@@ -212,7 +175,6 @@ class Linear(nn.Linear, VeraLayer):
         adapter_name: str,
         in_features: int,
         out_features: int,
-        prng_key: int,
         r: int = 0,
         vera_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
@@ -232,7 +194,7 @@ class Linear(nn.Linear, VeraLayer):
 
         self.fan_in_fan_out = fan_in_fan_out
 
-        self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, prng_key, d_initial=d_initial)
+        self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self.set_adapter(adapter_name)
 
@@ -278,7 +240,6 @@ class Linear(nn.Linear, VeraLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
 
-                # TODO: pass vera_A/B here
                 self.weight.data -= self.get_delta_weight(active_adapter, vera_A, vera_B)
 
     def get_delta_weight(self, adapter, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
@@ -297,30 +258,26 @@ class Linear(nn.Linear, VeraLayer):
         # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
         cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
 
-        weight_A = vera_A
-        weight_B = vera_B
         lambda_d = self.vera_lambda_d[adapter]
         lambda_b = self.vera_lambda_b[adapter]
 
         if cast_to_fp32:
-            weight_A = weight_A.float()
-            weight_B = weight_B.float()
+            weight_A = vera_A.float()
+            weight_B = vera_B.float()
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
 
-        lambda_d = torch.diag(lambda_d)
-        lambda_b = torch.diag(lambda_b)
-
-        output_tensor = transpose(lambda_b @ weight_B @ lambda_d @ weight_A, self.fan_in_fan_out)
+        lambda_b = lambda_b.unsqueeze(-1)
+        lambda_d = lambda_d.unsqueeze(-1)
+        output_tensor = transpose((lambda_b * vera_B) @ (lambda_d * vera_A), self.fan_in_fan_out)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
 
             # cast back the weights
-            # self.vera_A[adapter].weight.data = weight_A.to(dtype)
-            # self.vera_B[adapter].weight.data = weight_B.to(dtype)
-            self.vera_lambda_d[adapter].data = torch.diag(lambda_d).to(dtype)
-            self.vera_lambda_b[adapter].data = torch.diag(lambda_b).to(dtype)
+            # TODO: why?
+            self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
+            self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
 
         return output_tensor
 
@@ -344,15 +301,11 @@ class Linear(nn.Linear, VeraLayer):
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
 
-                # vera_A = self.vera_A[active_adapter]
-                # vera_B = self.vera_B[active_adapter]
-
                 lambda_d = self.vera_lambda_d[active_adapter]
                 lambda_b = self.vera_lambda_b[active_adapter]
 
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
-                # TODO: replace with bmm?
                 result += lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)
 
         result = result.to(previous_dtype)
@@ -366,7 +319,6 @@ class Embedding(nn.Embedding, VeraLayer):
         adapter_name: str,
         num_embeddings: int,
         embedding_dim: int,
-        prng_key: int,
         r: int = 0,
         vera_dropout: float = 0.0,
         d_initial: float = 1.0,
@@ -376,7 +328,7 @@ class Embedding(nn.Embedding, VeraLayer):
         init_vera_weights = kwargs.pop("init_vera_weights", True)
         self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
         VeraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
-        self.update_layer_embedding(adapter_name, r, vera_dropout, init_vera_weights, prng_key, d_initial=d_initial)
+        self.update_layer_embedding(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:
@@ -504,7 +456,6 @@ class Conv2d(nn.Conv2d, VeraLayer):
     def __init__(
         self,
         adapter_name: str,
-        prng_key: int,
         in_channels: int,
         out_channels: int,
         kernel_size: Union[int, Tuple[int]],
@@ -528,7 +479,7 @@ class Conv2d(nn.Conv2d, VeraLayer):
             padding=padding,
         )
 
-        self.update_layer_conv2d(adapter_name, r, vera_dropout, init_vera_weights, prng_key, d_initial=d_initial)
+        self.update_layer_conv2d(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.set_adapter(adapter_name)
 
     def merge(self, safe_merge: bool = False) -> None:
