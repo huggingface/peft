@@ -709,6 +709,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
     def test_decoder_model(self):
         # test a somewhat realistic model instead of a toy model
+        torch.manual_seed(0)
 
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
         model = AutoModelForCausalLM.from_pretrained(model_id).eval().to(self.torch_device)
@@ -720,12 +721,14 @@ class TestMixedAdapterTypes(unittest.TestCase):
         }
         output_base = model.generate(**input_dict)
 
+        torch.manual_seed(0)
         config0 = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
         peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
         output0 = peft_model.generate(**input_dict)
         self.assertTrue(torch.isfinite(output0).all())
         self.assertFalse(torch.allclose(output_base, output0))
 
+        torch.manual_seed(1)
         config1 = LoHaConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
         peft_model.add_adapter("adapter1", config1)
         peft_model.set_adapter(["adapter0", "adapter1"])
@@ -733,6 +736,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         self.assertTrue(torch.isfinite(output1).all())
         self.assertFalse(torch.allclose(output0, output1))
 
+        torch.manual_seed(2)
         config2 = AdaLoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
         peft_model.add_adapter("adapter2", config2)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2"])
@@ -740,6 +744,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         self.assertTrue(torch.isfinite(output2).all())
         self.assertFalse(torch.allclose(output1, output2))
 
+        torch.manual_seed(3)
         config3 = LoKrConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
         peft_model.add_adapter("adapter3", config3)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3"])
