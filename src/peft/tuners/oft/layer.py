@@ -176,7 +176,7 @@ class OFTLayer(nn.Module, LycorisLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
-                base_layer = self.base_layer
+                base_layer = self.get_base_layer()
                 orig_weights = base_layer.weight.data
                 if isinstance(base_layer, nn.Linear):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
@@ -203,7 +203,7 @@ class OFTLayer(nn.Module, LycorisLayer):
                             base_layer.kernel_size[1],
                         ]
                     )
-                self.base_layer.weight.data = orig_weights
+                base_layer.weight.data = orig_weights
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         scaling = self.scaling[adapter_name]
@@ -221,6 +221,7 @@ class OFTLayer(nn.Module, LycorisLayer):
 
         return weight
 
+    # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L144
     def _cayley_batch(self, data: torch.Tensor) -> torch.Tensor:
         b, r, c = data.shape
         # Ensure the input matrix is skew-symmetric
@@ -232,6 +233,7 @@ class OFTLayer(nn.Module, LycorisLayer):
 
         return Q
 
+    # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L155
     def _block_diagonal(self, oft_r: torch.Tensor, rank: int) -> torch.Tensor:
         if oft_r.shape[0] == 1:
             # block share
@@ -244,6 +246,7 @@ class OFTLayer(nn.Module, LycorisLayer):
 
         return A
 
+    # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L52
     def _project_batch(self, oft_r, eps=1e-5):
         # scaling factor for each of the smaller block matrix
         eps = eps * 1 / torch.sqrt(torch.tensor(oft_r.shape[0]))
