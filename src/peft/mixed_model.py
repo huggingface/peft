@@ -20,12 +20,14 @@ from contextlib import contextmanager
 from typing import Any, Optional, Union
 
 import torch
+from accelerate.hooks import remove_hook_from_submodules
 from torch import nn
 from transformers.utils import PushToHubMixin
 
 from peft.tuners.mixed import COMPATIBLE_TUNER_TYPES
 
 from .config import PeftConfig
+from .peft_model import PeftModel
 from .tuners import (
     AdaLoraModel,
     IA3Model,
@@ -34,11 +36,7 @@ from .tuners import (
     LoraModel,
     MixedModel,
 )
-from .utils import (
-    PeftType,
-    _set_adapter,
-    _set_trainable,
-)
+from .utils import PeftType, _set_adapter, _set_trainable
 
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
@@ -100,11 +98,10 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     >>> from peft import get_peft_model
 
     >>> base_model = ...  # load the base model, e.g. from transformers
-    >>> config0 = PeftConfig.from_pretrained(...)  # load first adapter, e.g. LoRA
-    >>> peft_model = get_peft_model(base_model, config0, adapter_name="default", mixed=True)
-    >>> config1 = PeftConfig.from_pretrained(...)  # load second adapter, e.g. LoHa
-    >>> peft_model.add_adapter(config1, "loha")
-    >>> peft_model.set_adapter(["default", "loha"])
+    >>> peft_model = PeftMixedModel.from_pretrained(base_model, path_to_adapter1, "adapter1").eval()
+    >>> peft_model.load_adapter(path_to_adapter2, "adapter2")
+    >>> peft_model.set_adapter(["adapter1", "adapter2"])  # activate both adapters
+    >>> peft_model(data)  # forward pass using both adapters
     ```
 
     Tips:
@@ -290,10 +287,15 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         """
         return self.base_model.unload(*args, **kwargs)
 
-    def load_adapter(
-        self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any
-    ) -> tuple[list[str], list[str]]:
-        raise NotImplementedError(f"Loading is not supported for {self.__class__.__name__} (yet).")
+    @classmethod
+    def _split_kwargs(cls, kwargs: dict[str, Any]):
+        return PeftModel._split_kwargs(kwargs)
+
+    def load_adapter(self, model_id: str, adapter_name: str, *args: Any, **kwargs: Any):
+        output = PeftModel.load_adapter(self, model_id, adapter_name, *args, **kwargs)
+        # TODO: not quite clear why this is necessary but tests fail without it
+        self.set_adapter(self.active_adapters)
+        return output
 
     def create_or_update_model_card(self, output_dir: str):
         raise NotImplementedError(f"Model card creation is not supported for {self.__class__.__name__} (yet).")
@@ -317,4 +319,67 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         config: Optional[PeftConfig] = None,
         **kwargs: Any,
     ):
-        raise NotImplementedError(f"Loading is not supported for {cls.__name__} (yet).")
+        r"""
+        Instantiate a PEFT mixed model from a pretrained model and loaded PEFT weights.
+
+        Note that the passed `model` may be modified inplace.
+
+        Args:
+            model (`nn.Module`):
+                The model to be adapted.
+            model_id (`str` or `os.PathLike`):
+                The name of the PEFT configuration to use. Can be either:
+                    - A string, the `model id` of a PEFT configuration hosted inside a model repo on the Hugging Face
+                      Hub.
+                    - A path to a directory containing a PEFT configuration file saved using the `save_pretrained`
+                      method (`./my_peft_config_directory/`).
+            adapter_name (`str`, *optional*, defaults to `"default"`):
+                The name of the adapter to be loaded. This is useful for loading multiple adapters.
+            is_trainable (`bool`, *optional*, defaults to `False`):
+                Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and use for
+                inference
+            config ([`~peft.PeftConfig`], *optional*):
+                The configuration object to use instead of an automatically loaded configuation. This configuration
+                object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
+                loaded before calling `from_pretrained`.
+            kwargs: (`optional`):
+                Additional keyword arguments passed along to the specific PEFT configuration class.
+        """
+        # note: adapted from PeftModel.from_pretrained
+        from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        # load the config
+        if config is None:
+            config = PEFT_TYPE_TO_CONFIG_MAPPING[
+                PeftConfig._get_peft_type(
+                    model_id,
+                    subfolder=kwargs.get("subfolder", None),
+                    revision=kwargs.get("revision", None),
+                    cache_dir=kwargs.get("cache_dir", None),
+                    use_auth_token=kwargs.get("use_auth_token", None),
+                )
+            ].from_pretrained(model_id, **kwargs)
+        elif isinstance(config, PeftConfig):
+            config.inference_mode = not is_trainable
+        else:
+            raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
+
+        # note: this is different from PeftModel.from_pretrained
+        if config.peft_type not in PEFT_TYPE_TO_MODEL_MAPPING:
+            raise ValueError(f"Adapter of type {config.peft_type} is not supported for mixed models.")
+
+        if (getattr(model, "hf_device_map", None) is not None) and len(
+            set(model.hf_device_map.values()).intersection({"cpu", "disk"})
+        ) > 0:
+            remove_hook_from_submodules(model)
+
+        if config.is_prompt_learning and is_trainable:
+            # note: should not be possible to reach, but just in case
+            raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
+        else:
+            config.inference_mode = not is_trainable
+
+        # note: this is different from PeftModel.from_pretrained, we always return a PeftMixedModel
+        model = cls(model, config, adapter_name)
+        model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+        return model

@@ -16,17 +16,16 @@ Normally, it is not possible to mix different adapter types in 🤗 PEFT. For ex
 
 ## Loading different adapter types into a PEFT model
 
-To load different adapter types into a PEFT model, proceed the same as if you were loading two adapters of the same type, but pass `mixed=True` to `get_peft_model`:
+To load different adapter types into a PEFT model, proceed the same as if you were loading two adapters of the same type, but use `PeftMixedModel` instead of `PeftModel`:
 
 ```py
->>> from peft import get_peft_model
+from peft import PeftMixedModel
 
->>> base_model = ...  # load the base model, e.g. from transformers
->>> config0 = PeftConfig.from_pretrained(...)  # load first adapter, e.g. LoRA
->>> peft_model = get_peft_model(base_model, config0, adapter_name="default", mixed=True)
->>> config1 = PeftConfig.from_pretrained(...)  # load second adapter, e.g. LoHa
->>> peft_model.add_adapter(config1, "loha")
->>> peft_model.set_adapter(["default", "loha"])
+base_model = ...  # load the base model, e.g. from transformers
+# load first adapter, which will be called "default"
+peft_model = PeftMixedModel.from_pretrained(base_model, <path_to_adapter1>)
+peft_model.load_adapter(<path_to_adapter2>, adapter_name="other")
+peft_model.set_adapter(["default", "other"])
 ```
 
 The last line is necessary if you want to activate both adapters, otherwise, only the first adapter would be active. Of course, you can add more different adapters by calling `add_adapter` repeatedly.
@@ -37,4 +36,4 @@ Currently, the main purpose of mixed adapter types is to combine trained adapter
 
 - Not all adapter types can be combined. See `peft.tuners.mixed.COMPATIBLE_TUNER_TYPES` for a list of compatible types. An error will be raised if you are trying to combine incompatible adapter types.
 - It is possible to mix multiple adapters of the same type. This can be useful to combine adapters with very different configs.
-- If you want to combine a lot of different adapters, it is most performant to add the same types of adapters consecutively. E.g., add LoRA1, LoRA2, LoHa1, LoHa2 in this order, instead of LoRA1, LoHa1, LoRA2, LoHa2. As long as the adapters are commutative, the order does not matter for the final result.
+- If you want to combine a lot of different adapters, it is most performant to add the same types of adapters consecutively. E.g., add LoRA1, LoRA2, LoHa1, LoHa2 in this order, instead of LoRA1, LoHa1, LoRA2, LoHa2. The order will make a difference for the outcome in most cases, but since no order is better a priori, it is best to choose the order that is most performant.
