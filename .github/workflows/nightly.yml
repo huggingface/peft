@@ -71,11 +71,10 @@ jobs:
         working-directory: peft/
         shell: bash
     steps:
-      - name: Update clone
+      - uses: actions/checkout@v3
+      - name: Pip install
         run: |
           source activate peft
-          git config --global --add safe.directory '*'
-          git fetch && git checkout ${{ github.sha }}
           pip install -e . --no-deps
           pip install pytest-reportlog
 
