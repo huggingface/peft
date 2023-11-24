@@ -601,21 +601,60 @@ class TestMixedAdapterTypes(unittest.TestCase):
         input = torch.arange(90).reshape(9, 10).to(self.torch_device)
         output_base = model(input)
 
+        # create adapter0
+        torch.manual_seed(0)
         config0 = LoraConfig(r=4, lora_alpha=4, target_modules=["lin0", "lin1"], init_lora_weights=False)
         peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
         output_0 = peft_model(input)
         self.assertFalse(torch.allclose(output_base, output_0, atol=atol, rtol=rtol))
 
+        # add adapter1
+        torch.manual_seed(1)
         config1 = LoHaConfig(r=4, alpha=4, target_modules=["lin0"], init_weights=False)
         peft_model.add_adapter("adapter1", config1)
         peft_model.set_adapter(["adapter0", "adapter1"])
         output_01 = peft_model(input)
         self.assertFalse(torch.allclose(output_base, output_01, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_0, output_01, atol=atol, rtol=rtol))
 
+        # delete adapter1
         peft_model.delete_adapter("adapter1")
         self.assertEqual(peft_model.active_adapters, ["adapter0"])
-        output_deleted = peft_model(input)
-        self.assertTrue(torch.allclose(output_0, output_deleted, atol=atol, rtol=rtol))
+        output_deleted_1 = peft_model(input)
+        self.assertTrue(torch.allclose(output_0, output_deleted_1, atol=atol, rtol=rtol))
+
+        msg = re.escape("Adapter(s) ['adapter1'] not found, available adapters: ['adapter0']")
+        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+            peft_model.set_adapter(["adapter0", "adapter1"])
+
+        # re-add adapter1
+        torch.manual_seed(1)
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.set_adapter(["adapter0", "adapter1"])
+        output_01_readded = peft_model(input)
+        self.assertFalse(torch.allclose(output_base, output_01_readded, atol=atol, rtol=rtol))
+
+        # same as above, but this time delete adapter0 first
+        torch.manual_seed(0)
+        model = SimpleNet().eval().to(self.torch_device)
+        torch.manual_seed(0)
+        peft_model = get_peft_model(model, config0, "adapter0", mixed=True)
+        torch.manual_seed(1)
+        peft_model.add_adapter("adapter1", config1)
+        peft_model.delete_adapter("adapter0")
+        self.assertEqual(peft_model.active_adapters, ["adapter1"])
+        output_deleted_0 = peft_model(input)
+        self.assertFalse(torch.allclose(output_deleted_0, output_base, atol=atol, rtol=rtol))
+        self.assertFalse(torch.allclose(output_deleted_0, output_01, atol=atol, rtol=rtol))
+
+        msg = re.escape("Adapter(s) ['adapter0'] not found, available adapters: ['adapter1']")
+        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+            peft_model.set_adapter(["adapter0", "adapter1"])
+
+        peft_model.delete_adapter("adapter1")
+        self.assertEqual(peft_model.active_adapters, [])
+        output_deleted_01 = peft_model(input)
+        self.assertTrue(torch.allclose(output_deleted_01, output_base, atol=atol, rtol=rtol))
 
     def test_modules_to_save(self):
         model = SimpleNet().eval().to(self.torch_device)
