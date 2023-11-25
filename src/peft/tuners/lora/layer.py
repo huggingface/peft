@@ -242,7 +242,7 @@ class Linear(nn.Module, LoraLayer):
 
         if adapter_names is None:
             adapter_names = self.active_adapters
-        print ('adapter names', adapter_names)
+        print ('')
 
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
@@ -280,9 +280,8 @@ class Linear(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        if hasattr(adapter, "_hf_hook"):
-            print ('adapter has hook')
-            adapter._hf_hook.pre_forward(adapter)
+        if hasattr(self.lora_A[adapter], "_hf_hook"):
+            print ('adapter A has hook')
         else:
             print ('no hook')
 
@@ -311,6 +310,7 @@ class Linear(nn.Module, LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
+        print (output_tensor)
 
         return output_tensor
 
