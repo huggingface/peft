@@ -24,6 +24,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
+from accelerate.hooks import AlignDevicesHook
 
 
 class LoraLayer(BaseTunerLayer):
@@ -243,7 +244,11 @@ class Linear(nn.Module, LoraLayer):
         if adapter_names is None:
             adapter_names = self.active_adapters
 
+        if hasattr(self, "_hf_hook") and isinstance(self._hf_hook, AlignDevicesHook):
+            self.pre_forward(self)
+
         for active_adapter in adapter_names:
+
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:
@@ -279,8 +284,19 @@ class Linear(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        if hasattr(self.lora_A[adapter], "_hf_hook" and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook)):
+            print ('adapter A has hook')
+        else:
+            print ('no hook')
+
+        # if hasattr(self.lora_A[adapter], "_hf_hook"):
+        #     self.lora_A[adapter].pre_forward(self.lora_A[adapter])
+        # if hasattr(self.lora_B[adapter], "_hf_hook"):
+        #     self.lora_B[adapter].pre_forward(self.lora_B[adapter])
+
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
+        print('device, dtype, adapter: ', device, dtype, adapter)
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
@@ -289,6 +305,7 @@ class Linear(nn.Module, LoraLayer):
 
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
+        print (weight_A, weight_B)
 
         if cast_to_fp32:
             weight_A = weight_A.float()
@@ -302,6 +319,7 @@ class Linear(nn.Module, LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
+        print (output_tensor)
 
         return output_tensor
 
@@ -373,6 +391,7 @@ class Embedding(nn.Module, LoraLayer):
 
         if adapter_names is None:
             adapter_names = self.active_adapters
+
 
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
