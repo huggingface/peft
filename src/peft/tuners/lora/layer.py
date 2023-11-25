@@ -244,13 +244,13 @@ class Linear(nn.Module, LoraLayer):
         if adapter_names is None:
             adapter_names = self.active_adapters
 
-        # if hasattr(self, "_hf_hook") and isinstance(self._hf_hook, AlignDevicesHook):
-        #     self.pre_forward(self)
-
         for active_adapter in adapter_names:
 
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                    print ('base layer also has hook')
+                    base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
