@@ -289,10 +289,10 @@ class Linear(nn.Module, LoraLayer):
         # else:
         #     print ('no hook')
 
-        # if hasattr(self.lora_A[adapter], "_hf_hook"):
-        #     self.lora_A[adapter].pre_forward(self.lora_A[adapter])
-        # if hasattr(self.lora_B[adapter], "_hf_hook"):
-        #     self.lora_B[adapter].pre_forward(self.lora_B[adapter])
+        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_A[adapter]._hf_hook.pre_forward(self.lora_A[adapter])
+        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_B[adapter]._hf_hook.pre_forward(self.lora_B[adapter])
 
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
