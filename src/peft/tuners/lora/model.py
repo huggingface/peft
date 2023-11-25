@@ -379,9 +379,10 @@ class LoraModel(BaseTuner):
 
         key_mod_list = [[key, module] for key, module in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-        
+
         from accelerate.hooks import remove_hook_from_submodules
-        for key, module in tqdm(keym_list, disable=not progressbar, desc=desc):
+
+        for key, module in tqdm(key_mod_list, disable=not progressbar, desc=desc):
             if hasattr(module, "_hf_hook"):
                 module._hf_hook.pre_forward(module)
                 remove_hook_from_submodules(module)

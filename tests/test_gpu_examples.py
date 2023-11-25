@@ -39,6 +39,9 @@ from transformers import (
     WhisperTokenizer,
 )
 
+# A full testing suite that tests all the necessary features on GPU. The tests should
+# rely on the example scripts to test the features.
+import peft
 from peft import (
     AdaLoraConfig,
     LoraConfig,
@@ -58,10 +61,8 @@ from .testing_utils import (
 )
 
 
-# A full testing suite that tests all the necessary features on GPU. The tests should
-# rely on the example scripts to test the features.
-import peft
-print (peft.__version__)
+print(peft.__version__)
+
 
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
