@@ -242,6 +242,7 @@ class Linear(nn.Module, LoraLayer):
 
         if adapter_names is None:
             adapter_names = self.active_adapters
+        print ('adapter names', adapter_names)
 
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
