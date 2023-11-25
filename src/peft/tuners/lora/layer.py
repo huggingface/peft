@@ -244,8 +244,8 @@ class Linear(nn.Module, LoraLayer):
         if adapter_names is None:
             adapter_names = self.active_adapters
 
-        if hasattr(self, "_hf_hook") and isinstance(self._hf_hook, AlignDevicesHook):
-            self.pre_forward(self)
+        # if hasattr(self, "_hf_hook") and isinstance(self._hf_hook, AlignDevicesHook):
+        #     self.pre_forward(self)
 
         for active_adapter in adapter_names:
 
