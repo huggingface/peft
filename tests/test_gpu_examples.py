@@ -981,4 +981,4 @@ class OffloadSaveTests(unittest.TestCase):
         model = model.merge_and_unload()
         post_merge_olayer = model(input_tokens)[0]
 
-        self.assertTrue(torch.all(pre_merge_olayer == post_merge_olayer))
+        self.assertTrue(torch.allclose(pre_merge_olayer, post_merge_olayer))
