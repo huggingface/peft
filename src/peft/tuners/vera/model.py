@@ -165,7 +165,7 @@ class VeraModel(BaseTuner):
             self.vera_B = None
 
         if first_embedding is not None:
-            vera_embedding_A = torch.randn((first_embedding_vocab_size, config.r), generator=generator)
+            vera_embedding_A = torch.randn((config.r, first_embedding_vocab_size), generator=generator)
             vera_embedding_B = torch.randn((first_embedding_dim, config.r), generator=generator)
             self.register_buffer("vera_embedding_A", vera_embedding_A, persistent=config.save_projection)
             self.register_buffer("vera_embedding_B", vera_embedding_B, persistent=config.save_projection)
@@ -247,7 +247,7 @@ class VeraModel(BaseTuner):
                 vera_config.init_vera_weights,
                 d_initial=vera_config.d_initial,
             )
-        elif isinstance(target, VeraLayer) and isinstance(target, torch.nn.Embedding):
+        elif isinstance(target, VeraLayer) and isinstance(target, (torch.nn.Embedding, torch.nn.sparse.Embedding)):
             target.update_layer_embedding(
                 adapter_name,
                 r,

@@ -394,8 +394,8 @@ class Embedding(nn.Embedding, VeraLayer):
             lambda_b = lambda_b.float()
 
         lambda_b = lambda_b.unsqueeze(-1)
-        lambda_d = lambda_d.unsqueeze(0)
-        output_tensor = transpose((lambda_b * vera_B) @ (lambda_d * vera_A).T, True)
+        lambda_d = lambda_d.unsqueeze(-1)
+        output_tensor = transpose((lambda_b * vera_B) @ (lambda_d * vera_A), True)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -435,8 +435,9 @@ class Embedding(nn.Embedding, VeraLayer):
                 lambda_d = self.vera_lambda_d[active_adapter]
                 lambda_b = self.vera_lambda_b[active_adapter]
 
-                after_A = lambda_d * self._embed(x, vera_A)
-                result += lambda_b * F.linear(after_A, vera_B)
+                after_A = lambda_d * self._embed(x, vera_A.T)
+                # result += lambda_b * F.linear(after_A, vera_B)
+                result += lambda_b * (after_A @ vera_B.T)
 
         return result
 
