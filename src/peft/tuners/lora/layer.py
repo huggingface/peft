@@ -281,10 +281,14 @@ class Linear(nn.Module, LoraLayer):
                 The name of the adapter for which the delta weight should be computed.
         """
         if hasattr(adapter, "_hf_hook"):
+            print ('adapter has hook')
             adapter._hf_hook.pre_forward(adapter)
+        else:
+            print ('no hook')
+
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
-        print(device, dtype, adapter)
+        print('device, dtype, adapter': device, dtype, adapter)
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
