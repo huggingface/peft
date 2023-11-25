@@ -297,6 +297,7 @@ class Linear(nn.Module, LoraLayer):
 
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
+        print (weight_A, weight_B)
 
         if cast_to_fp32:
             weight_A = weight_A.float()
