@@ -40,6 +40,8 @@ from .config import LoraConfig
 from .gptq import QuantLinear
 from .layer import Conv2d, Embedding, Linear, LoraLayer
 
+from accelerate.hooks import AlignDevicesHook
+
 
 if is_bnb_available():
     import bitsandbytes as bnb
