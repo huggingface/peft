@@ -161,7 +161,7 @@ class OFTLayer(nn.Module, LycorisLayer):
                         ]
                     )
 
-                if not torch.isfinite(orig_weights).all():
+                if safe_merge and not torch.isfinite(orig_weights).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
