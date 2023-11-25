@@ -377,26 +377,21 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        key_list = [[key, module] for key, module in self.model.named_modules() if self.prefix not in key]
+        key_mod_list = [[key, module] for key, module in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-        for key, module in tqdm(key_list, disable=not progressbar, desc=desc):
+        for key, module in tqdm(keym_list, disable=not progressbar, desc=desc):
             if hasattr(module, "_hf_hook"):
                 module._hf_hook.pre_forward(module)
+                remove_hook_from_submodules(module)
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
-                if hasattr(parent, "_hf_hook"):
-                    parent._hf_hook.pre_forward(parent)
-                if hasattr(target, "_hf_hook"):
-                    target._hf_hook.pre_forward(target)
-
             except AttributeError:
                 continue
 
             if hasattr(target, "base_layer"):
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
-                    
-                # self._replace_module(parent, target_name, target.get_base_layer(), target)
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
