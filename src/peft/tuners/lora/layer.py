@@ -280,6 +280,8 @@ class Linear(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        if hasattr(adapter, "_hf_hook"):
+            adapter._hf_hook.pre_forward(adapter)
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
         print(device, dtype, adapter)
