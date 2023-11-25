@@ -388,9 +388,8 @@ class LoraModel(BaseTuner):
             except AttributeError:
                 continue
 
-            print ('Does target have hook?', hasattr(target, "_hf_hook"))
-
             if hasattr(target, "base_layer"):
+                print (f'Does {target} have hook?', hasattr(target, "_hf_hook"))
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
