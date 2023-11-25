@@ -281,6 +281,7 @@ class Linear(nn.Module, LoraLayer):
         """
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
+        print (device, dtype, adapter)
 
         # In case users wants to merge the adapter weights that are in
         # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
