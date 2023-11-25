@@ -27,7 +27,7 @@ from .layer import Conv2d, Linear, OFTLayer
 
 class OFTModel(LycorisTuner):
     """
-    Creates Orthogonal Finetuning model from a pretrained model. The method is partially described in
+    Creates Orthogonal Finetuning model from a pretrained model. The method is described in
     https://arxiv.org/abs/2306.07280
 
     Args:
