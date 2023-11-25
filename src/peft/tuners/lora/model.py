@@ -393,7 +393,7 @@ class LoraModel(BaseTuner):
             if hasattr(target, "base_layer"):
                 if hasattr(target, "_hf_hook") and isinstance(target._hf_hook, AlignDevicesHook):
                     print ('target has align hook')
-                    target.pre_forward(target)
+                    target._hf_hook.pre_forward(target)
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
