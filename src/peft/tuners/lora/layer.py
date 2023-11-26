@@ -266,6 +266,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     print (base_layer.weight.data)
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    print (base_layer.weight.data)
                     
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
