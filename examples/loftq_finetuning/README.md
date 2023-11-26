@@ -2,7 +2,7 @@
 
 ## Introduction
 
-LoftQ provides better initialization for LoRA adaptors A and B, 
+LoftQ provides better initialization for LoRA adapters A and B, 
 and the Quantization of pre-trained weights W.
 
 ## Quantization
