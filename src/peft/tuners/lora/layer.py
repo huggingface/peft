@@ -264,9 +264,14 @@ class Linear(nn.Module, LoraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
+                    print (base_layer.weight.data)
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                    base_layer._hf_hook.pre_forward(base_layer)
+                    print (base_layer.weight.data)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
