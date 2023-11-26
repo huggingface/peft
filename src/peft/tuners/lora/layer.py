@@ -266,11 +266,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     print ('pre delta base weight', base_layer.weight.data)
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    keys = [i for i in base_layer._hf_hook.weights_map.keys()]
-                    print ('keys', keys)
-                    if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
-                        for key in keys:
-                            pass
+                    base_layer._hf_hook.init_hook()
                     print ('post delta base weight', base_layer.weight.data)
                     
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
