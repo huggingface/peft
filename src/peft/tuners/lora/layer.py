@@ -266,7 +266,8 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     print ('pre delta base weight', base_layer.weight.data)
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    print (dict(base_layer._hf_hook.weights_map))
+                    from accelerate.utils import named_module_tensors
+                    base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
                     print ('post delta base weight', base_layer.weight.data)
                     
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
