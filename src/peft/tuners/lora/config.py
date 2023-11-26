@@ -35,25 +35,8 @@ class LoftQConfig:
             bits.
     """
 
-    bits_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from "
-                "the default bits specified by `bits`. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 2`}"
-            )
-        },
-    )
     loftq_bits: int = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
     loftq_iter: int = field(default=1, metadata={"help": "Alternating iterations for LoftQ"})
-    loftq_fake: bool = field(
-        default=True,
-        metadata={
-            "help": "True: use fp16/fp32; used for first time to save weights."
-            "False: use bitsandbytes 4bit linear models. weights can't be saved."
-            "Recommend to set to True, save the weights and load the saved weights in 4 bits."
-        },
-    )
 
 
 @dataclass

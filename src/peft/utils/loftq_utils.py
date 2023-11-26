@@ -1,7 +1,11 @@
 import logging
 
 import torch
-from scipy.stats import norm
+try:
+    from scipy.stats import norm
+except ImportError:
+    raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
+
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 

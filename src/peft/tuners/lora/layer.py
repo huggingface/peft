@@ -23,7 +23,6 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils.loftq_utils import loftq_init
 from peft.utils.other import transpose
 
 
@@ -171,6 +170,7 @@ class LoraLayer(BaseTunerLayer):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def loftq_init(self, adapter_name):
+        from peft.utils.loftq_utils import loftq_init
         weight = self.get_base_layer().weight
         kwargs = {
             "num_bits": self.kwargs.get("loftq_bits", 4),

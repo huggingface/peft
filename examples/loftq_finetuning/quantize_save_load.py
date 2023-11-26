@@ -129,13 +129,13 @@ def quantize_and_save():
         raise NotImplementedError("Other models not supported yet.")
 
     # Config of LoftQ
-    loftq_config = LoftQConfig(loftq_bits=args.bits, loftq_iter=args.iter, loftq_fake=True)
+    loftq_config = LoftQConfig(loftq_bits=args.bits, loftq_iter=args.iter)
 
     lora_config = LoraConfig(
         task_type=task_type,
         inference_mode=True,
         r=args.rank,
-        lora_alpha=args.rank,
+        lora_alpha=16 if task_type is TaskType.CAUSAL_LM else args.rank,
         lora_dropout=0.1,
         target_modules=target_modules,
         init_lora_weights="loftq",
