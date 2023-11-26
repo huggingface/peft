@@ -957,25 +957,29 @@ class OffloadSaveTests(unittest.TestCase):
         r"""
         Test merging and unloading of a model with offloaded modules.
         """
+        torch.manual_seed(0)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        config = AutoConfig.from_pretrained(self.causal_lm_model_id)
-        with init_empty_weights():
-            model = AutoModelForCausalLM.from_config(config)
-
         memory_limits = {0: "0.5GIB", "cpu": "5GIB"}
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
-        assert 0 in device_map.values()
-        assert "cpu" in device_map.values()
+        self.assertTrue (0 in device_map.values())
+        self.assertTrue("cpu" in device_map.values())
 
-        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map)
-        assert len({p.device for p in model.parameters()}) == 2
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        config = LoraConfig(
+            task_type="CAUSAL_LM",
+            init_lora_weights=False,
+            target_modules=['c_attn']
+        )
 
-        # LoRA adapters on ['c_attn', 'c_proj', 'c_fc']
-        lora_checkpoint = "blbadger/gpt2-lora"
-
-        # max_memory must be specified again to avoid defaulting to 'auto' device map
-        model = PeftModel.from_pretrained(model, lora_checkpoint, max_memory=memory_limits)
+        model = get_peft_model(model, config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            # load the model with device_map
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
+            self.assertTrue(len({p.device for p in model.parameters()}) == 2)
+            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
+            
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
         pre_merge_olayer = model(input_tokens)[0]
         model = model.merge_and_unload()
