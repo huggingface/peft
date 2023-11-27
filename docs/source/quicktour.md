@@ -92,7 +92,7 @@ Easily load your model for inference using the [`~transformers.PreTrainedModel.f
   from transformers import AutoModelForCausalLM, AutoTokenizer
 + from peft import PeftModel, PeftConfig
 
-+ peft_model_id = "dfurman/Mistral-7B-Instruct-v0.2"
++ peft_model_id = "merve/Mistral-7B-Instruct-v0.2"
 + config = PeftConfig.from_pretrained(peft_model_id)
   model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
 + model = PeftModel.from_pretrained(model, peft_model_id)
