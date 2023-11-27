@@ -958,14 +958,14 @@ class OffloadSaveTests(unittest.TestCase):
         Test merging and unloading of a model with offloaded modules.
         """
         torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {0: "0.5GIB", "cpu": "5GIB"}
+        memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
         self.assertTrue (0 in device_map.values())
         self.assertTrue("cpu" in device_map.values())
-
-        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        
         config = LoraConfig(
             task_type="CAUSAL_LM",
             init_lora_weights=False,
