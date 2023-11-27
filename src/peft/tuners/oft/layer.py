@@ -45,9 +45,9 @@ class OFTLayer(nn.Module, LycorisLayer):
 
     def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...], block_share: bool):
         if block_share:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(shape[1] / r), math.ceil(shape[1] / r)))
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
         else:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[1] / r), math.ceil(shape[1] / r)))
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
 
     def reset_adapter_parameters(self, adapter_name: str):
         nn.init.zeros_(self.oft_r[adapter_name])
@@ -100,7 +100,7 @@ class OFTLayer(nn.Module, LycorisLayer):
         else:
             raise TypeError(f"OFT is not implemented for base layers of type {type(base_layer).__name__}")
 
-        self.eps[adapter_name] = eps * math.ceil(shape[1] / r) * math.ceil(shape[1] / r)
+        self.eps[adapter_name] = eps * math.ceil(shape[0] / r) * math.ceil(shape[0] / r)
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape, block_share)
@@ -140,18 +140,20 @@ class OFTLayer(nn.Module, LycorisLayer):
                 elif isinstance(base_layer, nn.Conv2d):
                     orig_weights = orig_weights.view(
                         [
-                            base_layer.kernel_size[0] * base_layer.kernel_size[1] * base_layer.in_channels,
                             base_layer.out_channels,
+                            base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                         ]
                     )
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                 delta_weight = self.get_delta_weight(active_adapter)
-                if orig_weights.shape[0] != delta_weight.shape[1]:
+                if orig_weights.shape[1] != delta_weight.shape[1]:
                     # when in channels is not divisible by r
-                    delta_weight = delta_weight[: orig_weights.shape[0], : orig_weights.shape[0]]
-                orig_weights = torch.mm(delta_weight, orig_weights)
+                    delta_weight = delta_weight[: orig_weights.shape[1], : orig_weights.shape[1]]
+                orig_weights = torch.mm(orig_weights, delta_weight)
                 if isinstance(base_layer, nn.Linear):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                 elif isinstance(base_layer, nn.Conv2d):
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights.view(
                         [
                             base_layer.out_channels,
@@ -183,18 +185,23 @@ class OFTLayer(nn.Module, LycorisLayer):
                 elif isinstance(base_layer, nn.Conv2d):
                     orig_weights = orig_weights.view(
                         [
-                            base_layer.kernel_size[0] * base_layer.kernel_size[1] * base_layer.in_channels,
                             base_layer.out_channels,
+                            base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                         ]
                     )
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                 delta_weight = self.get_delta_weight(active_adapter)
-                if orig_weights.shape[0] != delta_weight.shape[1]:
+                if orig_weights.shape[1] != delta_weight.shape[1]:
                     # when in channels is not divisible by r
-                    delta_weight = delta_weight[: orig_weights.shape[0], : orig_weights.shape[0]]
-                orig_weights = torch.linalg.solve(delta_weight, orig_weights)
+                    delta_weight = delta_weight[: orig_weights.shape[1], : orig_weights.shape[1]]
+                #orig_weights = torch.linalg.solve(delta_weight, orig_weights)
+                delta_inv = torch.linalg.inv(delta_weight)
+                orig_weights = torch.mm(orig_weights, delta_inv)
+
                 if isinstance(base_layer, nn.Linear):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
                 elif isinstance(base_layer, nn.Conv2d):
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights.reshape(
                         [
                             base_layer.out_channels,
@@ -271,8 +278,15 @@ class OFTLayer(nn.Module, LycorisLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            result = None
-            weight = None
+            result = self.base_layer(x, *args, **kwargs)
+            if len(result.shape) == 4:
+                result = result.permute(0, 2, 3, 1)
+
+            base_layer = self.get_base_layer()
+            base_bias = base_layer.bias
+            if base_bias is not None:
+                result = result - base_bias.data
+
             # Execute all the adapters
             for active_adapter in self.active_adapters:
                 if active_adapter not in self._available_adapters:
@@ -280,14 +294,14 @@ class OFTLayer(nn.Module, LycorisLayer):
 
                 module_dropout = self.module_dropout[active_adapter]
 
+                # Modify current execution weights
                 if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    weight = self._get_delta_activations(active_adapter, weight, *args, **kwargs)
+                    result = self._get_delta_activations(active_adapter, result, *args, **kwargs)
 
-            if weight is None:
-                # skip all active_adapter
-                result = self.base_layer(x, *args, **kwargs)
-            else:
-                result = self._forward_from_weight(x, weight, *args, **kwargs)
+            if base_bias is not None:
+                result = result + base_bias.data
+            if len(result.shape) == 4:
+                result = result.permute(0, 3, 1, 2)
 
         result = result.to(previous_dtype)
         return result
@@ -313,28 +327,16 @@ class Linear(OFTLayer):
         self.update_layer(adapter_name, r, alpha, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
-        self, adapter_name: str, prev_weight: Optional[torch.Tensor], *args: Any, **kwargs: Any
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
 
         base_layer = self.get_base_layer()
+        base_weight = base_layer.weight.data
+        delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
 
-        base_weight = base_layer.weight.data if prev_weight is None else prev_weight
-        base_weight = torch.transpose(base_weight, 0, 1)
-        if base_weight.shape[0] != delta_weight.shape[1]:
-            # when in channels is not divisible by r
-            delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
-        weight = torch.mm(delta_weight, base_weight)
-        weight = torch.transpose(weight, 0, 1)
-        return weight
-
-    def _forward_from_weight(
-        self, input: torch.Tensor, weight: torch.Tensor, *args: Any, **kwargs: Any
-    ) -> torch.Tensor:
-        base_layer = self.get_base_layer()
-        base_bias = base_layer.bias.data if base_layer.bias is not None else None
-
-        return F.linear(input=input, weight=weight, bias=base_bias)
+        # don't add bias here, because the bias will be added after OFT forward
+        return torch.matmul(input, delta_weight)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
@@ -361,40 +363,16 @@ class Conv2d(OFTLayer):
         self.update_layer(adapter_name, r, alpha, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
-        self, adapter_name: str, prev_weight: Optional[torch.Tensor], *args: Any, **kwargs: Any
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
 
         base_layer = self.get_base_layer()
+        base_weight = base_layer.weight.data
+        delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
 
-        base_weight = base_layer.weight.data if prev_weight is None else prev_weight
-        base_weight = base_weight.view(
-            [base_layer.kernel_size[0] * base_layer.kernel_size[1] * base_layer.in_channels, base_layer.out_channels]
-        )
-        if base_weight.shape[0] != delta_weight.shape[1]:
-            # when in channels is not divisible by r
-            delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
-        weight = torch.mm(delta_weight, base_weight)
-        weight = weight.view(
-            [base_layer.out_channels, base_layer.in_channels, base_layer.kernel_size[0], base_layer.kernel_size[1]]
-        )
-        return weight
-
-    def _forward_from_weight(
-        self, input: torch.Tensor, weight: torch.Tensor, *args: Any, **kwargs: Any
-    ) -> torch.Tensor:
-        base_layer = self.get_base_layer()
-        base_bias = base_layer.bias.data if base_layer.bias is not None else None
-
-        return F.conv2d(
-            input,
-            weight,
-            bias=base_bias,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        # don't add bias here, because the bias will be added after OFT forward
+        return torch.matmul(input, delta_weight)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
