@@ -249,7 +249,6 @@ class Linear(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
-                    print ('base layer also has hook')
                     base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
@@ -264,17 +263,12 @@ class Linear(nn.Module, LoraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    print ('pre delta base weight', base_layer.weight.data)
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
                     from accelerate.utils import named_module_tensors
                     base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
-                    print ('post delta base weight', base_layer.weight.data)
                     
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
-                    base_layer._hf_hook.pre_forward(base_layer)
-                    print ('post hook base weight', base_layer.weight.data)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -294,11 +288,6 @@ class Linear(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        # if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
-        #     print ('adapter A has hook')
-        # else:
-        #     print ('no hook')
-
         if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
             self.lora_A[adapter]._hf_hook.pre_forward(self.lora_A[adapter])
         if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
@@ -327,7 +316,6 @@ class Linear(nn.Module, LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
-        print (output_tensor)
 
         return output_tensor
 
