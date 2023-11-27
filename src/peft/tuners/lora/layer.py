@@ -20,12 +20,12 @@ from typing import Any, List, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from accelerate.hooks import AlignDevicesHook
+from accelerate.utils import named_module_tensors
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
-from accelerate.hooks import AlignDevicesHook
-from accelerate.utils import named_module_tensors
 
 
 class LoraLayer(BaseTunerLayer):
@@ -265,8 +265,10 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
-                    
+                    base_layer._hf_hook.weights_map = {
+                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
+                    }
+
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
                 self.merged_adapters.append(active_adapter)
@@ -393,7 +395,6 @@ class Embedding(nn.Module, LoraLayer):
         if adapter_names is None:
             adapter_names = self.active_adapters
 
-
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
@@ -413,8 +414,10 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
-                    
+                    base_layer._hf_hook.weights_map = {
+                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
+                    }
+
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
@@ -569,8 +572,10 @@ class Conv2d(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
-                    
+                    base_layer._hf_hook.weights_map = {
+                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
+                    }
+
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
@@ -640,7 +645,7 @@ class Conv2d(nn.Module, LoraLayer):
             self.lora_A[adapter]._hf_hook.post_forward(self.lora_A[adapter], torch.tensor([]))
         if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
             self.lora_B[adapter]._hf_hook.post_forward(self.lora_B[adapter], torch.tensor([]))
-            
+
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:

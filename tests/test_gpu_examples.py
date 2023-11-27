@@ -21,10 +21,9 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
-from accelerate import infer_auto_device_map, init_empty_weights
+from accelerate import infer_auto_device_map
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
-    AutoConfig,
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
@@ -965,14 +964,10 @@ class OffloadSaveTests(unittest.TestCase):
         memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
-        self.assertTrue (0 in device_map.values())
+        self.assertTrue(0 in device_map.values())
         self.assertTrue("cpu" in device_map.values())
 
-        config = LoraConfig(
-            task_type="CAUSAL_LM",
-            init_lora_weights=False,
-            target_modules=['c_attn']
-        )
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
         model = get_peft_model(model, config)
         with tempfile.TemporaryDirectory() as tmp_dir:
