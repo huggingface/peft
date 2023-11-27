@@ -396,6 +396,11 @@ class LoraModel(BaseTuner):
                 if hasattr(target, "_hf_hook") and isinstance(target._hf_hook, AlignDevicesHook):
                     target._hf_hook.pre_forward(target)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
+                
+                if hasattr(parent, "_hf_hook") and isinstance(parent._hf_hook, AlignDevicesHook):
+                    parent._hf_hook.pre_forward(parent)
+                if hasattr(target, "_hf_hook") and isinstance(target._hf_hook, AlignDevicesHook):
+                    target._hf_hook.pre_forward(target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
