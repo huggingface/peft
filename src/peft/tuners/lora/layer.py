@@ -397,6 +397,8 @@ class Embedding(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                    base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -411,6 +413,11 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
+                    
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                    base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -430,6 +437,11 @@ class Embedding(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_A[adapter]._hf_hook.pre_forward(self.lora_A[adapter])
+        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_B[adapter]._hf_hook.pre_forward(self.lora_B[adapter])
+
         device = self.lora_embedding_B[adapter].device
         dtype = self.lora_embedding_A[adapter].dtype
 
@@ -453,6 +465,11 @@ class Embedding(nn.Module, LoraLayer):
             # cast back the weights
             self.lora_embedding_A[adapter] = weight_A.to(dtype)
             self.lora_embedding_B[adapter] = weight_B.to(dtype)
+
+        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_A[adapter]._hf_hook.post_forward(self.lora_A[adapter], torch.tensor([]))
+        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_B[adapter]._hf_hook.post_forward(self.lora_B[adapter], torch.tensor([]))
 
         return output_tensor
 
@@ -537,6 +554,8 @@ class Conv2d(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                    base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
@@ -550,6 +569,11 @@ class Conv2d(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
+                    
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                    base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -569,6 +593,11 @@ class Conv2d(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_A[adapter]._hf_hook.pre_forward(self.lora_A[adapter])
+        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_B[adapter]._hf_hook.pre_forward(self.lora_B[adapter])
+
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_A[adapter].weight.dtype
 
@@ -607,6 +636,11 @@ class Conv2d(nn.Module, LoraLayer):
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
 
+        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_A[adapter]._hf_hook.post_forward(self.lora_A[adapter], torch.tensor([]))
+        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
+            self.lora_B[adapter]._hf_hook.post_forward(self.lora_B[adapter], torch.tensor([]))
+            
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
