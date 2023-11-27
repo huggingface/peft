@@ -19,7 +19,6 @@ from typing import Any, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
@@ -194,7 +193,7 @@ class OFTLayer(nn.Module, LycorisLayer):
                 if orig_weights.shape[1] != delta_weight.shape[1]:
                     # when in channels is not divisible by r
                     delta_weight = delta_weight[: orig_weights.shape[1], : orig_weights.shape[1]]
-                #orig_weights = torch.linalg.solve(delta_weight, orig_weights)
+                # orig_weights = torch.linalg.solve(delta_weight, orig_weights)
                 delta_inv = torch.linalg.inv(delta_weight)
                 orig_weights = torch.mm(orig_weights, delta_inv)
 
