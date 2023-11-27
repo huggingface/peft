@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Literal, List, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -76,12 +76,14 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool = field(
+    init_lora_weights: bool | Literal["gaussian"] = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the Lora layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
+                "How to initialize the weights of the LoRA layers. Passing True (default) results in the default "
+                "initialization from the reference implementation from Microsoft. Passing 'gaussian' results "
+                "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
+                "to False leads to completely random initialization and is discouraged."
             ),
         },
     )
