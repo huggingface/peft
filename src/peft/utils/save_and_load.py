@@ -193,13 +193,17 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         filename = os.path.join(path, WEIGHTS_NAME)
         use_safetensors = False
     else:
+        
+        token = hf_hub_download_kwargs.get("token", None)
+        if token is None:
+            token = hf_hub_download_kwargs.get("use_auth_token", None) 
+        
         has_remote_safetensors_file = file_exists(
             repo_id=model_id,
             filename=SAFETENSORS_WEIGHTS_NAME,
             revision=hf_hub_download_kwargs.get("revision", None),
             repo_type=hf_hub_download_kwargs.get("repo_type", None),
             token=hf_hub_download_kwargs.get("token", None),
-            use_auth_token=hf_hub_download_kwargs.get("use_auth_token", None),
         )
         use_safetensors = has_remote_safetensors_file
 
