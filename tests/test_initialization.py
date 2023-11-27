@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
 import unittest
 
 import torch
@@ -89,7 +88,6 @@ class InitializationTest(unittest.TestCase):
         # use statistical test to check if weight A is from a normal distribution
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-
 
         # import matplotlib.pyplot as plt
         # x = weight_A.detach().flatten().cpu().numpy()
