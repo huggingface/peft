@@ -25,6 +25,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
 from accelerate.hooks import AlignDevicesHook
+from accelerate.utils import named_module_tensors
 
 
 class LoraLayer(BaseTunerLayer):
@@ -264,7 +265,6 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    from accelerate.utils import named_module_tensors
                     base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
                     
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):

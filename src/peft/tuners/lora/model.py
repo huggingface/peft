@@ -395,8 +395,11 @@ class LoraModel(BaseTuner):
                     parent._hf_hook.pre_forward(parent)
                 if hasattr(target, "_hf_hook") and isinstance(target._hf_hook, AlignDevicesHook):
                     target._hf_hook.pre_forward(target)
+
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
-                
+                print ([i for i in parent.parameters()])
+                print ([i for i in target.parameters()])
+
                 if hasattr(parent, "_hf_hook") and isinstance(parent._hf_hook, AlignDevicesHook):
                     parent._hf_hook.pre_forward(parent)
                 if hasattr(target, "_hf_hook") and isinstance(target._hf_hook, AlignDevicesHook):
