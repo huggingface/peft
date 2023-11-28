@@ -117,6 +117,32 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    megatron_config: Optional[dict] = field(
+        default=None,
+        metadata={
+            "help": (
+                "The TransformerConfig from Megatron, it is used to create LoRA's parallel linear layer."
+                "You can get it like this, `core_transformer_config_from_args(get_args())`, "
+                "this two functions are from Megatron."
+                "You need to specify this parameter when you want to loraize the ColumnParallelLinear and "
+                "RowParallelLinear layers of megatron."
+                "It should be noted that we may not be able to use the `save_pretrained` and `from_pretrained` "
+                "functions, because TransformerConfig may not necessarily be serialized."
+                "But when using megatron, we can use `get_peft_model_state_dict` function and "
+                "megatron's framework, they can also save and load models and configurations."
+            )
+        },
+    )
+    megatron_core: Optional[str] = field(
+        default="megatron.core",
+        metadata={
+            "help": (
+                "The core module from Megatron, it is used to judge and create LoRA's parallel linear layer. "
+                "It only needs to be passed in when you need to use your own modified megatron core module. "
+                "Otherwise, it will use the default value `megatron.core`. "
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
