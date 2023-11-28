@@ -106,6 +106,10 @@ class OFTConfig(LycorisConfig):
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
+    pinv: bool = field(
+        default=False,
+        metadata={"help": "Whether to use the pseudo-inverse or not."},
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.OFT
