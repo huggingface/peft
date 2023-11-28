@@ -742,8 +742,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             training_config_text += "\n"
 
         training_procedure_heading = "## Training procedure"
-        if quantization_prefix not in lines:
-            if training_procedure_heading in lines:
+        if quantization_prefix not in lines and not bool(training_config_text):
+            if training_procedure_heading in lines and training_config_text:
                 lines.insert(lines.index(training_procedure_heading) + 2, training_config_text)
             else:
                 lines.append(f"{training_procedure_heading}\n{training_config_text}")
