@@ -148,12 +148,12 @@ class OFTLayer(nn.Module, LycorisLayer):
                 if orig_weights.shape[1] != delta_weight.shape[1]:
                     # when in channels is not divisible by r
                     delta_weight = delta_weight[: orig_weights.shape[1], : orig_weights.shape[1]]
-                orig_weights = torch.mm(orig_weights, delta_weight)
+                new_weights = torch.mm(orig_weights, delta_weight)
                 if isinstance(base_layer, nn.Linear):
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    new_weights = torch.transpose(new_weights, 0, 1)
                 elif isinstance(base_layer, nn.Conv2d):
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = orig_weights.view(
+                    new_weights = torch.transpose(new_weights, 0, 1)
+                    new_weights = new_weights.view(
                         [
                             base_layer.out_channels,
                             base_layer.in_channels,
@@ -162,12 +162,12 @@ class OFTLayer(nn.Module, LycorisLayer):
                         ]
                     )
 
-                if safe_merge and not torch.isfinite(orig_weights).all():
+                if safe_merge and not torch.isfinite(new_weights).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                base_layer.weight.data = orig_weights
+                base_layer.weight.data = new_weights
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -178,23 +178,23 @@ class OFTLayer(nn.Module, LycorisLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
                 base_layer = self.get_base_layer()
-                orig_weights = base_layer.weight.data
+                new_weights = base_layer.weight.data
                 if isinstance(base_layer, nn.Linear):
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    new_weights = torch.transpose(new_weights, 0, 1)
                 elif isinstance(base_layer, nn.Conv2d):
-                    orig_weights = orig_weights.view(
+                    new_weights = new_weights.view(
                         [
                             base_layer.out_channels,
                             base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                         ]
                     )
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    new_weights = torch.transpose(new_weights, 0, 1)
                 delta_weight = self.get_delta_weight(active_adapter)
-                if orig_weights.shape[1] != delta_weight.shape[1]:
+                if new_weights.shape[1] != delta_weight.shape[1]:
                     # when in channels is not divisible by r
-                    delta_weight = delta_weight[: orig_weights.shape[1], : orig_weights.shape[1]]
+                    delta_weight = delta_weight[: new_weights.shape[1], : new_weights.shape[1]]
                 delta_inv = torch.linalg.inv(delta_weight)
-                orig_weights = torch.mm(orig_weights, delta_inv)
+                orig_weights = torch.mm(new_weights, delta_inv)
 
                 if isinstance(base_layer, nn.Linear):
                     orig_weights = torch.transpose(orig_weights, 0, 1)
