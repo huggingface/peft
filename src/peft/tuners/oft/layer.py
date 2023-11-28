@@ -283,6 +283,7 @@ class OFTLayer(nn.Module, LycorisLayer):
             base_layer = self.get_base_layer()
             base_bias = base_layer.bias
             if base_bias is not None:
+                # Bias should be added after OFT forward
                 result = result - base_bias.data
 
             # Execute all the adapters
