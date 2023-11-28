@@ -21,8 +21,8 @@ python quantize_save_load.py \
 
 - `HF_TOKEN` is the token used to access to [LLAMA models](https://huggingface.co/meta-llama).
 - `quantize_and_save()` function will quantize the backbone and initialize LoRA adapters. 
-It creates 2 folders under `$save_dir`. The quantized backbone is at `Llama-2-7b-hf-4bit-16rank-backbone`,
-and the LoRA adapters are at `Llama-2-7b-hf-4bit-16rank-adapters`.
+It creates 2 folders under `$save_dir`. The quantized backbone is at `Llama-2-7b-hf-4bit-16rank`,
+and the LoRA adapters are at the sub-folder `Llama-2-7b-hf-4bit-16rank/loftq_init`.
 
 ## Fine-tuning
 
@@ -36,12 +36,12 @@ from peft import PeftModel
 
 
 base_model = AutoModelForCausalLM.from_pretrained(
-    os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank-backbone"), 
+    os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank"), 
     load_in_4bit=True,
 )
 peft_model = PeftModel.from_pretrained(
     base_model,
-    os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank-adapters",
+    os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank", "loftq_init"),
     is_trainable=True,
 )
 ```
@@ -51,8 +51,7 @@ We load the quantized backbone and LoRA adapters from the [LoftQ Huggingface hub
 
 ```sh
 python train_gsm8k_llama.py \
-    --model_name_or_path LoftQ/Llama-2-7b-hf-6bit-64rank-backbone \
-    --adapter_name_or_path LoftQ/Llama-2-7b-hf-4bit-64rank-adapters \
+    --model_name_or_path LoftQ/Llama-2-7b-hf-4bit-64rank \
     --output_dir exp_results/gsm8k/llama-2-7b/bit4-rank64/lr3e-4 \
     --learning_rate 3e-4  \
     --seed 202 \

@@ -12,7 +12,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
@@ -162,8 +161,13 @@ class LoraConfig(PeftConfig):
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
 
         # handle init_lora_weights and loftq_config
-        if self.init_lora_weights == "loftq" and self.loftq_config is None:
-            raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+        if self.init_lora_weights == "loftq":
+            import importlib
+
+            if not importlib.util.find_spec("scipy"):
+                raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
+            if self.loftq_config is None:
+                raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
 
         # convert loftq_config to dict
         if self.loftq_config is not None and not isinstance(self.loftq_config, dict):

@@ -1,3 +1,18 @@
+# coding=utf-8
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import argparse
 import os
 
@@ -109,18 +124,20 @@ def quantize_and_save():
     args = arg_parse()
 
     # Download weights and configure LoRA
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, token=args.token)
-    if "llama" in args.model_name_or_path.lower():
-        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, token=args.token, device_map="auto")
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, token=args.token, trust_remote_code=True)
+    if any(name in args.model_name_or_path.lower() for name in ["llama", "mistral", "falcon"]):
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_name_or_path, token=args.token, trust_remote_code=True, device_map="auto"
+        )
         task_type = TaskType.CAUSAL_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
 
-    elif "bart" in args.model_name_or_path.lower():
+    elif any(name in args.model_name_or_path.lower() for name in ["bart", "t5"]):
         model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path, token=args.token, device_map="auto")
         task_type = TaskType.SEQ_2_SEQ_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "fc1", "fc2", "out_proj"]
 
-    elif "deberta" in args.model_name_or_path.lower():
+    elif any(name in args.model_name_or_path.lower() for name in ["deberta", "roberta", "bert"]):
         model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path, token=args.token)
         model = model.cuda()
         task_type = TaskType.SEQ_CLS
@@ -148,8 +165,8 @@ def quantize_and_save():
 
     # Save LoftQ model
     model_name = args.model_name_or_path.split("/")[-1] + f"-{args.bits}bit" + f"-{args.rank}rank"
-    base_model_dir = os.path.join(args.save_dir, model_name + "-backbone")
-    lora_model_dir = os.path.join(args.save_dir, model_name + "-adapters")
+    base_model_dir = os.path.join(args.save_dir, model_name)
+    lora_model_dir = os.path.join(args.save_dir, model_name, "loft_init")
 
     # save lora adapters first
     lora_model.base_model.peft_config[
@@ -171,19 +188,18 @@ def quantize_and_save():
 
 
 def load_loftq(base_model_path, lora_adapter_path):
-    if "llama" in base_model_path.lower():
+    if any(name in base_model_path.lower() for name in ["llama", "mistral", "falcon"]):
         model = AutoModelForCausalLM.from_pretrained(
             base_model_path,
             device_map="auto",
             low_cpu_mem_usage=True,
-            load_in_4bit=True,
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_use_double_quant=False,
                 bnb_4bit_quant_type="nf4",
             ),
         )
-    elif "bart" in base_model_path.lower():
+    elif any(name in base_model_path.lower() for name in ["bart", "t5"]):
         model = AutoModelForSeq2SeqLM.from_pretrained(
             base_model_path,
             device_map="auto",
@@ -195,7 +211,7 @@ def load_loftq(base_model_path, lora_adapter_path):
                 bnb_4bit_quant_type="nf4",
             ),
         )
-    elif "deberta" in base_model_path.lower():
+    elif any(name in base_model_path.lower() for name in ["deberta", "roberta", "bert"]):
         model = AutoModelForSequenceClassification.from_pretrained(
             base_model_path,
             low_cpu_mem_usage=True,

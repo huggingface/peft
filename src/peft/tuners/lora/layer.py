@@ -171,6 +171,7 @@ class LoraLayer(BaseTunerLayer):
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
+
         weight = self.get_base_layer().weight
         kwargs = {
             "num_bits": self.kwargs.get("loftq_bits", 4),

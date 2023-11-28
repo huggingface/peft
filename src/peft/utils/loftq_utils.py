@@ -1,11 +1,25 @@
+# coding=utf-8
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reference code: https://github.com/yxli2123/LoftQ/blob/main/utils.py
+# Reference paper: https://arxiv.org/abs/2310.08659
+
 import logging
+from typing import Union
 
 import torch
-try:
-    from scipy.stats import norm
-except ImportError:
-    raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
-
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
@@ -44,10 +58,13 @@ class NFQuantizer:
 
     @staticmethod
     def create_normal_map(offset=0.9677083, symmetric=False, num_bits=2):
-        variations = 2**num_bits
+        try:
+            from scipy.stats import norm
+        except ImportError:
+            raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
 
+        variations = 2**num_bits
         if symmetric:
-            # print("symmetric NormalFloat")
             v = norm.ppf(torch.linspace(1 - offset, offset, variations + 1)).tolist()
             values = []
             for index in range(len(v) - 1):
@@ -55,23 +72,15 @@ class NFQuantizer:
             v = values
         else:
             # one more positive value, this is an asymmetric type
-            # print("asymmetric NormalFloat")
             v1 = norm.ppf(torch.linspace(offset, 0.5, variations // 2 + 1)[:-1]).tolist()
-            # print(torch.linspace(offset, 0.5, 9)[:-1])
-            # print(v1)
             v2 = [0]
-            # v2 = [0]*(256-15) ## we have 15 non-zero values in this data type
             v3 = (-norm.ppf(torch.linspace(offset, 0.5, variations // 2)[:-1])).tolist()
-            # print(torch.linspace(offset, 0.5, 8)[:-1])
-            # print(v3)
             v = v1 + v2 + v3
 
         values = torch.Tensor(v)
         values = values.sort().values
         values /= values.max()
-        # print(values)
         return values
-        # assert values.
 
     def quantize_tensor(self, weight):
         max_abs = torch.abs(weight).max()
@@ -87,7 +96,6 @@ class NFQuantizer:
 
         # Find the index of the minimum absolute difference for each element
         qweight = torch.argmin(abs_diff, dim=-1)
-        # print(min_index)
         return qweight, max_abs
 
     def dequantize_tensor(self, qweight, max_abs):
@@ -101,7 +109,14 @@ class NFQuantizer:
         return weight
 
     def quantize_block(self, weight):
-        assert len(weight.shape) == 2 and weight.shape[0] * weight.shape[1] % self.block_size == 0
+        if len(weight.shape) != 2:
+            raise ValueError(f"Only support 2D matrix, but your input has {len(weight.shape)} dimensions.")
+        if weight.shape[0] * weight.shape[1] % self.block_size != 0:
+            raise ValueError(
+                f"Weight with shape ({weight.shape[0]} x {weight.shape[1]}) "
+                f"is not dividable by block size {self.block_size}."
+            )
+
         M, N = weight.shape
         device = weight.device
 
@@ -156,7 +171,8 @@ def _low_rank_decomposition(weight, reduced_rank=32):
     :param weight: The matrix to decompose, of shape (H, W) :param reduced_rank: the final rank :return:
     """
     matrix_dimension = len(weight.size())
-    assert matrix_dimension == 2, "Only Support 2D matrix"
+    if matrix_dimension != 2:
+        raise ValueError(f"Only support 2D matrix, but your input has {matrix_dimension} dimensions.")
 
     # Use SVD to decompose a matrix, default full_matrices is False to save parameters
     U, S, Vh = torch.linalg.svd(weight, full_matrices=False)
@@ -168,9 +184,11 @@ def _low_rank_decomposition(weight, reduced_rank=32):
 
 
 @torch.no_grad()
-def loftq_init(weight, num_bits: int, reduced_rank: int, num_iter: int):
-    assert num_bits in [2, 4, 8], "Only support 2, 4, 8 bits quantization"
-    assert num_iter > 0, "Number of iterations must be greater than 0"
+def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, reduced_rank: int, num_iter=1):
+    if num_bits not in [2, 4, 8]:
+        raise ValueError("Only support 2, 4, 8 bits quantization")
+    if num_iter <= 0:
+        raise ValueError("Number of iterations must be greater than 0")
 
     out_feature, in_feature = weight.size()
     device = weight.device
