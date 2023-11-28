@@ -228,7 +228,7 @@ An example is provided in [this notebook](https://github.com/huggingface/peft/bl
 
 ## Models support matrix
 
-Find models that are supported out of the box below. Note that PEFT works with almost all models -- it it is not listed, you just need to [do some manual configuration](https://huggingface.co/docs/peft/developer_guides/custom_models).
+Find models that are supported out of the box below. Note that PEFT works with almost all models -- if it is not listed, you just need to [do some manual configuration](https://huggingface.co/docs/peft/developer_guides/custom_models).
 
 ### Causal Language Modeling
 | Model        | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
