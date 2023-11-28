@@ -197,10 +197,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config = self.peft_config[adapter_name]
             # save only the trainable weights
             output_state_dict = get_peft_model_state_dict(
-                self,
-                state_dict=kwargs.get("state_dict", None),
-                adapter_name=adapter_name,
-                base_model_layers_to_save=kwargs.get("base_model_layers_to_save", None),
+                self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
