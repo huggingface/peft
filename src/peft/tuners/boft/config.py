@@ -23,7 +23,7 @@ from peft.utils import PeftType
 @dataclass
 class BOFTConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`LoraModel`].
+    This is the configuration class to store the configuration of a [`BOFTModel`].
 
     Args:
         r (`int`): Lora attention dimension.
@@ -90,20 +90,20 @@ class BOFTConfig(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Lora. Can be 'none', 'all' or 'lora_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for BOFT. Can be 'none', 'all' or 'boft_only'"})
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. "
+            "help": "List of modules apart from BOFT layers to be set as trainable and saved in the final checkpoint. "
             "For example, in Sequence Classification or Token Classification tasks, "
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool = field(
+    init_boft_weights: bool = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the Lora layers with their default initialization. Don't change "
+                "Whether to initialize the weights of the BOFT layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
         },
@@ -118,24 +118,6 @@ class BOFTConfig(PeftConfig):
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
-        },
-    )
-    rank_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-            )
-        },
-    )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
-            )
         },
     )
 

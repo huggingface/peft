@@ -13,23 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-
 from .config import BOFTConfig
-from .gptq import SVDQuantLinear
 from .layer import BOFTLayer
 from .model import BOFTModel
 
 
 __all__ = ["BOFTConfig", "BOFTLayer", "BOFTModel"]
-
-
-if is_bnb_available():
-    from .bnb import Linear8bitLt
-
-    __all__ += ["Linear8bitLt"]
-
-if is_bnb_4bit_available():
-    from .bnb import Linear4bit
-
-    __all__ += ["Linear4bit"]

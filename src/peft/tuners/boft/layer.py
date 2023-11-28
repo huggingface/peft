@@ -150,11 +150,6 @@ class BOFTLayer(BaseTunerLayer):
         self.boft_dropout = nn.ModuleDict({})
         self.boft_R = nn.ParameterDict({})
         self.boft_s = nn.ParameterDict({})
-        self.boft_b = nn.ParameterDict({})
-        # For Embedding layer
-        self.boft_embedding_R = nn.ParameterDict({})
-        self.boft_embedding_s = nn.ParameterDict({})
-        self.boft_embedding_b = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
@@ -222,7 +217,6 @@ class BOFTLayer(BaseTunerLayer):
 
         self.boft_R[adapter_name] = nn.Parameter(torch.zeros(self.kwargs["boft_n_butterfly_factor"]+1, boft_block_num, boft_block_size, boft_block_size))
         self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
-        self.boft_b[adapter_name] = nn.Parameter(torch.ones(int(self.out_features)))
 
         if init_boft_weights:
             self.reset_boft_parameters(adapter_name)
@@ -301,62 +295,86 @@ class BOFTLayer(BaseTunerLayer):
         return indices
 
 
-#  ------------------------------------------------------------------------------------------
-#  Copyright (c) Microsoft Corporation. All rights reserved.
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-#  ------------------------------------------------------------------------------------------
-
-
-class Linear(nn.Linear, LoraLayer):
-    # BOFT implemented in a dense layer
+class Linear(nn.Linear, BOFTLayer):
+    """
+    BOFT implemented in a dense layer.
+    """
     def __init__(
         self,
         adapter_name: str,
         in_features: int,
         out_features: int,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
+        boft_dropout: float = 0.1,
+        boft_block_size: int = 8,
+        boft_block_num: int = 0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        boft_n_butterfly_factor: int = 0,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        # this gets the init from nn.Linear's super perspective, i.e.
-        # nn.Module.__init__, which should always be called
-        super(nn.Linear, self).__init__()
-        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
-        # added robustness is not big enough for Linear.
+        init_boft_weights = kwargs.pop("init_boft_weights", True)
 
-        LoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+        nn.Linear.__init__(self, in_features, out_features, **kwargs)
+        BOFTLayer.__init__(self, in_features=in_features, out_features=out_features, boft_n_butterfly_factor=boft_n_butterfly_factor)
         # Freezing the pre-trained weight matrix
+        self.weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
+        if fan_in_fan_out:
+            self.weight.data = self.weight.data.T
 
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.boft_n_butterfly_factor = boft_n_butterfly_factor
+
+        nn.Linear.reset_parameters(self)
+        self.update_layer(adapter_name, boft_block_size, boft_block_num, boft_dropout, init_boft_weights)
+        self.active_adapter = adapter_name
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
-        if self.active_adapter not in self.boft_R.keys():
-            return
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+        """
         if self.merged:
-            warnings.warn("Already merged. Nothing to do.")
-            return
-        if self.boft_block_size[self.active_adapter] > 0 and self.boft_block_num[self.active_adapter] > 0:
-            # self.weight.data += self.get_delta_weight(self.active_adapter)
-            orig_weight = self.weight.data
-            butterfly_oft_mat, boft_s, boft_b = self.get_delta_weight(self.active_adapter)
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.boft_R.keys():
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = self.weight.data.clone()
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = orig_weight * boft_s
 
-            orig_weight = torch.transpose(orig_weight, 0, 1)
-            rotated_weight = torch.mm(butterfly_oft_mat, orig_weight)
-            rotated_weight = torch.transpose(rotated_weight, 0, 1)
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
 
-            self.weight.data = rotated_weight * boft_s
-            self.bias.data = self.bias.data * boft_b
-            self.merged = True
+                    self.weight.data = orig_weights
+                else:
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+                    self.weight.data = torch.transpose(self.weight.data, 0, 1)
+                    self.weight.data = torch.mm(butterfly_oft_mat, self.weight.data)
+                    self.weight.data = torch.transpose(self.weight.data, 0, 1)
+                    self.weight.data = self.weight.data * boft_s
+                self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        Delete the BOFT adapter weights with the base model.
+        """
         if self.active_adapter not in self.boft_R.keys():
             return
         if not self.merged:
@@ -376,9 +394,18 @@ class Linear(nn.Linear, LoraLayer):
             self.merged = False
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        device = self.lora_B[adapter].weight.device
+        dtype = self.lora_B[adapter].weight.dtype
+
         boft_R = self.boft_R[adapter]
         boft_s = self.boft_s[adapter]
-        boft_b = self.boft_b[adapter]
 
         N, Z, b, _ = boft_R.shape
         boft_R = boft_R.view(N * Z, b, b)
@@ -393,16 +420,20 @@ class Linear(nn.Linear, LoraLayer):
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
             butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
-        return butterfly_oft_mat, boft_s, boft_b
+        return butterfly_oft_mat, boft_s
 
     def _linear(self, input: torch.Tensor) -> torch.Tensor:
         return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
     
     def cayley_batch(self, data):
+        """
+        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
+        Args:
+            data: A batch of skew-symmetric matrices of shape (b, r, c).
+        """
         b, r, c = data.shape
         # Ensure the input matrix is skew-symmetric
         skew = 0.5 * (data - data.transpose(1, 2))
-        # I = torch.eye(r, device=data.device).unsqueeze(0).repeat(b, 1, 1)
         I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
         # Perform the Cayley parametrization
@@ -412,12 +443,19 @@ class Linear(nn.Linear, LoraLayer):
         return Q
     
     def angle2rot(self, alphas):
+        """
+        Convert the angle to rotation matrix.
+        Only applicable for BOFT block size 2.
+        """
         c = torch.cos(alphas)
         s = torch.sin(alphas)
         rot_mats = torch.cat([c, -s, s, c], dim=-1).view(alphas.shape[0], alphas.shape[1], 2, 2)
         return rot_mats
     
     def is_orthogonal(self, R, eps=1e-3):
+        """
+        Check if the matrix is orthogonal.
+        """
         R = R.float()
         with torch.no_grad():
             RtR = torch.matmul(R.t(), R)
@@ -425,6 +463,9 @@ class Linear(nn.Linear, LoraLayer):
             return torch.all(diff < eps)
 
     def is_identity_matrix(self, tensor):
+        """
+        Check if the matrix is identity.
+        """
         if not torch.is_tensor(tensor):
             raise TypeError("Input must be a PyTorch tensor.")
         if tensor.ndim != 2 or tensor.shape[0] != tensor.shape[1]:
@@ -433,370 +474,43 @@ class Linear(nn.Linear, LoraLayer):
         return torch.all(torch.eq(tensor, identity))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.active_adapter not in self.boft_R.keys():
-            return self._linear(x)
-
-        previous_dtype = x.dtype
-
-        # if self.disable_adapters:
-        #     if (self.boft_block_size[self.active_adapter] > 0) and self.merged:
-        #         self.unmerge()
-        #     result = self._linear(x)
-        # elif (self.boft_block_size[self.active_adapter] == 0) or self.merged:
-        #     result = self._linear(x)
-        # else:
-
-        boft_R = self.boft_R[self.active_adapter]
-        boft_s = self.boft_s[self.active_adapter]
-        if self.boft_bias_fit:
-            boft_b = self.boft_b[self.active_adapter]
-        dropout = self.boft_dropout[self.active_adapter]
-
-        # oft_mat = self.cayley_batch(boft_R)
-        # oft_mat = dropout(oft_mat)
-        # oft_mat = FastBlockDiag.apply(oft_mat.unsqueeze(0)).squeeze(0)
-
-        # if self.kwargs["boft_n_butterfly_factor"] != 0:
-        #     boft_R_butterfly = self.boft_R_butterfly[self.active_adapter]
-
-        N, Z, b, _ = boft_R.shape
-        boft_R = boft_R.view(N * Z, b, b)
-        orth_rotate_butterfly = self.cayley_batch(boft_R)
-        orth_rotate_butterfly = orth_rotate_butterfly.view(N, Z, b, b)
-        orth_rotate_butterfly = dropout(orth_rotate_butterfly)
-        block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-
-        # with torch.cuda.amp.autocast(enabled=False):
-
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
-        butterfly_oft_mat = butterfly_oft_mat_batch[0]
-
-        for i in range(1, butterfly_oft_mat_batch.shape[0]):
-            butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
-
-        # if self.optim_idx % 5 == 0:
-        #     oft_mat = butterfly_mat @ oft_mat #.detach()
-        #     self.optim_idx = self.optim_idx + 1
-        # else:
-        #     oft_mat = butterfly_mat.detach() @ oft_mat
-        #     self.optim_idx = self.optim_idx + 1
-
-        # print('percentage of non-zero before', (torch.nonzero(oft_mat).size(0) / oft_mat.numel()) * 100)
-        # oft_mat = butterfly_mat @ oft_mat
-        # print('percentage of non-zero after ', (torch.nonzero(oft_mat).size(0) / oft_mat.numel()) * 100)
-
-        # scaling = self.scaling[self.active_adapter]
-
-        # print('oft_mat is orthogonal', self.is_orthogonal(oft_mat))
-        # print('oft_mat is identity', self.is_identity_matrix(oft_mat))
-        # print('butterfly_mat is identity', self.is_identity_matrix(butterfly_mat))
-
-        # print('boft_R', boft_R.norm(p='fro'))
-        # print('boft_R_butterfly', boft_R_butterfly.norm(p='fro'))
-
-        x = x.to(boft_R.data.dtype)
-        
-        orig_weight = self.weight.data
-        orig_weight = torch.transpose(orig_weight, 0, 1)
-        rotated_weight = torch.mm(butterfly_oft_mat, orig_weight)
-        rotated_weight = torch.transpose(rotated_weight, 0, 1)
-
-        scaled_rotated_weight = rotated_weight * boft_s
-
-        # Apply the trainable identity matrix
-        if self.boft_bias_fit:
-            if self.bias is not None:
-                bias_term = self.bias.data * boft_b
-            else:
-                bias_term = None
-        else:
-            bias_term = self.bias.data if self.bias is not None else None
-
-        result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias_term)
-
-        result = result.to(previous_dtype)
-        return result
-
-
-class Embedding(nn.Embedding, LoraLayer):
-    # LoRA implemented in a Embedding layer
-    def __init__(
-        self,
-        adapter_name: str,
-        num_embeddings: int,
-        embedding_dim: int,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        **kwargs,
-    ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
-        LoraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
-        self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
-
-    def merge(self, safe_merge: bool = False) -> None:
-        """
-        Merge the active adapter weights into the base weights
-
-        Args:
-            safe_merge (`bool`, *optional*):
-                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
-        """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-        for active_adapter in self.active_adapters:
-            if active_adapter in self.lora_embedding_A.keys():
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = self.weight.data.copy()
-                    orig_weights += self.get_delta_weight(active_adapter)
-
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-
-                    self.weight.data = orig_weights
-                else:
-                    self.weight.data += self.get_delta_weight(active_adapter)
-                self.merged_adapters.append(active_adapter)
-
-    def unmerge(self) -> None:
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.lora_embedding_A.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
-
-    def get_delta_weight(self, adapter) -> torch.Tensor:
-        """
-        Compute the delta weight for the given adapter.
-
-        Args:
-            adapter (str):
-                The name of the adapter for which the delta weight should be computed.
-        """
-        device = self.lora_embedding_B[adapter].device
-        dtype = self.lora_embedding_A[adapter].dtype
-
-        # In case users wants to merge the adapter weights that are in
-        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
-        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
-
-        weight_A = self.lora_embedding_A[adapter]
-        weight_B = self.lora_embedding_B[adapter]
-
-        if cast_to_fp32:
-            weight_A = weight_A.float()
-            weight_B = weight_B.float()
-
-        output_tensor = transpose(weight_B @ weight_A, True) * self.scaling[adapter]
-
-        if cast_to_fp32:
-            output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.lora_embedding_A[adapter] = weight_A.to(dtype)
-            self.lora_embedding_B[adapter] = weight_B.to(dtype)
-
-        return output_tensor
-
-    def _embed(self, input: torch.Tensor, weight: Optional[torch.Tensor] = None) -> torch.Tensor:
-        weight = self.weight if weight is None else weight
-        return F.embedding(
-            input,
-            weight,
-            padding_idx=self.padding_idx,
-            max_norm=self.max_norm,
-            norm_type=self.norm_type,
-            scale_grad_by_freq=self.scale_grad_by_freq,
-            sparse=self.sparse,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # TODO: no dtype conversion here, unlike in Linear, is that correct?
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self._embed(x)
-        elif self.merged:
-            result = self._embed(x)
-        else:
-            result = self._embed(x)
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.lora_embedding_A:
-                    continue
-                embedding_A = self.lora_embedding_A[active_adapter].T
-                embedding_B = self.lora_embedding_B[active_adapter].T
-                scaling = self.scaling[active_adapter]
-                after_A = self._embed(x, embedding_A)
-                result += (after_A @ embedding_B) * scaling
-
-        return result
-
-
-class Conv2d(nn.Conv2d, LoraLayer):
-    # Lora implemented in a conv2d layer
-    def __init__(
-        self,
-        adapter_name: str,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: Union[int, Tuple[int]],
-        stride: Union[int, Tuple[int]] = 1,
-        padding: Union[int, Tuple[int]] = 0,
-        r: int = 0,
-        lora_alpha: int = 1,
-        lora_dropout: float = 0.0,
-        **kwargs,
-    ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        self._init_empty_weights(nn.Conv2d, in_channels, out_channels, kernel_size, stride=stride, padding=padding)
-
-        LoraLayer.__init__(
-            self,
-            in_features=in_channels,
-            out_features=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-        )
-
-        self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
-
-    def merge(self, safe_merge: bool = False) -> None:
-        """
-        Merge the active adapter weights inside the base weights
-
-        Args:
-            safe_merge (`bool`, *optional*):
-                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
-        """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-        for active_adapter in self.active_adapters:
-            if active_adapter in self.lora_A.keys():
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = self.weight.data.copy()
-                    orig_weights += self.get_delta_weight(active_adapter)
-
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-                    self.weight.data = orig_weights
-                else:
-                    self.weight.data += self.get_delta_weight(active_adapter)
-                self.merged_adapters.append(active_adapter)
-
-    def unmerge(self) -> None:
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.lora_A.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
-
-    def get_delta_weight(self, adapter) -> torch.Tensor:
-        """
-        Compute the delta weight for the given adapter.
-
-        Args:
-            adapter (str):
-                The name of the adapter for which the delta weight should be computed.
-        """
-        device = self.lora_B[adapter].weight.device
-        dtype = self.lora_A[adapter].weight.dtype
-
-        # In case users wants to merge the adapter weights that are in
-        # float16 while being on CPU, we need to cast the weights to float32, perform the merge and then cast back to
-        # float16 because the `@` and matmul operation in general is not supported in torch + cpu + fp16.
-        cast_to_fp32 = device.type == "cpu" and dtype == torch.float16
-
-        weight_A = self.lora_A[adapter].weight
-        weight_B = self.lora_B[adapter].weight
-
-        if cast_to_fp32:
-            weight_A = weight_A.float()
-            weight_B = weight_B.float()
-
-        # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
-        if self.weight.size()[2:4] == (1, 1):
-            # conv2d 1x1
-            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
-                3
-            ) * self.scaling[adapter]
-        else:
-            # conv2d 3x3
-            output_tensor = (
-                F.conv2d(
-                    weight_A.permute(1, 0, 2, 3),
-                    weight_B,
-                ).permute(1, 0, 2, 3)
-                * self.scaling[adapter]
-            )
-
-        if cast_to_fp32:
-            output_tensor = output_tensor.to(dtype=dtype)
-
-            # cast back the weights
-            self.lora_A[adapter].weight.data = weight_A.to(dtype)
-            self.lora_B[adapter].weight.data = weight_B.to(dtype)
-
-        return output_tensor
-
-    def _conv2d(self, input: torch.Tensor) -> torch.Tensor:
-        return F.conv2d(
-            input,
-            self.weight,
-            bias=self.bias,
-            stride=self.stride,
-            padding=self.padding,
-            dilation=self.dilation,
-            groups=self.groups,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._conv2d(x)
+            result = self._linear(x)
         elif self.merged:
-            result = self._conv2d(x)
+            result = self._linear(x)
         else:
-            result = self._conv2d(x)
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self.lora_A.keys():
-                    continue
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
-                dropout = self.lora_dropout[active_adapter]
-                scaling = self.scaling[active_adapter]
-                x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+            boft_R = self.boft_R[self.active_adapter]
+            boft_s = self.boft_s[self.active_adapter]
+            dropout = self.boft_dropout[self.active_adapter]
+
+            N, Z, b, _ = boft_R.shape
+            boft_R = boft_R.view(N * Z, b, b)
+            orth_rotate_butterfly = self.cayley_batch(boft_R)
+            orth_rotate_butterfly = orth_rotate_butterfly.view(N, Z, b, b)
+            orth_rotate_butterfly = dropout(orth_rotate_butterfly)
+            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+
+            butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
+            butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+            butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+            for i in range(1, butterfly_oft_mat_batch.shape[0]):
+                butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+            x = x.to(boft_R.data.dtype)
+            
+            orig_weight = self.weight.data
+            orig_weight = torch.transpose(orig_weight, 0, 1)
+            rotated_weight = torch.mm(butterfly_oft_mat, orig_weight)
+            rotated_weight = torch.transpose(rotated_weight, 0, 1)
+
+            scaled_rotated_weight = rotated_weight * boft_s
+
+            result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.bias.data)
 
         result = result.to(previous_dtype)
         return result
