@@ -193,7 +193,7 @@ class OFTLayer(nn.Module, LycorisLayer):
                 if new_weights.shape[1] != delta_weight.shape[1]:
                     # when in channels is not divisible by r
                     delta_weight = delta_weight[: new_weights.shape[1], : new_weights.shape[1]]
-                delta_inv = torch.linalg.inv(delta_weight)
+                delta_inv = torch.inverse(delta_weight)
                 orig_weights = torch.mm(new_weights, delta_inv)
 
                 if isinstance(base_layer, nn.Linear):
