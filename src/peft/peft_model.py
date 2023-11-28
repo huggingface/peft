@@ -741,7 +741,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             training_config_text += "\n".join([f"- {name}: {value}" for name, value in quantization_config.items()])
             training_config_text += "\n"
 
-        training_procedure_heading = "## Training procedure\n"
+        training_procedure_heading = "## Training procedure"
         if quantization_prefix not in lines:
             if training_procedure_heading in lines:
                 lines.insert(lines.index(training_procedure_heading) + 2, training_config_text)
@@ -749,7 +749,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 lines.append(f"{training_procedure_heading}\n{training_config_text}")
 
         # Adds peft version
-        framework_block_heading = "### Framework versions\n"
+        framework_block_heading = "### Framework versions"
         if f"- PEFT {__version__}" not in lines:
             if framework_block_heading in lines:
                 lines.insert(lines.index(framework_block_heading) + 2, f"- PEFT {__version__}\n")
