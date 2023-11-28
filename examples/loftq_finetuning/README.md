@@ -35,13 +35,15 @@ from transformers import AutoModelForCausalLM
 from peft import PeftModel
 
 
-base_model = AutoModelForCausalLM.from_pretrained(os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank-backbone"), 
-                                                  load_in_4bit=True,
-                                                  )
-peft_model = PeftModel.from_pretrained(base_model,
-                                       os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank-adapters",
-                                       is_trainable=True),
-                                       )
+base_model = AutoModelForCausalLM.from_pretrained(
+    os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank-backbone"), 
+    load_in_4bit=True,
+)
+peft_model = PeftModel.from_pretrained(
+    base_model,
+    os.path.join(args.save_dir, "Llama-2-7b-hf-4bit-16rank-adapters",
+    is_trainable=True,
+)
 ```
 
 We also provide an example to fine-tune LoftQ on GSM8K. 
