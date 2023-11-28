@@ -55,7 +55,7 @@ def get_closest_label(eval_pred, classes):
 
 # Converting Bytes to Megabytes
 def b2mb(x):
-    return int(x / 2 ** 20)
+    return int(x / 2**20)
 
 
 # This context manager is used to track the peak memory usage of the process
@@ -124,7 +124,9 @@ def main():
     dataset = load_dataset("ought/raft", dataset_name)
     classes = [k.replace("_", " ") for k in dataset["train"].features["Label"].names]
     dataset = dataset.map(
-        lambda x: {"text_label": [classes[label] for label in x["Label"]]}, batched=True, num_proc=1,
+        lambda x: {"text_label": [classes[label] for label in x["Label"]]},
+        batched=True,
+        num_proc=1,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
@@ -221,7 +223,9 @@ def main():
 
     # lr scheduler
     lr_scheduler = get_linear_schedule_with_warmup(
-        optimizer=optimizer, num_warmup_steps=0, num_training_steps=(len(train_dataloader) * num_epochs),
+        optimizer=optimizer,
+        num_warmup_steps=0,
+        num_training_steps=(len(train_dataloader) * num_epochs),
     )
 
     model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_scheduler = accelerator.prepare(
