@@ -25,9 +25,24 @@ from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
 
-def get_peft_model_state_dict(
-    model, state_dict=None, adapter_name="default", unwrap_compiled=False, base_model_layers_to_save=None
-):
+def has_valid_embedding_base_layer(layer):
+    """Check if the layer has an embedding base layer"""
+    return (
+        layer is not None
+        and hasattr(layer, "base_layer")
+        and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
+    )
+
+
+def get_base_module_name(model, layer):
+    """Get the name of the base module for a given layer."""
+    for name, module in model.named_modules():
+        if module == layer.base_layer:
+            return name
+    return None
+
+
+def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", unwrap_compiled=False):
     """
     Get the state dict of the Peft model.
 
@@ -40,8 +55,6 @@ def get_peft_model_state_dict(
             The name of the adapter whose state dict should be returned.
         unwrap_compiled (`bool`, *optional*, defaults to `False`):
             Whether to unwrap the model if torch.compile was used.
-        base_model_layers_to_save (`list(str)`, *optional*, defaults to `None`):
-            The list of base model layers to save. For example, ["embed_tokens", "lm_head"]
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -78,12 +91,13 @@ def get_peft_model_state_dict(
 
         # save the corresponding base embedding layers when loras are applied to the embedding layers
         # support from version >= 0.6.2
-        if base_model_layers_to_save is not None:
-            if not isinstance(base_model_layers_to_save, list):
-                raise ValueError(f"{base_model_layers_to_save} should be a list of strings")
-            for k, v in state_dict.items():
-                if any(f"{module_name}.base_layer" in k for module_name in base_model_layers_to_save):
-                    to_return[k] = v
+        input_embedding_layer = model.get_input_embeddings()
+        output_embedding_layer = model.get_output_embeddings()
+        for layer in [input_embedding_layer, output_embedding_layer]:
+            if has_valid_embedding_base_layer(layer):
+                base_module_name = get_base_module_name(model, layer)
+                if base_module_name:
+                    to_return.update({k: v for k, v in state_dict.items() if base_module_name in k})
 
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
