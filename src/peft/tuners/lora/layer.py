@@ -265,9 +265,10 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    base_layer._hf_hook.weights_map = {
-                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
-                    }
+                    if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                        base_layer._hf_hook.weights_map = {
+                            name: param.to("cpu") for name, param in named_module_tensors(base_layer)
+                        }
 
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
@@ -414,9 +415,10 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    base_layer._hf_hook.weights_map = {
-                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
-                    }
+                    if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                        base_layer._hf_hook.weights_map = {
+                            name: param.to("cpu") for name, param in named_module_tensors(base_layer)
+                        }
 
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
@@ -572,9 +574,10 @@ class Conv2d(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-                    base_layer._hf_hook.weights_map = {
-                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
-                    }
+                    if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                        base_layer._hf_hook.weights_map = {
+                            name: param.to("cpu") for name, param in named_module_tensors(base_layer)
+                        }
 
                 if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
