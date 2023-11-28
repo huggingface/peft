@@ -16,11 +16,10 @@ import os
 from typing import Optional
 
 import torch
-from huggingface_hub import hf_hub_download
+from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
-from .hub_utils import hub_file_exists
 from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
@@ -194,11 +193,16 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         filename = os.path.join(path, WEIGHTS_NAME)
         use_safetensors = False
     else:
-        has_remote_safetensors_file = hub_file_exists(
-            model_id,
-            SAFETENSORS_WEIGHTS_NAME,
+        token = hf_hub_download_kwargs.get("token", None)
+        if token is None:
+            token = hf_hub_download_kwargs.get("use_auth_token", None)
+
+        has_remote_safetensors_file = file_exists(
+            repo_id=model_id,
+            filename=SAFETENSORS_WEIGHTS_NAME,
             revision=hf_hub_download_kwargs.get("revision", None),
             repo_type=hf_hub_download_kwargs.get("repo_type", None),
+            token=token,
         )
         use_safetensors = has_remote_safetensors_file
 
