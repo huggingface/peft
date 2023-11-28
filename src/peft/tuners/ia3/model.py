@@ -78,6 +78,8 @@ class IA3Model(BaseTuner):
         - **peft_config** ([`ia3Config`]): The configuration of the (IA)^3 model.
     """
 
+    prefix: str = "ia3_"
+
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
 
@@ -146,7 +148,7 @@ class IA3Model(BaseTuner):
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
-            if "ia3_" not in n:
+            if self.prefix not in n:
                 p.requires_grad = False
 
     def _create_and_replace(
@@ -202,8 +204,7 @@ class IA3Model(BaseTuner):
             is_feedforward = any(key.endswith(target_key) for target_key in ia3_config.feedforward_modules)
         return is_feedforward
 
-    @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
 
         # child layer wraps the original module, unpack it
@@ -225,7 +226,7 @@ class IA3Model(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "ia3_" in name:
+            if self.prefix in name:
                 module.to(child.weight.device)
 
     def __getattr__(self, name: str):
@@ -298,7 +299,7 @@ class IA3Model(BaseTuner):
         if getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
 
-        key_list = [key for key, _ in self.model.named_modules() if "ia3" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
@@ -348,3 +349,25 @@ class IA3Model(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def delete_adapter(self, adapter_name: str):
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (str): Name of the adapter to be deleted.
+        """
+        if adapter_name not in self.peft_config:
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        new_adapter = None
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, IA3Layer):
+                target.delete_adapter(adapter_name)
+                if new_adapter is None:
+                    new_adapter = target.active_adapters[:]
+
+        self.active_adapter = new_adapter or []

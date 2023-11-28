@@ -8,13 +8,17 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
+
+⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+rendered properly in your Markdown viewer.
+
 -->
 
 # Working with custom models
 
 Some fine-tuning techniques, such as prompt tuning, are specific to language models. That means in 🤗 PEFT, it is
 assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like
-[LoRA](./conceptual_guides/lora) - are not restricted to specific model types.
+[LoRA](../conceptual_guides/lora) - are not restricted to specific model types.
 
 In this guide, we will see how LoRA can be applied to a multilayer perceptron and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
 
