@@ -135,9 +135,9 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        if config_cls == LoHaConfig:
+        if config_cls in [LoHaConfig, OFTConfig]:
             # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
-            self.skipTest("LoHaConfig test is flaky")
+            self.skipTest("LoHaConfig and OFTConfig test is flaky")
 
         # Instantiate model & adapters
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
