@@ -57,7 +57,7 @@
 
 - title: Reference
   sections:
-  - local: autoclass/auto_class
+  - local: package_reference/auto_class
     title: AutoPeftModel
   - local: package_reference/peft_model
     title: PEFT model
