@@ -27,22 +27,20 @@ from .peft_types import PeftType
 
 def has_valid_embedding_base_layer(layer):
     """Check if the layer has an embedding base layer"""
-    return (
-        layer is not None
-        and hasattr(layer, "base_layer")
-        and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
-    )
+    return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
 
 
-def get_base_module_name(model, layer):
-    """Get the name of the base module for a given layer."""
+def get_embedding_layer_name(model, layer, is_prompt_learning):
+    """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
-        if module == layer.base_layer:
+        if (is_prompt_learning and module == layer) or module == layer.base_layer:
             return name
     return None
 
 
-def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", unwrap_compiled=False):
+def get_peft_model_state_dict(
+    model, state_dict=None, adapter_name="default", unwrap_compiled=False, is_embedding_layer_resized=False
+):
     """
     Get the state dict of the Peft model.
 
@@ -55,6 +53,8 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
             The name of the adapter whose state dict should be returned.
         unwrap_compiled (`bool`, *optional*, defaults to `False`):
             Whether to unwrap the model if torch.compile was used.
+        is_embedding_layer_resized (`bool`, *optional*, defaults to `False`):
+            If `True`, save the embedding layers in addition to adapter weights.
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -89,16 +89,6 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
 
-        # save the corresponding base embedding layers when loras are applied to the embedding layers
-        # support from version >= 0.6.2
-        input_embedding_layer = model.get_input_embeddings()
-        output_embedding_layer = model.get_output_embeddings()
-        for layer in [input_embedding_layer, output_embedding_layer]:
-            if has_valid_embedding_base_layer(layer):
-                base_module_name = get_base_module_name(model, layer)
-                if base_module_name:
-                    to_return.update({k: v for k, v in state_dict.items() if base_module_name in k})
-
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
 
@@ -127,6 +117,15 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
+
+    # save the corresponding base embedding layers when loras are applied to the embedding layers
+    # support from version >= 0.6.2
+    if is_embedding_layer_resized and hasattr(model, "get_input_embeddings"):
+        for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
+            if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
+                embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
+                if embedding_module_name:
+                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
 
     to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return

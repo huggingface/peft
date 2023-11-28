@@ -159,6 +159,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         save_directory: str,
         safe_serialization: bool = True,
         selected_adapters: Optional[List[str]] = None,
+        is_embedding_layer_resized: bool = False,
+        is_main_process: bool = True,
         **kwargs: Any,
     ):
         r"""
@@ -172,6 +174,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 exist).
             safe_serialization (`bool`, *optional*):
                 Whether to save the adapter files in safetensors format.
+            selected_adapters (`list(str)`,  *optional*):
+                A list of adapters to be saved. If `None`, will default to all adapters.
+            is_embedding_layer_resized (`bool`, *optional*):
+                If `True`, save the embedding layers in addition to adapter weights.
+            is_main_process (`bool`, *optional*):
+                Whether the process calling this is the main process or not. Will default to `True`.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
@@ -190,48 +198,53 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
 
-        os.makedirs(save_directory, exist_ok=True)
-        self.create_or_update_model_card(save_directory)
+        if is_main_process:
+            os.makedirs(save_directory, exist_ok=True)
+            self.create_or_update_model_card(save_directory)
 
         for adapter_name in selected_adapters:
             peft_config = self.peft_config[adapter_name]
             # save only the trainable weights
             output_state_dict = get_peft_model_state_dict(
-                self, state_dict=kwargs.get("state_dict", None), adapter_name=adapter_name
+                self,
+                state_dict=kwargs.get("state_dict", None),
+                adapter_name=adapter_name,
+                is_embedding_layer_resized=is_embedding_layer_resized,
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
 
-            if safe_serialization:
-                # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
-                # Safetensors does not allow tensor aliasing.
-                # We're going to remove aliases before saving
-                ptrs = collections.defaultdict(list)
-                for name, tensor in output_state_dict.items():
-                    # Sometimes in the state_dict we have non-tensor objects.
-                    # e.g. in bitsandbytes we have some `str` objects in the state_dict
-                    if isinstance(tensor, torch.Tensor):
-                        ptrs[id_tensor_storage(tensor)].append(name)
-                    else:
-                        # In the non-tensor case, fall back to the pointer of the object itself
-                        ptrs[id(tensor)].append(name)
+            if is_main_process:
+                if safe_serialization:
+                    # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
+                    # Safetensors does not allow tensor aliasing.
+                    # We're going to remove aliases before saving
+                    ptrs = collections.defaultdict(list)
+                    for name, tensor in output_state_dict.items():
+                        # Sometimes in the state_dict we have non-tensor objects.
+                        # e.g. in bitsandbytes we have some `str` objects in the state_dict
+                        if isinstance(tensor, torch.Tensor):
+                            ptrs[id_tensor_storage(tensor)].append(name)
+                        else:
+                            # In the non-tensor case, fall back to the pointer of the object itself
+                            ptrs[id(tensor)].append(name)
 
-                # These are all the pointers of shared tensors.
-                shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
+                    # These are all the pointers of shared tensors.
+                    shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
 
-                for _, names in shared_ptrs.items():
-                    # Here we just clone the shared tensors to avoid tensor aliasing which is
-                    # not supported in safetensors.
-                    for shared_tensor_name in names[1:]:
-                        output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
+                    for _, names in shared_ptrs.items():
+                        # Here we just clone the shared tensors to avoid tensor aliasing which is
+                        # not supported in safetensors.
+                        for shared_tensor_name in names[1:]:
+                            output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
 
-                safe_save_file(
-                    output_state_dict,
-                    os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
-                    metadata={"format": "pt"},
-                )
-            else:
-                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+                    safe_save_file(
+                        output_state_dict,
+                        os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
+                        metadata={"format": "pt"},
+                    )
+                else:
+                    torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
             if peft_config.base_model_name_or_path is None:
@@ -257,7 +270,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 auto_mapping_dict = None
 
-            peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
+            if is_main_process:
+                peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 
     @classmethod
@@ -720,24 +734,27 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if hasattr(self.config, "quantization_config"):
             quantization_config = self.config.quantization_config.to_dict()
         training_config_text = ""
+        quantization_prefix = "The following `bitsandbytes` quantization config was used during training:"
         # Adds quantization information if it was used
         if quantization_config is not None:
-            training_config_text += "\nThe following `bitsandbytes` quantization config was used during training:\n"
+            training_config_text += f"\n{quantization_prefix}\n"
             training_config_text += "\n".join([f"- {name}: {value}" for name, value in quantization_config.items()])
             training_config_text += "\n"
 
         training_procedure_heading = "## Training procedure\n"
-        if training_procedure_heading in lines:
-            lines.insert(lines.index(training_procedure_heading) + 2, training_config_text)
-        else:
-            lines.append(f"{training_procedure_heading}\n{training_config_text}")
+        if quantization_prefix not in lines:
+            if training_procedure_heading in lines:
+                lines.insert(lines.index(training_procedure_heading) + 2, training_config_text)
+            else:
+                lines.append(f"{training_procedure_heading}\n{training_config_text}")
 
         # Adds peft version
         framework_block_heading = "### Framework versions\n"
-        if framework_block_heading in lines:
-            lines.insert(lines.index(framework_block_heading) + 2, f"- PEFT {__version__}\n")
-        else:
-            lines.append(f"{framework_block_heading}\n\n- PEFT {__version__}\n")
+        if f"- PEFT {__version__}" not in lines:
+            if framework_block_heading in lines:
+                lines.insert(lines.index(framework_block_heading) + 2, f"- PEFT {__version__}\n")
+            else:
+                lines.append(f"{framework_block_heading}\n\n- PEFT {__version__}\n")
 
         card.text = "\n".join(lines)
         card.save(filename)
