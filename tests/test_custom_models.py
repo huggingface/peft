@@ -203,7 +203,6 @@ TEST_CASES = [
         OFTConfig,
         {
             "target_modules": ["lin0"],
-            "alpha": 4,
             "module_dropout": 0.1,
         },
     ),

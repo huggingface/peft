@@ -27,7 +27,6 @@ class OFTConfig(LycorisConfig):
 
     Args:
         r (`int`): OFT rank.
-        alpha (`int`): The alpha parameter for OFT scaling.
         module_dropout (`int`): The dropout probability for disabling OFT modules during training.
         target_modules (`Union[List[str],str]`): The names of the modules to apply OFT to.
         init_weights (`bool`): Whether to perform initialization of OFT weights.
@@ -41,9 +40,6 @@ class OFTConfig(LycorisConfig):
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
-        alpha_pattern (`dict`):
-            The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `alpha`.
         modules_to_save (`List[str]`): The names of modules to be set as trainable except OFT parameters.
         coft (`bool`): Whether to use the constrainted variant of OFT or not.
         eps (`float`):
@@ -52,7 +48,6 @@ class OFTConfig(LycorisConfig):
     """
 
     r: int = field(default=8, metadata={"help": "OFT rank"})
-    alpha: int = field(default=1, metadata={"help": "OFT alpha"})
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling OFT modules during training"}
     )

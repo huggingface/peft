@@ -58,7 +58,6 @@ class OFTLayer(nn.Module, LycorisLayer):
         self,
         adapter_name: str,
         r: int,
-        alpha: float,
         module_dropout: float,
         init_weights: bool,
         coft: bool = False,
@@ -71,7 +70,6 @@ class OFTLayer(nn.Module, LycorisLayer):
         Args:
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
-            alpha (`float`): Alpha for the added adapter.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
             coft (`bool`): Whether to use the constrainted variant of OFT or not.
@@ -81,8 +79,6 @@ class OFTLayer(nn.Module, LycorisLayer):
         """
 
         self.r[adapter_name] = r
-        self.alpha[adapter_name] = alpha
-        self.scaling[adapter_name] = alpha / r
         self.module_dropout[adapter_name] = module_dropout
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
@@ -119,6 +115,10 @@ class OFTLayer(nn.Module, LycorisLayer):
             else:
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
+
+    def unscale_layer(self, scale=None) -> None:
+        # scale is not used
+        pass
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         if self.merged:
@@ -211,7 +211,6 @@ class OFTLayer(nn.Module, LycorisLayer):
                 base_layer.weight.data = orig_weights
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        scaling = self.scaling[adapter_name]
         rank = self.r[adapter_name]
         coft = self.coft[adapter_name]
         eps = self.eps[adapter_name]
@@ -221,7 +220,7 @@ class OFTLayer(nn.Module, LycorisLayer):
             with torch.no_grad():
                 opt_r.copy_(self._project_batch(opt_r, eps=eps))
 
-        orth_rotate = self._cayley_batch(opt_r * scaling)
+        orth_rotate = self._cayley_batch(opt_r)
         weight = self._block_diagonal(orth_rotate, rank)
 
         return weight
@@ -314,7 +313,6 @@ class Linear(OFTLayer):
         base_layer: nn.Module,
         adapter_name: str = "default",
         r: int = 0,
-        alpha: float = 0.0,
         module_dropout: float = 0.0,
         init_weights: bool = True,
         **kwargs,
@@ -323,7 +321,7 @@ class Linear(OFTLayer):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -350,7 +348,6 @@ class Conv2d(OFTLayer):
         base_layer: nn.Module,
         adapter_name: str = "default",
         r: int = 0,
-        alpha: float = 0.0,
         module_dropout: float = 0.0,
         init_weights: bool = True,
         **kwargs,
@@ -359,7 +356,7 @@ class Conv2d(OFTLayer):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
