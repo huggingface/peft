@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import warnings
 from typing import Optional
 
 import torch
@@ -21,7 +22,7 @@ from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
 from .hub_utils import hub_file_exists
-from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
+from .other import EMBEDDING_LAYER_NAMES, SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
 
@@ -118,11 +119,19 @@ def get_peft_model_state_dict(
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
-    # save the corresponding base embedding layers when loras are applied to the embedding layers
-    # support from version >= 0.6.2
+    # check the common embedding layers in `target_modules` to reset `is_embedding_layer_resized` if necessary
+    if (
+        hasattr(config, "target_modules")
+        and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+        and not is_embedding_layer_resized
+    ):
+        warnings.warn("Setting `is_embedding_layer_resized` to `True` as embedding layers found in `target_modules`")
+        is_embedding_layer_resized = True
+
     if is_embedding_layer_resized and hasattr(model, "get_input_embeddings"):
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
             if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
+                # support from version >= 0.6.2
                 embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
