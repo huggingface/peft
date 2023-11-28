@@ -8,6 +8,10 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
+
+⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+rendered properly in your Markdown viewer.
+
 -->
 
 # Quicktour
@@ -85,23 +89,24 @@ This only saves the incremental 🤗 PEFT weights that were trained, meaning it 
 Easily load your model for inference using the [`~transformers.PreTrainedModel.from_pretrained`] function:
 
 ```diff
-  from transformers import AutoModelForSeq2SeqLM
+  from transformers import AutoModelForCausalLM, AutoTokenizer
 + from peft import PeftModel, PeftConfig
 
-+ peft_model_id = "smangrul/twitter_complaints_bigscience_T0_3B_LORA_SEQ_2_SEQ_LM"
++ peft_model_id = "merve/Mistral-7B-Instruct-v0.2"
 + config = PeftConfig.from_pretrained(peft_model_id)
-  model = AutoModelForSeq2SeqLM.from_pretrained(config.base_model_name_or_path)
+  model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
 + model = PeftModel.from_pretrained(model, peft_model_id)
   tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
 
   model = model.to(device)
   model.eval()
-  inputs = tokenizer("Tweet text : @HondaCustSvc Your customer service has been horrible during the recall process. I will never purchase a Honda again. Label :", return_tensors="pt")
+  inputs = tokenizer("Tell me the recipe for chocolate chip cookie", return_tensors="pt")
 
   with torch.no_grad():
       outputs = model.generate(input_ids=inputs["input_ids"].to("cuda"), max_new_tokens=10)
       print(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True)[0])
-  'complaint'
+  'Tell me the recipe for chocolate chip cookie dough.
+  1. Preheat oven'
 ```
 
 ## Easy loading with Auto classes 

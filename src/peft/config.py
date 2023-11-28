@@ -213,10 +213,12 @@ class PeftConfig(PeftConfigMixin):
         inference_mode (`bool`, defaults to `False`): Whether to use the Peft model in inference mode.
     """
 
-    base_model_name_or_path: str = field(default=None, metadata={"help": "The name of the base model to use."})
-    revision: str = field(default=None, metadata={"help": "The specific model version to use."})
-    peft_type: Union[str, PeftType] = field(default=None, metadata={"help": "Peft type"})
-    task_type: Union[str, TaskType] = field(default=None, metadata={"help": "Task type"})
+    base_model_name_or_path: Optional[str] = field(
+        default=None, metadata={"help": "The name of the base model to use."}
+    )
+    revision: Optional[str] = field(default=None, metadata={"help": "The specific model version to use."})
+    peft_type: Optional[Union[str, PeftType]] = field(default=None, metadata={"help": "Peft type"})
+    task_type: Optional[Union[str, TaskType]] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})
 
 
