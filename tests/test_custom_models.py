@@ -793,6 +793,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
                     model.base_model.model.emb.base_layer.weight, state_dict["base_model.model.emb.base_layer.weight"]
                 )
             )
+            del state_dict
 
     @parameterized.expand(
         [
