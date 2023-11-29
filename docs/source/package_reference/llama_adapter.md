@@ -22,10 +22,10 @@ The abstract from the paper is:
 
 *We present LLaMA-Adapter, a lightweight adaption method to efficiently fine-tune LLaMA into an instruction-following model. Using 52K self-instruct demonstrations, LLaMA-Adapter only introduces 1.2M learnable parameters upon the frozen LLaMA 7B model, and costs less than one hour for fine-tuning on 8 A100 GPUs. Specifically, we adopt a set of learnable adaption prompts, and prepend them to the input text tokens at higher transformer layers. Then, a zero-init attention mechanism with zero gating is proposed, which adaptively injects the new instructional cues into LLaMA, while effectively preserves its pre-trained knowledge. With efficient training, LLaMA-Adapter generates high-quality responses, comparable to Alpaca with fully fine-tuned 7B parameters. Furthermore, our approach can be simply extended to multi-modal input, e.g., images, for image-conditioned LLaMA, which achieves superior reasoning capacity on ScienceQA. We release our code at https://github.com/ZrrSkywalker/LLaMA-Adapter*.
 
-## AdaptationPromptConfig
+## AdaptionPromptConfig
 
-[[autodoc]] tuners.adaptation_prompt.config.AdaptationPromptConfig
+[[autodoc]] tuners.adaption_prompt.config.AdaptionPromptConfig
 
-## AdaptationPromptModel
+## AdaptionPromptModel
 
-[[autodoc]] tuners.adaptation_prompt.model.AdaptationPromptModel
+[[autodoc]] tuners.adaption_prompt.model.AdaptionPromptModel
