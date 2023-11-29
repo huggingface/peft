@@ -20,8 +20,8 @@ A tuner (or adapter) is a module that can be plugged into a `torch.nn.Module`. [
 
 ## BaseTuner
 
-[[autodoc]] BaseTuner
+[[autodoc]] tuners.tuners_utils.BaseTuner
 
 ## BaseTunerLayer
 
-[[autodoc]] BaseTunerLayer
+[[autodoc]] tuners.tuners_utils.BaseTunerLayer
