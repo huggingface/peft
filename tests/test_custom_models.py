@@ -778,7 +778,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertGreater(len(model_card), 1000)
 
     @parameterized.expand(["auto", True, False])
-    def test_targetting_lora_to_embedding_layer(self, save_embedding_layers):
+    def test_targeting_lora_to_embedding_layer(self, save_embedding_layers):
         model = ModelEmbWithEmbeddingUtils()
         config = LoraConfig(target_modules=["embed_tokens", "lin0"], init_lora_weights=False)
         model = get_peft_model(model, config)
@@ -807,7 +807,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             del state_dict
 
     @parameterized.expand(["auto", True, False])
-    def test_targetting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
+    def test_targeting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
         model = ModelEmbConv1D()
         config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
         model = get_peft_model(model, config)
