@@ -332,6 +332,12 @@ class ModelEmbConv1D(nn.Module):
         X = self.sm(X)
         return X
 
+    def get_input_embeddings(self):
+        return self.emb
+
+    def get_output_embeddings(self):
+        return None
+
 
 class ModelConv2D(nn.Module):
     def __init__(self):
@@ -749,6 +755,24 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertIn("library_name: peft", model_card)
         # rough check that the model card is pre-filled
         self.assertGreater(len(model_card), 1000)
+
+    def test_targetting_lora_to_embedding_layer(self):
+        model = ModelEmbConv1D()
+        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+        print(model)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname, is_embedding_layer_resized=True)
+            from safetensors.torch import load_file as safe_load_file
+
+            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            self.assertTrue("base_model.model.emb.base_layer.weight" in state_dict)
+            self.assertTrue(
+                torch.allclose(
+                    model.base_model.model.emb.base_layer.weight, state_dict["base_model.model.emb.base_layer.weight"]
+                )
+            )
 
     @parameterized.expand(
         [
