@@ -14,14 +14,14 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# Tuners
+# LoKr
 
-A tuner (or adapter) is a module that can be plugged into a `torch.nn.Module`. [`BaseTuner`] base class for other tuners and provides shared methods and attributes for preparing an adapter configuration and replacing a target module with the adapter module. [`BaseTunerLayer`] is a tuner mixin offering methods and attributes for managing adapters such as merging and unmerging, and activating and disabling adapters.
+Low-Rank Kronecker Product ([LoKr](https://hf.co/papers/2309.14859)), is a LoRA-variant method that approximates the large weight matrix with two low-rank matrices and combines them with the Kronecker product. LoKr also provides an optional third low-rank matrix to provide better control during fine-tuning.
 
-## BaseTuner
+## LoKrConfig
 
-[[autodoc]] BaseTuner
+[[autodoc]] LoKrConfig
 
-## BaseTunerLayer
+## LoKrModel
 
-[[autodoc]] BaseTunerLayer
+[[autodoc]] LoKrModel
