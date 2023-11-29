@@ -738,13 +738,13 @@ class Conv3d(nn.Module, LoraLayer):
             weight_B = weight_B.float()
 
         # https://github.com/bmaltais/kohya_ss/blob/feb6728762a8f463d15ba936d189d4c3abfaa1ab/networks/lora.py#L117
-        if self.get_base_layer().weight.size()[2:4] == (1, 1):
-            # conv2d 1x1
-            output_tensor = (weight_B.squeeze(3).squeeze(2) @ weight_A.squeeze(3).squeeze(2)).unsqueeze(2).unsqueeze(
-                3
-            ) * self.scaling[adapter]
+        if self.get_base_layer().weight.size()[2:5] == (1, 1, 1):
+            # conv3d 1x1x1
+            output_tensor = (
+                weight_B.squeeze(4).squeeze(3).squeeze(2) @ weight_A.squeeze(4).squeeze(3).squeeze(2)
+            ).unsqueeze(2).unsqueeze(3).unsqueeze(4) * self.scaling[adapter]
         else:
-            # conv2d 3x3
+            # conv3d 3x3x3
             output_tensor = (
                 F.conv2d(
                     weight_A.permute(1, 0, 2, 3, 4),
