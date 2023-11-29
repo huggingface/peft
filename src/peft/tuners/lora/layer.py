@@ -15,7 +15,7 @@
 
 import math
 import warnings
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -46,6 +46,7 @@ class LoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -83,7 +84,10 @@ class LoraLayer(BaseTunerLayer):
             self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
             self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
             self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
+
+        if init_lora_weights == "loftq":
+            self.loftq_init(adapter_name)
+        elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
         weight = getattr(self.get_base_layer(), "weight", None)
@@ -115,7 +119,10 @@ class LoraLayer(BaseTunerLayer):
             self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
             self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
             self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
+
+        if init_lora_weights == "loftq":
+            self.loftq_init(adapter_name)
+        elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
         weight = getattr(base_layer, "weight", None)
@@ -142,7 +149,11 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
             self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
             self.scaling[adapter_name] = lora_alpha / r
-        self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        if init_lora_weights == "loftq":
+            self.loftq_init(adapter_name)
+        elif init_lora_weights:
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
 
         base_layer = self.get_base_layer()
         weight = getattr(base_layer, "weight", None)
@@ -169,6 +180,27 @@ class LoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+
+    def loftq_init(self, adapter_name):
+        from peft.utils.loftq_utils import loftq_init
+
+        weight = self.get_base_layer().weight
+        kwargs = {
+            "num_bits": self.kwargs.get("loftq_bits", 4),
+            "reduced_rank": self.r[adapter_name],
+            "num_iter": self.kwargs.get("loftq_iter", 1),
+        }
+
+        qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
+        if adapter_name in self.lora_A.keys():
+            # initialize A the same way as the default for nn.Linear and B to zero
+            self.lora_A[adapter_name].weight.data = lora_A
+            self.lora_B[adapter_name].weight.data = lora_B
+        if adapter_name in self.lora_embedding_A.keys():
+            # initialize a the same way as the default for nn.linear and b to zero
+            self.lora_embedding_A[adapter_name].weight.data = lora_A
+            self.lora_embedding_B[adapter_name].weight.data = lora_B
+        self.get_base_layer().weight.data = qweight
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
@@ -218,11 +250,11 @@ class Linear(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_lora_weights: bool = True,
+        init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
-        LoraLayer.__init__(self, base_layer)
+        LoraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
@@ -351,7 +383,7 @@ class Embedding(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
+        init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -491,7 +523,7 @@ class Conv2d(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
+        init_lora_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()

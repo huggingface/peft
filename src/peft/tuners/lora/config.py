@@ -23,6 +23,25 @@ from peft.utils import PeftType
 
 
 @dataclass
+class LoftQConfig:
+    """
+    This is the sub-configuration class to store the configuration of a [`LoraModel`].
+
+    Args:
+        bits_pattern (`dict`): The mapping from layer names or regexp expression to bits which are different from the
+            default bits specified by `bits`. For example, `{model.decoder.layers.0.encoder_attn.k_proj: 2`}.
+        bits (`int`): Quantization bits for LoftQ.
+        iter (`int`): Alternating iterations for LoftQ.
+        fake (`bool`): True: use fp16/fp32; used for first time to save weights. False: use bitsandbytes 4bit linear
+            models. weights can't be saved. Recommend to set to True, save the weights and load the saved weights in 4
+            bits.
+    """
+
+    loftq_bits: int = field(default=4, metadata={"help": "Quantization bits for LoftQ"})
+    loftq_iter: int = field(default=1, metadata={"help": "Alternating iterations for LoftQ"})
+
+
+@dataclass
 class LoraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`LoraModel`].
@@ -78,7 +97,7 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool | Literal["gaussian"] = field(
+    init_lora_weights: bool | Literal["gaussian", "loftq"] = field(
         default=True,
         metadata={
             "help": (
@@ -86,6 +105,7 @@ class LoraConfig(PeftConfig):
                 "initialization from the reference implementation from Microsoft. Passing 'gaussian' results "
                 "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
                 "to False leads to completely random initialization and is discouraged."
+                "Pass `'loftq'` to use LoftQ initialization"
             ),
         },
     )
@@ -121,6 +141,16 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    # dict type is used when loading config.json
+    loftq_config: Union[LoftQConfig, dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone "
+                "weights and initialize Lora layers."
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
@@ -134,3 +164,16 @@ class LoraConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        # handle init_lora_weights and loftq_config
+        if self.init_lora_weights == "loftq":
+            import importlib
+
+            if not importlib.util.find_spec("scipy"):
+                raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
+            if self.loftq_config is None:
+                raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+
+        # convert loftq_config to dict
+        if self.loftq_config is not None and not isinstance(self.loftq_config, dict):
+            self.loftq_config = vars(self.loftq_config)
