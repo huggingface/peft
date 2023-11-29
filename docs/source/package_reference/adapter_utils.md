@@ -20,12 +20,12 @@ rendered properly in your Markdown viewer.
 
 ## LycorisConfig
 
-[[autodoc]] LycorisConfig
+[[autodoc]] tuners.lycoris_utils.LycorisConfig
 
 ## LycorisLayer
 
-[[autodoc]] LycorisLayer
+[[autodoc]] tuners.lycoris_utils.LycorisLayer
 
 ## LycorisTuner
 
-[[autodoc]] LycorisTuner
+[[autodoc]] tuners.lycoris_utils.LycorisTuner

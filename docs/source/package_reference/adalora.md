@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## AdaLoraConfig
 
-[[autodoc]] AdaLoraConfig
+[[autodoc]] tuners.adalora.config.AdaLoraConfig
 
 ## AdaLoraModel
 
-[[autodoc]] AdaLoraModel
+[[autodoc]] tuners.adalora.model.AdaLoraModel

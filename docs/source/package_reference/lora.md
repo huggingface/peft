@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## LoraConfig
 
-[[autodoc]] LoraConfig
+[[autodoc]] tuners.lora.config.LoraConfig
 
 ## LoraModel
 
-[[autodoc]] LoraModel
+[[autodoc]] tuners.lora.model.LoraModel

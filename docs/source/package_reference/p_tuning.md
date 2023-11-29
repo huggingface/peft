@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## PromptEncoderConfig
 
-[[autodoc]] PromptEncoderConfig
+[[autodoc]] tuners.p_tuning.config.PromptEncoderConfig
 
 ## PromptEncoder
 
-[[autodoc]] PromptEncoder
+[[autodoc]] tuners.p_tuning.model.PromptEncoder

@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## IA3Config
 
-[[autodoc]] IA3Config
+[[autodoc]] tuners.ia3.configIA3Config
 
 ## IA3Model
 
-[[autodoc]] IA3Model
+[[autodoc]] tuners.ia3.modelIA3Model

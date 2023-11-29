@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## AdaptationPromptConfig
 
-[[autodoc]] AdaptationPromptConfig
+[[autodoc]] tuners.adaptation_prompt.config.AdaptationPromptConfig
 
 ## AdaptationPromptModel
 
-[[autodoc]] AdaptationPromptModel
+[[autodoc]] tuners.adaptation_prompt.model.AdaptationPromptModel

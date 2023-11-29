@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## LoHaConfig
 
-[[autodoc]] LoHaConfig
+[[autodoc]] tuners.loha.config.LoHaConfig
 
 ## LoHaModel
 
-[[autodoc]] LoHaModel
+[[autodoc]] tuners.loha.model.LoHaModel

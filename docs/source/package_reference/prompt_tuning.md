@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## PromptTuningConfig
 
-[[autodoc]] PromptTuningConfig
+[[autodoc]] tuners.prompt_tuning.config.PromptTuningConfig
 
 ## PromptEmbedding
 
-[[autodoc]] PromptEmbedding
+[[autodoc]] tuners.prompt_tuning.model.PromptEmbedding

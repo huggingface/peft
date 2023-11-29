@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## MultitaskPromptTuningConfig
 
-[[autodoc]] MultitaskPromptTuningConfig
+[[autodoc]] tuners.multitask_prompt_tuning.config.MultitaskPromptTuningConfig
 
 ## MultitaskPromptEmbedding
 
-[[autodoc]] MultitaskPromptEmbedding
+[[autodoc]] tuners.multitask_prompt_tuning.model.MultitaskPromptEmbedding

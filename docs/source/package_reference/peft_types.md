@@ -20,8 +20,8 @@ rendered properly in your Markdown viewer.
 
 ## PeftType
 
-[[autodoc]] PeftType
+[[autodoc]] utils.peft_types.PeftType
 
 ## TaskType
 
-[[autodoc]] TaskType
+[[autodoc]] utils.peft_types.TaskType

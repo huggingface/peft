@@ -20,8 +20,8 @@ Low-Rank Kronecker Product ([LoKr](https://hf.co/papers/2309.14859)), is a LoRA-
 
 ## LoKrConfig
 
-[[autodoc]] LoKrConfig
+[[autodoc]] tuners.lokr.config.LoKrConfig
 
 ## LoKrModel
 
-[[autodoc]] LoKrModel
+[[autodoc]] tuners.lokr.model.LoKrModel

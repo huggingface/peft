@@ -24,8 +24,8 @@ The abstract from the paper is:
 
 ## PrefixTuningConfig
 
-[[autodoc]] PrefixTuningConfig
+[[autodoc]] tuners.prefix_tuning.config.PrefixTuningConfig
 
 ## PrefixEncoder
 
-[[autodoc]] PrefixEncoder
+[[autodoc]] tuners.prefix_tuning.model.PrefixEncoder
