@@ -332,6 +332,26 @@ class ModelEmbConv1D(nn.Module):
         X = self.sm(X)
         return X
 
+
+class ModelEmbWithEmbeddingUtils(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = nn.Embedding(100, 5)
+        self.conv1d = Conv1D(1, 5)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = self.emb(X)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
     def get_input_embeddings(self):
         return self.emb
 
@@ -757,7 +777,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertGreater(len(model_card), 1000)
 
     def test_targetting_lora_to_embedding_layer(self):
-        model = ModelEmbConv1D()
+        model = ModelEmbWithEmbeddingUtils()
         config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
         model = get_peft_model(model, config)
         print(model)
