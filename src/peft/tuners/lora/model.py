@@ -39,7 +39,7 @@ from peft.utils import (
 
 from .config import LoraConfig
 from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
+from .layer import Conv2d, Conv3d, Embedding, Linear, LoraLayer
 
 
 if is_bnb_available():
@@ -175,6 +175,14 @@ class LoraModel(BaseTuner):
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
+        elif isinstance(target, Conv3d):
+            target.update_layer_conv3d(
+                adapter_name,
+                r,
+                alpha,
+                lora_config.lora_dropout,
+                lora_config.init_lora_weights,
+            )
         elif isinstance(target, Embedding):
             target.update_layer_embedding(
                 adapter_name,
@@ -289,6 +297,8 @@ class LoraModel(BaseTuner):
             new_module = Embedding(target, adapter_name, **embedding_kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = Conv2d(target, adapter_name, **kwargs)
+        elif isinstance(target_base_layer, torch.nn.Conv3d):
+            new_module = Conv3d(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(
