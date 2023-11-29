@@ -96,5 +96,6 @@
       title: Prompt tuning
     - local: package_reference/adapter_utils
       title: Utilities
-    title: API Reference
+    title: Adapters
+  title: API reference
 
