@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import math
 import operator
 import re
 import warnings
@@ -285,8 +286,10 @@ class LoraModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
+            embedding_kwargs.update(lora_config.loftq_config)
             new_module = Embedding(target, adapter_name, **embedding_kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
+            kwargs.update(lora_config.loftq_config)
             new_module = Conv2d(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
@@ -295,6 +298,7 @@ class LoraModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            kwargs.update(lora_config.loftq_config)
             new_module = Linear(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, Conv1D):
             if not kwargs["fan_in_fan_out"]:
@@ -303,6 +307,7 @@ class LoraModel(BaseTuner):
                     "Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+            kwargs.update(lora_config.loftq_config)
             new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
         else:
             raise ValueError(
@@ -517,8 +522,8 @@ class LoraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         else:
                             continue
-                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data
+                        target_lora_A.data += current_adapter_lora_A.data * math.sqrt(weight) * target.scaling[adapter]
+                        target_lora_B.data += current_adapter_lora_B.data * math.sqrt(weight)
                 elif combination_type == "cat":
                     loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):

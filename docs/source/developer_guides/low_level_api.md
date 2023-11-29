@@ -8,6 +8,10 @@ http://www.apache.org/licenses/LICENSE-2.0
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
 an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
+
+⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+rendered properly in your Markdown viewer.
+
 -->
 
 # PEFT as a utility library
@@ -17,7 +21,7 @@ The development of this API has been motivated by the need for super users to no
 
 ## Supported tuner types
 
-Currently the supported adapter types are the 'injectable' adapters, meaning adapters where an inplace modification of the model is sufficient to correctly perform the fine tuning. As such, only [LoRA](./conceptual_guides/lora), AdaLoRA and [IA3](./conceptual_guides/ia3) are currently supported in this API.
+Currently the supported adapter types are the 'injectable' adapters, meaning adapters where an inplace modification of the model is sufficient to correctly perform the fine tuning. As such, only [LoRA](../conceptual_guides/lora), AdaLoRA and [IA3](../conceptual_guides/ia3) are currently supported in this API.
 
 ## `inject_adapter_in_model` method 
 
