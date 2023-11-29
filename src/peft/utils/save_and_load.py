@@ -39,7 +39,7 @@ def get_embedding_layer_name(model, layer, is_prompt_learning):
 
 
 def get_peft_model_state_dict(
-    model, state_dict=None, adapter_name="default", unwrap_compiled=False, is_embedding_layer_resized=False
+    model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
 ):
     """
     Get the state dict of the Peft model.
@@ -53,8 +53,10 @@ def get_peft_model_state_dict(
             The name of the adapter whose state dict should be returned.
         unwrap_compiled (`bool`, *optional*, defaults to `False`):
             Whether to unwrap the model if torch.compile was used.
-        is_embedding_layer_resized (`bool`, *optional*, defaults to `False`):
-            If `True`, save the embedding layers in addition to adapter weights.
+        save_embedding_layers (`Union[bool, str]`, , *optional*, defaults to `auto`):
+            If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common embedding
+            layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available. Based on it
+            sets the boolean flag. This only works for 🤗 transformers models.
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -118,22 +120,26 @@ def get_peft_model_state_dict(
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
-    # check the common embedding layers in `target_modules` to reset `is_embedding_layer_resized` if necessary
+    # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
     if (
-        hasattr(config, "target_modules")
+        save_embedding_layers == "auto"
+        and hasattr(config, "target_modules")
         and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
-        and not is_embedding_layer_resized
     ):
-        warnings.warn("Setting `is_embedding_layer_resized` to `True` as embedding layers found in `target_modules`")
-        is_embedding_layer_resized = True
+        warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
+        save_embedding_layers = True
+    elif save_embedding_layers == "auto":
+        save_embedding_layers = False
 
-    if is_embedding_layer_resized and hasattr(model, "get_input_embeddings"):
+    if save_embedding_layers and hasattr(model, "get_input_embeddings"):
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
             if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
                 # support from version >= 0.6.2
                 embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+    elif save_embedding_layers:
+        warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
     to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return

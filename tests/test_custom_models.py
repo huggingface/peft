@@ -334,9 +334,10 @@ class ModelEmbConv1D(nn.Module):
 
 
 class ModelEmbWithEmbeddingUtils(nn.Module):
+    # Adds `get_input_embeddings` and `get_output_embeddings` methods to mimic 🤗 transformers models
     def __init__(self):
         super().__init__()
-        self.emb = nn.Embedding(100, 5)
+        self.embed_tokens = nn.Embedding(100, 5)
         self.conv1d = Conv1D(1, 5)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
@@ -344,7 +345,7 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
-        X = self.emb(X)
+        X = self.embed_tokens(X)
         X = self.conv1d(X)
         X = self.relu(X)
         X = self.flat(X)
@@ -353,7 +354,7 @@ class ModelEmbWithEmbeddingUtils(nn.Module):
         return X
 
     def get_input_embeddings(self):
-        return self.emb
+        return self.embed_tokens
 
     def get_output_embeddings(self):
         return None
@@ -776,23 +777,53 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # rough check that the model card is pre-filled
         self.assertGreater(len(model_card), 1000)
 
-    def test_targetting_lora_to_embedding_layer(self):
+    @parameterized.expand(["auto", True, False])
+    def test_targetting_lora_to_embedding_layer(self, save_embedding_layers):
         model = ModelEmbWithEmbeddingUtils()
-        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        config = LoraConfig(target_modules=["embed_tokens", "lin0"], init_lora_weights=False)
         model = get_peft_model(model, config)
-        print(model)
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname, is_embedding_layer_resized=True)
+            if save_embedding_layers == "auto":
+                # assert warning
+                msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
+                with self.assertWarns(UserWarning, msg=msg_start):
+                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            else:
+                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
             from safetensors.torch import load_file as safe_load_file
 
             state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
-            self.assertTrue("base_model.model.emb.base_layer.weight" in state_dict)
-            self.assertTrue(
-                torch.allclose(
-                    model.base_model.model.emb.base_layer.weight, state_dict["base_model.model.emb.base_layer.weight"]
+            if save_embedding_layers in ["auto", True]:
+                self.assertTrue("base_model.model.embed_tokens.base_layer.weight" in state_dict)
+                self.assertTrue(
+                    torch.allclose(
+                        model.base_model.model.embed_tokens.base_layer.weight,
+                        state_dict["base_model.model.embed_tokens.base_layer.weight"],
+                    )
                 )
-            )
+            else:
+                self.assertFalse("base_model.model.embed_tokens.base_layer.weight" in state_dict)
+            del state_dict
+
+    @parameterized.expand(["auto", True, False])
+    def test_targetting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
+        model = ModelEmbConv1D()
+        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            if save_embedding_layers is True:
+                # assert warning
+                msg_start = "Could not identify embedding layer(s) because the model is not a 🤗 transformers model."
+                with self.assertWarns(UserWarning, msg=msg_start):
+                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            else:
+                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            from safetensors.torch import load_file as safe_load_file
+
+            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            self.assertFalse("base_model.model.emb.base_layer.weight" in state_dict)
             del state_dict
 
     @parameterized.expand(

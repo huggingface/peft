@@ -159,7 +159,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         save_directory: str,
         safe_serialization: bool = True,
         selected_adapters: Optional[List[str]] = None,
-        is_embedding_layer_resized: bool = False,
+        save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
         **kwargs: Any,
     ):
@@ -176,8 +176,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Whether to save the adapter files in safetensors format.
             selected_adapters (`list(str)`,  *optional*):
                 A list of adapters to be saved. If `None`, will default to all adapters.
-            is_embedding_layer_resized (`bool`, *optional*):
-                If `True`, save the embedding layers in addition to adapter weights.
+            save_embedding_layers (`Union[bool, str]`, , *optional*, defaults to `auto`):
+                If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common
+                embedding layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available.
+                Based on it sets the boolean flag. This only works for 🤗 transformers models.
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`.
             kwargs (additional keyword arguments, *optional*):
@@ -209,42 +211,41 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self,
                 state_dict=kwargs.get("state_dict", None),
                 adapter_name=adapter_name,
-                is_embedding_layer_resized=is_embedding_layer_resized,
+                save_embedding_layers=save_embedding_layers,
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
 
-            if is_main_process:
-                if safe_serialization:
-                    # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
-                    # Safetensors does not allow tensor aliasing.
-                    # We're going to remove aliases before saving
-                    ptrs = collections.defaultdict(list)
-                    for name, tensor in output_state_dict.items():
-                        # Sometimes in the state_dict we have non-tensor objects.
-                        # e.g. in bitsandbytes we have some `str` objects in the state_dict
-                        if isinstance(tensor, torch.Tensor):
-                            ptrs[id_tensor_storage(tensor)].append(name)
-                        else:
-                            # In the non-tensor case, fall back to the pointer of the object itself
-                            ptrs[id(tensor)].append(name)
+            if is_main_process and safe_serialization:
+                # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
+                # Safetensors does not allow tensor aliasing.
+                # We're going to remove aliases before saving
+                ptrs = collections.defaultdict(list)
+                for name, tensor in output_state_dict.items():
+                    # Sometimes in the state_dict we have non-tensor objects.
+                    # e.g. in bitsandbytes we have some `str` objects in the state_dict
+                    if isinstance(tensor, torch.Tensor):
+                        ptrs[id_tensor_storage(tensor)].append(name)
+                    else:
+                        # In the non-tensor case, fall back to the pointer of the object itself
+                        ptrs[id(tensor)].append(name)
 
-                    # These are all the pointers of shared tensors.
-                    shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
+                # These are all the pointers of shared tensors.
+                shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
 
-                    for _, names in shared_ptrs.items():
-                        # Here we just clone the shared tensors to avoid tensor aliasing which is
-                        # not supported in safetensors.
-                        for shared_tensor_name in names[1:]:
-                            output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
+                for _, names in shared_ptrs.items():
+                    # Here we just clone the shared tensors to avoid tensor aliasing which is
+                    # not supported in safetensors.
+                    for shared_tensor_name in names[1:]:
+                        output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
 
-                    safe_save_file(
-                        output_state_dict,
-                        os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
-                        metadata={"format": "pt"},
-                    )
-                else:
-                    torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
+                safe_save_file(
+                    output_state_dict,
+                    os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
+                    metadata={"format": "pt"},
+                )
+            elif is_main_process:
+                torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
             if peft_config.base_model_name_or_path is None:
