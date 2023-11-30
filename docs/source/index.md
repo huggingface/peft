@@ -44,6 +44,6 @@ PEFT is integrated with the Transformers, Diffusers, and Accelerate libraries to
 <iframe
 	src="https://stevhliu-peft-methods.hf.space"
 	frameborder="0"
-	width="100%"
-	height="100%"
+	width="850"
+	height="620"
 ></iframe>
