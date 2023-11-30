@@ -367,6 +367,8 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 
 ## 🤗 PEFT as a utility library
 
+### Injecting adapters directly into the model
+
 Inject trainable adapters on any `torch` model using `inject_adapter_in_model` method. Note the method will make no further change to the model.
 
 ```python
@@ -402,6 +404,35 @@ dummy_outputs = model(dummy_inputs)
 ```
 
 Learn more about the [low level API in the docs](https://huggingface.co/docs/peft/developer_guides/low_level_api).
+
+### Mixing different adapter types
+
+Ususally, it is not possible to combine different adapter types in the same model, e.g. combining LoRA with AdaLoRA, LoHa, or LoKr. Using a mixed model, this can, however, be achieved:
+
+```python
+from peft import PeftMixedModel
+
+model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").eval()
+peft_model = PeftMixedModel.from_pretrained(model, <path-to-adapter-0>, "adapter0")
+peft_model.load_adapter(<path-to-adapter-1>, "adapter1")
+peft_model.set_adapter(["adapter0", "adapter1"])
+result = peft_model(**inputs)
+```
+
+The main intent is to load already trained adapters and use this only for inference. However, it is also possible to create a PEFT model for training by passing `mixed=True` to `get_peft_model`:
+
+```python
+from peft import get_peft_model, LoraConfig, LoKrConfig
+
+base_model = ...
+config0 = LoraConfig(...)
+config1 = LoKrConfig(...)
+peft_model = get_peft_model(base_model, config0, "adapter0", mixed=True)
+peft_model.add_adapter(config1, "adapter1")
+peft_model.set_adapter(["adapter0", "adapter1"])
+for batch in dataloader:
+    ...
+```
 
 ## Contributing
 
