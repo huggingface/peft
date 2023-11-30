@@ -59,7 +59,7 @@ class BOFTModel(BaseTuner):
 
         ```py
         >>> import transformers
-        >>> from transformers import AutoModelForSeq2SeqLM, LoraConfig 
+        >>> from transformers import AutoModelForSeq2SeqLM, BOFTConfig 
         >>> from peft import BOFTConfig, get_peft_model
 
         >>> config = BOFTConfig(
@@ -87,7 +87,7 @@ class BOFTModel(BaseTuner):
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
 
-    def _check_new_adapter_config(self, config: BOFT) -> None:
+    def _check_new_adapter_config(self, config: BOFTConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -196,7 +196,7 @@ class BOFTModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(boft_config, adapter_name, target, **kwargs):
-        bias = target.bias is not None
+        bias = kwargs.pop("bias", False)
 
         if isinstance(target, torch.nn.Linear):
             in_features, out_features = target.in_features, target.out_features
@@ -215,12 +215,12 @@ class BOFTModel(BaseTuner):
 
         return new_module
 
-def __getattr__(self, name: str):
-        """Forward missing attributes to the wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            return getattr(self.model, name)
+    def __getattr__(self, name: str):
+            """Forward missing attributes to the wrapped module."""
+            try:
+                return super().__getattr__(name)  # defer to nn.Module's logic
+            except AttributeError:
+                return getattr(self.model, name)
 
     def get_peft_config_as_dict(self, inference: bool = False):
         config_dict = {}

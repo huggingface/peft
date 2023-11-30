@@ -71,6 +71,23 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
+    
+    elif config.peft_type == PeftType.BOFT:
+        bias = config.bias
+        if bias == "none":
+            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k}
+        elif bias == "all":
+            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k or "bias" in k}
+        elif bias == "boft_only":
+            to_return = {}
+            for k in state_dict:
+                if "boft_" in k:
+                    to_return[k] = state_dict[k]
+                    bias_name = k.split("boft_")[0] + "bias"
+                    if bias_name in state_dict:
+                        to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
 
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}

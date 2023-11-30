@@ -26,13 +26,14 @@ from torch.autograd import Function
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
 
+import os
 os.environ["CC"] = "gcc"
 os.environ["CXX"] = "gcc"
 curr_dir = os.path.dirname(__file__)
 fbd_cuda = \
     load(name='fbd_cuda', 
         sources=[f'{curr_dir}/fbd/fbd_cuda.cpp', f'{curr_dir}/fbd/fbd_cuda_kernel.cu'], verbose=True,
-        build_directory='/tmp/'
+        # build_directory='/tmp/'
         )
         # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7 
 
@@ -119,7 +120,7 @@ class MultiplicativeDropoutLayer(nn.Module):
             mask = torch.cat([torch.ones(num_to_replace, device=x.device), torch.zeros(num_zeros, device=x.device)])
 
             # Shuffle and reshape the mask
-            mask = mask[torch.randperm(D)].view(1, Z, 1, 1)
+            mask = mask[torch.randperm(D)].view(1, D, 1, 1)
 
             full_mask = torch.zeros(N, D, 1, 1, device=x.device)
             full_mask[n_random] = mask
@@ -173,7 +174,7 @@ class BOFTLayer(BaseTunerLayer):
         cls.__init__(self, *args, device="meta", **kwargs)
         self.to_empty(device=final_device)
 
-    def update_layer(self, adapter_name, boft_block_size, boft_block_num, boft_dropout, init_boft_weights):
+    def update_layer(self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights):
         """
         Update the linear layer with trainable BOFT weights.
         """
@@ -190,16 +191,16 @@ class BOFTLayer(BaseTunerLayer):
 
         if boft_block_size == 0 and boft_block_num != 0:
             assert self.in_features % boft_block_num == 0, "in_features must be divisible by boft_block_num"
-            if self.kwargs["boft_n_butterfly_factor"] != 0:
-                assert self.kwargs["boft_n_butterfly_factor"] <= int(math.log2(boft_block_num)), "invalid combination of boft_n_butterfly_factor and boft_block_num"
-                assert boft_block_num % (2**self.kwargs["boft_n_butterfly_factor"]) == 0, "boft_block_num must be a power of 2"
+            if boft_n_butterfly_factor != 0:
+                assert boft_n_butterfly_factor <= int(math.log2(boft_block_num)), "invalid combination of boft_n_butterfly_factor and boft_block_num"
+                assert boft_block_num % (2**boft_n_butterfly_factor) == 0, "boft_block_num must be a power of 2"
             boft_block_size = int(self.in_features // boft_block_num)
 
         elif boft_block_size != 0 and boft_block_num == 0:
             assert self.in_features % boft_block_size == 0, "in_features must be divisible by boft_block_size"
-            if self.kwargs["boft_n_butterfly_factor"] != 0:
-                assert self.in_features >= boft_block_size * (2**self.kwargs["boft_n_butterfly_factor"]), "invalid combination of boft_n_butterfly_factor and boft_block_size"
-                assert self.in_features % (boft_block_size * (2**self.kwargs["boft_n_butterfly_factor"])) == 0, "invalid combination of boft_n_butterfly_factor and boft_block_size"
+            if boft_n_butterfly_factor != 0:
+                assert self.in_features >= boft_block_size * (2**boft_n_butterfly_factor), "invalid combination of boft_n_butterfly_factor and boft_block_size"
+                assert self.in_features % (boft_block_size * (2**boft_n_butterfly_factor)) == 0, "invalid combination of boft_n_butterfly_factor and boft_block_size"
             boft_block_num = int(self.in_features // boft_block_size)
 
         else:
@@ -207,15 +208,15 @@ class BOFTLayer(BaseTunerLayer):
             sys.exit()
 
         # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
-        P = torch.empty((self.kwargs["boft_n_butterfly_factor"]+1, self.in_features, self.in_features))
-        for i in range((self.kwargs["boft_n_butterfly_factor"]+1)):
+        P = torch.empty((boft_n_butterfly_factor+1, self.in_features, self.in_features))
+        for i in range((boft_n_butterfly_factor+1)):
             perm = self.block_butterfly_perm(self.in_features, int(boft_block_num/(2**(i))), int(boft_block_size / 2))
             perm_mat = self.perm2mat(perm)
             P[i] = perm_mat
 
         self.register_buffer('boft_P', P)
 
-        self.boft_R[adapter_name] = nn.Parameter(torch.zeros(self.kwargs["boft_n_butterfly_factor"]+1, boft_block_num, boft_block_size, boft_block_size))
+        self.boft_R[adapter_name] = nn.Parameter(torch.zeros(boft_n_butterfly_factor+1, boft_block_num, boft_block_size, boft_block_size))
         self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
 
         if init_boft_weights:
@@ -228,7 +229,7 @@ class BOFTLayer(BaseTunerLayer):
                 self.to(weight.device, dtype=weight.dtype)
             else:
                 self.to(weight.device)
-        self.set_adapter(self.active_adapters)
+        self.set_adapter(self.active_adapters[0])
 
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
@@ -241,7 +242,6 @@ class BOFTLayer(BaseTunerLayer):
             # initialize R to zero   
             nn.init.zeros_(self.boft_R[adapter_name])
             nn.init.ones_(self.boft_s[adapter_name])
-            nn.init.ones_(self.boft_b[adapter_name])
 
     def perm2mat(self, indices):
         """
@@ -313,22 +313,19 @@ class Linear(nn.Linear, BOFTLayer):
         **kwargs,
     ) -> None:
         init_boft_weights = kwargs.pop("init_boft_weights", True)
+        # this gets the init from nn.Linear's super perspective, i.e.
+        # nn.Module.__init__, which should always be called
+        super(nn.Linear, self).__init__()
+        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
+        # added robustness is not big enough for Linear.
 
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        BOFTLayer.__init__(self, in_features=in_features, out_features=out_features, boft_n_butterfly_factor=boft_n_butterfly_factor)
+        BOFTLayer.__init__(self, in_features=in_features, out_features=out_features)
         # Freezing the pre-trained weight matrix
-        self.weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
-        if fan_in_fan_out:
-            self.weight.data = self.weight.data.T
 
-        self.boft_n_butterfly_factor = boft_n_butterfly_factor
-
-        nn.Linear.reset_parameters(self)
-        self.update_layer(adapter_name, boft_block_size, boft_block_num, boft_dropout, init_boft_weights)
-        self.active_adapter = adapter_name
-        self.is_target_conv_1d_layer = is_target_conv_1d_layer
+        self.update_layer(adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights)
+        self.set_adapter(adapter_name)
 
     def merge(self) -> None:
         """
@@ -373,25 +370,22 @@ class Linear(nn.Linear, BOFTLayer):
 
     def unmerge(self) -> None:
         """
-        Delete the BOFT adapter weights with the base model.
+        Delete the BOFT adapter weights from the base model.
         """
-        if self.active_adapter not in self.boft_R.keys():
-            return
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        if self.boft_block_size[self.active_adapter] > 0 and self.boft_block_num[self.active_adapter] > 0:
-            # self.weight.data -= self.get_delta_weight(self.active_adapter)
-            orig_weight = self.weight.data 
-            butterfly_oft_mat, boft_s, boft_b = self.get_delta_weight(self.active_adapter)
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.boft_R.keys():
+                orig_weight = self.weight.data 
+                butterfly_oft_mat, boft_s = self.get_delta_weight(self.active_adapter)
 
-            orig_weight = torch.transpose(orig_weight, 0, 1)
-            rotated_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
-            rotated_weight = torch.transpose(rotated_weight, 0, 1) 
+                orig_weight = torch.transpose(self.weight.data , 0, 1)
+                rotated_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                rotated_weight = torch.transpose(rotated_weight, 0, 1) 
 
-            self.weight.data = rotated_weight * (1 / boft_s)
-            self.bias.data = self.bias.data / boft_b
-            self.merged = False
+                self.weight.data = rotated_weight * (1 / boft_s)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -401,8 +395,8 @@ class Linear(nn.Linear, BOFTLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        device = self.lora_B[adapter].weight.device
-        dtype = self.lora_B[adapter].weight.dtype
+        device = self.boft_R[adapter].weight.device
+        dtype = self.boft_R[adapter].weight.dtype
 
         boft_R = self.boft_R[adapter]
         boft_s = self.boft_s[adapter]
@@ -483,10 +477,10 @@ class Linear(nn.Linear, BOFTLayer):
         elif self.merged:
             result = self._linear(x)
         else:
-            boft_R = self.boft_R[self.active_adapter]
-            boft_s = self.boft_s[self.active_adapter]
-            dropout = self.boft_dropout[self.active_adapter]
-
+            boft_R = self.boft_R[self.active_adapter[0]]
+            boft_s = self.boft_s[self.active_adapter[0]]
+            dropout = self.boft_dropout[self.active_adapter[0]]
+            
             N, Z, b, _ = boft_R.shape
             boft_R = boft_R.view(N * Z, b, b)
             orth_rotate_butterfly = self.cayley_batch(boft_R)
@@ -510,7 +504,7 @@ class Linear(nn.Linear, BOFTLayer):
 
             scaled_rotated_weight = rotated_weight * boft_s
 
-            result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.bias.data)
+            result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.bias)
 
         result = result.to(previous_dtype)
         return result

@@ -26,60 +26,57 @@ class BOFTConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`BOFTModel`].
 
     Args:
-        r (`int`): Lora attention dimension.
+        boft_block_size (`int`): BOFT block size across different layers.
+        boft_block_num (`int`): Number of BOFT blocks per injected layer.
+        boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
-        lora_alpha (`int`): The alpha parameter for Lora scaling.
-        lora_dropout (`float`): The dropout probability for Lora layers.
+        boft_dropout (`float`): The multiplicative dropout probability for BOFT layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
             to `True`.
-        bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'. If 'all' or 'lora_only', the
+        bias (`str`): Bias type for BOFT. Can be 'none', 'all' or 'boft_only'. If 'all' or 'boft_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
-        modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
+        modules_to_save (`List[str]`):List of modules apart from BOFT layers to be set as trainable
             and saved in the final checkpoint.
         layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the LoRA transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoRA
+            The layer indexes to transform, if this argument is specified, it will apply the BOFT transformations on
+            the layer indexes that are specified in this list. If a single integer is passed, it will apply the BOFT
             transformations on the layer at this index.
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
             pattern is not in the common layers pattern.
-        rank_pattern (`dict`):
-            The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
-        alpha_pattern (`dict`):
-            The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `lora_alpha`.
     """
 
     boft_block_size: int = field(
         default=8, 
         metadata={
-            "help": "BOFT block size."
+            "help": "BOFT block size across different layers.",
             "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension."
         },
     )
     boft_block_num: int = field(
         default=0, 
         metadata={
-            "help": "Number of BOFT blocks per injected layer."
+            "help": "Number of BOFT blocks per injected layer.",
             "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension."
         },
     )
     boft_n_butterfly_factor: int = field(
         default=0, 
         metadata={
-            "help": "Number of butterfly factors."
-            "For example boft_n_butterfly_factor=1, the effective block size of OFT becomes twice as big and the number of blocks become half. "
-            "note": "For boft_n_butterfly_factor=0, BOFT is the same as vanilla OFT."
+            "help": "Number of butterfly factors.",
+            "note": (
+                "For example boft_n_butterfly_factor=1, the effective block size of OFT becomes twice as big and the number of blocks become half.",
+                "Note: for boft_n_butterfly_factor=0, BOFT is the same as vanilla OFT."
+            )
         },
     )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with BOFT."
-            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "help": "List of module names or regex expression of the module names to replace with BOFT.",
+            "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
         },
     )
     boft_dropout: float = field(
@@ -94,16 +91,18 @@ class BOFTConfig(PeftConfig):
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from BOFT layers to be set as trainable and saved in the final checkpoint. "
-            "For example, in Sequence Classification or Token Classification tasks, "
-            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+            "help": "List of modules apart from BOFT layers to be set as trainable and saved in the final checkpoint. ",
+            "note": (
+                "For example, in Sequence Classification or Token Classification tasks, ",
+                "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+            ),
         },
     )
     init_boft_weights: bool = field(
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the BOFT layers with their default initialization. Don't change "
+                "Whether to initialize the weights of the BOFT layers with their default initialization. Don't change ",
                 "this setting, except if you know exactly what you're doing."
             ),
         },

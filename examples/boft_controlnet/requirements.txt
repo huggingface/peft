@@ -1,0 +1,6 @@
+datasets
+diffusers==0.17.1
+transformers
+accelerate
+wandb
+xformers
