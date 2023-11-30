@@ -62,6 +62,9 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
             # QuantLinear
             in_features, out_features = base_layer.infeatures, base_layer.outfeatures
+        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
+            # Megatron ColumnParallelLinear,RowParallelLinear
+            in_features, out_features = base_layer.input_size, base_layer.output_size
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
