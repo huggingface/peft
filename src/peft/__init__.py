@@ -35,6 +35,7 @@ from .mapping import (
     get_peft_model,
     inject_adapter_in_model,
 )
+from .mixed_model import PeftMixedModel
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
