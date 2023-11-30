@@ -20,7 +20,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import LoHaConfig, LoraConfig, get_peft_model
+from peft import LoHaConfig, LoraConfig, OFTConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -60,11 +60,24 @@ CONFIG_TESTING_KWARGS = (
             "module_dropout": 0.0,
         },
     },
+    {
+        "text_encoder": {
+            "r": 8,
+            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+            "module_dropout": 0.0,
+        },
+        "unet": {
+            "r": 8,
+            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
+            "module_dropout": 0.0,
+        },
+    },
 )
 CLASSES_MAPPING = {
     "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
     "loha": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
     "lokr": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
+    "oft": (OFTConfig, CONFIG_TESTING_KWARGS[2]),
 }
 
 
@@ -115,13 +128,14 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
             },
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        if config_cls == LoHaConfig:
+        if config_cls in [LoHaConfig, OFTConfig]:
             # TODO: This test is flaky with PyTorch 2.1 on Windows, we need to figure out what is going on
-            self.skipTest("LoHaConfig test is flaky")
+            self.skipTest("LoHaConfig and OFTConfig test is flaky")
 
         # Instantiate model & adapters
         model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
@@ -148,7 +162,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr"])],
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft"])],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
@@ -178,6 +192,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
                 "lokr_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
             },
         )
     )

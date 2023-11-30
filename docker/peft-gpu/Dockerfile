@@ -40,6 +40,12 @@ SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
     python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
 
+# Install apt libs
+RUN apt-get update && \
+    apt-get install -y curl git wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists*
+
 # Activate the conda env and install transformers + accelerate from source
 RUN source activate peft && \
     python3 -m pip install -U --no-cache-dir \
@@ -50,13 +56,8 @@ RUN source activate peft && \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft
 
-RUN pip freeze | grep transformers
-
-# Install apt libs
-RUN apt-get update && \
-    apt-get install -y curl git wget && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists*
+RUN source activate peft && \ 
+    pip freeze | grep transformers
 
 RUN echo "source activate peft" >> ~/.profile
 

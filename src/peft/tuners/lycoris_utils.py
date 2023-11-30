@@ -159,7 +159,7 @@ class LycorisLayer(BaseTunerLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
-                self.base_layer.weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def unscale_layer(self, scale=None) -> None:
         for active_adapter in self.active_adapters:

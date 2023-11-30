@@ -298,12 +298,22 @@ def main():
         pred_df.to_csv(f"data/{dataset_name}/predictions.csv", index=False)
 
     accelerator.wait_for_everyone()
-    model.push_to_hub(
-        "smangrul/"
-        + f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
-        state_dict=accelerator.get_state_dict(model),
-        use_auth_token=True,
+    # Option1: Pushing the model to Hugging Face Hub
+    # model.push_to_hub(
+    #     f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
+    #     token = "hf_..."
+    # )
+    # token (`bool` or `str`, *optional*):
+    #     `token` is to be used for HTTP Bearer authorization when accessing remote files. If `True`, will use the token generated
+    #     when running `huggingface-cli login` (stored in `~/.huggingface`). Will default to `True` if `repo_url`
+    #     is not specified.
+    #     Or you can get your token from https://huggingface.co/settings/token
+
+    # Option2: Saving the model locally
+    peft_model_id = f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace(
+        "/", "_"
     )
+    model.save_pretrained(peft_model_id)
     accelerator.wait_for_everyone()
 
 
