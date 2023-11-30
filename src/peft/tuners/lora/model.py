@@ -53,10 +53,12 @@ if is_bnb_4bit_available():
 
 class LoraModel(BaseTuner):
     """
-    Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
+    Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
+
+    The method is described in detail in https://arxiv.org/abs/2106.09685.
 
     Args:
-        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
+        model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
@@ -333,15 +335,23 @@ class LoraModel(BaseTuner):
         config_dict[key] = config
         return config
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
         for active_adapter in self.active_adapters:
             val = self.peft_config[active_adapter].bias
             if val != "none":
@@ -352,7 +362,12 @@ class LoraModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
                 if module.merged:
@@ -410,7 +425,7 @@ class LoraModel(BaseTuner):
         svd_clamp=None,
         svd_full_matrices=True,
         svd_driver=None,
-    ):
+    ) -> None:
         """
         This method adds a new adapter by merging the given adapters with the given weights.
 
@@ -610,7 +625,7 @@ class LoraModel(BaseTuner):
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
@@ -634,7 +649,7 @@ class LoraModel(BaseTuner):
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
-    ):
+    ) -> torch.nn.Module:
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -664,7 +679,7 @@ class LoraModel(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self):
+    def unload(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the lora modules without merging. This gives back the original base
         model.
