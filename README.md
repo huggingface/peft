@@ -35,6 +35,7 @@ Supported methods:
 8. LoHa: [FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning](https://arxiv.org/abs/2108.06098)
 9. LoKr: [KronA: Parameter Efficient Tuning with Kronecker Adapter](https://arxiv.org/abs/2212.10650) based on [Navigating Text-To-Image Customization:From LyCORIS Fine-Tuning to Model Evaluation](https://arxiv.org/abs/2309.14859) implementation
 10. LoftQ: [LoftQ: LoRA-Fine-Tuning-aware Quantization for Large Language Models](https://arxiv.org/abs/2310.08659)
+11. OFT: [Controlling Text-to-Image Diffusion by Orthogonal Finetuning](https://arxiv.org/abs/2306.07280)
 
 ## Getting started
 
@@ -278,9 +279,9 @@ Find models that are supported out of the box below. Note that PEFT works with a
 
 ### Text-to-Image Generation
 
-|   Model         | LoRA | LoHa | LoKr | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
-| Stable Diffusion           | ✅  | ✅  | ✅  |  |   |   |
+|   Model         | LoRA | LoHa | LoKr | OFT | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
+| Stable Diffusion           | ✅  | ✅  | ✅  | ✅  |  |   |   |
 
 
 ### Image Classification
