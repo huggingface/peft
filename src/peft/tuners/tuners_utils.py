@@ -87,11 +87,6 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-
-        # transformers models have a .config attribute, whose presence is assumed later on
-        if not hasattr(self, "config"):
-            self.config = {"model_type": "custom"}
-
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.

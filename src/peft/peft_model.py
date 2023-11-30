@@ -121,7 +121,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
-        self.config = getattr(self.base_model, "config", {"model_type": "custom"})
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
@@ -724,16 +723,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         card = ModelCard.load(filename) if os.path.exists(filename) else ModelCard.from_template(ModelCardData())
 
         card.data["library_name"] = "peft"
-        model_config = self.config
+
+        model_config = getattr(self, "config", None)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config.get("model_type", "custom") != "custom":
+        if model_config is not None:
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
 
         quantization_config = None
-        if hasattr(self.config, "quantization_config"):
+        if hasattr(model_config, "quantization_config"):
             quantization_config = self.config.quantization_config.to_dict()
         training_config_text = ""
         quantization_prefix = "The following `bitsandbytes` quantization config was used during training:"
