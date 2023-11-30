@@ -47,5 +47,4 @@ from .other import (
     get_quantization_config,
     id_tensor_storage,
 )
-from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights

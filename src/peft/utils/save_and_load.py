@@ -13,19 +13,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import warnings
 from typing import Optional
 
 import torch
-from huggingface_hub import hf_hub_download
+from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
-from .hub_utils import hub_file_exists
-from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
+from .other import EMBEDDING_LAYER_NAMES, SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
 
 
-def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", unwrap_compiled=False):
+def has_valid_embedding_base_layer(layer):
+    """Check if the layer has an embedding base layer"""
+    return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
+
+
+def get_embedding_layer_name(model, layer, is_prompt_learning):
+    """Get the name of the embedding module for a given layer."""
+    for name, module in model.named_modules():
+        if (is_prompt_learning and module == layer) or module == layer.base_layer:
+            return name
+    return None
+
+
+def get_peft_model_state_dict(
+    model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
+):
     """
     Get the state dict of the Peft model.
 
@@ -38,6 +53,10 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
             The name of the adapter whose state dict should be returned.
         unwrap_compiled (`bool`, *optional*, defaults to `False`):
             Whether to unwrap the model if torch.compile was used.
+        save_embedding_layers (`Union[bool, str]`, , *optional*, defaults to `auto`):
+            If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common embedding
+            layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available. Based on it
+            sets the boolean flag. This only works for 🤗 transformers models.
     """
     if unwrap_compiled:
         model = getattr(model, "_orig_mod", model)
@@ -94,12 +113,35 @@ def get_peft_model_state_dict(model, state_dict=None, adapter_name="default", un
         to_return["prompt_embeddings"] = prompt_embeddings
     elif config.peft_type == PeftType.IA3:
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
+    elif config.peft_type == PeftType.OFT:
+        to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
     else:
         raise NotImplementedError
     if getattr(model, "modules_to_save", None) is not None:
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
+
+    # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
+    if (
+        save_embedding_layers == "auto"
+        and hasattr(config, "target_modules")
+        and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
+    ):
+        warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
+        save_embedding_layers = True
+    elif save_embedding_layers == "auto":
+        save_embedding_layers = False
+
+    if save_embedding_layers and hasattr(model, "get_input_embeddings"):
+        for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
+            if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
+                # support from version >= 0.6.2
+                embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
+                if embedding_module_name:
+                    to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
+    elif save_embedding_layers:
+        warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
     to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return
@@ -126,7 +168,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3):
+    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3, PeftType.OFT):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",
@@ -134,6 +176,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.ADALORA: "lora_",
             PeftType.LOHA: "hada_",
             PeftType.LOKR: "lokr_",
+            PeftType.OFT: "oft_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
@@ -194,11 +237,16 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         filename = os.path.join(path, WEIGHTS_NAME)
         use_safetensors = False
     else:
-        has_remote_safetensors_file = hub_file_exists(
-            model_id,
-            SAFETENSORS_WEIGHTS_NAME,
+        token = hf_hub_download_kwargs.get("token", None)
+        if token is None:
+            token = hf_hub_download_kwargs.get("use_auth_token", None)
+
+        has_remote_safetensors_file = file_exists(
+            repo_id=model_id,
+            filename=SAFETENSORS_WEIGHTS_NAME,
             revision=hf_hub_download_kwargs.get("revision", None),
             repo_type=hf_hub_download_kwargs.get("repo_type", None),
+            token=token,
         )
         use_safetensors = has_remote_safetensors_file
 

@@ -12,6 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import importlib
+import math
 import operator
 import re
 import warnings
@@ -258,6 +260,10 @@ class LoraModel(BaseTuner):
         else:
             target_base_layer = target
 
+        megatron_core = None
+        if lora_config.megatron_config:
+            megatron_core = importlib.import_module(lora_config.megatron_core)
+
         if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
@@ -285,8 +291,10 @@ class LoraModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
+            embedding_kwargs.update(lora_config.loftq_config)
             new_module = Embedding(target, adapter_name, **embedding_kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
+            kwargs.update(lora_config.loftq_config)
             new_module = Conv2d(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
@@ -295,7 +303,30 @@ class LoraModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            kwargs.update(lora_config.loftq_config)
             new_module = Linear(target, adapter_name, **kwargs)
+        elif megatron_core and isinstance(
+            target_base_layer,
+            (megatron_core.tensor_parallel.ColumnParallelLinear, megatron_core.tensor_parallel.RowParallelLinear),
+        ):
+            from .tp_layer import LoraParallelLinear
+
+            megatron_kwargs = kwargs.copy()
+            megatron_config = lora_config.megatron_config
+            if isinstance(megatron_config, dict):
+                transformer_config_class = megatron_core.transformer.transformer_config.TransformerConfig
+                megatron_config = transformer_config_class(**lora_config.megatron_config)
+            megatron_kwargs["megatron_config"] = megatron_config
+            if megatron_kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to True but the target module is `ColumnParallelLinear` "
+                    "or `RowParallelLinear`. "
+                    "Setting fan_in_fan_out to False."
+                )
+                megatron_kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            new_module = LoraParallelLinear(
+                base_layer=target, adapter_name=adapter_name, backend=megatron_core.tensor_parallel, **megatron_kwargs
+            )
         elif isinstance(target_base_layer, Conv1D):
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
@@ -303,6 +334,7 @@ class LoraModel(BaseTuner):
                     "Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+            kwargs.update(lora_config.loftq_config)
             new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
         else:
             raise ValueError(
@@ -517,8 +549,8 @@ class LoraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         else:
                             continue
-                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data
+                        target_lora_A.data += current_adapter_lora_A.data * math.sqrt(weight) * target.scaling[adapter]
+                        target_lora_B.data += current_adapter_lora_B.data * math.sqrt(weight)
                 elif combination_type == "cat":
                     loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):

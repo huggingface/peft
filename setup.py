@@ -18,7 +18,9 @@ extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
-extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers<0.21.0"]
+extras["test"] = extras["dev"] + [
+    "pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers<0.21.0", "scipy"
+]
 
 setup(
     name="peft",
@@ -47,6 +49,7 @@ setup(
         "tqdm",
         "accelerate>=0.21.0",
         "safetensors",
+        "huggingface_hub>=0.17.0",
     ],
     extras_require=extras,
     classifiers=[
@@ -82,4 +85,5 @@ setup(
 # 8. Upload the final version to actual pypi:
 #      twine upload dist/* -r pypi
 # 9. Add release notes to the tag on https://github.com/huggingface/peft/releases once everything is looking hunky-dory.
+#      Check the notes here: https://docs.google.com/document/d/1k-sOIfykuKjWcOIALqjhFKz4amFEp-myeJUJEzNgjoU/edit?usp=sharing
 # 10. Update the version in __init__.py, setup.py to the bumped minor version + ".dev0" (e.g. from "0.6.0" to "0.7.0.dev0")
