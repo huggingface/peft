@@ -15,13 +15,13 @@
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
-from .config import LoraConfig
+from .config import LoftQConfig, LoraConfig
 from .gptq import QuantLinear
 from .layer import Conv2d, Embedding, Linear, LoraLayer
 from .model import LoraModel
 
 
-__all__ = ["LoraConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
+__all__ = ["LoraConfig", "LoftQConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
 
 
 if is_bnb_available():

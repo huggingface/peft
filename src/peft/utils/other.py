@@ -507,6 +507,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "codegen": ["qkv_proj"],
     "mistral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
+    "phi": ["Wqkv", "out_proj", "fc1", "fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
@@ -582,3 +583,4 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
+EMBEDDING_LAYER_NAMES = ["embed_tokens", "lm_head"]
