@@ -86,6 +86,8 @@
       title: LoKr
     - local: package_reference/lora
       title: LoRA
+    - local: package_reference/adapter_utils
+      title: LyCORIS
     - local: package_reference/multitask_prompt_tuning
       title: Multitask Prompt Tuning
     - local: package_reference/p_tuning
@@ -94,8 +96,6 @@
       title: Prefix tuning
     - local: package_reference/prompt_tuning
       title: Prompt tuning
-    - local: package_reference/adapter_utils
-      title: Utilities
     title: Adapters
   title: API reference
 

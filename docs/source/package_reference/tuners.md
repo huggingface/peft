@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Tuners
 
-A tuner (or adapter) is a module that can be plugged into a `torch.nn.Module`. [`BaseTuner`] base class for other tuners and provides shared methods and attributes for preparing an adapter configuration and replacing a target module with the adapter module. [`BaseTunerLayer`] is a tuner mixin offering methods and attributes for managing adapters such as merging and unmerging, and activating and disabling adapters.
+A tuner (or adapter) is a module that can be plugged into a `torch.nn.Module`. [`BaseTuner`] base class for other tuners and provides shared methods and attributes for preparing an adapter configuration and replacing a target module with the adapter module. [`BaseTunerLayer`] is a base class for adapter layers. It offers methods and attributes for managing adapters such as activating and disabling adapters.
 
 ## BaseTuner
 

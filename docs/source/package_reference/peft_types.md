@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # PEFT types
 
-`PeftType` includes the supported adapters in PEFT, and `TaskType` includes PEFT-supported tasks.
+[`PeftType`] includes the supported adapters in PEFT, and [`TaskType`] includes PEFT-supported tasks.
 
 ## PeftType
 

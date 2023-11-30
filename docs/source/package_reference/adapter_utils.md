@@ -14,7 +14,7 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# Adapter utilities
+# LyCORIS
 
 [LyCORIS](https://hf.co/papers/2309.14859) (Lora beYond Conventional methods, Other Rank adaptation Implementations for Stable diffusion) are LoRA-like matrix decomposition adapters that modify the cross-attention layer of the UNet. The [LoHa](loha) and [LoKr](lokr) methods inherit from the `Lycoris` classes here.
 

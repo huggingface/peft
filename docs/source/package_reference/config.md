@@ -4,7 +4,7 @@ rendered properly in your Markdown viewer.
 
 # Configuration
 
-The configuration classes stores the configuration of a [`PeftModel`], PEFT adapter models, and the configurations of [`PrefixTuning`], [`PromptTuning`], and [`PromptEncoder`]. They contain methods for saving and loading model configurations from the Hub, specifying the PEFT method to use, type of task to perform, and model configurations like number of layers and number of attention heads.
+[`PeftConfigMixin`] is the base configuration class for storing the adapter configuration of a [`PeftModel`], and [`PromptLearningConfig`] is the base configuration class for soft prompt methods (p-tuning, prefix tuning, and prompt tuning). These base classes contain methods for saving and loading model configurations from the Hub, specifying the PEFT method to use, type of task to perform, and model configurations like number of layers and number of attention heads.
 
 ## PeftConfigMixin
 
