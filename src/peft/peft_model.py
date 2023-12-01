@@ -181,7 +181,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             save_embedding_layers (`Union[bool, str]`, *optional*, defaults to `"auto"`):
                 If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common
                 embedding layers `peft.utils.other.EMBEDDING_LAYER_NAMES` in config's `target_modules` when available.
-                Based on it sets, the boolean flag. This only works for 🤗 transformers models.
+                and automatically sets the boolean flag. This only works for 🤗 transformers models.
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
@@ -545,7 +545,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     @contextmanager
     def disable_adapter(self):
         """
-        Context managers that disables the adapter module. Use this to run inference on the base model.
+        Context manager that disables the adapter module. Use this to run inference on the base model.
 
         Example:
 
@@ -584,7 +584,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         The name for the new adapter should be unique.
 
-        Note that the new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set
         the active adapter.
 
         Args:
@@ -649,7 +649,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         The name for the new adapter should be unique.
 
-        Note that the new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set
         the active adapter.
 
         Args:
