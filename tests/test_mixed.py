@@ -58,8 +58,8 @@ class SimpleNet(nn.Module):
 def _param_name_func(testcase_func, param_num, params):
     # for parameterized tests in TextMixedAdapterTypes
     config0, config1 = params[0]
-    name0 = config0.__class__.__name__[:-len("Config")]
-    name1 = config1.__class__.__name__[:-len("Config")]
+    name0 = config0.__class__.__name__[: -len("Config")]
+    name1 = config1.__class__.__name__[: -len("Config")]
     if name0 != name1:
         return f"{testcase_func.__name__}_{param_num}_{name0}_{name1}"
     return f"{testcase_func.__name__}_{param_num}_{name0}_x2"
