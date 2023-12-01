@@ -130,8 +130,8 @@ class OFTLayer(nn.Module, LycorisLayer):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
             adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged. Defaults
-                to `None`.
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
         """
         if self.merged:
             warnings.warn(

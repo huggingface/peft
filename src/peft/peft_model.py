@@ -584,8 +584,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         The name for the new adapter should be unique.
 
-        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set
-        the active adapter.
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
 
         Args:
             adapter_name (`str`):
@@ -649,8 +649,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         The name for the new adapter should be unique.
 
-        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set
-        the active adapter.
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
 
         Args:
             adapter_name (`str`):

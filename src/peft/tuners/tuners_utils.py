@@ -274,9 +274,9 @@ class BaseTuner(nn.Module, ABC):
         """
         This method merges the adapter layers into the base model.
 
-        Merging adapters can lead to a speed up of the forward pass. A copy of the adapter weights is still
-        kept in memory, which is required to unmerge the adapters. In order to merge the adapter weights
-        without keeping them in memory, please call `merge_and_unload`.
+        Merging adapters can lead to a speed up of the forward pass. A copy of the adapter weights is still kept in
+        memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
+        in memory, please call `merge_and_unload`.
 
         Args:
             safe_merge (`bool`, *optional*):
@@ -284,8 +284,8 @@ class BaseTuner(nn.Module, ABC):
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
             adapter_names (`list[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged. Defaults
-                to `None`.
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
