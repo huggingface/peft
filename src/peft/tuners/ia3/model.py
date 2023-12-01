@@ -20,6 +20,7 @@ from enum import Enum
 from typing import List, Optional
 
 import torch
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -146,8 +147,9 @@ class IA3Model(BaseTuner):
     def _check_target_module_exists(ia3_config, key):
         return check_target_module_exists(ia3_config, key)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module = None) -> None:
+        model = model or self.model
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 

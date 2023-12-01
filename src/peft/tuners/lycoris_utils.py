@@ -254,8 +254,9 @@ class LycorisTuner(BaseTuner):
 
         return new_module
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module = None) -> None:
+        model = model or self.model
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
