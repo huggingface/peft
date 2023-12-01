@@ -181,9 +181,9 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
     def _check_merging(self, model_cls, config0, config1, input):
         # Ensure that when merging mixed adapters, the result is the same as when applying the adapters separately.
-        # merging requires a bit higher tolerance for some adapters
-        atol = 5e-5
-        rtol = 5e-5
+        # Merging requires a bit higher tolerance for some adapters, which can also vary depending on CPU vs GPU.
+        atol = 7e-5
+        rtol = 7e-5
         seed0 = 0
         seed1 = 1
 
