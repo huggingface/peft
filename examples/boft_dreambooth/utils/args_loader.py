@@ -187,76 +187,14 @@ def parse_args(input_args=None):
         default="none",
         help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True"
     )
-
-    # oft args
     parser.add_argument(
-        "--use_oft", action="store_true", help="Whether to use OFT for parameter efficient tuning"
+        "--num_dataloader_workers", type=int, default=1, help="Num of workers for the training dataloader."
     )
     parser.add_argument(
-        "--oft_r", type=int, default=384, help="OFT rank, only used if use_oft is True"
-    )
-    parser.add_argument("--oft_bias_fit", action="store_true", help="Whether to use bias fit")
-    parser.add_argument(
-        "--oft_dropout", type=float, default=0.1, help="OFT dropout, only used if use_oft is True"
-    )
-    parser.add_argument(
-        "--oft_bias",
-        type=str,
-        default="none",
-        help="Bias type for OFT. Can be 'none', 'all' or 'oft_only', only used if use_oft is True"
-    )
-
-    # lora args
-    parser.add_argument(
-        "--use_lora",
+        "--no_tracemalloc",
+        default=False,
         action="store_true",
-        help="Whether to use Lora for parameter efficient tuning"
-    )
-    parser.add_argument(
-        "--lora_r", type=int, default=8, help="Lora rank, only used if use_lora is True"
-    )
-    parser.add_argument(
-        "--lora_alpha", type=int, default=32, help="Lora alpha, only used if use_lora is True"
-    )
-    parser.add_argument(
-        "--lora_dropout",
-        type=float,
-        default=0.0,
-        help="Lora dropout, only used if use_lora is True"
-    )
-    parser.add_argument(
-        "--lora_bias",
-        type=str,
-        default="none",
-        help=
-        "Bias type for Lora. Can be 'none', 'all' or 'lora_only', only used if use_lora is True",
-    )
-    parser.add_argument(
-        "--lora_text_encoder_r",
-        type=int,
-        default=8,
-        help="Lora rank for text encoder, only used if `use_lora` and `train_text_encoder` are True",
-    )
-    parser.add_argument(
-        "--lora_text_encoder_alpha",
-        type=int,
-        default=32,
-        help=
-        "Lora alpha for text encoder, only used if `use_lora` and `train_text_encoder` are True",
-    )
-    parser.add_argument(
-        "--lora_text_encoder_dropout",
-        type=float,
-        default=0.0,
-        help=
-        "Lora dropout for text encoder, only used if `use_lora` and `train_text_encoder` are True",
-    )
-    parser.add_argument(
-        "--lora_text_encoder_bias",
-        type=str,
-        default="none",
-        help=
-        "Bias type for Lora. Can be 'none', 'all' or 'lora_only', only used if use_lora and `train_text_encoder` are True",
+        help="Flag to stop memory allocation tracing during training. This could speed up training on Windows.",
     )
 
     parser.add_argument(

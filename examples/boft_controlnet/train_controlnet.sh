@@ -26,9 +26,9 @@ accelerate launch train_controlnet.py \
   --dataset_name=$DATASET_NAME \
   --resolution=512 \
   --learning_rate=1e-5 \
-  --checkpointing_steps=10 \
+  --checkpointing_steps=10000 \
   --max_train_steps=50000 \
-  --validation_steps=10 \
+  --validation_steps=1000 \
   --validation_image "./conditioning_image_1.png" "./conditioning_image_2.png" \
   --validation_prompt "red circle with blue background" "cyan circle with brown floral background" \
   --train_batch_size=4 \
