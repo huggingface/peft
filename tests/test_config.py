@@ -21,17 +21,9 @@ import warnings
 
 import pytest
 
-from peft import (
-    AdaptionPromptConfig,
-    IA3Config,
-    LoraConfig,
-    PeftConfig,
-    PrefixTuningConfig,
-    PromptEncoder,
-    PromptEncoderConfig,
-    PromptTuningConfig,
-)
-
+from peft import (AdaptionPromptConfig, IA3Config, LoraConfig, PeftConfig,
+                  PrefixTuningConfig, PromptEncoder, PromptEncoderConfig,
+                  PromptTuningConfig, VeraConfig)
 
 PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
@@ -39,6 +31,7 @@ PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 class PeftConfigTestMixin:
     all_config_classes = (
         LoraConfig,
+        VeraConfig,
         PromptEncoderConfig,
         PrefixTuningConfig,
         PromptTuningConfig,

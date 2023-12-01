@@ -18,7 +18,6 @@ from transformers import AutoModelForCausalLM
 
 from peft import PeftConfig, PeftModel
 
-
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
 
 

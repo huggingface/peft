@@ -1,20 +1,13 @@
+import evaluate
 import torch
+from datasets import load_dataset
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
-from peft import (
-    get_peft_model,
-    VeraConfig,
-    PeftType,
-)
-
-import evaluate
-from datasets import load_dataset
-from transformers import (
-    AutoModelForSequenceClassification,
-    AutoTokenizer,
-    get_linear_schedule_with_warmup,
-)
 from tqdm import tqdm
+from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
+                          get_linear_schedule_with_warmup)
+
+from peft import PeftType, VeraConfig, get_peft_model
 
 experiment_configs = {
     "sst2": dict(
@@ -37,7 +30,7 @@ experiment_configs = {
     ),
 }
 
-task = "mrpc"
+task = "qnli"
 
 # hparams
 batch_size = experiment_configs[task]["batch_size"]

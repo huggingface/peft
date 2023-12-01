@@ -22,37 +22,22 @@ from typing import Any, Dict, List, Union
 import pytest
 import torch
 from datasets import Audio, DatasetDict, load_dataset
-from transformers import (
-    AutoModelForCausalLM,
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-    DataCollatorForLanguageModeling,
-    Seq2SeqTrainer,
-    Seq2SeqTrainingArguments,
-    Trainer,
-    TrainingArguments,
-    WhisperFeatureExtractor,
-    WhisperForConditionalGeneration,
-    WhisperProcessor,
-    WhisperTokenizer,
-)
+from transformers import (AutoModelForCausalLM, AutoModelForSeq2SeqLM,
+                          AutoTokenizer, DataCollatorForLanguageModeling,
+                          Seq2SeqTrainer, Seq2SeqTrainingArguments, Trainer,
+                          TrainingArguments, WhisperFeatureExtractor,
+                          WhisperForConditionalGeneration, WhisperProcessor,
+                          WhisperTokenizer)
 
-from peft import (
-    AdaLoraConfig,
-    LoraConfig,
-    get_peft_model,
-    prepare_model_for_int8_training,
-    prepare_model_for_kbit_training,
-)
+from peft import (AdaLoraConfig, LoraConfig, get_peft_model,
+                  prepare_model_for_int8_training,
+                  prepare_model_for_kbit_training)
 
-from .testing_utils import (
-    require_auto_gptq,
-    require_bitsandbytes,
-    require_optimum,
-    require_torch_gpu,
-    require_torch_multi_gpu,
-)
+from .testing_utils import (require_auto_gptq, require_bitsandbytes,
+                            require_optimum, require_torch_gpu,
+                            require_torch_multi_gpu)
 
+# TODO: add VeRA GPU test here?
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
 # rely on the example scripts to test the features.
@@ -364,7 +349,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_causal_lm_training_mutli_gpu(self):
+    def test_causal_lm_training_mutli_gpu(self):  # TODO: 🤨
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
         https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train

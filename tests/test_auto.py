@@ -17,22 +17,15 @@ import unittest
 
 import torch
 
-from peft import (
-    AutoPeftModel,
-    AutoPeftModelForCausalLM,
-    AutoPeftModelForFeatureExtraction,
-    AutoPeftModelForQuestionAnswering,
-    AutoPeftModelForSeq2SeqLM,
-    AutoPeftModelForSequenceClassification,
-    AutoPeftModelForTokenClassification,
-    PeftModel,
-    PeftModelForCausalLM,
-    PeftModelForFeatureExtraction,
-    PeftModelForQuestionAnswering,
-    PeftModelForSeq2SeqLM,
-    PeftModelForSequenceClassification,
-    PeftModelForTokenClassification,
-)
+from peft import (AutoPeftModel, AutoPeftModelForCausalLM,
+                  AutoPeftModelForFeatureExtraction,
+                  AutoPeftModelForQuestionAnswering, AutoPeftModelForSeq2SeqLM,
+                  AutoPeftModelForSequenceClassification,
+                  AutoPeftModelForTokenClassification, PeftModel,
+                  PeftModelForCausalLM, PeftModelForFeatureExtraction,
+                  PeftModelForQuestionAnswering, PeftModelForSeq2SeqLM,
+                  PeftModelForSequenceClassification,
+                  PeftModelForTokenClassification)
 
 
 class PeftAutoModelTester(unittest.TestCase):
