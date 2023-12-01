@@ -155,9 +155,11 @@ def main(args):
     )
     if args.report_to == "wandb":
         import wandb
-
-        wandb.login(key=args.wandb_key)
-        wandb.init(project=args.wandb_project_name)
+        wandb_init = {"wandb": {
+            "name": args.wandb_run_name,
+            "mode": "online",
+        }}
+        
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
     # TODO (patil-suraj): Remove this check when gradient accumulation with two models is enabled in accelerate.
@@ -420,7 +422,9 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("dreambooth", config=vars(args))
+        accelerator.init_trackers(
+            args.wandb_project_name, config=vars(args), init_kwargs=wandb_init
+        )
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
