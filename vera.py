@@ -2,14 +2,9 @@ import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from peft import (
-    get_peft_config,
     get_peft_model,
-    get_peft_model_state_dict,
-    set_peft_model_state_dict,
     VeraConfig,
     PeftType,
-    PrefixTuningConfig,
-    PromptEncoderConfig,
 )
 
 import evaluate
@@ -18,11 +13,8 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
     get_linear_schedule_with_warmup,
-    set_seed,
-    AutoConfig,
 )
 from tqdm import tqdm
-from transformers.models.roberta.modeling_roberta import RobertaAttention
 
 experiment_configs = {
     "sst2": dict(
@@ -45,7 +37,7 @@ experiment_configs = {
     ),
 }
 
-task = "stsb"
+task = "mrpc"
 
 # hparams
 batch_size = experiment_configs[task]["batch_size"]
