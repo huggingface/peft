@@ -1,5 +1,0 @@
-boft ade20k 32 0 5
-oft celebhq 4 0 0
-oft ade20k 4 0 0
-lora celebhq 128 0 0
-lora ade20k 128 0 0
