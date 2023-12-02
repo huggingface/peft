@@ -51,12 +51,6 @@ class VeraConfig(PeftConfig):
         layers_pattern (`str`):
             The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
             pattern is not in the common layers pattern.
-        rank_pattern (`dict`):
-            The mapping from layer names or regexp expression to ranks which are different from the default rank
-            specified by `r`.
-        alpha_pattern (`dict`):
-            The mapping from layer names or regexp expression to alphas which are different from the default alpha
-            specified by `vera_alpha`.
     """
 
     r: int = field(default=8, metadata={"help": "Vera attention dimension"})
@@ -114,24 +108,6 @@ class VeraConfig(PeftConfig):
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
-        },
-    )
-    rank_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-            )
-        },
-    )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `vera_alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
-            )
         },
     )
 

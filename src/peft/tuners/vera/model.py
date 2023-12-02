@@ -232,11 +232,8 @@ class VeraModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-        # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(vera_config.rank_pattern.keys(), vera_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
 
-        r = vera_config.rank_pattern.get(target_name_key, vera_config.r)
+        r = vera_config.r
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "r": r,
