@@ -28,6 +28,27 @@ BOFTConfig allows you to control how BOFT is applied to the base model through t
 * 
 
 ```python
+import transformers
+from peft import BOFTConfig, get_peft_model
+
+config = BOFTConfig(
+    boft_block_size=8,
+    boft_block_num=args.block_num,
+    boft_n_butterfly_factor=args.n_butterfly_factor,
+    target_modules=["query", "value", "key", "output.dense", "mlp.fc1", "mlp.fc2"],
+    boft_dropout=args.boft_dropout,
+    bias="boft_only",
+    modules_to_save=["classifier"],
+)
+
+model = transformers.Dinov2ForImageClassification.from_pretrained(
+    "facebook/dinov2-large",
+    num_labels=100,
+    )
+boft_model = get_peft_model(model, config)
+boft_model.print_trainable_parameters()
+# output: 
+
 from transformers import AutoModelForSeq2SeqLM
 from peft import get_peft_config, get_peft_model, LoraConfig, TaskType
 model_name_or_path = "bigscience/mt0-large"

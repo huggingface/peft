@@ -128,7 +128,6 @@ class MultiplicativeDropoutLayer(nn.Module):
             # Use the mask to combine original matrices and identity matrices
             eye_matrix = torch.eye(H, device=x.device).repeat(N, D, 1, 1)
             x = (1 - full_mask) * x + full_mask * eye_matrix
-
         return x
 
 
@@ -246,6 +245,9 @@ class BOFTLayer(BaseTunerLayer):
     def perm2mat(self, indices):
         """
         Convert permutation indices to permutation matrix.
+
+        Args:
+        indices: A list of indices representing the permutation.
         """
         # Number of indices determines the size of the square matrix
         n = len(indices)
@@ -379,7 +381,7 @@ class Linear(nn.Linear, BOFTLayer):
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.boft_R.keys():
                 orig_weight = self.weight.data 
-                butterfly_oft_mat, boft_s = self.get_delta_weight(self.active_adapter)
+                butterfly_oft_mat, boft_s = self.get_delta_weight(self.active_adapter[0])
 
                 orig_weight = torch.transpose(self.weight.data , 0, 1)
                 rotated_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)

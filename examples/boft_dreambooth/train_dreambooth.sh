@@ -191,6 +191,6 @@ accelerate launch train_dreambooth.py \
   --learning_rate=3e-5 \
   --max_train_steps=2000 \
   --checkpointing_steps=1000 \
-  --validation_steps=400 \
+  --validation_steps=800 \
   --enable_xformers_memory_efficient_attention \
   --report_to="wandb" \
