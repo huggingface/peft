@@ -31,7 +31,11 @@ class VeraConfig(PeftConfig):
             Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint did not
             include these projections.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Vera to.
+        projection_prng_key: (`Optional[int]`): Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint
+        did not include these projections.
+        save_projection: (`bool`): Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on all system configurations.)
         vera_dropout (`float`): The dropout probability for Vera layers.
+        d_initial (`float`): Initial init value for `vera_lambda_d` vector used when `init_vera_weights` is `True`.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
             to `True`.

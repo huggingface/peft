@@ -129,13 +129,6 @@ class VeraLayer(BaseTunerLayer):
         self.vera_dropout[adapter_name] = vera_dropout_layer
         # Actual trainable parameters
         if r > 0:
-            # weight_A = torch.randn((r, self.in_features))
-            # weight_B = torch.randn((self.out_features, r))
-
-            # TODO: these need to be frozen and initialised correctly somewhere
-            # self.vera_embedding_A[adapter_name] = nn.Parameter(weight_A)
-            # self.vera_embedding_B[adapter_name] = nn.Parameter(weight_B)
-
             self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
             self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
 
@@ -154,8 +147,8 @@ class VeraLayer(BaseTunerLayer):
                 nn.init.zeros_(self.vera_lambda_b[adapter_name])
 
 
-# TODO: add attribution to HF LoRA
-# Which was based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
+# Below was based on 'src/peft/tuners/lora/layer.py
+# Which was in turn based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 
 
 #  ------------------------------------------------------------------------------------------
@@ -173,7 +166,7 @@ class Linear(nn.Linear, VeraLayer):
         out_features: int,
         r: int = 0,
         vera_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        fan_in_fan_out: bool = False, # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         d_initial: float = 1.0,
         **kwargs,
@@ -258,6 +251,8 @@ class Linear(nn.Linear, VeraLayer):
         lambda_b = self.vera_lambda_b[adapter]
 
         if cast_to_fp32:
+            vera_A = vera_A.float()
+            vera_B = vera_B.float()
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
 
@@ -428,13 +423,10 @@ class Embedding(nn.Embedding, VeraLayer):
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d:
                     continue
-                # embedding_A = self.vera_embedding_A[active_adapter].T
-                # embedding_B = self.vera_embedding_B[active_adapter].T
                 lambda_d = self.vera_lambda_d[active_adapter]
                 lambda_b = self.vera_lambda_b[active_adapter]
 
                 after_A = lambda_d * self._embed(x, vera_A.T)
-                # result += lambda_b * F.linear(after_A, vera_B)
                 result += lambda_b * (after_A @ vera_B.T)
 
         return result

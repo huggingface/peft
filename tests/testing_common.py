@@ -661,7 +661,6 @@ class PeftCommonTester:
         loss = output.sum()
         loss.backward()
 
-        # TODO: what is the prefix here for VeRA?
         if config_cls == IA3Config:
             parameter_prefix = "ia3"
         elif config_cls == LoraConfig:
