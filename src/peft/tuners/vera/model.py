@@ -129,7 +129,7 @@ class VeraModel(BaseTuner):
 
                 if first_linear is not None and module_shape != first_linear:
                     raise ValueError(
-                        "Multiple target linear layers with different dimensions were specified! Vera only supports a single dimension size."
+                        f"Multiple target linear layers with different dimensions were specified! Vera only supports a single dimension size. Got '{module_shape}' expected '{first_linear}"
                     )
                 first_linear = module_shape
 
@@ -149,8 +149,8 @@ class VeraModel(BaseTuner):
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
         config = config[adapter_name]
-        generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
 
+        import ipdb; ipdb.set_trace()
         first_linear, first_embedding = self._find_first_dim()
 
         if first_embedding is not None:
@@ -158,6 +158,7 @@ class VeraModel(BaseTuner):
         if first_linear is not None:
             first_linear_out_dim, first_linear_in_dim = first_linear
 
+        generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
         if first_linear is not None:
             vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
             vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
