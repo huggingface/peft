@@ -24,12 +24,12 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import (AdaLoraConfig, IA3Config, LoHaConfig, LoraConfig, PeftModel,
-                  get_peft_model)
+from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoraConfig, PeftModel, get_peft_model
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict
+
 
 # MLP is a vanilla FF network with only linear layers
 # EmbConv1D has an embedding and a Conv1D layer

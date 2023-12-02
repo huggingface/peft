@@ -12,17 +12,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import math
 import operator
 import re
 import warnings
 from dataclasses import asdict, replace
 from enum import Enum
-from functools import reduce
+from functools import partial, reduce
 from itertools import chain
-from functools import partial
+from typing import Union
 
 import torch
 from torch import nn
+from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
@@ -36,9 +38,6 @@ from peft.utils import (
 
 from .config import VeraConfig
 from .layer import Conv2d, Embedding, Linear, VeraLayer
-from torch.nn.init import _calculate_correct_fan
-import math
-from typing import Union
 
 
 def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):

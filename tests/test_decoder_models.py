@@ -22,6 +22,7 @@ from peft import AdaLoraConfig
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
+
 PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-OPTForCausalLM",
     "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",

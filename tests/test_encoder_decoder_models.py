@@ -20,6 +20,7 @@ from transformers import AutoModelForSeq2SeqLM
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
+
 PEFT_ENCODER_DECODER_MODELS_TO_TEST = [
     "ybelkada/tiny-random-T5ForConditionalGeneration-calibrated",
     "hf-internal-testing/tiny-random-BartForConditionalGeneration",

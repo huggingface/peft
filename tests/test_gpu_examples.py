@@ -22,20 +22,37 @@ from typing import Any, Dict, List, Union
 import pytest
 import torch
 from datasets import Audio, DatasetDict, load_dataset
-from transformers import (AutoModelForCausalLM, AutoModelForSeq2SeqLM,
-                          AutoTokenizer, DataCollatorForLanguageModeling,
-                          Seq2SeqTrainer, Seq2SeqTrainingArguments, Trainer,
-                          TrainingArguments, WhisperFeatureExtractor,
-                          WhisperForConditionalGeneration, WhisperProcessor,
-                          WhisperTokenizer)
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    DataCollatorForLanguageModeling,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
+    Trainer,
+    TrainingArguments,
+    WhisperFeatureExtractor,
+    WhisperForConditionalGeneration,
+    WhisperProcessor,
+    WhisperTokenizer,
+)
 
-from peft import (AdaLoraConfig, LoraConfig, get_peft_model,
-                  prepare_model_for_int8_training,
-                  prepare_model_for_kbit_training)
+from peft import (
+    AdaLoraConfig,
+    LoraConfig,
+    get_peft_model,
+    prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
+)
 
-from .testing_utils import (require_auto_gptq, require_bitsandbytes,
-                            require_optimum, require_torch_gpu,
-                            require_torch_multi_gpu)
+from .testing_utils import (
+    require_auto_gptq,
+    require_bitsandbytes,
+    require_optimum,
+    require_torch_gpu,
+    require_torch_multi_gpu,
+)
+
 
 # TODO: add VeRA GPU test here?
 

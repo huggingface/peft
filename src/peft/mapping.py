@@ -39,12 +39,12 @@ from .tuners import (
     LoHaModel,
     LoraConfig,
     LoraModel,
-    VeraConfig,
-    VeraModel,
     MultitaskPromptTuningConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VeraConfig,
+    VeraModel,
 )
 from .utils import _prepare_prompt_learning_config
 

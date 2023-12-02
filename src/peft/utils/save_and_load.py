@@ -13,13 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import warnings
 from typing import Optional
 
 import torch
 from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
-import warnings
 
 from .hub_utils import hub_file_exists
 from .other import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device

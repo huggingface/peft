@@ -24,15 +24,25 @@ import torch
 import yaml
 from diffusers import StableDiffusionPipeline
 
-from peft import (AdaLoraConfig, IA3Config, LoraConfig, PeftModel,
-                  PrefixTuningConfig, PromptEncoderConfig,
-                  PromptLearningConfig, PromptTuningConfig, VeraConfig,
-                  get_peft_model, get_peft_model_state_dict,
-                  prepare_model_for_int8_training)
+from peft import (
+    AdaLoraConfig,
+    IA3Config,
+    LoraConfig,
+    PeftModel,
+    PrefixTuningConfig,
+    PromptEncoderConfig,
+    PromptLearningConfig,
+    PromptTuningConfig,
+    VeraConfig,
+    get_peft_model,
+    get_peft_model_state_dict,
+    prepare_model_for_int8_training,
+)
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
 
 from .testing_utils import get_state_dict
+
 
 CONFIG_CLASSES = (
     IA3Config,

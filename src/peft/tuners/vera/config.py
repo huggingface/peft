@@ -27,7 +27,9 @@ class VeraConfig(PeftConfig):
 
     Args:
         r (`int`): Vera attention dimension.
-        projection_prng_key (`int`): Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint did not include these projections.
+        projection_prng_key (`int`):
+            Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint did not
+            include these projections.
         target_modules (`Union[List[str],str]`): The names of the modules to apply Vera to.
         vera_dropout (`float`): The dropout probability for Vera layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).

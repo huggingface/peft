@@ -25,6 +25,7 @@ from peft import LoHaConfig, LoraConfig, VeraConfig, get_peft_model
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
 
+
 PEFT_DIFFUSERS_SD_MODELS_TO_TEST = ["hf-internal-testing/tiny-stable-diffusion-torch"]
 CONFIG_TESTING_KWARGS = (
     {
@@ -62,7 +63,6 @@ CONFIG_TESTING_KWARGS = (
     {
         "text_encoder": {
             "r": 64,
-            "target_modules": None,
             "vera_dropout": 0.05,
             "projection_prng_key": 0xFF,
             "d_initial": 0.1,
@@ -72,7 +72,6 @@ CONFIG_TESTING_KWARGS = (
         },
         "unet": {
             "r": 64,
-            "target_modules": None,
             "vera_dropout": 0.05,
             "projection_prng_key": 0xFF,
             "d_initial": 0.1,
