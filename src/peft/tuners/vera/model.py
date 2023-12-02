@@ -37,7 +37,7 @@ from peft.utils import (
 )
 
 from .config import VeraConfig
-from .layer import Conv2d, Embedding, Linear, VeraLayer
+from .layer import Embedding, Linear, VeraLayer
 
 
 def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
@@ -257,15 +257,7 @@ class VeraModel(BaseTuner):
 
         # the below todo is copied from LoRA
         # TODO: better deal with that
-        if isinstance(target, VeraLayer) and isinstance(target, torch.nn.Conv2d):
-            target.update_layer_conv2d(
-                adapter_name,
-                r,
-                vera_config.vera_dropout,
-                vera_config.init_vera_weights,
-                d_initial=vera_config.d_initial,
-            )
-        elif isinstance(target, VeraLayer) and isinstance(target, (torch.nn.Embedding, torch.nn.sparse.Embedding)):
+        if isinstance(target, VeraLayer) and isinstance(target, (torch.nn.Embedding, torch.nn.sparse.Embedding)):
             target.update_layer_embedding(
                 adapter_name,
                 r,
@@ -355,21 +347,6 @@ class VeraModel(BaseTuner):
                 out_features,
                 d_initial=vera_config.d_initial,
                 **embedding_kwargs,
-            )
-        elif isinstance(target, torch.nn.Conv2d):
-            out_channels, in_channels = target.weight.size()[:2]
-            kernel_size = target.weight.size()[2:]
-            stride = target.stride
-            padding = target.padding
-            new_module = Conv2d(
-                adapter_name,
-                in_channels,
-                out_channels,
-                kernel_size,
-                stride,
-                padding,
-                d_initial=vera_config.d_initial,
-                **kwargs,
             )
         else:
             if isinstance(target, torch.nn.Linear):
@@ -474,15 +451,6 @@ class VeraModel(BaseTuner):
             if isinstance(target, VeraLayer):
                 if isinstance(target, nn.Embedding):
                     new_module = torch.nn.Embedding(target.in_features, target.out_features)
-                elif isinstance(target, nn.Conv2d):
-                    new_module = torch.nn.Conv2d(
-                        target.in_channels,
-                        target.out_channels,
-                        kernel_size=target.kernel_size,
-                        stride=target.stride,
-                        padding=target.padding,
-                        dilation=target.dilation,
-                    )
                 else:
                     bias = target.bias is not None
                     if getattr(target, "is_target_conv_1d_layer", False):
