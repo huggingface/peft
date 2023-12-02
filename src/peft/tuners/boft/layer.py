@@ -401,10 +401,10 @@ class Linear(nn.Linear, BOFTLayer):
         boft_R = self.boft_R[adapter]
         boft_s = self.boft_s[adapter]
 
-        N, Z, b, _ = boft_R.shape
-        boft_R = boft_R.view(N * Z, b, b)
+        N, D, H, _ = boft_R.shape
+        boft_R = boft_R.view(N * D, H, H)
         orth_rotate_butterfly = self.cayley_batch(boft_R)
-        orth_rotate_butterfly = orth_rotate_butterfly.view(N, Z, b, b)
+        orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
         block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
 
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
@@ -481,10 +481,10 @@ class Linear(nn.Linear, BOFTLayer):
             boft_s = self.boft_s[self.active_adapter[0]]
             dropout = self.boft_dropout[self.active_adapter[0]]
             
-            N, Z, b, _ = boft_R.shape
-            boft_R = boft_R.view(N * Z, b, b)
+            N, D, H, _ = boft_R.shape
+            boft_R = boft_R.view(N * D, H, H)
             orth_rotate_butterfly = self.cayley_batch(boft_R)
-            orth_rotate_butterfly = orth_rotate_butterfly.view(N, Z, b, b)
+            orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
             orth_rotate_butterfly = dropout(orth_rotate_butterfly)
             block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
 
