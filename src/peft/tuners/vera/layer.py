@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Optional, Union, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -138,7 +138,7 @@ class Linear(nn.Linear, VeraLayer):
         out_features: int,
         r: int = 0,
         vera_dropout: float = 0.0,
-        fan_in_fan_out: bool = False, # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         d_initial: float = 1.0,
         **kwargs,

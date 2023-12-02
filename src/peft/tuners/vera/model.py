@@ -13,13 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import math
-import operator
-import re
 import warnings
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from enum import Enum
-from functools import partial, reduce
-from itertools import chain
+from functools import partial
 from typing import Union
 
 import torch
@@ -32,7 +29,6 @@ from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_mod
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
-    _freeze_adapter,
     _get_submodules,
 )
 
@@ -121,14 +117,12 @@ class VeraModel(BaseTuner):
 
     def _find_first_dim(self) -> int:
         """
-        Finds the first linear and embedding that has been wrapped with Vera,
-        and extract the input and output dimension.
+        Finds the first linear and embedding that has been wrapped with Vera, and extract the input and output
+        dimension.
 
-        This will be used for determining the size of the shared vera_A and
-        vera_B matrices.
+        This will be used for determining the size of the shared vera_A and vera_B matrices.
 
-        This will throw an error if there are multiple layers of the same type
-        with different shapes.
+        This will throw an error if there are multiple layers of the same type with different shapes.
         """
         first_linear, first_embedding = None, None
         for module in self.model.modules():
@@ -142,7 +136,6 @@ class VeraModel(BaseTuner):
                         f"Multiple target linear layers with different dimensions were specified! Vera only supports a single dimension size. Got '{module_shape}' expected '{first_linear}"
                     )
                 first_linear = module_shape
-
 
             elif isinstance(module, Embedding):
                 if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
@@ -538,8 +531,8 @@ class VeraModel(BaseTuner):
 
     def _add_forward_hooks(self):
         """
-        Adds pre-forward hooks to all Vera modules in order to inject the shared
-        vera_A and vera_B without adding them to each module's state dictionary.
+        Adds pre-forward hooks to all Vera modules in order to inject the shared vera_A and vera_B without adding them
+        to each module's state dictionary.
         """
         hook_handles = []
         for module in self.modules():
