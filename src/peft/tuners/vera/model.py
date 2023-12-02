@@ -123,11 +123,16 @@ class VeraModel(BaseTuner):
         first_linear, first_embedding = None, None
         for module in self.model.modules():
             if isinstance(module, Linear):
-                if first_linear is not None and tuple(module.weight.shape) != first_linear:
+                module_shape = tuple(module.weight.shape)
+                if module.fan_in_fan_out:
+                    module_shape = module_shape[::-1]
+
+                if first_linear is not None and module_shape != first_linear:
                     raise ValueError(
                         "Multiple target linear layers with different dimensions were specified! Vera only supports a single dimension size."
                     )
-                first_linear = tuple(module.weight.shape)
+                first_linear = module_shape
+
 
             elif isinstance(module, Embedding):
                 if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
@@ -375,7 +380,7 @@ class VeraModel(BaseTuner):
             else:
                 raise ValueError(
                     f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                    "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+                    "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(
                 adapter_name,
@@ -765,7 +770,7 @@ class VeraModel(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def forward(self, *args, **kwargs):
+    def _add_forward_hooks(self):
         hook_handles = []
         for module in self.modules():
             if isinstance(module, Linear):
@@ -778,6 +783,10 @@ class VeraModel(BaseTuner):
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
+        return hook_handles
+
+    def forward(self, *args, **kwargs):
+        hook_handles = self._add_forward_hooks()
         try:
             outputs = super().forward(*args, **kwargs)
         finally:

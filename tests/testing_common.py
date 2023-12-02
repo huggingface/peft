@@ -84,7 +84,7 @@ CONFIG_TESTING_KWARGS = (
         "target_modules": None,
     },
     {
-        "r": 64,
+        "r": 8,
         "target_modules": None,
         "vera_dropout": 0.05,
         "projection_prng_key": 0xFF,
@@ -501,7 +501,7 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda_b" in name or "vera_lambda_d" in name:
                 module.data[0] = torch.nan
 
         with self.assertRaises(ValueError) as error_context:
@@ -513,7 +513,7 @@ class PeftCommonTester:
         )
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda_b" in name or "vera_lambda_d" in name:
                 module.data[0] = torch.inf
 
         with self.assertRaises(ValueError) as error_context:
@@ -593,6 +593,9 @@ class PeftCommonTester:
 
         inputs = self.prepare_inputs_for_testing()
 
+        if config_cls == VeraConfig and hasattr(model, '_add_forward_hooks'):
+            model._add_forward_hooks()
+
         # check if `generate` works
         _ = model.generate(**inputs)
 
@@ -614,6 +617,8 @@ class PeftCommonTester:
 
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+        if config_cls == VeraConfig and hasattr(model, '_add_forward_hooks'):
+            model._add_forward_hooks()
 
         # check if `generate` works
         _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
@@ -992,6 +997,8 @@ class PeftCommonTester:
             if hasattr(model, "generate"):
                 # let's check the scores, not the output ids, since the latter can easily be identical even if the
                 # weights are slightly changed
+                if config_cls == VeraConfig and hasattr(model, '_add_forward_hooks'):
+                    model._add_forward_hooks()
                 output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
                 # take element 0, as output is a tuple
             else:
@@ -1023,6 +1030,7 @@ class PeftCommonTester:
             )
             peft_model = get_peft_model(model, config)
 
+        peft_model = peft_model.to(self.torch_device)
         output_peft = get_output(peft_model)
 
         # first check trivial case is not true that peft does not affect the output; for this to work, init_lora_weight
