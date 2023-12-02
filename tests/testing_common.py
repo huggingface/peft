@@ -657,7 +657,13 @@ class PeftCommonTester:
         loss.backward()
 
         # TODO: what is the prefix here for VeRA?
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        if config_cls == IA3Config:
+            parameter_prefix = "ia3"
+        elif config_cls == LoraConfig:
+            parameter_prefix = "lora"
+        elif config_cls == VeraConfig:
+            parameter_prefix = "vera" if config.save_projection else "vera_lambda"
+        # parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
         for n, param in model.named_parameters():
             if (parameter_prefix in n) or ("modules_to_save" in n):
                 self.assertIsNotNone(param.grad)
@@ -701,7 +707,7 @@ class PeftCommonTester:
             self.assertTrue(torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4))
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, VeraConfig):
+        if config_cls not in (LoraConfig,):
             return
 
         config = config_cls(

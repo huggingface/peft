@@ -249,7 +249,10 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.merge()
+                if hasattr(self, 'vera_A'):
+                    module.merge(self.vera_A, self.vera_B)
+                else:
+                    module.merge()
 
     def unmerge_adapter(self):
         """
@@ -257,7 +260,10 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.unmerge()
+                if hasattr(self, 'vera_A'):
+                    module.unmerge(self.vera_A, self.vera_B)
+                else:
+                    module.unmerge()
 
 
 class BaseTunerLayer(ABC):
