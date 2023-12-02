@@ -150,7 +150,6 @@ class VeraModel(BaseTuner):
         super().__init__(model, config, adapter_name)
         config = config[adapter_name]
 
-        import ipdb; ipdb.set_trace()
         first_linear, first_embedding = self._find_first_dim()
 
         if first_embedding is not None:
