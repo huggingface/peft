@@ -153,7 +153,7 @@ export MODEL_NAME="stabilityai/stable-diffusion-2-1"
 # export MODEL_NAME="runwayml/stable-diffusion-v1-5"
 
 export PEFT_TYPE="boft"
-BLOCK_NUM=32
+BLOCK_NUM=8
 BLOCK_SIZE=0
 N_BUTTERFLY_FACTOR=0
 export PROJECT_NAME="dreambooth_${PEFT_TYPE}"
@@ -191,6 +191,6 @@ accelerate launch train_dreambooth.py \
   --learning_rate=3e-5 \
   --max_train_steps=2000 \
   --checkpointing_steps=1000 \
-  --validation_steps=800 \
+  --validation_steps=400 \
   --enable_xformers_memory_efficient_attention \
   --report_to="wandb" \

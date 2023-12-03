@@ -618,6 +618,8 @@ def main(args):
                     del pipeline
                     torch.cuda.empty_cache()
 
+                    
+
                 if global_step >= args.max_train_steps:
                     break
 
@@ -644,32 +646,6 @@ def main(args):
                     tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
                 )
             )
-
-    # Create the pipeline using using the trained modules and save it.
-    accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        if args.use_boft :
-            unwarpped_unet = accelerator.unwrap_model(unet)
-            unwarpped_unet.save_pretrained(
-                os.path.join(args.output_dir, "unet"), state_dict=accelerator.get_state_dict(unet)
-            )
-            if args.train_text_encoder:
-                unwarpped_text_encoder = accelerator.unwrap_model(text_encoder)
-                unwarpped_text_encoder.save_pretrained(
-                    os.path.join(args.output_dir, "text_encoder"),
-                    state_dict=accelerator.get_state_dict(text_encoder),
-                )
-        else:
-            pipeline = DiffusionPipeline.from_pretrained(
-                args.pretrained_model_name_or_path,
-                unet=accelerator.unwrap_model(unet),
-                text_encoder=accelerator.unwrap_model(text_encoder),
-                revision=args.revision,
-            )
-            pipeline.save_pretrained(args.output_dir)
-
-        if args.push_to_hub:
-            repo.push_to_hub(commit_message="End of training", blocking=False, auto_lfs_prune=True)
 
     accelerator.end_training()
 
