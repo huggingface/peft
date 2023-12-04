@@ -35,6 +35,7 @@ from .tuners import (
     LoKrModel,
     LoraModel,
     MixedModel,
+    OFTModel,
 )
 from .utils import PeftType, _set_adapter, _set_trainable
 
@@ -45,6 +46,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LOKR: LoKrModel,
     PeftType.ADALORA: AdaLoraModel,
     PeftType.IA3: IA3Model,
+    PeftType.OFT: OFTModel,
 }
 
 
