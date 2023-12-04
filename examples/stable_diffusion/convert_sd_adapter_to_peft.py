@@ -1,16 +1,20 @@
 import argparse
+import json
 import logging
 import os
 from collections import Counter
 from dataclasses import dataclass
+from operator import attrgetter
 from typing import Dict, List, Optional, Union
 
 import safetensors
 import torch
+import torch.nn as nn
 from diffusers import UNet2DConditionModel
 from transformers import CLIPTextModel
 
-from peft import LoHaConfig, LoraConfig, PeftType, get_peft_model, set_peft_model_state_dict
+from peft import LoHaConfig, LoKrConfig, LoraConfig, PeftType, get_peft_model, set_peft_model_state_dict
+from peft.tuners.lokr.layer import factorization
 
 
 # Default kohya_ss LoRA replacement modules
@@ -74,7 +78,48 @@ class LoHaInfo:
         return state_dict
 
 
-def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
+@dataclass
+class LoKrInfo:
+    kohya_key: str
+    peft_key: str
+    alpha: Optional[float] = None
+    rank: Optional[int] = None
+    lokr_w1: Optional[torch.Tensor] = None
+    lokr_w1_a: Optional[torch.Tensor] = None
+    lokr_w1_b: Optional[torch.Tensor] = None
+    lokr_w2: Optional[torch.Tensor] = None
+    lokr_w2_a: Optional[torch.Tensor] = None
+    lokr_w2_b: Optional[torch.Tensor] = None
+    lokr_t2: Optional[torch.Tensor] = None
+
+    def peft_state_dict(self) -> Dict[str, torch.Tensor]:
+        if (self.lokr_w1 is None) and ((self.lokr_w1_a is None) or (self.lokr_w1_b is None)):
+            raise ValueError("Either lokr_w1 or both lokr_w1_a and lokr_w1_b should be provided")
+
+        if (self.lokr_w2 is None) and ((self.lokr_w2_a is None) or (self.lokr_w2_b is None)):
+            raise ValueError("Either lokr_w2 or both lokr_w2_a and lokr_w2_b should be provided")
+
+        state_dict = {}
+
+        if self.lokr_w1 is not None:
+            state_dict[f"base_model.model.{self.peft_key}.lokr_w1"] = self.lokr_w1
+        elif self.lokr_w1_a is not None:
+            state_dict[f"base_model.model.{self.peft_key}.lokr_w1_a"] = self.lokr_w1_a
+            state_dict[f"base_model.model.{self.peft_key}.lokr_w1_b"] = self.lokr_w1_b
+
+        if self.lokr_w2 is not None:
+            state_dict[f"base_model.model.{self.peft_key}.lokr_w2"] = self.lokr_w2
+        elif self.lokr_w2_a is not None:
+            state_dict[f"base_model.model.{self.peft_key}.lokr_w2_a"] = self.lokr_w2_a
+            state_dict[f"base_model.model.{self.peft_key}.lokr_w2_b"] = self.lokr_w2_b
+
+        if self.lokr_t2 is not None:
+            state_dict[f"base_model.model.{self.peft_key}.lokr_t2"] = self.lokr_t2
+
+        return state_dict
+
+
+def construct_peft_loraconfig(info: Dict[str, LoRAInfo], **kwargs) -> LoraConfig:
     """Constructs LoraConfig from data extracted from adapter checkpoint
 
     Args:
@@ -113,7 +158,7 @@ def construct_peft_loraconfig(info: Dict[str, LoRAInfo]) -> LoraConfig:
     return config
 
 
-def construct_peft_lohaconfig(info: Dict[str, LoHaInfo]) -> LoHaConfig:
+def construct_peft_lohaconfig(info: Dict[str, LoHaInfo], **kwargs) -> LoHaConfig:
     """Constructs LoHaConfig from data extracted from adapter checkpoint
 
     Args:
@@ -156,6 +201,77 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo]) -> LoHaConfig:
     return config
 
 
+def construct_peft_lokrconfig(info: Dict[str, LoKrInfo], decompose_factor: int = -1, **kwargs) -> LoKrConfig:
+    """Constructs LoKrConfig from data extracted from adapter checkpoint
+
+    Args:
+        info (Dict[str, LoKrInfo]): Information extracted from adapter checkpoint
+
+    Returns:
+        LoKrConfig: config for constructing LoKr
+    """
+
+    # Unpack all ranks and alphas
+    ranks = {x[0]: x[1].rank for x in info.items()}
+    alphas = {x[0]: x[1].alpha or x[1].rank for x in info.items()}
+
+    # Determine which modules needs to be transformed
+    target_modules = sorted(info.keys())
+
+    # Determine most common rank and alpha
+    r = int(Counter(ranks.values()).most_common(1)[0][0])
+    alpha = Counter(alphas.values()).most_common(1)[0][0]
+
+    # Determine which modules have different rank and alpha
+    rank_pattern = dict(sorted(filter(lambda x: x[1] != r, ranks.items()), key=lambda x: x[0]))
+    alpha_pattern = dict(sorted(filter(lambda x: x[1] != alpha, alphas.items()), key=lambda x: x[0]))
+
+    # Determine whether any of modules have effective conv2d decomposition
+    use_effective_conv2d = any(((val.lokr_t2 is not None) for val in info.values()))
+
+    # decompose_both should be enabled if any w1 matrix in any layer is decomposed into 2
+    decompose_both = any((val.lokr_w1_a is not None and val.lokr_w1_b is not None) for val in info.values())
+
+    # Determining decompose factor is a bit tricky (but it is most often -1)
+    # Check that decompose_factor is equal to provided
+    for val in info.values():
+        # Determine shape of first matrix
+        if val.lokr_w1 is not None:
+            w1_shape = tuple(val.lokr_w1.shape)
+        else:
+            w1_shape = (val.lokr_w1_a.shape[0], val.lokr_w1_b.shape[1])
+
+        # Determine shape of second matrix
+        if val.lokr_w2 is not None:
+            w2_shape = tuple(val.lokr_w2.shape[:2])
+        elif val.lokr_t2 is not None:
+            w2_shape = (val.lokr_w2_a.shape[1], val.lokr_w2_b.shape[1])
+        else:
+            # We may iterate over Conv2d layer, for which second item in shape is multiplied by ksize^2
+            w2_shape = (val.lokr_w2_a.shape[0], val.lokr_w2_b.shape[1])
+
+        # We need to check, whether decompose_factor is really -1 or not
+        shape = (w1_shape[0], w2_shape[0])
+        if factorization(shape[0] * shape[1], factor=-1) != shape:
+            raise ValueError("Cannot infer decompose_factor, probably it is not equal to -1")
+
+    config = LoKrConfig(
+        r=r,
+        alpha=alpha,
+        target_modules=target_modules,
+        rank_dropout=0.0,
+        module_dropout=0.0,
+        init_weights=False,
+        rank_pattern=rank_pattern,
+        alpha_pattern=alpha_pattern,
+        use_effective_conv2d=use_effective_conv2d,
+        decompose_both=decompose_both,
+        decompose_factor=decompose_factor,
+    )
+
+    return config
+
+
 def combine_peft_state_dict(info: Dict[str, Union[LoRAInfo, LoHaInfo]]) -> Dict[str, torch.Tensor]:
     result = {}
     for key_info in info.values():
@@ -180,7 +296,7 @@ def detect_adapter_type(keys: List[str]) -> PeftType:
         elif any(x in key for x in ["lokr_w1", "lokr_w2", "lokr_t1", "lokr_t2"]):
             # LoKr may have the following keys:
             # lokr_w1, lokr_w2, lokr_w1_a, lokr_w1_b, lokr_w2_a, lokr_w2_b, lokr_t1, lokr_t2
-            raise ValueError("Currently LoKr adapters are not implemented")
+            return PeftType.LOKR
         elif "diff" in key:
             raise ValueError("Currently full diff adapters are not implemented")
         else:
@@ -231,22 +347,40 @@ if __name__ == "__main__":
             }
         )
 
-    # Store conversion info (model_type -> peft_key -> LoRAInfo | LoHaInfo)
-    adapter_info: Dict[str, Dict[str, Union[LoRAInfo, LoHaInfo]]] = {
+    # Store conversion info (model_type -> peft_key -> LoRAInfo | LoHaInfo | LoKrInfo)
+    adapter_info: Dict[str, Dict[str, Union[LoRAInfo, LoHaInfo, LoKrInfo]]] = {
         "text_encoder": {},
         "unet": {},
     }
+
+    # Store decompose_factor for LoKr
+    decompose_factor = -1
 
     # Open adapter checkpoint
     with safetensors.safe_open(args.adapter_path, framework="pt", device="cpu") as f:
         # Extract information about adapter structure
         metadata = f.metadata()
 
+        # It may be difficult to determine rank for LoKr adapters
+        # If checkpoint was trained with large rank it may not be utilized during weights creation at all
+        # So we need to get it from checkpoint metadata (along with decompose_factor)
+        rank, conv_rank = None, None
+        if metadata is not None:
+            rank = metadata.get("ss_network_dim", None)
+            rank = int(rank) if rank else None
+            if "ss_network_args" in metadata:
+                network_args = json.loads(metadata["ss_network_args"])
+                conv_rank = network_args.get("conv_dim", None)
+                conv_rank = int(conv_rank) if conv_rank else rank
+                decompose_factor = network_args.get("factor", -1)
+                decompose_factor = int(decompose_factor)
+
         # Detect adapter type based on keys
         adapter_type = detect_adapter_type(f.keys())
         adapter_info_cls = {
             PeftType.LORA: LoRAInfo,
             PeftType.LOHA: LoHaInfo,
+            PeftType.LOKR: LoKrInfo,
         }[adapter_type]
 
         # Iterate through available info and unpack all the values
@@ -255,9 +389,9 @@ if __name__ == "__main__":
 
             # Find which model this key belongs to
             if kohya_key.startswith(PREFIX_TEXT_ENCODER):
-                model_type = "text_encoder"
+                model_type, model = "text_encoder", text_encoder
             elif kohya_key.startswith(PREFIX_UNET):
-                model_type = "unet"
+                model_type, model = "unet", unet
             else:
                 raise ValueError(f"Cannot determine model for key: {key}")
 
@@ -265,6 +399,9 @@ if __name__ == "__main__":
             if kohya_key not in models_keys:
                 raise ValueError(f"Cannot find corresponding key for diffusers/transformers model: {kohya_key}")
             peft_key = models_keys[kohya_key]
+
+            # Retrieve corresponding layer of model
+            layer = attrgetter(peft_key)(model)
 
             # Create a corresponding adapter info
             if peft_key not in adapter_info[model_type]:
@@ -305,6 +442,35 @@ if __name__ == "__main__":
                     elif kohya_type == "hada_t2":
                         adapter_info[model_type][peft_key].hada_t2 = tensor
                         adapter_info[model_type][peft_key].rank = tensor.shape[0]
+            elif kohya_type == "lokr_t2":
+                adapter_info[model_type][peft_key].lokr_t2 = tensor
+                adapter_info[model_type][peft_key].rank = tensor.shape[0]
+            elif kohya_type == "lokr_w1":
+                adapter_info[model_type][peft_key].lokr_w1 = tensor
+                if isinstance(layer, nn.Linear) or (
+                    isinstance(layer, nn.Conv2d) and tuple(layer.weight.shape[2:]) == (1, 1)
+                ):
+                    adapter_info[model_type][peft_key].rank = rank
+                elif isinstance(layer, nn.Conv2d):
+                    adapter_info[model_type][peft_key].rank = conv_rank
+            elif kohya_type == "lokr_w2":
+                adapter_info[model_type][peft_key].lokr_w2 = tensor
+                if isinstance(layer, nn.Linear) or (
+                    isinstance(layer, nn.Conv2d) and tuple(layer.weight.shape[2:]) == (1, 1)
+                ):
+                    adapter_info[model_type][peft_key].rank = rank
+                elif isinstance(layer, nn.Conv2d):
+                    adapter_info[model_type][peft_key].rank = conv_rank
+            elif kohya_type == "lokr_w1_a":
+                adapter_info[model_type][peft_key].lokr_w1_a = tensor
+                adapter_info[model_type][peft_key].rank = tensor.shape[1]
+            elif kohya_type == "lokr_w1_b":
+                adapter_info[model_type][peft_key].lokr_w1_b = tensor
+                adapter_info[model_type][peft_key].rank = tensor.shape[0]
+            elif kohya_type == "lokr_w2_a":
+                adapter_info[model_type][peft_key].lokr_w2_a = tensor
+            elif kohya_type == "lokr_w2_b":
+                adapter_info[model_type][peft_key].lokr_w2_b = tensor
             else:
                 raise ValueError(f"Unknown weight name in key: {key} - {kohya_type}")
 
@@ -312,11 +478,12 @@ if __name__ == "__main__":
     construct_config_fn = {
         PeftType.LORA: construct_peft_loraconfig,
         PeftType.LOHA: construct_peft_lohaconfig,
+        PeftType.LOKR: construct_peft_lokrconfig,
     }[adapter_type]
 
     # Process each model sequentially
     for model, model_name in [(text_encoder, "text_encoder"), (unet, "unet")]:
-        config = construct_config_fn(adapter_info[model_name])
+        config = construct_config_fn(adapter_info[model_name], decompose_factor=decompose_factor)
 
         # Output warning for LoHa with use_effective_conv2d
         if (

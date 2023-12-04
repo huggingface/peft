@@ -34,6 +34,8 @@
     title: Working with custom models
   - local: developer_guides/low_level_api
     title: PEFT low level API
+  - local: developer_guides/mixed_models
+    title: Mixing different adapter types
   - local: developer_guides/contributing
     title: Contributing to PEFT
   - local: developer_guides/troubleshooting

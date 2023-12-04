@@ -1,0 +1,43 @@
+<!--⚠️ Note that this file is in Markdown but contain specific syntax for our doc-builder (similar to MDX) that may not be
+rendered properly in your Markdown viewer.
+-->
+
+# Tuners
+
+Each tuner (or PEFT method) has a configuration and model.
+
+## LoRA
+
+For finetuning a model with LoRA.
+
+[[autodoc]] LoraConfig
+
+[[autodoc]] LoraModel
+
+[[autodoc]] tuners.lora.LoraLayer
+
+[[autodoc]] tuners.lora.Linear
+
+## P-tuning
+
+[[autodoc]] tuners.p_tuning.PromptEncoderConfig
+
+[[autodoc]] tuners.p_tuning.PromptEncoder
+
+## Prefix tuning
+
+[[autodoc]] tuners.prefix_tuning.PrefixTuningConfig
+
+[[autodoc]] tuners.prefix_tuning.PrefixEncoder
+
+## Prompt tuning
+
+[[autodoc]] tuners.prompt_tuning.PromptTuningConfig
+
+[[autodoc]] tuners.prompt_tuning.PromptEmbedding
+
+## IA3
+
+[[autodoc]] tuners.ia3.IA3Config
+
+[[autodoc]] tuners.ia3.IA3Model

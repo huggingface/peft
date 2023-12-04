@@ -14,9 +14,9 @@
 # limitations under the License.
 
 import warnings
+from typing import Any, List, Optional
 
 import torch
-import torch.nn.functional as F
 from torch import nn
 
 from peft.tuners.lora import LoraLayer
@@ -26,14 +26,11 @@ from peft.utils import transpose
 class AdaLoraLayer(LoraLayer):
     # List all names of layers that may contain adapter weights
     # Note: ranknum doesn't need to be included as it is not an nn.Module
-    adapter_layer_names = ["lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B"]
+    adapter_layer_names = ("lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B")
+    # other_param_names is defined in LoraLayer
 
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-    ):
-        super().__init__(in_features, out_features)
+    def __init__(self, base_layer: nn.Module) -> None:
+        super().__init__(base_layer)
         self.lora_E = nn.ParameterDict({})
         self.lora_A = nn.ParameterDict({})
         self.lora_B = nn.ParameterDict({})
@@ -62,7 +59,12 @@ class AdaLoraLayer(LoraLayer):
         self.scaling[adapter_name] = lora_alpha if lora_alpha > 0 else float(r)
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
-        self.to(self.weight.device)
+
+        if hasattr(self.get_base_layer(), "qweight"):
+            # QuantLinear
+            self.to(self.get_base_layer().qweight.device)
+        else:
+            self.to(self.get_base_layer().weight.device)
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):
@@ -72,34 +74,29 @@ class AdaLoraLayer(LoraLayer):
             nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
 
 
-class SVDLinear(nn.Linear, AdaLoraLayer):
+class SVDLinear(nn.Module, AdaLoraLayer):
     # SVD-based adaptation by a dense layer
     def __init__(
         self,
+        base_layer: nn.Module,
         adapter_name: str,
-        in_features: int,
-        out_features: int,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        AdaLoraLayer.__init__(self, in_features=in_features, out_features=out_features)
+        super().__init__()
+        AdaLoraLayer.__init__(self, base_layer)
         # Freezing the pre-trained weight matrix
-        self.weight.requires_grad = False
+        self.get_base_layer().weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
-        if fan_in_fan_out:
-            self.weight.data = self.weight.data.T
-
-        nn.Linear.reset_parameters(self)
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
-    def merge(self, safe_merge: bool = False) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -108,18 +105,26 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in adapter_names:
+            base_layer = self.get_base_layer()
             if active_adapter in self.lora_A.keys():
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = self.weight.data.clone()
+                    orig_weights = base_layer.weight.data.clone()
                     orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
@@ -127,9 +132,9 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights
                 else:
-                    self.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -139,7 +144,7 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         return (
@@ -148,19 +153,16 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
             / (self.ranknum[adapter] + 1e-5)
         )
 
-    def _linear(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         # TODO: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -175,8 +177,12 @@ class SVDLinear(nn.Linear, AdaLoraLayer):
 
         return result
 
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "adalora." + rep
 
-class RankAllocator(object):
+
+class RankAllocator:
     """
     The RankAllocator for AdaLoraModel. Paper: https://openreview.net/pdf?id=lq62uWRJjiY
 
