@@ -85,6 +85,7 @@ if is_megatron_available():
                 init_method=init.xavier_normal_,
                 bias=False,
                 input_is_parallel=True,
+                skip_bias_add=True,
             )
 
         def forward(self, input):
