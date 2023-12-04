@@ -16,6 +16,9 @@ from .layer import Linear, PolyLayer
 
 
 class PolyModel(BaseTuner):
+
+    prefix: str = "poly_"
+
     def __init__(self, model, config, adapter_name) -> None:
         self.task_id_ptr = dict()
         super().__init__(model, config, adapter_name)
@@ -47,8 +50,8 @@ class PolyModel(BaseTuner):
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
-    @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         new_module.weight = child.weight
         if hasattr(child, "bias"):
@@ -59,12 +62,12 @@ class PolyModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "poly_" in name:
+            if self.prefix in name:
                 module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
-            if "poly_" not in n:
+            if self.prefix not in n:
                 p.requires_grad = False
 
     @staticmethod
