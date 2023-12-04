@@ -21,7 +21,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 
 import torch
 from accelerate import dispatch_model, infer_auto_device_map
@@ -65,6 +65,8 @@ from .utils import (
     load_peft_weights,
     set_peft_model_state_dict,
     shift_tokens_right,
+    separate_pad_tokens,
+    add_pad_tokens,
 )
 
 
@@ -1033,10 +1035,15 @@ class PeftModelForCausalLM(PeftModel):
             )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
+        if not peft_config.peft_type == PeftType.PREFIX_TUNING:
+            input_ids, attention_mask, labels, pad_els = separate_pad_tokens(input_ids, attention_mask, labels)
         if attention_mask is not None:
-            # concat prompt attention mask
-            prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask.device)
-            attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
+            # concat prompt attention mask. index into first element for device info since attentin_mask can be a list for prompt tuning
+            prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask[0].device)
+            if not peft_config.peft_type == PeftType.PREFIX_TUNING:
+                attention_mask = [torch.cat((prefix_attention_mask_single, mask)) for prefix_attention_mask_single, mask in zip(prefix_attention_mask, attention_mask)]
+            else:
+                attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
         if kwargs.get("position_ids", None) is not None:
             warnings.warn("Position ids are not supported for parameter efficient tuning. Ignoring position ids.")
@@ -1061,14 +1068,27 @@ class PeftModelForCausalLM(PeftModel):
             )
         else:
             if inputs_embeds is None:
-                inputs_embeds = self.word_embeddings(input_ids)
+                inputs_embeds = [self.word_embeddings(input_id) for input_id in input_ids]
             # concat prompt labels
             if labels is not None:
-                prefix_labels = torch.full((batch_size, peft_config.num_virtual_tokens), -100).to(labels.device)
-                kwargs["labels"] = torch.cat((prefix_labels, labels), dim=1)
+                # index into first element for device info since labels is a list for prompt tuning
+                prefix_labels = torch.full((batch_size, peft_config.num_virtual_tokens), -100).to(labels[0].device)
+                labels = [torch.cat((prefix_label, label)) for prefix_label, label in zip(prefix_labels, labels)]
             prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
-            prompts = prompts.to(inputs_embeds.dtype)
-            inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
+            prompts = prompts.to(inputs_embeds[0].dtype)
+            
+            inputs_embeds = [torch.cat((prompt, input_embed)) for prompt, input_embed in zip(prompts, inputs_embeds)]
+            # get padding token embeddings
+            padding_embeds = [self.word_embeddings(pad_id) for pad_id in pad_els[0]]
+            pad_els = (padding_embeds, pad_els[1], pad_els[2]) # update pad_els to include embeddings
+            # add the padding tokens again
+            inputs_embeds, attention_mask, labels = add_pad_tokens(inputs_embeds, attention_mask, labels, pad_els)
+            kwargs.update(
+                {
+                    "labels": labels,
+                    "attention_mask": attention_mask,
+                }
+            )
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def generate(self, **kwargs):
