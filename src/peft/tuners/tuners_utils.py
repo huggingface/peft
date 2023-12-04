@@ -403,7 +403,7 @@ class BaseTunerLayer(ABC):
         """Set the active adapter(s).
 
         Args:
-            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+            adapter_name (`str` or `List[str]`): Name of the adapter(s) to be activated.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]

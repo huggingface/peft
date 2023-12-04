@@ -176,7 +176,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 exist).
             safe_serialization (`bool`, *optional*):
                 Whether to save the adapter files in safetensors format, defaults to `True`.
-            selected_adapters (`list` of `str`,  *optional*):
+            selected_adapters (`List[str]`,  *optional*):
                 A list of adapters to be saved. If `None`, will default to all adapters.
             save_embedding_layers (`Union[bool, str]`, *optional*, defaults to `"auto"`):
                 If `True`, save the embedding layers in addition to adapter weights. If `auto`, checks the common
