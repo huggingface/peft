@@ -146,6 +146,9 @@ class Linear(nn.Module, IA3Layer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -271,6 +274,9 @@ class Conv2d(nn.Module, IA3Layer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
