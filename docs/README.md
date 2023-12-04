@@ -33,7 +33,7 @@ pip install git+https://github.com/huggingface/doc-builder
 **NOTE**
 
 You only need to generate the documentation to inspect it locally (if you're planning changes and want to
-check how they look before committing for instance). You don't have to commit the built documentation.
+check how they look before committing for instance). You don't have to commit to the built documentation.
 
 ---
 
@@ -46,7 +46,7 @@ typing the following command:
 doc-builder build peft docs/source/ --build_dir ~/tmp/test-build
 ```
 
-You can adapt the `--build_dir` to set any temporary folder that you prefer. This command will create it and generate
+You can adapt the `--build_dir` to set any temporary folder you prefer. This command will create it and generate
 the MDX files that will be rendered as the documentation on the main website. You can inspect them in your favorite
 Markdown editor.
 
@@ -124,7 +124,7 @@ Adding a new tutorial or section is done in two steps:
 - Link that file in `./source/_toctree.yml` on the correct toc-tree.
 
 Make sure to put your new file under the proper section. It's unlikely to go in the first section (*Get Started*), so
-depending on the intended targets (beginners, more advanced users, or researchers) it should go in sections two, three, or
+depending on the intended targets (beginners, more advanced users, or researchers) it should go into sections two, three, or
 four.
 
 ### Writing source documentation
@@ -188,7 +188,7 @@ then its documentation should look like this:
 ```
 
 Note that we always omit the "defaults to \`None\`" when None is the default for any argument. Also note that even
-if the first line describing your argument type and its default gets long, you can't break it on several lines. You can
+if the first line describing your argument type and its default gets long, you can't break it into several lines. You can
 however write as many lines as you want in the indented description (see the example above with `input_ids`).
 
 #### Writing a multi-line code block
@@ -234,13 +234,13 @@ We have an automatic script running with the `make style` comment that will make
 - the docstrings fully take advantage of the line width
 - all code examples are formatted using black, like the code of the Transformers library
 
-This script may have some weird failures if you made a syntax mistake or if you uncover a bug. Therefore, it's
+This script may have some weird failures if you make a syntax mistake or if you uncover a bug. Therefore, it's
 recommended to commit your changes before running `make style`, so you can revert the changes done by that script
 easily.
 
 ## Writing documentation examples
 
-The syntax for Example docstrings can look as follows:
+The syntax, for example, docstrings can look as follows:
 
 ```
     Example:
