@@ -59,13 +59,42 @@
   - local: conceptual_guides/ia3
     title: IA3
 
-- title: Reference
-  sections:
-  - local: package_reference/auto_class
-    title: AutoPeftModel
-  - local: package_reference/peft_model
-    title: PEFT model
-  - local: package_reference/config
-    title: Configuration
-  - local: package_reference/tuners
-    title: Tuners
+- sections:
+  - sections:
+    - local: package_reference/auto_class
+      title: AutoPeftModel
+    - local: package_reference/peft_model
+      title: PEFT model
+    - local: package_reference/peft_types
+      title: PEFT types
+    - local: package_reference/config
+      title: Configuration
+    - local: package_reference/tuners
+      title: Tuner
+    title: Main classes
+  - sections:
+    - local: package_reference/adalora
+      title: AdaLoRA
+    - local: package_reference/ia3
+      title: IA3
+    - local: package_reference/llama_adapter
+      title: Llama-Adapter
+    - local: package_reference/loha
+      title: LoHa
+    - local: package_reference/lokr
+      title: LoKr
+    - local: package_reference/lora
+      title: LoRA
+    - local: package_reference/adapter_utils
+      title: LyCORIS
+    - local: package_reference/multitask_prompt_tuning
+      title: Multitask Prompt Tuning
+    - local: package_reference/p_tuning
+      title: P-tuning
+    - local: package_reference/prefix_tuning
+      title: Prefix tuning
+    - local: package_reference/prompt_tuning
+      title: Prompt tuning
+    title: Adapters
+  title: API reference
+
