@@ -23,7 +23,7 @@ class PolyConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_poly_weights: bool = field(
+    init_weights: bool = field(
         default=True,
         metadata={
             "help": (

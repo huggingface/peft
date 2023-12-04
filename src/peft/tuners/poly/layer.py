@@ -60,7 +60,7 @@ class PolyLayer(BaseTunerLayer):
         )
         self.poly_router[adapter_name] = get_router(poly_config)
 
-        if poly_config.init_poly_weights:
+        if poly_config.init_weights:
             self.reset_poly_parameters(adapter_name)
 
         weight = getattr(self, "weight", None)
@@ -99,7 +99,7 @@ class Linear(nn.Linear, PolyLayer):
         task_id_ptr: dict,
         **kwargs: object,
     ) -> None:
-        init_poly_weights = kwargs.pop("init_poly_weights", True)
+        init_weights = kwargs.pop("init_weights", True)
         # this gets the init from nn.Linear's super perspective, i.e.
         # nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
