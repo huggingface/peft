@@ -52,7 +52,7 @@ from transformers import AutoModelForSeq2SeqLM
 model = AutoModelForSeq2SeqLM.from_pretrained("bigscience/mt0-large")
 ```
 
-Wrap the base model and `peft_config` with the [`get_peft_model`] function to create a [`PeftModel`]. To get a sense of the number of trainable parameters in your model, use the [`print_trainable_parameters`] method. Out of the 1.2B parameters in [bigscience/mt0-large](https://huggingface.co/bigscience/mt0-large), you're only training 0.19% of them!
+Wrap the base model and `peft_config` with the [`get_peft_model`] function to create a [`PeftModel`]. To get a sense of the number of trainable parameters in your model, use the [`print_trainable_parameters`] method.
 
 ```python
 from peft import get_peft_model
@@ -61,6 +61,8 @@ model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 "output: trainable params: 2359296 || all params: 1231940608 || trainable%: 0.19151053100118282"
 ```
+
+Out of [bigscience/mt0-large's](https://huggingface.co/bigscience/mt0-large) 1.2B parameters, you're only training 0.19% of them!
 
 That is it 🎉! Now you can train the model with the Transformers [`~transformers.Trainer`], Accelerate, or any custom PyTorch training loop.
 
@@ -142,14 +144,13 @@ model = model.to("cuda")
 model.eval()
 inputs = tokenizer("Preheat the oven to 350 degrees and place the cookie dough", return_tensors="pt")
 
-with torch.no_grad():
-    outputs = model.generate(input_ids=inputs["input_ids"].to("cuda"), max_new_tokens=50)
-    print(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True)[0])
+outputs = model.generate(input_ids=inputs["input_ids"].to("cuda"), max_new_tokens=50)
+print(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True)[0])
 
 "Preheat the oven to 350 degrees and place the cookie dough in the center of the oven. In a large bowl, combine the flour, baking powder, baking soda, salt, and cinnamon. In a separate bowl, combine the egg yolks, sugar, and vanilla."
 ```
 
-For other tasks that aren't explicitly supported with an `AutoPeftModelFor` class - such as automatic speech recognition - you can still use the base [`AutoPeftModel`] class to load a model for a task.
+For other tasks that aren't explicitly supported with an `AutoPeftModelFor` class - such as automatic speech recognition - you can still use the base [`AutoPeftModel`] class to load a model for the task.
 
 ```py
 from peft import AutoPeftModel
