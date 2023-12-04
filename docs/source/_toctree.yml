@@ -59,11 +59,10 @@
   - local: conceptual_guides/ia3
     title: IA3
 
-- title: Reference
-  - title: Main classes
-    sections:
-  - local: package_reference/auto_class
-    title: AutoPeftModel
+- sections:
+  - sections:
+    - local: package_reference/auto_class
+      title: AutoPeftModel
     - local: package_reference/peft_model
       title: PEFT model
     - local: package_reference/peft_types
