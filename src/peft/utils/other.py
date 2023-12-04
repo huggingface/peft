@@ -477,23 +477,35 @@ def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
 
     return tensor.device, unique_id, storage_size(tensor)
 
-def separate_pad_tokens(input_ids: torch.Tensor, attention_mask: torch.Tensor, labels: torch.Tensor):
+def separate_pad_tokens(input_ids: torch.Tensor, inputs_embeds: torch.Tensor, attention_mask: torch.Tensor, labels: torch.Tensor):
     """
-    Separates out the tokens corresponding to padding in input_ids, attention_mask and labels
+    Separates out the tokens corresponding to padding in input_ids, inputs_embeds, attention_mask and labels
     Returns:
     - input_ids: input_ids with padding tokens removed
+    - inputs_embeds: inputs_embeds with padding tokens removed
     - attention_mask: attention_mask with padding tokens removed
     - labels: labels with padding tokens removed
-    - pad_els: a tuple (pad_token_input_ids, pad_token_attention_mask, pad_token_labels) containing the padding token elements
+    - pad_els: a tuple (pad_token_input_ids, pad_token_inputs_embeds, pad_token_attention_mask, pad_token_labels) containing the padding token elements
     """
-    if not input_ids.ndim == 2:
+    if input_ids is None and inputs_embeds is None:
+        raise ValueError("You have to provide either input_ids or inputs_embeds")
+    ndim = input_ids.ndim if input_ids is not None else inputs_embeds.ndim-1
+    if not ndim == 2:
         raise ValueError("input_ids must be a 2D tensor")
     # find the first index of a non-padding token
     if attention_mask is not None:
         first_non_padding_tok_ind = torch.argmax(attention_mask, dim=1)
     else:
-        first_non_padding_tok_ind = torch.zeros(input_ids.shape[0], dtype=torch.long, device=input_ids.device)
-    input_paddings = [input_ids[i][:first_ind] for i, first_ind in enumerate(first_non_padding_tok_ind)]
+        batch_size = _get_batch_size(input_ids, inputs_embeds)
+        first_non_padding_tok_ind = torch.zeros(batch_size, dtype=torch.long)
+
+    input_id_paddings, input_embed_paddings = None, None
+    if input_ids is not None:
+        input_id_paddings = [input_ids[i][:first_ind] for i, first_ind in enumerate(first_non_padding_tok_ind)]
+        input_ids = [input_ids[i][first_ind:] for i, first_ind in enumerate(first_non_padding_tok_ind)]
+    else:
+        input_embed_paddings = [inputs_embeds[i][:first_ind] for i, first_ind in enumerate(first_non_padding_tok_ind)]
+        inputs_embeds = [inputs_embeds[i][first_ind:] for i, first_ind in enumerate(first_non_padding_tok_ind)]
     # get the same slices for attention_mask and labels. Note that all the padding vectors are of different shapes 
     # so we can't stack them into a tensor
     attention_mask_paddings, labels_paddings = None, None
@@ -503,11 +515,11 @@ def separate_pad_tokens(input_ids: torch.Tensor, attention_mask: torch.Tensor, l
     
     if labels is not None:
         labels_paddings = [labels[i][:first_ind] for i, first_ind in enumerate(first_non_padding_tok_ind)]
-        labels = [labels[i][first_ind:] for i, first_ind in enumerate(first_non_padding_tok_ind)]
+        labels = [labels[i][first_ind:] for i, first_ind in enumerate(first_non_padding_tok_ind)]        
 
-    pad_els = (input_paddings, attention_mask_paddings, labels_paddings)
-    input_ids = [input_ids[i][first_ind:] for i, first_ind in enumerate(first_non_padding_tok_ind)]
-    return input_ids, attention_mask, labels, pad_els
+    pad_els = (input_id_paddings, input_embed_paddings, attention_mask_paddings, labels_paddings)
+
+    return input_ids, inputs_embeds, attention_mask, labels, pad_els
 
 def add_pad_tokens(input_embeds: List[torch.Tensor], attention_mask: List[torch.Tensor], labels: List[torch.Tensor], pad_els: Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]):
     """
@@ -518,8 +530,8 @@ def add_pad_tokens(input_embeds: List[torch.Tensor], attention_mask: List[torch.
     - labels: labels with padding tokens removed
     - pad_els: a tuple (pad_token_input_ids, pad_token_attention_mask, pad_token_labels) containing the padding tokens
     """
-    pad_embeds, pad_mask, pad_labels = pad_els
-    final_input_embeds = torch.stack([torch.cat((pad_embed, input_embed)) for input_embed, pad_embed in zip(input_embeds, pad_embeds)])
+    pad_input_ids, pad_input_embeds, pad_mask, pad_labels = pad_els
+    final_input_embeds = torch.stack([torch.cat((pad_embed, input_embed)) for input_embed, pad_embed in zip(input_embeds, pad_input_embeds)])
     final_attention_mask, final_labels = None, None
     if attention_mask is not None:
         final_attention_mask = torch.stack([torch.cat((pad_mask, attention_mask)) for attention_mask, pad_mask in zip(attention_mask, pad_mask)])

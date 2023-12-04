@@ -1036,7 +1036,7 @@ class PeftModelForCausalLM(PeftModel):
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if not peft_config.peft_type == PeftType.PREFIX_TUNING:
-            input_ids, attention_mask, labels, pad_els = separate_pad_tokens(input_ids, attention_mask, labels)
+            input_ids, inputs_embeds, attention_mask, labels, pad_els = separate_pad_tokens(input_ids, inputs_embeds, attention_mask, labels)
         if attention_mask is not None:
             # concat prompt attention mask. index into first element for device info since attentin_mask can be a list for prompt tuning
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask[0].device)
@@ -1078,9 +1078,11 @@ class PeftModelForCausalLM(PeftModel):
             prompts = prompts.to(inputs_embeds[0].dtype)
             
             inputs_embeds = [torch.cat((prompt, input_embed)) for prompt, input_embed in zip(prompts, inputs_embeds)]
-            # get padding token embeddings
-            padding_embeds = [self.word_embeddings(pad_id) for pad_id in pad_els[0]]
-            pad_els = (padding_embeds, pad_els[1], pad_els[2]) # update pad_els to include embeddings
+            input_embed_paddings = pad_els[1]
+            if not input_embed_paddings: 
+                # get padding token embeddings
+                padding_embeds = [self.word_embeddings(pad_id) for pad_id in pad_els[0]]
+                pad_els = (pad_els[0], padding_embeds, pad_els[2], pad_els[3])
             # add the padding tokens again
             inputs_embeds, attention_mask, labels = add_pad_tokens(inputs_embeds, attention_mask, labels, pad_els)
             kwargs.update(
