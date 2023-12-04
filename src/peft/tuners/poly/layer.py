@@ -1,8 +1,8 @@
 import math
+from typing import Any
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from .config import PolyConfig
@@ -10,10 +10,13 @@ from .router import get_router
 
 
 class PolyLayer(BaseTunerLayer):
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names = ["poly_lora_A", "poly_lora_B", "poly_router"]
+    # All names of layers that may contain (trainable) adapter weights
+    adapter_layer_names = ("poly_lora_A", "poly_lora_B", "poly_router")
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("r", "n_tasks", "n_skills", "n_splits")
 
-    def __init__(self, in_features: int, out_features: int, task_id_ptr: dict, **kwargs):
+    def __init__(self, base_layer: nn.Module, task_id_ptr: dict, **kwargs):
+        self.base_layer = base_layer
         self.r = {}
         self.n_tasks = {}
         self.n_skills = {}
@@ -22,11 +25,17 @@ class PolyLayer(BaseTunerLayer):
         self.poly_router = nn.ModuleDict()
         self.poly_lora_A = nn.ParameterDict()
         self.poly_lora_B = nn.ParameterDict()
+        self.kwargs = kwargs
+
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.Linear):
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+        else:
+            raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
         self.task_id_ptr = task_id_ptr
-        self.kwargs = kwargs
 
     @property
     def task_ids(self) -> torch.Tensor:
@@ -60,10 +69,9 @@ class PolyLayer(BaseTunerLayer):
         )
         self.poly_router[adapter_name] = get_router(poly_config)
 
-        if poly_config.init_weights:
-            self.reset_poly_parameters(adapter_name)
+        self.reset_poly_parameters(adapter_name, init_weight=poly_config.init_weight)
 
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -72,9 +80,9 @@ class PolyLayer(BaseTunerLayer):
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
 
-    def reset_poly_parameters(self, adapter_name):
+    def reset_poly_parameters(self, adapter_name, init_weight):
         if adapter_name in self.poly_lora_A.keys():
-            # initialize A the same way as the default for nn.Linear and B to zero
+            # initialize A the same way as the default for nn.Linear
             n_splits, n_skills, d, r = self.poly_lora_A[adapter_name].shape
             for skill in range(n_skills):
                 for split in range(n_splits):
@@ -82,46 +90,45 @@ class PolyLayer(BaseTunerLayer):
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
                     self.poly_lora_A[adapter_name].data[split, skill, :, :] = param.T
 
-            torch.nn.init.zeros_(self.poly_lora_B[adapter_name])
+            if init_weight:
+                # initialize B to zero
+                torch.nn.init.zeros_(self.poly_lora_B[adapter_name])
+            else:
+                # initialize B the same way as the default for nn.Linear
+                n_splits, n_skills, r, d = self.poly_lora_B[adapter_name].shape
+                for skill in range(n_skills):
+                    for split in range(n_splits):
+                        param = torch.empty((d, r))
+                        torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
+                        self.poly_lora_B[adapter_name].data[split, skill, :, :] = param.T
 
             # initialized router
             self.poly_router[adapter_name].reset()
 
 
-class Linear(nn.Linear, PolyLayer):
+class Linear(nn.Module, PolyLayer):
     # Lora implemented in a dense layer
     def __init__(
         self,
+        base_layer,
         adapter_name: str,
-        in_features: int,
-        out_features: int,
         poly_config: PolyConfig,
         task_id_ptr: dict,
-        **kwargs: object,
+        **kwargs,
     ) -> None:
-        init_weights = kwargs.pop("init_weights", True)
-        # this gets the init from nn.Linear's super perspective, i.e.
-        # nn.Module.__init__, which should always be called
-        super(nn.Linear, self).__init__()
-        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
-        # added robustness is not big enough for Linear.
+        super().__init__()
+        PolyLayer.__init__(self, base_layer, task_id_ptr, **kwargs)
 
-        PolyLayer.__init__(self, in_features=in_features, out_features=out_features, task_id_ptr=task_id_ptr)
-        # Freezing the pre-trained weight matrix
-
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, poly_config)
-        self.set_adapter(adapter_name)
 
-    def _linear(self, x: torch.Tensor) -> torch.Tensor:
-        return F.linear(x, self.weight, bias=self.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.poly_lora_A.keys():
                     continue
@@ -132,11 +139,7 @@ class Linear(nn.Linear, PolyLayer):
                 poly_lora_B = self.poly_lora_B[active_adapter]
 
                 task_ids = self.task_ids
-                repeat = x.size(0) // task_ids.size(0)
-                # this repeat follows the patten in `model.predict()` line 152
-                if repeat:
-                    task_ids = task_ids.repeat_interleave(repeat)
-                mixing_weights = poly_router(task_ids=task_ids, input_ids=x).to(dtype=previous_dtype)
+                mixing_weights = poly_router(task_ids=task_ids, input_ids=x)
                 bs, n_splits, n_skills = mixing_weights.size()
 
                 # A is    n_splits, n_skills, D // n_splits, rank
@@ -147,7 +150,12 @@ class Linear(nn.Linear, PolyLayer):
                 A = A.reshape(bs, self.in_features, r)
                 B = B.transpose(1, 2).reshape(bs, r, self.out_features)
 
+                x = x.to(A.dtype)
                 result += x.bmm(A).bmm(B) / r
 
         result = result.to(previous_dtype)
         return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "poly." + rep

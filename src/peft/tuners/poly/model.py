@@ -73,8 +73,7 @@ class PolyModel(BaseTuner):
     @staticmethod
     def _create_new_module(poly_config, adapter_name, target, **kwargs):
         if isinstance(target, torch.nn.Linear):
-            in_features, out_features = target.in_features, target.out_features
-            return Linear(adapter_name, in_features, out_features, poly_config, **kwargs)
+            return Linear(target, adapter_name, poly_config, **kwargs)
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
