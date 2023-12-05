@@ -56,7 +56,9 @@
     title: Prompting
   - local: conceptual_guides/ia3
     title: IA3
-
+  - local: conceptual_guides/quantization
+    title: Quantization
+    
 - title: Reference
   sections:
   - local: package_reference/peft_model
