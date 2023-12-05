@@ -64,7 +64,7 @@ class PolyLayer(BaseTunerLayer):
         )
         self.poly_router[adapter_name] = get_router(poly_config)
 
-        self.reset_poly_parameters(adapter_name, init_weight=poly_config.init_weight)
+        self.reset_poly_parameters(adapter_name, init_weights=poly_config.init_weights)
 
         weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
@@ -75,7 +75,7 @@ class PolyLayer(BaseTunerLayer):
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
 
-    def reset_poly_parameters(self, adapter_name, init_weight):
+    def reset_poly_parameters(self, adapter_name, init_weights):
         if adapter_name in self.poly_lora_A.keys():
             # initialize A the same way as the default for nn.Linear
             n_splits, n_skills, d, r = self.poly_lora_A[adapter_name].shape
@@ -85,7 +85,7 @@ class PolyLayer(BaseTunerLayer):
                     torch.nn.init.kaiming_uniform_(param, a=math.sqrt(5))
                     self.poly_lora_A[adapter_name].data[split, skill, :, :] = param.T
 
-            if init_weight:
+            if init_weights:
                 # initialize B to zero
                 torch.nn.init.zeros_(self.poly_lora_B[adapter_name])
             else:
