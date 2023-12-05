@@ -392,7 +392,6 @@ class LoraModel(BaseTuner):
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
-
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
