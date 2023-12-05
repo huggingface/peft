@@ -5,7 +5,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -16,7 +16,6 @@ from .layer import Linear, PolyLayer
 
 
 class PolyModel(BaseTuner):
-
     prefix: str = "poly_"
 
     def __init__(self, model, config, adapter_name) -> None:
@@ -50,17 +49,30 @@ class PolyModel(BaseTuner):
 
     def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
-        new_module.weight = child.weight
-        if hasattr(child, "bias"):
-            new_module.bias = child.bias
+        # It's not necessary to set requires_grad here, as that is handled by
+        # _mark_only_adapters_as_trainable
+
+        # child layer wraps the original module, unpack it
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
+
         if getattr(child, "state", None) is not None:
-            new_module.state = child.state
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if self.prefix in name:
-                module.to(child.weight.device)
+            if (self.prefix in name) or ("ranknum" in name):
+                weight = child.qweight if hasattr(child, "qweight") else child.weight
+                module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
@@ -69,7 +81,12 @@ class PolyModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(poly_config, adapter_name, target, **kwargs):
-        if isinstance(target, torch.nn.Linear):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        if isinstance(target_base_layer, torch.nn.Linear):
             return Linear(target, adapter_name, poly_config, **kwargs)
         else:
             raise ValueError(
