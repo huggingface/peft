@@ -20,7 +20,6 @@ class PolyModel(BaseTuner):
     prefix: str = "poly_"
 
     def __init__(self, model, config, adapter_name) -> None:
-        self.task_id_ptr = dict()
         super().__init__(model, config, adapter_name)
 
     @staticmethod
@@ -43,13 +42,11 @@ class PolyModel(BaseTuner):
                 poly_config,
                 adapter_name,
                 target,
-                task_id_ptr=self.task_id_ptr,
             )
             if adapter_name != self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
-
 
     def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
@@ -121,11 +118,3 @@ class PolyModel(BaseTuner):
                 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
-
-    def forward(self, *args: Any, **kwargs: Any):
-        self.task_id_ptr["task_ids"] = kwargs.pop("task_ids", None)
-        return self.model(*args, **kwargs)
-
-    def generate(self, *args: Any, **kwargs: Any):
-        self.task_id_ptr["task_ids"] = kwargs.pop("task_ids", None)
-        return self.model.generate(*args, **kwargs)

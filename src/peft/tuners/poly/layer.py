@@ -15,7 +15,7 @@ class PolyLayer(BaseTunerLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "n_tasks", "n_skills", "n_splits")
 
-    def __init__(self, base_layer: nn.Module, task_id_ptr: dict, **kwargs):
+    def __init__(self, base_layer: nn.Module, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.n_tasks = {}
@@ -35,11 +35,6 @@ class PolyLayer(BaseTunerLayer):
 
         self.in_features = in_features
         self.out_features = out_features
-        self.task_id_ptr = task_id_ptr
-
-    @property
-    def task_ids(self) -> torch.Tensor:
-        return self.task_id_ptr["task_ids"]
 
     def update_layer(self, adapter_name, poly_config):
         if poly_config.r <= 0:
@@ -105,6 +100,11 @@ class PolyLayer(BaseTunerLayer):
             # initialized router
             self.poly_router[adapter_name].reset()
 
+    @classmethod
+    def _add_task_id_pre_hook(cls, module, args, kwargs):
+        module.task_ids = kwargs.pop("task_ids", None)
+        return args, kwargs
+
 
 class Linear(nn.Module, PolyLayer):
     # Lora implemented in a dense layer
@@ -113,14 +113,14 @@ class Linear(nn.Module, PolyLayer):
         base_layer,
         adapter_name: str,
         poly_config: PolyConfig,
-        task_id_ptr: dict,
         **kwargs,
     ) -> None:
         super().__init__()
-        PolyLayer.__init__(self, base_layer, task_id_ptr, **kwargs)
+        PolyLayer.__init__(self, base_layer, **kwargs)
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, poly_config)
+        self.register_forward_pre_hook(PolyLayer._add_task_id_pre_hook, with_kwargs=True)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
