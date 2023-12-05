@@ -51,6 +51,8 @@ computational expense becomes particularly apparent during the inference phase, 
 
 * The `AdaLora` techniques also allows us to [quantize and fine-tune models](https://huggingface.co/docs/peft/main/en/package_reference/adalora) but unlike LoRA, which distributes parameters evenly across all modules. More parameters are budgeted for important weight matrices and layers while less important ones receive fewer parameters.
 
+* The `ia3` allows us to [quantize and fine-tune models](https://huggingface.co/docs/peft/main/en/package_reference/ia3) it is a method that adds three learned vectors to rescale the keys and values of the self-attention and encoder-decoder attention layers, and the intermediate activation of the position-wise feed-forward network.
+
 
 ## References
 
