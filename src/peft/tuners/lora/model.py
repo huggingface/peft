@@ -23,7 +23,6 @@ from itertools import chain
 from typing import List, Optional
 
 import torch
-from accelerate.hooks import AlignDevicesHook
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
