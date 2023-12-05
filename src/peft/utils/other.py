@@ -30,6 +30,8 @@ from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
 def infer_device():
     if torch.cuda.is_available():
         torch_device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        torch_device = torch.device("mps")
     elif is_xpu_available():
         torch_device = "xpu"
     elif is_npu_available():
