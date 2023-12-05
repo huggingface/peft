@@ -380,7 +380,6 @@ class LoraModel(BaseTuner):
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
-
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
