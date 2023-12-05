@@ -115,6 +115,7 @@ def strtobool(val):
         raise ValueError("invalid truth value {!r}".format(val))
 
 
+# same as in ..testing_utils.py but cannot be imported
 def require_torch_gpu(test_case):
     """
     Decorator marking a test that requires a GPU. Will be skipped when no GPU is available.
@@ -128,6 +129,7 @@ def require_torch_gpu(test_case):
         return test_case
 
 
+# same as in ..testing_utils.py but cannot be imported
 def require_bitsandbytes(test_case):
     """
     Decorator marking a test that requires the bitsandbytes library. Will be skipped when the library is not installed.
@@ -239,7 +241,6 @@ class RegressionTester(unittest.TestCase):
             save_model(model, name, force=self.force_mode)
 
     def _assert_results_equal(self, name):
-        # TODO: abstract
         path = os.path.join(REGRESSION_DIR, name)
         versions = os.listdir(path)
         for version in versions:  # each directory corresponds to a version
