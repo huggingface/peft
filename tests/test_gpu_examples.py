@@ -942,8 +942,9 @@ class LoftQTests(unittest.TestCase):
     r"""
     Tests for LoftQ
     """
-    error_factor = 3
+
     def setUp(self):
+        self.error_factor = 3
         self.model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         self.inputs = self.tokenizer("All I want is", padding=True, return_tensors="pt").to("cuda")
