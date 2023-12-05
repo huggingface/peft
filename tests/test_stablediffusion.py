@@ -143,7 +143,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
 
         # Merge adapter and model
         if config_cls not in [LoHaConfig, OFTConfig]:
-            # TODO: Merging the text_encoder adapter is flaky on Windows on PyTorch 2.1
+            # TODO: Merging the text_encoder is leading to issues on CPU with PyTorch 2.1
             model.text_encoder = model.text_encoder.merge_and_unload()
         model.unet = model.unet.merge_and_unload()
 
