@@ -88,6 +88,8 @@
     - local: package_reference/adapter_utils
       title: LyCORIS
     - local: package_reference/multitask_prompt_tuning
+    - local: package_reference/oft
+      title: OFT
       title: Multitask Prompt Tuning
     - local: package_reference/p_tuning
       title: P-tuning
