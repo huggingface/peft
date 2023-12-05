@@ -942,7 +942,7 @@ class LoftQTests(unittest.TestCase):
     r"""
     Tests for LoftQ
     """
-
+    error_factor = 3
     def setUp(self):
         self.model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
@@ -1027,9 +1027,8 @@ class LoftQTests(unittest.TestCase):
         self.assertTrue(mse_loftq > 0.0)
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        self.assertTrue(mae_loftq < mae_quantized / factor)
-        self.assertTrue(mse_loftq < mse_quantized / factor)
+        self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
+        self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
 
     def test_bloomz_loftq_8bit(self):
         # this currently does not work:
@@ -1047,9 +1046,8 @@ class LoftQTests(unittest.TestCase):
         self.assertTrue(mse_loftq > 0.0)
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        self.assertTrue(mae_loftq < mae_quantized / factor)
-        self.assertTrue(mse_loftq < mse_quantized / factor)
+        self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
+        self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
 
     def test_bloomz_loftq_8bit_iter_5(self):
         # this currently does not work:
@@ -1067,6 +1065,5 @@ class LoftQTests(unittest.TestCase):
         self.assertTrue(mse_loftq > 0.0)
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        self.assertTrue(mae_loftq < mae_quantized / factor)
-        self.assertTrue(mse_loftq < mse_quantized / factor)
+        self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
+        self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
