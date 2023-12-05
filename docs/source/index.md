@@ -16,11 +16,9 @@ rendered properly in your Markdown viewer.
 
 # PEFT
 
-🤗 PEFT, or Parameter-Efficient Fine-Tuning (PEFT), is a library for efficiently adapting pre-trained language models (PLMs) to various downstream applications without fine-tuning all the model's parameters. 
-PEFT methods only fine-tune a small number of (extra) model parameters, significantly decreasing computational and storage costs because fine-tuning large-scale PLMs is prohibitively costly.
-Recent state-of-the-art PEFT techniques achieve performance comparable to that of full fine-tuning.
+🤗 PEFT (Parameter-Efficient Fine-Tuning) is a library for efficiently adapting large pretrained models to various downstream applications without fine-tuning all of a model's parameters because it is prohibitively costly. PEFT methods only fine-tune a small number of (extra) model parameters - significantly decreasing computational and storage costs - while yielding performance comparable to a fully fine-tuned model. This makes it more accessible to train and store large language models (LLMs) on consumer hardware.
 
-PEFT is seamlessly integrated with 🤗 Accelerate for large-scale models leveraging DeepSpeed and [Big Model Inference](https://huggingface.co/docs/accelerate/usage_guides/big_modeling).
+PEFT is integrated with the Transformers, Diffusers, and Accelerate libraries to provide a faster and easier way to load, train, and use large models for inference.
 
 <div class="mt-10">
   <div class="w-full flex flex-col space-y-4 md:space-y-0 md:grid md:grid-cols-2 md:gap-y-4 md:gap-x-5">
@@ -43,100 +41,9 @@ PEFT is seamlessly integrated with 🤗 Accelerate for large-scale models levera
   </div>
 </div>
 
-## Supported methods
-
-1. LoRA: [LORA: LOW-RANK ADAPTATION OF LARGE LANGUAGE MODELS](https://arxiv.org/pdf/2106.09685.pdf)
-2. Prefix Tuning: [Prefix-Tuning: Optimizing Continuous Prompts for Generation](https://aclanthology.org/2021.acl-long.353/), [P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks](https://arxiv.org/pdf/2110.07602.pdf)
-3. P-Tuning: [GPT Understands, Too](https://arxiv.org/pdf/2103.10385.pdf)
-4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://arxiv.org/pdf/2104.08691.pdf) 
-5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://arxiv.org/abs/2303.10512) 
-6. [LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention](https://github.com/ZrrSkywalker/LLaMA-Adapter)
-7. IA3: [Infused Adapter by Inhibiting and Amplifying Inner Activations](https://arxiv.org/abs/2205.05638)
-
-## Supported models
-
-The tables provided below list the PEFT methods and models supported for each task. To apply a particular PEFT method for 
-a task, please refer to the corresponding Task guides.
-
-### Causal Language Modeling
-
-| Model        | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-|--------------| ---- | ---- | ---- | ----  | ----  |
-| GPT-2        | ✅  | ✅  | ✅  | ✅  | ✅  |
-| Bloom        | ✅  | ✅  | ✅  | ✅  | ✅  |
-| OPT          | ✅  | ✅  | ✅  | ✅  | ✅  |
-| GPT-Neo      | ✅  | ✅  | ✅  | ✅  | ✅  |
-| GPT-J        | ✅  | ✅  | ✅  | ✅  | ✅  |
-| GPT-NeoX-20B | ✅  | ✅  | ✅  | ✅  | ✅  |
-| LLaMA        | ✅  | ✅  | ✅  | ✅  | ✅  |
-| ChatGLM      | ✅  | ✅  | ✅  | ✅  | ✅  |
-
-### Conditional Generation
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ---- | ---- |
-| T5        | ✅   | ✅   | ✅   | ✅   | ✅   |
-| BART      | ✅   | ✅   | ✅   | ✅   | ✅   |
-
-### Sequence Classification
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | ----  |
-| BERT           | ✅  | ✅  | ✅  | ✅  | ✅  |  
-| RoBERTa        | ✅  | ✅  | ✅  | ✅  | ✅  |
-| GPT-2          | ✅  | ✅  | ✅  | ✅  |   | 
-| Bloom          | ✅  | ✅  | ✅  | ✅  |   |
-| OPT            | ✅  | ✅  | ✅  | ✅  |   |
-| GPT-Neo        | ✅  | ✅  | ✅  | ✅  |   |
-| GPT-J          | ✅  | ✅  | ✅  | ✅  |   |
-| Deberta        | ✅  |     | ✅  | ✅  |   | 
-| Deberta-v2     | ✅  |     | ✅  | ✅  |   |    
-
-### Token Classification
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | --- |
-| BERT           | ✅  | ✅  |   |   |   |  
-| RoBERTa        | ✅  | ✅  |   |   |   |
-| GPT-2          | ✅  | ✅  |   |   |   | 
-| Bloom          | ✅  | ✅  |   |   |   |
-| OPT            | ✅  | ✅  |   |   |   |
-| GPT-Neo        | ✅  | ✅  |   |   |   |
-| GPT-J          | ✅  | ✅  |   |   |   |
-| Deberta        | ✅  |     |   |   |    |
-| Deberta-v2     | ✅  |     |   |   |   |
-
-### Text-to-Image Generation
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | ----  |
-| Stable Diffusion           | ✅  |   |   |   |   |  
-
-
-### Image Classification
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | ----  | ----  |
-| ViT           | ✅  |   |   |   |   | 
-| Swin           | ✅  |   |   |   |   | 
-
-### Image to text (Multi-modal models)
-
-We have tested LoRA for [ViT](https://huggingface.co/docs/transformers/model_doc/vit) and [Swin](https://huggingface.co/docs/transformers/model_doc/swin) for fine-tuning on image classification. 
-However, it should be possible to use LoRA for any [ViT-based model](https://huggingface.co/models?pipeline_tag=image-classification&sort=downloads&search=vit) from 🤗 Transformers. 
-Check out the [Image classification](/task_guides/image_classification_lora) task guide to learn more. If you run into problems, please open an issue.
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | ---- |
-| Blip-2           | ✅  |   |   |   |   | 
- 
-
-### Semantic Segmentation
-
-As with image-to-text models, you should be able to apply LoRA to any of the [segmentation models](https://huggingface.co/models?pipeline_tag=image-segmentation&sort=downloads). 
-It's worth noting that we haven't tested this with every architecture yet. Therefore, if you come across any issues, kindly create an issue report.
-
-|   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ----  | ----  |
-| SegFormer           | ✅  |   |   |   |   |
-
+<iframe
+	src="https://stevhliu-peft-methods.hf.space"
+	frameborder="0"
+	width="850"
+	height="620"
+></iframe>

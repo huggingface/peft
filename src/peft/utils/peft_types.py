@@ -20,6 +20,8 @@ import enum
 
 
 class PeftType(str, enum.Enum):
+    """Enum class for the different types of adapters in PEFT."""
+
     PROMPT_TUNING = "PROMPT_TUNING"
     MULTITASK_PROMPT_TUNING = "MULTITASK_PROMPT_TUNING"
     P_TUNING = "P_TUNING"
@@ -34,6 +36,8 @@ class PeftType(str, enum.Enum):
 
 
 class TaskType(str, enum.Enum):
+    """Enum class for the different types of tasks supported by PEFT."""
+
     SEQ_CLS = "SEQ_CLS"
     SEQ_2_SEQ_LM = "SEQ_2_SEQ_LM"
     CAUSAL_LM = "CAUSAL_LM"

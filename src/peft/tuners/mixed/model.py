@@ -20,7 +20,7 @@ from typing import Any, Optional, Union
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners import adalora, loha, lokr, lora
+from peft.tuners import adalora, loha, lokr, lora, oft
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -32,10 +32,10 @@ from peft.utils import (
 
 
 # Collection of constants used for all tuners
-COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA)
-PREFIXES = [lora.LoraModel.prefix, lokr.LoKrModel.prefix, loha.LoHaModel.prefix]
-Configs = Union[lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig]
-Layers = (lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer)
+COMPATIBLE_TUNER_TYPES = (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.OFT)
+PREFIXES = [lora.LoraModel.prefix, lokr.LoKrModel.prefix, loha.LoHaModel.prefix, oft.OFTModel.prefix]
+Configs = Union[lora.LoraConfig, loha.LoHaConfig, lokr.LoKrConfig, adalora.AdaLoraConfig, oft.OFTConfig]
+Layers = (lora.layer.LoraLayer, loha.layer.LoHaLayer, lokr.layer.LoKrLayer, adalora.layer.AdaLoraLayer, oft.OFTLayer)
 
 
 class MixedModel(BaseTuner):
@@ -95,6 +95,8 @@ class MixedModel(BaseTuner):
             loha.LoHaModel._create_and_replace(self, config, *args, **kwargs)
         elif isinstance(config, lokr.LoKrConfig):
             lokr.LoKrModel._create_and_replace(self, config, *args, **kwargs)
+        elif isinstance(config, oft.OFTConfig):
+            oft.OFTModel._create_and_replace(self, config, *args, **kwargs)
         else:
             raise ValueError(f"Unsupported config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
 
@@ -171,6 +173,8 @@ class MixedModel(BaseTuner):
             new_module = loha.LoHaModel._create_new_module(config, adapter_name, target, **kwargs)
         elif isinstance(config, lokr.LoKrConfig):
             new_module = lokr.LoKrModel._create_new_module(config, adapter_name, target, **kwargs)
+        elif isinstance(config, oft.OFTConfig):
+            new_module = oft.OFTModel._create_new_module(config, adapter_name, target, **kwargs)
         else:
             raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module
