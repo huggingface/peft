@@ -20,6 +20,7 @@ class PolyModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
+        self.register_forward_pre_hook(self._add_task_id_pre_hook, with_kwargs=True)
 
     @staticmethod
     def _check_target_module_exists(poly_config, key):
@@ -135,3 +136,8 @@ class PolyModel(BaseTuner):
                 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
         return peft_config
+
+    def _add_task_id_pre_hook(self, module, args, kwargs):
+        for m in self.model.modules():
+            if isinstance(m, PolyLayer):
+                m.task_ids = kwargs.get("task_ids", None)

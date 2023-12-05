@@ -100,11 +100,6 @@ class PolyLayer(BaseTunerLayer):
             # initialized router
             self.poly_router[adapter_name].reset()
 
-    @classmethod
-    def _add_task_id_pre_hook(cls, module, args, kwargs):
-        module.task_ids = kwargs.pop("task_ids", None)
-        return args, kwargs
-
 
 class Linear(nn.Module, PolyLayer):
     # Lora implemented in a dense layer
@@ -120,7 +115,6 @@ class Linear(nn.Module, PolyLayer):
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, poly_config)
-        self.register_forward_pre_hook(PolyLayer._add_task_id_pre_hook, with_kwargs=True)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
