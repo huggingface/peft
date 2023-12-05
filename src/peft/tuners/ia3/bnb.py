@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import bitsandbytes as bnb
+from typing import Any
+
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -23,39 +24,27 @@ from .layer import IA3Layer
 
 if is_bnb_available():
 
-    class Linear8bitLt(bnb.nn.Linear8bitLt, IA3Layer):
+    class Linear8bitLt(torch.nn.Module, IA3Layer):
         # (IA)^3 implemented in a dense layer
         def __init__(
             self,
-            adapter_name,
-            in_features,
-            out_features,
-            is_feedforward,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
+            is_feedforward: bool,
+            init_ia3_weights: bool = True,
             **kwargs,
         ) -> None:
-            bnb.nn.Linear8bitLt.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                has_fp16_weights=kwargs.get("has_fp16_weights", True),
-                memory_efficient_backward=kwargs.get("memory_efficient_backward", False),
-                threshold=kwargs.get("threshold", 0.0),
-                index=kwargs.get("index", None),
-            )
-            IA3Layer.__init__(self, in_features=in_features, out_features=out_features, is_feedforward=is_feedforward)
-            self.is_feedforward = is_feedforward
+            super().__init__()
+            IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
 
             # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
-
-            init_ia3_weights = kwargs.pop("init_ia3_weights", True)
+            self.get_base_layer().weight.requires_grad = False
             self.update_layer(adapter_name, init_ia3_weights)
-            self.set_adapter(adapter_name)
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+            # note: no check for self.merged because merging is not supported (yet)
             if self.disable_adapters:
-                return super().forward(x)
+                return self.base_layer(x)
 
             ia3_scaling = 1
             for active_adapter in self.active_adapters:
@@ -67,10 +56,10 @@ if is_bnb_available():
             if requires_conversion:
                 x = x.float()
             if self.is_feedforward:
-                result = super().forward(x * ia3_scaling)
+                result = self.base_layer(x * ia3_scaling)
                 expected_dtype = result.dtype
             else:
-                result = super().forward(x)
+                result = self.base_layer(x)
                 expected_dtype = result.dtype
                 result = result * ia3_scaling
 
@@ -79,41 +68,34 @@ if is_bnb_available():
 
             return result
 
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "ia3." + rep
+
 
 if is_bnb_4bit_available():
 
-    class Linear4bit(bnb.nn.Linear4bit, IA3Layer):
+    class Linear4bit(torch.nn.Module, IA3Layer):
         # IA3 implemented in a dense layer
         def __init__(
             self,
-            adapter_name,
-            in_features,
-            out_features,
-            is_feedforward,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
+            is_feedforward: bool,
+            init_ia3_weights: bool = True,
             **kwargs,
         ) -> None:
-            bnb.nn.Linear4bit.__init__(
-                self,
-                in_features,
-                out_features,
-                bias=kwargs.get("bias", True),
-                compute_dtype=kwargs.get("compute_dtype", torch.float32),
-                compress_statistics=kwargs.get("compress_statistics", True),
-                quant_type=kwargs.get("quant_type", "nf4"),
-            )
-            IA3Layer.__init__(self, in_features=in_features, out_features=out_features, is_feedforward=is_feedforward)
-            self.is_feedforward = is_feedforward
+            super().__init__()
+            IA3Layer.__init__(self, base_layer, is_feedforward=is_feedforward)
 
             # Freezing the pre-trained weight matrix
-            self.weight.requires_grad = False
-
-            init_ia3_weights = kwargs.pop("init_ia3_weights", True)
+            self.get_base_layer().weight.requires_grad = False
             self.update_layer(adapter_name, init_ia3_weights)
-            self.set_adapter(adapter_name)
 
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
+        def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+            # note: no check for self.merged because merging is not supported (yet)
             if self.disable_adapters:
-                return super().forward(x)
+                return self.base_layer(x)
 
             ia3_scaling = 1
             for active_adapter in self.active_adapters:
@@ -125,10 +107,10 @@ if is_bnb_4bit_available():
             if requires_conversion:
                 x = x.float()
             if self.is_feedforward:
-                result = super().forward(x * ia3_scaling)
+                result = self.base_layer(x * ia3_scaling)
                 expected_dtype = result.dtype
             else:
-                result = super().forward(x)
+                result = self.base_layer(x)
                 expected_dtype = result.dtype
                 result = result * ia3_scaling
 
@@ -140,3 +122,7 @@ if is_bnb_4bit_available():
                 result = result.to(expected_dtype)
 
             return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "ia3." + rep

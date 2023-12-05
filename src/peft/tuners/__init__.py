@@ -18,9 +18,10 @@
 # limitations under the License.
 
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
-from .lora import LoraConfig, LoraModel
 from .vera import VeraConfig, VeraModel
+from .lora import LoraConfig, LoraModel, LoftQConfig
 from .loha import LoHaConfig, LoHaModel
+from .lokr import LoKrConfig, LoKrModel
 from .ia3 import IA3Config, IA3Model
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparameterizationType
@@ -35,3 +36,5 @@ TUNERS_MAPPING = {
     "IA3": IA3Model,
     "ADALORA": AdaLoraModel,
 }
+from .oft import OFTConfig, OFTModel
+from .mixed import MixedModel
