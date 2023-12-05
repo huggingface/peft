@@ -59,6 +59,7 @@
   - local: conceptual_guides/quantization
     title : Quantization
 
+    
 - title: Reference
   sections:
   - local: package_reference/peft_model
