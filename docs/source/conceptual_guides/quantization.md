@@ -58,3 +58,4 @@ computational expense becomes particularly apparent during the inference phase, 
 
 - [All about Quantization ](https://www.youtube.com/watch?v=UQlsqdwCQdc&t=478s) you-tube video
 - [LLM Series — Parameter Efficient Fine Tuning](https://medium.com/@abonia/llm-series-parameter-efficient-fine-tuning-e9839fae44ac)
+- [🤗 transformers quantization documentation page](https://huggingface.co/docs/transformers/main_classes/quantization) 
