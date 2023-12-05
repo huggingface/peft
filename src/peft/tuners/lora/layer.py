@@ -288,11 +288,11 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.weights_map = {
                         name: param.to("cpu") for name, param in named_module_tensors(base_layer)
                     }
-
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
                 self.merged_adapters.append(active_adapter)
 
@@ -429,11 +429,11 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.weights_map = {
                         name: param.to("cpu") for name, param in named_module_tensors(base_layer)
                     }
-
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
                 self.merged_adapters.append(active_adapter)
@@ -578,11 +578,11 @@ class Conv2d(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
+
+                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.weights_map = {
                         name: param.to("cpu") for name, param in named_module_tensors(base_layer)
                     }
-
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
                 self.merged_adapters.append(active_adapter)
