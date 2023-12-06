@@ -78,6 +78,7 @@ class PolyLayer(BaseTunerLayer):
     def reset_poly_parameters(self, adapter_name, init_weights):
         if adapter_name in self.poly_lora_A.keys():
             # initialize A the same way as the default for nn.Linear
+            # https://github.com/microsoft/mttl/blob/ce4ca51dbca73be656feb9b3e5233633e3c5dec7/mttl/models/poly.py#L269
             n_splits, n_skills, d, r = self.poly_lora_A[adapter_name].shape
             for skill in range(n_skills):
                 for split in range(n_splits):
@@ -132,6 +133,8 @@ class Linear(nn.Module, PolyLayer):
                 poly_lora_A = self.poly_lora_A[active_adapter]
                 poly_lora_B = self.poly_lora_B[active_adapter]
 
+                # Combine the output of LoRAs
+                # https://github.com/microsoft/mttl/blob/ce4ca51dbca73be656feb9b3e5233633e3c5dec7/mttl/models/poly.py#L293
                 task_ids = self.task_ids
                 mixing_weights = poly_router(task_ids=task_ids, input_ids=x)
                 bs, n_splits, n_skills = mixing_weights.size()

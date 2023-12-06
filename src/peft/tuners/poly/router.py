@@ -27,6 +27,8 @@ class Router(nn.Module, ABC):
 
 
 class PolyRouter(Router):
+    # It's a simplified implementation of
+    # https://github.com/microsoft/mttl/blob/ce4ca51dbca73be656feb9b3e5233633e3c5dec7/mttl/models/poly.py#L138
     def __init__(self, poly_config: PolyConfig):
         super().__init__()
 
