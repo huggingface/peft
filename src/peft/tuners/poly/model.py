@@ -20,7 +20,7 @@ class PolyModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
-        self.register_forward_pre_hook(self._add_task_id_pre_hook, with_kwargs=True)
+        self.register_forward_pre_hook(PolyModel._add_task_id_pre_hook, with_kwargs=True)
 
     @staticmethod
     def _check_target_module_exists(poly_config, key):
@@ -137,7 +137,15 @@ class PolyModel(BaseTuner):
             )
         return peft_config
 
-    def _add_task_id_pre_hook(self, module, args, kwargs):
-        for m in self.model.modules():
+    @classmethod
+    def _add_task_id_pre_hook(cls, module, args, kwargs):
+        task_ids = kwargs.get("task_ids", None)
+        new_kwargs = {k: v for k, v in kwargs.items() if k != "task_ids"}
+        for m in module.modules():
             if isinstance(m, PolyLayer):
-                m.task_ids = kwargs.get("task_ids", None)
+                m.task_ids = task_ids
+        return args, new_kwargs
+
+    def generate(self, *args, **kwargs):
+        args, new_kwargs = PolyModel._add_task_id_pre_hook(self.model, args, kwargs)
+        return self.model.generate(*args, **new_kwargs)
