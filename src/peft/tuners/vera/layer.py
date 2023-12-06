@@ -30,7 +30,7 @@ class VeraLayer(BaseTunerLayer):
     adapter_layer_names = ("vera_lambda_b", "vera_lambda_d")
 
     def __init__(self, base_layer: nn.Module, **kwargs):
-        self.base_layer = base_layer 
+        self.base_layer = base_layer
         self.r = {}
         self.vera_dropout = nn.ModuleDict({})
 
@@ -47,7 +47,9 @@ class VeraLayer(BaseTunerLayer):
         elif isinstance(base_layer, nn.Embedding):
             in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
         elif isinstance(base_layer, Conv1D):
-            in_features, out_features = base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
+            in_features, out_features = (
+                base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
+            )
 
         self.in_features = in_features
         self.out_features = out_features
@@ -164,7 +166,7 @@ class Linear(nn.Linear, VeraLayer):
 
         self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.set_adapter(adapter_name) # TODO: remove?
+        self.set_adapter(adapter_name)  # TODO: remove?
 
     def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """
@@ -292,7 +294,7 @@ class Embedding(nn.Embedding, VeraLayer):
         # self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs) # TODO: remove?
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.update_layer_embedding(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
-        self.set_adapter(adapter_name) # TODO: remove?
+        self.set_adapter(adapter_name)  # TODO: remove?
 
     def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """

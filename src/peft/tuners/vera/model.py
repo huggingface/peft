@@ -20,7 +20,6 @@ from functools import partial
 from typing import Union
 
 import torch
-from torch import nn
 from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
