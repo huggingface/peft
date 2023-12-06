@@ -18,18 +18,9 @@ rendered properly in your Markdown viewer.
 
 The sheer size of today's large pretrained models - which commonly have billions of parameters - present a significant training challenge because they require more storage space and more computational power to crunch all those calculations. You'll need access to powerful GPUs or TPUs to train these large pretrained models which is expensive, not widely accessible to everyone, not environmentally friendly, and not very practical. PEFT methods address many of these challenges. There are several types of PEFT methods (soft prompting, matrix decomposition, adapters), but they all focus on the same thing, reduce the number of trainable parameters. This makes it more accessible to train and store large models on consumer hardware.
 
-The PEFT library is designed to help you quickly train large models on free or low-cost GPUs, and in this tutorial, you'll learn how to setup a configuration to apply a PEFT method to a pretrained base model for training. Once the PEFT configuration is setup, you can use any training framework you like (Transformer's [`~transformers.Trainer`] class, [Accelerate](https://hf.co/docs/accelerate), PyTorch).
+The PEFT library is designed to help you quickly train large models on free or low-cost GPUs, and in this tutorial, you'll learn how to setup a configuration to apply a PEFT method to a pretrained base model for training. Once the PEFT configuration is setup, you can use any training framework you like (Transformer's [`~transformers.Trainer`] class, [Accelerate](https://hf.co/docs/accelerate), a custom PyTorch training loop).
 
 ## PEFT configurations
-
-A configuration stores important parameters that specify how a specific PEFT method should be applied. There are two main types of PEFT configurations:
-
-1. [`PeftConfig`] is the base configuration class for non-prompt based methods
-    * [`LoraConfig`] inherits from [`PeftConfig`] for applying LoRA
-        * [`LycorisConfig`] inherits from [`LoraConfig`] for applying LoRA-variants like LoHa and LoKr
-2. [`PromptLearningConfig`] is the base configuration class for prompt-based methods like p-tuning or prefix tuning
-
-For example, take a look at this [`LoraConfig`](https://huggingface.co/ybelkada/opt-350m-lora/blob/main/adapter_config.json) for applying LoRA and [`PromptEncoderConfig`](https://huggingface.co/smangrul/roberta-large-peft-p-tuning/blob/main/adapter_config.json) for applying p-tuning.
 
 <Tip>
 
@@ -37,8 +28,12 @@ Learn more about the parameters you can configure for each PEFT method in their 
 
 </Tip>
 
+A configuration stores important parameters that specify how a particular PEFT method should be applied.
+
+For example, take a look at the following [`LoraConfig`](https://huggingface.co/ybelkada/opt-350m-lora/blob/main/adapter_config.json) for applying LoRA and [`PromptEncoderConfig`](https://huggingface.co/smangrul/roberta-large-peft-p-tuning/blob/main/adapter_config.json) for applying p-tuning (these configuration files are already JSON-serialized). Whenever you load a PEFT adapter, it is a good idea to check whether it has an associated adapter_config.json file which is required.
+
 <hfoptions id="config">
-<hfoption id="LoRA">
+<hfoption id="LoraConfig">
 
 ```json
 {
@@ -78,7 +73,7 @@ lora_config = LoraConfig(
 ```
 
 </hfoption>
-<hfoption id="p-tuning">
+<hfoption id="PromptEncoderConfig">
 
 ```json
 {
@@ -122,17 +117,15 @@ p_tuning_config = PromptEncoderConfig(
 
 With a PEFT configuration in hand, you can now apply it to any pretrained model to create a [`PeftModel`]. Choose from any of the state-of-the-art models from the [Transformers](https://hf.co/docs/transformers) library, a custom model, and even new and unsupported transformer architectures.
 
-Load a base [facebook/opt-350m](https://huggingface.co/facebook/opt-350m) model to finetune.
+For this tutorial, load a base [facebook/opt-350m](https://huggingface.co/facebook/opt-350m) model to finetune.
 
 ```py
 from transformers import AutoModelForCausalLM
 
-model = AutoModelForCausalLM.from_pretrained(
-    "facebook/opt-350m"
-)
+model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
 ```
 
-Create a [`PeftModel`] from the base model and a configuration (for this tutorial, you'll use the [`LoraConfig`] you created earlier). The [`get_peft_model`] method returns a trainable [`PeftModel`].
+Use the [`get_peft_model`] function to create a [`PeftModel`] from the base facebook/opt-350m model and the `lora_config` you created earlier.
 
 ```py
 from peft import get_peft_model
@@ -142,9 +135,17 @@ lora_model.print_trainable_parameters()
 "trainable params: 1,572,864 || all params: 332,769,280 || trainable%: 0.472659014678278"
 ```
 
-Now you can train the [`PeftModel`] with your preferred training framework! After training, you can save your model locally with [`~PeftModel.save_pretrained`] or upload it to the Hub.
+Now you can train the [`PeftModel`] with your preferred training framework! After training, you can save your model locally with [`~PeftModel.save_pretrained`] or upload it to the Hub with the [`~transformers.PreTrainedModel.push_to_hub`] method.
 
-To load a [`PeftModel`], you'll need to provide the [`PeftConfig`] used to create it and the base model it was trained from.
+```py
+# save locally
+lora_model.save_pretrained("your-name/opt-350m-lora")
+
+# push to Hub
+lora_model.push_to_hub("your-name/opt-350m-lora")
+```
+
+To load a [`PeftModel`] for inference, you'll need to provide the [`PeftConfig`] used to create it and the base model it was trained from.
 
 ```py
 from peft import PeftModel, PeftConfig
@@ -154,11 +155,15 @@ model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path)
 lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora")
 ```
 
-By default, the [`PeftModel`] can only be used for inference, but if you'd like to train the adapter some more you can set `is_trainable=True`.
+<Tip>
+
+By default, the [`PeftModel`] is set for inference, but if you'd like to train the adapter some more you can set `is_trainable=True`.
 
 ```py
 lora_model = PeftModel.from_pretrained(model, "ybelkada/opt-350m-lora", is_trainable=True)
 ```
+
+</Tip>
 
 The [`PeftModel.from_pretrained`] method is the most flexible way to load a [`PeftModel`] because it doesn't matter what model framework was used (Transformers, timm, a generic PyTorch model). Other classes, like [`AutoPeftModel`], are just a convenient wrapper around the base [`PeftModel`], and makes it easier to load PEFT models directly from the Hub or locally where the PEFT weights are stored.
 

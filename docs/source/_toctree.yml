@@ -10,7 +10,7 @@
 - title: Tutorial
   sections:
   - local: tutorial/peft_model_config
-    title: PEFT model and configuration
+    title: PEFT configurations and models
 
 - title: Task guides
   sections:
