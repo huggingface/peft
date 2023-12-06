@@ -20,22 +20,21 @@ from .layer import AdaLoraLayer
 class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
     def __init__(
         self,
+        base_layer,
         adapter_name,
-        quant_linear_module,
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
+        init_lora_weights: bool = True,
         **kwargs,
     ) -> None:
-        torch.nn.Module.__init__(self)
-        AdaLoraLayer.__init__(
-            self, in_features=quant_linear_module.infeatures, out_features=quant_linear_module.outfeatures
-        )
-        self.quant_linear_module = quant_linear_module
-        self.weight = quant_linear_module.qweight
-        init_lora_weights = kwargs.pop("init_lora_weights", True)
+        super().__init__()
+        AdaLoraLayer.__init__(self, base_layer)
+
+        # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
+        # for backwards compatibility
+        self.quant_linear_module = base_layer
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
-        self.set_adapter(adapter_name)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         result = self.quant_linear_module(x)
@@ -67,3 +66,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
                 output = output.to(expected_dtype)
             result += output
         return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "adalora." + rep

@@ -16,12 +16,12 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
-from peft.config import PeftConfig
+from peft.tuners.lycoris_utils import LycorisConfig
 from peft.utils import PeftType
 
 
 @dataclass
-class LoHaConfig(PeftConfig):
+class LoHaConfig(LycorisConfig):
     """
     This is the configuration class to store the configuration of a [`LoHaModel`].
 
@@ -90,24 +90,6 @@ class LoHaConfig(PeftConfig):
         default=None,
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
-        },
-    )
-    rank_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-            )
-        },
-    )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
-            )
         },
     )
     modules_to_save: Optional[List[str]] = field(
