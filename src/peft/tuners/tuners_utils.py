@@ -18,7 +18,7 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 import torch
 from torch import nn
@@ -299,6 +299,14 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, BaseTunerLayer):
                 module.unmerge()
 
+    def _unloading_checks(self, adapter_names: Optional[List[str]]):
+        adapters_to_consider = adapter_names or self.active_adapters
+        is_modules_to_save_available = any(
+            self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
+        )
+        if is_modules_to_save_available and len(adapters_to_consider) > 1:
+            raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
+
 
 class BaseTunerLayer(ABC):
     r"""
@@ -310,6 +318,7 @@ class BaseTunerLayer(ABC):
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
+
     active_adapter = None
 
     # All names of layers that may contain adapter (trainable) weights
