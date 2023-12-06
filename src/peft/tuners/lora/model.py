@@ -12,6 +12,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
+import importlib
+import math
 import operator
 import re
 import warnings
@@ -52,10 +56,12 @@ if is_bnb_4bit_available():
 
 class LoraModel(BaseTuner):
     """
-    Creates Low Rank Adapter (Lora) model from a pretrained transformers model.
+    Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
+
+    The method is described in detail in https://arxiv.org/abs/2106.09685.
 
     Args:
-        model ([`~transformers.PreTrainedModel`]): The model to be adapted.
+        model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
@@ -258,6 +264,10 @@ class LoraModel(BaseTuner):
         else:
             target_base_layer = target
 
+        megatron_core = None
+        if lora_config.megatron_config:
+            megatron_core = importlib.import_module(lora_config.megatron_core)
+
         if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
@@ -285,8 +295,10 @@ class LoraModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
+            embedding_kwargs.update(lora_config.loftq_config)
             new_module = Embedding(target, adapter_name, **embedding_kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
+            kwargs.update(lora_config.loftq_config)
             new_module = Conv2d(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
@@ -295,7 +307,30 @@ class LoraModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            kwargs.update(lora_config.loftq_config)
             new_module = Linear(target, adapter_name, **kwargs)
+        elif megatron_core and isinstance(
+            target_base_layer,
+            (megatron_core.tensor_parallel.ColumnParallelLinear, megatron_core.tensor_parallel.RowParallelLinear),
+        ):
+            from .tp_layer import LoraParallelLinear
+
+            megatron_kwargs = kwargs.copy()
+            megatron_config = lora_config.megatron_config
+            if isinstance(megatron_config, dict):
+                transformer_config_class = megatron_core.transformer.transformer_config.TransformerConfig
+                megatron_config = transformer_config_class(**lora_config.megatron_config)
+            megatron_kwargs["megatron_config"] = megatron_config
+            if megatron_kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to True but the target module is `ColumnParallelLinear` "
+                    "or `RowParallelLinear`. "
+                    "Setting fan_in_fan_out to False."
+                )
+                megatron_kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+            new_module = LoraParallelLinear(
+                base_layer=target, adapter_name=adapter_name, backend=megatron_core.tensor_parallel, **megatron_kwargs
+            )
         elif isinstance(target_base_layer, Conv1D):
             if not kwargs["fan_in_fan_out"]:
                 warnings.warn(
@@ -303,6 +338,7 @@ class LoraModel(BaseTuner):
                     "Setting fan_in_fan_out to True."
                 )
                 kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+            kwargs.update(lora_config.loftq_config)
             new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
         else:
             raise ValueError(
@@ -328,15 +364,23 @@ class LoraModel(BaseTuner):
         config_dict[key] = config
         return config
 
-    def _set_adapter_layers(self, enabled=True):
+    def _set_adapter_layers(self, enabled: bool = True) -> None:
         for module in self.model.modules():
             if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
         for active_adapter in self.active_adapters:
             val = self.peft_config[active_adapter].bias
             if val != "none":
@@ -347,7 +391,12 @@ class LoraModel(BaseTuner):
                 warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
         for module in self.model.modules():
             if isinstance(module, LoraLayer):
                 if module.merged:
@@ -406,7 +455,7 @@ class LoraModel(BaseTuner):
         svd_clamp=None,
         svd_full_matrices=True,
         svd_driver=None,
-    ):
+    ) -> None:
         """
         This method adds a new adapter by merging the given adapters with the given weights.
 
@@ -518,8 +567,8 @@ class LoraModel(BaseTuner):
                             current_adapter_lora_B = target.lora_embedding_B[adapter]
                         else:
                             continue
-                        target_lora_A.data += current_adapter_lora_A.data * weight * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data
+                        target_lora_A.data += current_adapter_lora_A.data * math.sqrt(weight) * target.scaling[adapter]
+                        target_lora_B.data += current_adapter_lora_B.data * math.sqrt(weight)
                 elif combination_type == "cat":
                     loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):
@@ -606,7 +655,7 @@ class LoraModel(BaseTuner):
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
@@ -630,7 +679,7 @@ class LoraModel(BaseTuner):
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
-    ):
+    ) -> torch.nn.Module:
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -660,7 +709,7 @@ class LoraModel(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self):
+    def unload(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the lora modules without merging. This gives back the original base
         model.

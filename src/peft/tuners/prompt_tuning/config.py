@@ -73,4 +73,6 @@ class PromptTuningConfig(PromptLearningConfig):
         self.peft_type = PeftType.PROMPT_TUNING
 
         if self.tokenizer_kwargs and (self.prompt_tuning_init != PromptTuningInit.TEXT):
-            raise ValueError(f"tokenizer_kwargs only valid when using prompt_tuning_init='{PromptTuningInit.TEXT}'.")
+            raise ValueError(
+                f"tokenizer_kwargs only valid when using prompt_tuning_init='{PromptTuningInit.TEXT.value}'."
+            )

@@ -35,6 +35,7 @@ from .mapping import (
     get_peft_model,
     inject_adapter_in_model,
 )
+from .mixed_model import PeftMixedModel
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -48,6 +49,7 @@ from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     LoraConfig,
+    LoftQConfig,
     LoraModel,
     LoHaConfig,
     LoHaModel,
@@ -67,6 +69,8 @@ from .tuners import (
     PromptTuningInit,
     MultitaskPromptTuningConfig,
     MultitaskPromptTuningInit,
+    OFTConfig,
+    OFTModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

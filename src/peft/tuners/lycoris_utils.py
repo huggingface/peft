@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import warnings
 from abc import abstractmethod
@@ -108,6 +109,18 @@ class LycorisLayer(BaseTunerLayer):
         ...
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -155,13 +168,16 @@ class LycorisLayer(BaseTunerLayer):
             self.scaling[active_adapter] *= scale
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self._available_adapters:
-                self.base_layer.weight.data -= self.get_delta_weight(active_adapter)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
     def unscale_layer(self, scale=None) -> None:
         for active_adapter in self.active_adapters:
@@ -324,15 +340,23 @@ class LycorisTuner(BaseTuner):
 
         return self.model
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
         self._set_adapter_layers(enabled=False)
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
-    ):
+    ) -> torch.nn.Module:
         r"""
         This method merges the adapter layers into the base model. This is needed if someone wants to use the base
         model as a standalone model.
@@ -352,14 +376,19 @@ class LycorisTuner(BaseTuner):
             progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
         )
 
-    def unload(self):
+    def unload(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the lora modules without merging. This gives back the original base
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
         for module in self.model.modules():
             if isinstance(module, LycorisLayer):
                 if module.merged:
@@ -367,7 +396,7 @@ class LycorisTuner(BaseTuner):
                     module.unmerge()
                 module.set_adapter(adapter_name)
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
