@@ -166,7 +166,6 @@ class Linear(nn.Linear, VeraLayer):
 
         self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.set_adapter(adapter_name)  # TODO: remove?
 
     def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """
@@ -291,10 +290,8 @@ class Embedding(nn.Embedding, VeraLayer):
         **kwargs,
     ) -> None:
         init_vera_weights = kwargs.pop("init_vera_weights", True)
-        # self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs) # TODO: remove?
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.update_layer_embedding(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
-        self.set_adapter(adapter_name)  # TODO: remove?
 
     def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """

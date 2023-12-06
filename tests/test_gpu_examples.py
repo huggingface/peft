@@ -55,8 +55,6 @@ from .testing_utils import (
 )
 
 
-# TODO: add VeRA GPU test here?
-
 # A full testing suite that tests all the necessary features on GPU. The tests should
 # rely on the example scripts to test the features.
 
@@ -252,7 +250,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
     @pytest.mark.multi_gpu_tests
-    def test_causal_lm_training_mutli_gpu_4bit(self):
+    def test_causal_lm_training_multi_gpu_4bit(self):
         r"""
         Test the CausalLM training on a multi-GPU device with 4bit base model. The test would simply fail if the
         adapters are not set correctly.
@@ -440,7 +438,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_causal_lm_training_mutli_gpu(self):  # TODO: 🤨
+    def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
         https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
@@ -564,7 +562,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_seq2seq_lm_training_mutli_gpu(self):
+    def test_seq2seq_lm_training_multi_gpu(self):
         r"""
         Test the Seq2SeqLM training on a multi-GPU device. This test is a converted version of
         https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
@@ -875,7 +873,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_causal_lm_training_mutli_gpu(self):
+    def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
         correctly.
