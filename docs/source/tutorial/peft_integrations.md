@@ -120,5 +120,3 @@ model.disable_adapter()
 ```
 
 To learn more, check out the [Load and train adapters with PEFT](https://huggingface.co/docs/transformers/main/peft) tutorial.
-
-The main model loading method in Transformers, the [`~transformers.AutoModel`] class, supports loading PEFT adapters as long as you have the PEFT library installed. The [`~transformers.AutoModel`] class uses PEFT on the backend to load the adapter weights and configuration file into the base pretrained model.
