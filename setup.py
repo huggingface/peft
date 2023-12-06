@@ -14,6 +14,9 @@
 
 from setuptools import find_packages, setup
 
+
+VERSION = "0.7.0"
+
 extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
@@ -24,7 +27,7 @@ extras["test"] = extras["dev"] + [
 
 setup(
     name="peft",
-    version="0.6.3.dev0",
+    version=VERSION,
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),
