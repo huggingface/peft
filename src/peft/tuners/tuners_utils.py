@@ -299,14 +299,14 @@ class BaseTuner(nn.Module, ABC):
             if isinstance(module, BaseTunerLayer):
                 module.unmerge()
 
-    def _unloading_checks(self, adapter_names: List[str]):
+    def _unloading_checks(self, adapter_names: Optional[List[str]]):
         adapters_to_consider = adapter_names or self.active_adapters
         is_modules_to_save_available = any(
-            self.peft_config[adapter].modules_to_save is not None for adapter in adapters_to_consider
+            self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
         )
         if is_modules_to_save_available and len(adapters_to_consider) > 1:
             raise ValueError(
-                "models having `modules_to_save` specified in LoraConfig support only single adapter for unloading."
+                "Cannot unload multiple adapters that specify `modules_to_save`."
             )
 
 
