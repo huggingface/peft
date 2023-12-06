@@ -305,9 +305,7 @@ class BaseTuner(nn.Module, ABC):
             self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
         )
         if is_modules_to_save_available and len(adapters_to_consider) > 1:
-            raise ValueError(
-                "Cannot unload multiple adapters that specify `modules_to_save`."
-            )
+            raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
 
 class BaseTunerLayer(ABC):
