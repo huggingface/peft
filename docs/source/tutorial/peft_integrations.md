@@ -24,7 +24,7 @@ This tutorial will show you how PEFT can help you manage adapters in Diffusers a
 
 Diffusers is a generative AI library for creating images and videos from text or images with diffusion models. LoRA is an especially popular training method for diffusion models because you can very quickly train and share diffusion models to generate images in new styles. To make it easier to use and try multiple LoRA models, Diffusers uses the PEFT library to help manage different adapters for inference.
 
-For example, load a base model and then load the [artificialguybr/3DRedmond-V1](https://huggingface.co/artificialguybr/3DRedmond-V1) adapter for inference with the [`~diffusers.loaders.StableDiffusionXLLoraLoaderMixin.load_lora_weights`] method. The `adapter_name` argument in the loading method is enabled by PEFT and allows you to set a name for the adapter so it is easier to reference.
+For example, load a base model and then load the [artificialguybr/3DRedmond-V1](https://huggingface.co/artificialguybr/3DRedmond-V1) adapter for inference with the [`~diffusers.loaders.LoraLoaderMixin.load_lora_weights`] method. The `adapter_name` argument in the loading method is enabled by PEFT and allows you to set a name for the adapter so it is easier to reference.
 
 ```py
 import torch
@@ -43,7 +43,7 @@ image
 ```
 
 <div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/ybelkada/documentation-images/blob/main/test-lora-diffusers.png"/>
+    <img src="https://huggingface.co/datasets/ybelkada/documentation-images/resolve/main/test-lora-diffusers.png"/>
 </div>
 
 Now let's try another cool LoRA model, [ostris/super-cereal-sdxl-lora](https://huggingface.co/ostris/super-cereal-sdxl-lora). All you need to do is load and name this new adapter with `adapter_name`, and use the [`~diffusers.loaders.UNet2DConditionLoadersMixin.set_adapters`] method to set it as the currently active adapter.
@@ -60,7 +60,7 @@ image
 ```
 
 <div class="flex justify-center">
-    <img src="https://huggingface.co/datasets/ybelkada/documentation-images/blob/main/test-lora-diffusers-2.png"/>
+    <img src="https://huggingface.co/datasets/ybelkada/documentation-images/resolve/main/test-lora-diffusers-2.png"/>
 </div>
 
 Finally, you can call the [`~diffusers.loaders.UNet2DConditionLoadersMixin.disable_lora`] method to restore the base model.
