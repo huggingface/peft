@@ -2,9 +2,10 @@ import unittest
 
 import torch
 import torch.nn as nn
-from peft.tuners.lora import Linear as LoraLinear
-from peft.tuners.lora import Embedding as LoraEmbedding
+
 from peft.tuners.lora import Conv2d as LoraConv2d
+from peft.tuners.lora import Embedding as LoraEmbedding
+from peft.tuners.lora import Linear as LoraLinear
 
 
 class SimpleModel(nn.Module):
@@ -47,7 +48,7 @@ class SimpleConv2DModel(nn.Module):
 
 
 class SimpleLorALinearModel(nn.Module):
-    """ Same as SimpleModel but wraps Linear in Lora layer """
+    """Same as SimpleModel but wraps Linear in Lora layer"""
 
     def __init__(self):
         super(SimpleLorALinearModel, self).__init__()
@@ -55,8 +56,9 @@ class SimpleLorALinearModel(nn.Module):
         self.embedding_layer = nn.Embedding(1000, 768)
         self.layer_norm = nn.LayerNorm(768)
         self.linear_transform_base = nn.Linear(768, 256)
-        self.linear_transform = LoraLinear(self.linear_transform_base, adapter_name="test_linear", r=8, lora_alpha=16,
-                                           lora_dropout=0.05)
+        self.linear_transform = LoraLinear(
+            self.linear_transform_base, adapter_name="test_linear", r=8, lora_alpha=16, lora_dropout=0.05
+        )
 
     def forward(self, input_ids):
         embedded_output = self.embedding_layer(input_ids)
@@ -67,14 +69,15 @@ class SimpleLorALinearModel(nn.Module):
 
 
 class SimpleLorAEmbeddingModel(nn.Module):
-    """ Same as SimpleModel but wraps Embedding in Lora layer """
+    """Same as SimpleModel but wraps Embedding in Lora layer"""
 
     def __init__(self):
         super(SimpleLorAEmbeddingModel, self).__init__()
 
         self.embedding_layer_base = nn.Embedding(1000, 768)
-        self.embedding_layer = LoraEmbedding(self.embedding_layer_base, adapter_name="test_embedding", r=8,
-                                             lora_alpha=16, lora_dropout=0.05)
+        self.embedding_layer = LoraEmbedding(
+            self.embedding_layer_base, adapter_name="test_embedding", r=8, lora_alpha=16, lora_dropout=0.05
+        )
         self.layer_norm = nn.LayerNorm(768)
         self.linear_transform = nn.Linear(768, 256)
 
@@ -87,7 +90,7 @@ class SimpleLorAEmbeddingModel(nn.Module):
 
 
 class SimpleLorAConv2DModel(nn.Module):
-    """ Same as SimpleModel but wraps Conv2D in Lora layer """
+    """Same as SimpleModel but wraps Conv2D in Lora layer"""
 
     def __init__(self):
         super(SimpleLorAConv2DModel, self).__init__()
@@ -95,8 +98,9 @@ class SimpleLorAConv2DModel(nn.Module):
         self.embedding_layer = nn.Embedding(1000, 768)
         self.layer_norm = nn.LayerNorm(768)
         self.conv2d_transform_base = nn.Conv2d(1, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
-        self.conv2d_transform = LoraConv2d(self.conv2d_transform_base, adapter_name="test_conv2d", r=8, lora_alpha=16,
-                                           lora_dropout=0.05)
+        self.conv2d_transform = LoraConv2d(
+            self.conv2d_transform_base, adapter_name="test_conv2d", r=8, lora_alpha=16, lora_dropout=0.05
+        )
 
     def forward(self, input_ids):
         # Additional layers for your custom model
@@ -150,4 +154,3 @@ class TestAutoCast(unittest.TestCase):
         with torch.autocast(enabled=True, dtype=torch.float16, device_type="cuda"):
             outputs = model(input_ids)
             self.assertEqual(outputs.dtype, torch.float16)
-
