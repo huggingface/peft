@@ -341,7 +341,7 @@ class PeftCommonTester:
             self.check_modelcard(tmp_dirname, model)
             self.check_config_json(tmp_dirname, model)
 
-    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs):
+    def _test_save_pretrained_selected_adapters(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         if issubclass(config_cls, (AdaLoraConfig, VeraConfig)):
             # AdaLora does not support adding more than 1 adapter
             return

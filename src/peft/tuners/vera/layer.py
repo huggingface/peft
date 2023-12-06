@@ -19,6 +19,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
@@ -26,12 +27,10 @@ from peft.utils.other import transpose
 
 class VeraLayer(BaseTunerLayer):
     # List all names of layers that may contain adapter weights
-    adapter_layer_names = [
-        "vera_lambda_b",
-        "vera_lambda_d",
-    ]
+    adapter_layer_names = ("vera_lambda_b", "vera_lambda_d")
 
-    def __init__(self, in_features: int, out_features: int, **kwargs):
+    def __init__(self, base_layer: nn.Module, **kwargs):
+        self.base_layer = base_layer 
         self.r = {}
         self.vera_dropout = nn.ModuleDict({})
 
@@ -41,6 +40,15 @@ class VeraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+
+        base_layer = self.get_base_layer()
+        if isinstance(base_layer, nn.Linear):
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, nn.Embedding):
+            in_features, out_features = base_layer.num_embeddings, base_layer.embedding_dim
+        elif isinstance(base_layer, Conv1D):
+            in_features, out_features = base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
+
         self.in_features = in_features
         self.out_features = out_features
         self.kwargs = kwargs
@@ -80,7 +88,7 @@ class VeraLayer(BaseTunerLayer):
         if init_vera_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -107,7 +115,7 @@ class VeraLayer(BaseTunerLayer):
         if init_vera_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
-        weight = getattr(self, "weight", None)
+        weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
@@ -133,9 +141,8 @@ class Linear(nn.Linear, VeraLayer):
     # Vera implemented in a dense layer
     def __init__(
         self,
+        base_layer,
         adapter_name: str,
-        in_features: int,
-        out_features: int,
         r: int = 0,
         vera_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
@@ -150,14 +157,14 @@ class Linear(nn.Linear, VeraLayer):
         # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
         # added robustness is not big enough for Linear.
 
-        VeraLayer.__init__(self, in_features=in_features, out_features=out_features)
+        VeraLayer.__init__(self, base_layer, **kwargs)
         # Freezing the pre-trained weight matrix
 
         self.fan_in_fan_out = fan_in_fan_out
 
         self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
-        self.set_adapter(adapter_name)
+        self.set_adapter(adapter_name) # TODO: remove?
 
     def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """
@@ -176,10 +183,11 @@ class Linear(nn.Linear, VeraLayer):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self.vera_lambda_d.keys():
+                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = self.weight.data.clone()
+                    orig_weights = base_layer.weight.data.clone()
 
                     orig_weights += self.get_delta_weight(active_adapter, vera_A, vera_B)
 
@@ -188,9 +196,9 @@ class Linear(nn.Linear, VeraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights
                 else:
-                    self.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self, vera_A: torch.Tensor, vera_B: torch.Tensor) -> None:
@@ -200,8 +208,7 @@ class Linear(nn.Linear, VeraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
-
-                self.weight.data -= self.get_delta_weight(active_adapter, vera_A, vera_B)
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter, vera_A, vera_B)
 
     def get_delta_weight(self, adapter, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
         """
@@ -242,22 +249,19 @@ class Linear(nn.Linear, VeraLayer):
 
         return output_tensor
 
-    def _linear(self, input: torch.Tensor) -> torch.Tensor:
-        return F.linear(input, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)
-
     # we use a forward hook to populate vera_A and vera_B
     # this indirectly enforces the constraint of only supporting a single vera shape for now.
-    def forward(self, x: torch.Tensor, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, vera_A: torch.Tensor, vera_B: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._linear(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
@@ -277,19 +281,18 @@ class Embedding(nn.Embedding, VeraLayer):
     # Vera implemented in a Embedding layer
     def __init__(
         self,
+        base_layer,
         adapter_name: str,
-        num_embeddings: int,
-        embedding_dim: int,
         r: int = 0,
         vera_dropout: float = 0.0,
         d_initial: float = 1.0,
         **kwargs,
     ) -> None:
         init_vera_weights = kwargs.pop("init_vera_weights", True)
-        self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs)
-        VeraLayer.__init__(self, in_features=num_embeddings, out_features=embedding_dim)
+        # self._init_empty_weights(nn.Embedding, num_embeddings, embedding_dim, **kwargs) # TODO: remove?
+        VeraLayer.__init__(self, base_layer, **kwargs)
         self.update_layer_embedding(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
-        self.set_adapter(adapter_name)
+        self.set_adapter(adapter_name) # TODO: remove?
 
     def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
         """
@@ -308,10 +311,11 @@ class Embedding(nn.Embedding, VeraLayer):
             )
         for active_adapter in self.active_adapters:
             if active_adapter in self.vera_lambda_d.keys():
+                base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = self.weight.data.copy()
+                    orig_weights = base_layer.weight.data.copy()
                     orig_weights += self.get_delta_weight(active_adapter, vera_A, vera_B)
 
                     if not torch.isfinite(orig_weights).all():
@@ -319,9 +323,9 @@ class Embedding(nn.Embedding, VeraLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights
                 else:
-                    self.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self, vera_A: torch.Tensor, vera_B: torch.Tensor) -> None:
@@ -383,15 +387,15 @@ class Embedding(nn.Embedding, VeraLayer):
             sparse=self.sparse,
         )
 
-    def forward(self, x: torch.Tensor, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, vera_A: torch.Tensor, vera_B: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self._embed(x)
+            result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self._embed(x)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self._embed(x)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d:
                     continue

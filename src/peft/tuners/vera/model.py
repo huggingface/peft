@@ -189,6 +189,8 @@ class VeraModel(BaseTuner):
                 "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection` to `True` to guarantee restoring the checkpoint correctly on all system configurations."
             )
 
+        self.to(self.dtype)
+
     def _check_new_adapter_config(self, config: VeraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -327,30 +329,29 @@ class VeraModel(BaseTuner):
     def _create_new_module(vera_config, adapter_name, target, **kwargs):
         bias = kwargs.pop("bias", False)
 
-        if isinstance(target, torch.nn.Embedding):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        if isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
-            in_features, out_features = target.num_embeddings, target.embedding_dim
             new_module = Embedding(
+                target,
                 adapter_name,
-                in_features,
-                out_features,
                 d_initial=vera_config.d_initial,
                 **embedding_kwargs,
             )
         else:
-            if isinstance(target, torch.nn.Linear):
-                in_features, out_features = target.in_features, target.out_features
+            if isinstance(target_base_layer, torch.nn.Linear):
                 if kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                         "Setting fan_in_fan_out to False."
                     )
                     kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = False
-            elif isinstance(target, Conv1D):
-                in_features, out_features = (
-                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                )
+            elif isinstance(target_base_layer, Conv1D):
                 kwargs["is_target_conv_1d_layer"] = True
                 if not kwargs["fan_in_fan_out"]:
                     warnings.warn(
@@ -364,9 +365,8 @@ class VeraModel(BaseTuner):
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(
+                target,
                 adapter_name,
-                in_features,
-                out_features,
                 bias=bias,
                 d_initial=vera_config.d_initial,
                 **kwargs,
@@ -438,24 +438,14 @@ class VeraModel(BaseTuner):
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, VeraLayer):
-                if isinstance(target, nn.Embedding):
-                    new_module = torch.nn.Embedding(target.in_features, target.out_features)
-                else:
-                    bias = target.bias is not None
-                    if getattr(target, "is_target_conv_1d_layer", False):
-                        new_module = Conv1D(target.out_features, target.in_features)
-                    else:
-                        new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
-                if merge:
-                    if isinstance(target, Linear):
-                        target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge)
-                    elif isinstance(target, Embedding):
-                        target.merge(self.vera_embedding_A, self.vera_embedding_B, safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
 
-            # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+            if hasattr(target, "base_layer"):
+                if merge:
+                    target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge)
+
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
+            elif isinstance(target, ModulesToSaveWrapper):
+                # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
