@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from accelerate.hooks import AlignDevicesHook
-from accelerate.utils import named_module_tensors
+from accelerate.utils import named_module_tensors, offload_state_dict
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -272,7 +272,11 @@ class Linear(nn.Module, LoraLayer):
 
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                if (
+                    hasattr(base_layer, "_hf_hook")
+                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
+                    and base_layer._hf_hook.offload
+                ):
                     base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
@@ -289,10 +293,18 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
 
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                if (
+                    hasattr(base_layer, "_hf_hook")
+                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
+                    and base_layer._hf_hook.offload
+                ):
                     base_layer._hf_hook.weights_map = {
                         name: param.to("cpu") for name, param in named_module_tensors(base_layer)
                     }
+                    # offload weights map to disk if original device is the disk
+                    if torch.device("meta") in base_layer._hf_hook.original_devices.values():
+                        offload_folder = "offload_dir"
+                        offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
                 self.merged_adapters.append(active_adapter)
 
@@ -413,7 +425,11 @@ class Embedding(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                if (
+                    hasattr(base_layer, "_hf_hook")
+                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
+                    and base_layer._hf_hook.offload
+                ):
                     base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
@@ -430,10 +446,18 @@ class Embedding(nn.Module, LoraLayer):
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
 
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                if (
+                    hasattr(base_layer, "_hf_hook")
+                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
+                    and base_layer._hf_hook.offload
+                ):
                     base_layer._hf_hook.weights_map = {
                         name: param.to("cpu") for name, param in named_module_tensors(base_layer)
                     }
+                    # offload weights map to disk if original device is the disk
+                    if torch.device("meta") in base_layer._hf_hook.original_devices.values():
+                        offload_folder = "offload_dir"
+                        offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
                 self.merged_adapters.append(active_adapter)
@@ -563,7 +587,11 @@ class Conv2d(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                if (
+                    hasattr(base_layer, "_hf_hook")
+                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
+                    and base_layer._hf_hook.offload
+                ):
                     base_layer._hf_hook.pre_forward(base_layer)
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
@@ -579,10 +607,18 @@ class Conv2d(nn.Module, LoraLayer):
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
 
-                if hasattr(base_layer, "_hf_hook") and isinstance(base_layer._hf_hook, AlignDevicesHook):
+                if (
+                    hasattr(base_layer, "_hf_hook")
+                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
+                    and base_layer._hf_hook.offload
+                ):
                     base_layer._hf_hook.weights_map = {
                         name: param.to("cpu") for name, param in named_module_tensors(base_layer)
                     }
+                    # offload weights map to disk if original device is the disk
+                    if torch.device("meta") in base_layer._hf_hook.original_devices.values():
+                        offload_folder = "offload_dir"
+                        offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
                     base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
                 self.merged_adapters.append(active_adapter)
