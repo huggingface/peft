@@ -377,15 +377,7 @@ class LoraModel(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
 
-        adapters_to_consider = adapter_names or self.active_adapters
-        is_modules_to_save_available = any(
-            self.peft_config[adapter].modules_to_save is not None for adapter in adapters_to_consider
-        )
-        if is_modules_to_save_available and len(adapters_to_consider) > 1:
-            raise ValueError(
-                "models having `modules_to_save` specified in LoraConfig support only single adapter for unloading."
-            )
-
+        self._unloading_checks(adapter_names)
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
