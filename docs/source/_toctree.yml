@@ -39,6 +39,8 @@
 
 - title: Developer guides
   sections:
+  - local: developer_guides/quantization
+    title: Quantization
   - local: developer_guides/custom_models
     title: Working with custom models
   - local: developer_guides/low_level_api
