@@ -52,3 +52,7 @@ A `PeftModel` for getting extracting features/embeddings from transformer models
 
 [[autodoc]] PeftModelForFeatureExtraction
     - all
+
+## Utilities
+
+[[autodoc]] get_peft_model

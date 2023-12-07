@@ -7,6 +7,11 @@
   - local: install
     title: Installation
 
+- title: Tutorial
+  sections:
+  - local: tutorial/peft_model_config
+    title: PEFT configurations and models
+
 - title: Task guides
   sections:
   - local: task_guides/seq2seq-prefix-tuning
