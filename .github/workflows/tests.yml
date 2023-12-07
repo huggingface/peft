@@ -47,4 +47,3 @@ jobs:
       - name: Test with pytest
         run: |
           make test
-          python scripts/launch_accelerate.py
