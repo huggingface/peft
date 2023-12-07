@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
+from accelerate.test_utils.testing import run_command
+from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -933,3 +935,13 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+@require_bitsandbytes
+@require_torch_gpu
+class MultiprocessTester(unittest.TestCase):
+    def test_notebook_launcher(self):
+        script_path = os.path.join("scripts", "launch_notebook_mp.py")
+        cmd = ["python", script_path]
+        with patch_environment(omp_num_threads=1):
+            run_command(cmd, env=os.environ.copy())

@@ -35,15 +35,6 @@ from peft.utils import (
 from .layer import Conv2d, IA3Layer, Linear
 
 
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-    from .bnb import Linear8bitLt
-
-if is_bnb_4bit_available():
-    from .bnb import Linear4bit
-
-
 class IA3Model(BaseTuner):
     """
     Creates a Infused Adapter by Inhibiting and Amplifying Inner Activations ((IA)^3) model from a pretrained
@@ -86,6 +77,15 @@ class IA3Model(BaseTuner):
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import Linear8bitLt
+
+        if is_bnb_4bit_available():
+            from .bnb import Linear4bit
+
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
