@@ -86,7 +86,6 @@ class IA3Model(BaseTuner):
         if is_bnb_4bit_available():
             from .bnb import Linear4bit
 
-
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
