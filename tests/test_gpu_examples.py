@@ -21,8 +21,8 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
-from accelerate.utils import patch_environment
 from accelerate.test_utils.testing import run_command
+from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
     AutoModelForCausalLM,
