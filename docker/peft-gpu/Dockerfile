@@ -37,8 +37,9 @@ ENV PATH /opt/conda/bin:$PATH
 
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
+# TODO: unpin bitsandbytes when error is solved
 RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
+    python3 -m pip install --no-cache-dir "bitsandbytes<0.41.3" optimum auto-gptq
 
 # Install apt libs
 RUN apt-get update && \
