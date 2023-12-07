@@ -13,25 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-
-from .config import IA3Config
-from .layer import Conv2d, IA3Layer, Linear
-from .model import IA3Model
+import pytest
 
 
-__all__ = ["Conv2d", "IA3Config", "IA3Layer", "IA3Model", "Linear"]
+def pytest_addoption(parser):
+    parser.addoption("--regression", action="store_true", default=False, help="run regression tests")
 
 
-def __getattr__(name):
-    if (name == "Linear8bitLt") and is_bnb_available():
-        from .bnb import Linear8bitLt
+def pytest_configure(config):
+    config.addinivalue_line("markers", "regression: mark regression tests")
 
-        return Linear8bitLt
 
-    if (name == "Linear4bit") and is_bnb_4bit_available():
-        from .bnb import Linear4bit
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--regression"):
+        return
 
-        return Linear4bit
-
-    raise AttributeError(f"module {__name__} has no attribute {name}")
+    skip_regression = pytest.mark.skip(reason="need --regression option to run regression tests")
+    for item in items:
+        if "regression" in item.keywords:
+            item.add_marker(skip_regression)

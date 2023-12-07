@@ -111,7 +111,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         self.lora_B[adapter_name] = lora_b
         self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
 
         weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:

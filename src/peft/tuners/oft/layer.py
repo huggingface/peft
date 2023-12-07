@@ -121,6 +121,18 @@ class OFTLayer(nn.Module, LycorisLayer):
         pass
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
+        """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
@@ -171,6 +183,9 @@ class OFTLayer(nn.Module, LycorisLayer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return

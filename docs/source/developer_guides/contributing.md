@@ -50,7 +50,7 @@ pytest tests/ -k <name-of-test>
 
 This should finish much quicker and allow faster iteration. Before creating the PR, however, please still run the whole test suite, as some changes can inadvertently break tests that at first glance are unrelated.
 
-If your change is specific to a hardware setting (e.g. it requires CUDA), take a look at `tests/test_gpu_examples.py` and `tests/test_common_gpu.py` – maybe it makes sense to add a test there.
+If your change is specific to a hardware setting (e.g. it requires CUDA), take a look at `tests/test_gpu_examples.py` and `tests/test_common_gpu.py` – maybe it makes sense to add a test there. If your change could have an effect on saving and loading models, please run the tests with the `--regression` flag to trigger regression tests.
 
 It can happen that while you’re working on your PR, the underlying code base changes due to other changes being merged. If that happens – especially when there is a merge conflict – please update your branch to be on the latest changes. This can be a merge or a rebase, whatever you prefer. We will squash and merge the PR once it’s ready.
 
