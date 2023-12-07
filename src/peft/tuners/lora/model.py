@@ -45,15 +45,6 @@ from .gptq import QuantLinear
 from .layer import Conv2d, Embedding, Linear, LoraLayer
 
 
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-    from .bnb import Linear8bitLt
-
-if is_bnb_4bit_available():
-    from .bnb import Linear4bit
-
-
 class LoraModel(BaseTuner):
     """
     Creates Low Rank Adapter (LoRA) model from a pretrained transformers model.
@@ -253,6 +244,15 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import Linear8bitLt
+
+        if is_bnb_4bit_available():
+            from .bnb import Linear4bit
+
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
         AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 

@@ -33,14 +33,6 @@ from .gptq import SVDQuantLinear
 from .layer import AdaLoraLayer, RankAllocator, SVDLinear
 
 
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-    from .bnb import SVDLinear8bitLt
-if is_bnb_4bit_available():
-    from .bnb import SVDLinear4bit
-
-
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
@@ -159,6 +151,14 @@ class AdaLoraModel(LoraModel):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import SVDLinear8bitLt
+        if is_bnb_4bit_available():
+            from .bnb import SVDLinear4bit
+
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
         AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
