@@ -101,7 +101,7 @@ if is_bnb_available():
                 state.reset_grads()
                 self.merged_adapters.append(active_adapter)
 
-        def unmerge(self):
+        def unmerge(self) -> None:
             """
             This method unmerges all merged adapter layers from the base weights.
             """
@@ -245,7 +245,7 @@ if is_bnb_4bit_available():
                 )
                 self.merged_adapters.append(active_adapter)
 
-        def unmerge(self):
+        def unmerge(self) -> None:
             """
             This method unmerges all merged adapter layers from the base weights.
             """
