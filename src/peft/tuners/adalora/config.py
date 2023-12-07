@@ -47,7 +47,15 @@ class AdaLoraConfig(LoraConfig):
     beta2: float = field(default=0.85, metadata={"help": "Hyperparameter of EMA."})
     orth_reg_weight: float = field(default=0.5, metadata={"help": "The orthogonal regularization coefficient."})
     total_step: Optional[int] = field(default=None, metadata={"help": "The total training steps."})
-    rank_pattern: Optional[dict] = field(default=None, metadata={"help": "The saved rank pattern."})
+    rank_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.ADALORA
