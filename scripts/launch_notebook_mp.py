@@ -21,10 +21,10 @@
 
 import torch
 import peft
-from accelerate import debug_launcher
+from accelerate import notebook_launcher
 
 
-def func():
+def init():
     class MyModule(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -38,7 +38,7 @@ def func():
 
 
 def main():
-    debug_launcher(func)
+    notebook_launcher(init, (), num_processes=2)
 
 
 if __name__ == "__main__":
