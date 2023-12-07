@@ -102,6 +102,9 @@ if is_bnb_available():
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
@@ -243,6 +246,9 @@ if is_bnb_4bit_available():
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self):
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
