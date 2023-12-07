@@ -49,6 +49,11 @@ jobs:
         run: |
           source activate peft
           make tests_core_single_gpu
+
+      - name: Run regression tests on single GPU
+        run: |
+          source activate peft
+          make tests_regression
           
       - name: Generate Report
         if: always()
