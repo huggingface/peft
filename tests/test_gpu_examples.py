@@ -265,7 +265,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 load_in_4bit=True,
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -454,7 +454,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="auto",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_int8_training(model)
@@ -578,7 +578,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="balanced",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_int8_training(model)
@@ -889,7 +889,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             model = prepare_model_for_kbit_training(model)
 

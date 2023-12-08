@@ -317,7 +317,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="balanced")
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+        self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
         model = get_peft_model(model, lora_config)
         self.assertTrue(isinstance(model, PeftModel))
@@ -342,7 +342,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForSeq2SeqLM.from_pretrained(self.seq2seq_model_id, device_map="balanced", load_in_8bit=True)
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+        self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
         model = get_peft_model(model, lora_config)
         self.assertTrue(isinstance(model, PeftModel))
