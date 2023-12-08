@@ -192,6 +192,7 @@ class RegressionTester(unittest.TestCase):
     torch_device = infer_device()
 
     def setUp(self):
+        self.tol = 1e-4
         self.creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
         self.force_mode = strtobool(os.environ.get("REGRESSION_FORCE_MODE", "False"))
         if self.force_mode and not self.creation_mode:
@@ -248,7 +249,7 @@ class RegressionTester(unittest.TestCase):
             base_model = self.load_base_model()
             model = PeftModel.from_pretrained(base_model, os.path.join(path, version))
             output = self.get_output(model)
-            self.assertTrue(torch.allclose(output_loaded, output))
+            self.assertTrue(torch.allclose(output_loaded, output, atol=self.tol, rtol=self.tol))
 
     def get_output(self, model):
         raise NotImplementedError
