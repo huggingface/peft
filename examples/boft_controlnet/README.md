@@ -14,6 +14,7 @@ conda activate peft
 conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.8 -c pytorch -c nvidia
 pip install transformers accelerate evaluate datasets wandb diffusers==0.17.1
 conda install xformers -c xformers
+pip install scikit-image opencv-python face-alignment==1.4.1
 # pip install git+https://github.com/huggingface/peft
 ```
 

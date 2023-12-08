@@ -29,6 +29,99 @@ check_min_version("0.10.0.dev0")
 device = torch.device("cuda:0")
 
 
+detect_model = face_alignment.FaceAlignment(
+    face_alignment.LandmarksType.TWO_D, device="cuda:0", flip_input=False
+)
+
+end_list = np.array([17, 22, 27, 42, 48, 31, 36, 68], dtype=np.int32) - 1
+
+
+def plot_kpts(image, kpts, color='g'):
+    ''' Draw 68 key points
+    Args: 
+        image: the input image
+        kpt: (68, 3).
+    '''
+    if color == 'r':
+        c = (255, 0, 0)
+    elif color == 'g':
+        c = (0, 255, 0)
+    elif color == 'b':
+        c = (255, 0, 0)
+    image = image.copy()
+    kpts = kpts.copy()
+    radius = max(int(min(image.shape[0], image.shape[1]) / 200), 1)
+    for i in range(kpts.shape[0]):
+        st = kpts[i, :2]
+        if kpts.shape[1] == 4:
+            if kpts[i, 3] > 0.5:
+                c = (0, 255, 0)
+            else:
+                c = (0, 0, 255)
+        image = cv2.circle(image, (int(st[0]), int(st[1])), radius, c, radius * 2)
+        if i in end_list:
+            continue
+        ed = kpts[i + 1, :2]
+        image = cv2.line(
+            image, (int(st[0]), int(st[1])), (int(ed[0]), int(ed[1])), (255, 255, 255), radius
+        )
+    return image
+
+
+def generate_landmark2d(inputpath, savepath, gt_lmk_folder, vis=False):
+
+    # print(f'generate 2d landmarks')
+    os.makedirs(savepath, exist_ok=True)
+
+    imagepath_list = sorted(glob(f"{inputpath}/pred*.png"))
+
+    for imagepath in tqdm(imagepath_list):
+
+        name = Path(imagepath).stem
+        idx = val_data[int(name.split('_')[-1])]["image"].split(".")[0]
+        txt_path = os.path.join(savepath, f'{idx}.txt')
+        overlap_path = os.path.join(savepath, f'{idx}_overlay.jpg')
+
+        if (not os.path.exists(txt_path)) or (not os.path.exists(overlap_path)):
+
+            image = imread(imagepath)[:, :, :3]
+            out = detect_model.get_landmarks(image)
+            if out is None:
+                continue
+            
+            kpt = out[0].squeeze()
+            np.savetxt(txt_path, kpt)
+
+            if vis:
+                image = cv2.imread(imagepath)
+                image_point = plot_kpts(image, kpt)
+                gt_image = cv2.resize(cv2.imread(os.path.join(gt_lmk_folder, f"{idx}_overlay.jpg")), (512, 512))
+                cv2.imwrite(overlap_path, np.concatenate([image_point, gt_image], axis=1))
+
+
+def landmark_comparison(lmk_folder, gt_lmk_folder):
+    # print(f'calculate reprojection error')
+    lmk_err = []
+
+    pbar = tqdm(range(len(val_data)))
+    for i in pbar:
+
+        line = val_data[i]
+        img_name = line["image"].split(".")[0]
+        lmk1_path = os.path.join(gt_lmk_folder, f'{img_name}.txt')
+        lmk1 = np.loadtxt(lmk1_path) / 2
+        lmk2_path = os.path.join(lmk_folder, f'{img_name}.txt')
+        if not os.path.exists(lmk2_path):
+            print(f'{lmk2_path} not exist')
+            continue
+        lmk2 = np.loadtxt(lmk2_path)
+        lmk_err.append(np.mean(np.linalg.norm(lmk1 - lmk2, axis=1)))
+        pbar.set_description(f'lmk_err: {np.mean(lmk_err):.5f}')
+
+    # print(np.mean(lmk_err))
+    np.save(os.path.join(lmk_folder, 'lmk_err.npy'), lmk_err)
+
+
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -73,7 +166,15 @@ def main(args):
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
     
     if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir, exist_ok=True)      
+        os.makedirs(args.output_dir, exist_ok=True)
+
+    gt_lmk_dir = os.path.join(args.output_dir, "gt_lmk")
+    if not os.path.exists(gt_lmk_dir):
+        os.makedirs(gt_lmk_dir, exist_ok=True)
+
+    pred_lmk_dir = os.path.join(args.output_dir, "pred_lmk")
+    if not os.path.exists(pred_lmk_dir):
+        os.makedirs(pred_lmk_dir, exist_ok=True)        
 
     exist_lst = [int(img.split("_")[-1][:-4]) for img in os.listdir(args.output_dir)]
     all_lst = np.arange(len(val_dataset))
@@ -101,12 +202,18 @@ def main(args):
 
             pred_img.save(output_path)
 
+            generate_landmark2d(pred_lmk_dir, gt_lmk_dir, vis=False)
+
     # control_img = Image.fromarray(
     #     (data["conditioning_pixel_value"] * 255).numpy().transpose(1, 2, 0).astype(np.uint8)
     # )
     # gt_img = Image.fromarray(
     #     ((data["pixel_value"] + 1.0) * 0.5 * 255).numpy().transpose(1, 2, 0).astype(np.uint8)
     # )
+
+    if len(os.listdir(pred_lmk_dir)) == len(val_dataset) and len(os.listdir(gt_lmk_dir)) == len(val_dataset):
+        landmark_comparison(pred_lmk_dir, gt_lmk_folder)
+        print(args.method)
 
 
 if __name__ == "__main__":

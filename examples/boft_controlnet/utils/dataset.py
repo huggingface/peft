@@ -1,13 +1,14 @@
 import json
 import os
-import torch
+import random
 import wandb
 from diffusers import UniPCMultistepScheduler, DDIMScheduler
 from PIL import Image
+import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
-
+from datasets import load_dataset
 
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
@@ -20,195 +21,191 @@ def image_grid(imgs, rows, cols):
     return grid
 
 
-class DeepFashionDenseposeDataset(Dataset):
-    def __init__(self, split='train', resolution=512, full=False):
+def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerator):
 
-        self.data = []
-        self.split = split
-        self.resolution = resolution
+    pipeline = LightControlNetPipeline.from_pretrained(
+        args.pretrained_model_name_or_path,
+        controlnet=accelerator.unwrap_model(controlnet, keep_fp32_wrapper=True),
+        unet=accelerator.unwrap_model(unet, keep_fp32_wrapper=True).model,
+        text_encoder=accelerator.unwrap_model(text_encoder, keep_fp32_wrapper=True),
+        safety_checker=None,
+        revision=args.revision,
+    )
 
-        if full:
-            json_path = './data/DeepFashion/{}/prompt_{}_blip_full.json'.format(split, split)
-        else:
-            json_path = './data/DeepFashion/{}/prompt_{}_blip.json'.format(split, split)
+    pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
+    pipeline = pipeline.to(accelerator.device)
 
-        with open(json_path, 'rt') as f:    # fill50k, COCO
-            for line in f:
-                self.data.append(json.loads(line))
+    pipeline.set_progress_bar_config(disable=True)
 
-        self.image_transforms = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution),
+    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
+
+    image_logs = []
+
+    for idx in range(args.num_validation_images):
+        data = val_dataset[idx]
+        validation_prompt = data['text']
+        validation_image = data['conditioning_pixel_values']
+
+        image = pipeline(
+            validation_prompt,
+            [validation_image],
+            num_inference_steps=50,
+            generator=generator,
+        )[0][0]
+
+        image_logs.append({
+            "validation_image": validation_image,
+            "image": image,
+            "validation_prompt": validation_prompt,
+        })
+
+    for tracker in accelerator.trackers:
+        formatted_images = []
+
+        for log in image_logs:
+            image = log["image"]
+            validation_prompt = log["validation_prompt"]
+            validation_image = log["validation_image"]
+
+            formatted_images.append(
+                wandb.Image(validation_image, caption="Controlnet conditioning")
+            )
+
+            image = wandb.Image(image, caption=validation_prompt)
+            formatted_images.append(image)
+
+        tracker.log({"validation": formatted_images})
+
+    del pipeline
+    torch.cuda.empty_cache()
+
+
+def make_dataset(args, tokenizer, accelerator, split="train"):
+    # Get the datasets: you can either provide your own training and evaluation files (see below)
+    # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
+
+    # In distributed training, the load_dataset function guarantees that only one local process can concurrently
+    # download the dataset.
+    if args.dataset_name is not None:
+        # Downloading and loading a dataset from the hub.
+        dataset = load_dataset(
+            args.dataset_name,
+            args.dataset_config_name,
+            cache_dir=args.cache_dir,
+        )
+    else:
+        if args.train_data_dir is not None:
+            dataset = load_dataset(
+                args.train_data_dir,
+                cache_dir=args.cache_dir,
+            )
+        # See more about loading custom images at
+        # https://huggingface.co/docs/datasets/v2.0.0/en/dataset_script
+
+    # Preprocessing the datasets.
+    # We need to tokenize inputs and targets.
+    column_names = dataset[split].column_names
+
+    # 6. Get the column names for input/target.
+    if args.image_column is None:
+        image_column = column_names[0]
+        logger.info(f"image column defaulting to {image_column}")
+    else:
+        image_column = args.image_column
+        if image_column not in column_names:
+            raise ValueError(
+                f"`--image_column` value '{args.image_column}' not found in dataset columns. Dataset columns are: {', '.join(column_names)}"
+            )
+
+    if args.caption_column is None:
+        caption_column = column_names[1]
+        logger.info(f"caption column defaulting to {caption_column}")
+    else:
+        caption_column = args.caption_column
+        if caption_column not in column_names:
+            raise ValueError(
+                f"`--caption_column` value '{args.caption_column}' not found in dataset columns. Dataset columns are: {', '.join(column_names)}"
+            )
+
+    if args.conditioning_image_column is None:
+        conditioning_image_column = column_names[2]
+        logger.info(f"conditioning image column defaulting to {conditioning_image_column}")
+    else:
+        conditioning_image_column = args.conditioning_image_column
+        if conditioning_image_column not in column_names:
+            raise ValueError(
+                f"`--conditioning_image_column` value '{args.conditioning_image_column}' not found in dataset columns. Dataset columns are: {', '.join(column_names)}"
+            )
+
+    def tokenize_captions(examples, is_train=True):
+        captions = []
+        for caption in examples[caption_column]:
+            if random.random() < args.proportion_empty_prompts:
+                captions.append("")
+            elif isinstance(caption, str):
+                captions.append(caption)
+            elif isinstance(caption, (list, np.ndarray)):
+                # take a random caption if there are multiple
+                captions.append(random.choice(caption) if is_train else caption[0])
+            else:
+                raise ValueError(
+                    f"Caption column `{caption_column}` should contain either strings or lists of strings."
+                )
+        inputs = tokenizer(
+            captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+        )
+        return inputs.input_ids
+
+    image_transforms = transforms.Compose(
+        [
+            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5]),
-        ])
+        ]
+    )
 
-        self.conditioning_image_transforms = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution),
+    conditioning_image_transforms = transforms.Compose(
+        [
+            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
-        ])
+        ]
+    )
 
-    def __len__(self):
-        return len(self.data)
+    def preprocess_train(examples):
+        images = [image.convert("RGB") for image in examples[image_column]]
+        images = [image_transforms(image) for image in images]
 
-    def __getitem__(self, idx):
-        item = self.data[idx]
+        conditioning_images = [image.convert("RGB") for image in examples[conditioning_image_column]]
+        conditioning_images = [conditioning_image_transforms(image) for image in conditioning_images]
 
-        source_filename = item['source']
-        prompt = item['prompt']
+        examples["pixel_values"] = images
+        examples["conditioning_pixel_values"] = conditioning_images
+        examples["input_ids"] = tokenize_captions(examples)
 
-        source = Image.open(
-            './data/DeepFashion/{}/densepose/'.format(self.split) + source_filename[7:]
-        ).convert("RGB")
-        target = Image.open(
-            './data/DeepFashion/{}/color/'.format(self.split) + source_filename[7:]
-        ).convert("RGB")
+        return examples
 
-        image = self.image_transforms(target)
-        conditioning_image = self.conditioning_image_transforms(source)
+    with accelerator.main_process_first():
+        if args.max_train_samples is not None:
+            dataset[split] = dataset[split].shuffle(seed=args.seed).select(range(args.max_train_samples))
+        # Set the training transforms
+        split_dataset = dataset[split].with_transform(preprocess_train)
 
-        return dict(
-            pixel_value=image,
-            conditioning_pixel_value=conditioning_image,
-            caption=prompt,
-        )
+    return split_dataset
 
 
-class ADE20kSegmDataset(Dataset):
-    def __init__(self, split='train', resolution=512, full=False):
-
-        self.data = []
-        self.split = split
-        self.resolution = resolution
-
-        if full:
-            json_path = './data/ADE20K/{}/prompt_{}_blip_full.json'.format(split, split)
-        else:
-            json_path = './data/ADE20K/{}/prompt_{}_blip.json'.format(split, split)
-
-        with open(json_path, 'rt') as f:    # fill50k, COCO
-            for line in f:
-                self.data.append(json.loads(line))
-
-        self.image_transforms = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-
-        self.conditioning_image_transforms = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution),
-            transforms.ToTensor(),
-        ])
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-
-        item = self.data[idx]
-        source_filename = item['source']
-        prompt = item['prompt']
-
-        source = Image.open('./data/ADE20K/{}/segm/'.format(self.split) +
-                            source_filename[7:]).convert("RGB")
-        target = Image.open('./data/ADE20K/{}/color/'.format(self.split) +
-                            source_filename[7:]).convert("RGB")
-
-        image = self.image_transforms(target)
-        conditioning_image = self.conditioning_image_transforms(source)
-
-        return dict(
-            pixel_value=image,
-            conditioning_pixel_value=conditioning_image,
-            caption=prompt,
-        )
-
-
-class CelebHQDataset(Dataset):
-    def __init__(self, split='train', resolution=512, full=False):
-
-        self.data = []
-        self.split = split
-        self.resolution = resolution
-
-        if full:
-            json_path = './data/celebhq-text/prompt_{}_blip_full.json'.format(split)
-        else:
-            json_path = './data/celebhq-text/prompt_{}_blip.json'.format(split)
-
-        with open(json_path, 'rt') as f:    # fill50k, COCO
-            for line in f:
-                self.data.append(json.loads(line))
-
-        self.image_transforms = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ])
-
-        self.conditioning_image_transforms = transforms.Compose([
-            transforms.Resize(resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(resolution),
-            transforms.ToTensor(),
-        ])
-
-        self.data = self.data[0]
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        item = self.data[idx]
-
-        source_filename = item['image']
-        prompt = item['prompt']
-
-        source_path = './data/celebhq-text/celeba-hq-landmark2d_cond_512/' + \
-            source_filename[:-4] + '.png'
-        target_path = './data/celebhq-text/celeba-hq-img/' + source_filename
-
-        source = Image.open(source_path).convert("RGB")
-        target = Image.open(target_path).convert("RGB")
-
-        image = self.image_transforms(target)
-        conditioning_image = self.conditioning_image_transforms(source)
-
-        return dict(
-            pixel_value=image,
-            conditioning_pixel_value=conditioning_image,
-            caption=prompt,
-        )
-
-
-def collate_fn(examples, tokenizer):
-    pixel_values = [example["pixel_value"] for example in examples]
-    conditioning_pixel_values = [example["conditioning_pixel_value"] for example in examples]
-    captions = [example["caption"] for example in examples]
-
-    input_ids = tokenizer(
-        captions,
-        max_length=tokenizer.model_max_length,
-        padding="max_length",
-        truncation=True,
-        return_tensors="pt",
-    ).input_ids
-
-    pixel_values = torch.stack(pixel_values)
+def collate_fn(examples):
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
-    conditioning_pixel_values = torch.stack(conditioning_pixel_values)
-    conditioning_pixel_values = conditioning_pixel_values.to(memory_format=torch.contiguous_format
-                                                            ).float()
+    conditioning_pixel_values = torch.stack([example["conditioning_pixel_values"] for example in examples])
+    conditioning_pixel_values = conditioning_pixel_values.to(memory_format=torch.contiguous_format).float()
 
-    batch = {
-        "input_ids": input_ids,
+    input_ids = torch.stack([example["input_ids"] for example in examples])
+
+    return {
         "pixel_values": pixel_values,
         "conditioning_pixel_values": conditioning_pixel_values,
+        "input_ids": input_ids,
     }
-
-    return batch

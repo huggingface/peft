@@ -414,6 +414,25 @@ def parse_args(input_args=None):
         ),
     )
 
+    # inference arguments
+
+    parser.add_argument(
+        "--controlnet_path",
+        type=str,
+        default=None,
+        required=True,
+        help="Path to pretrained controlnet."
+    )
+    parser.add_argument(
+        "--unet_path", type=str, default=None, required=True, help="Path to pretrained unet."
+    )
+    parser.add_argument(
+        "--adapter_name", type=str, default=None, required=True, help="Name of the adapter to use."
+    )
+    parser.add_argument(
+        "--vis_overlays", action="store_true", help="Whether to visualize the predicted landmarks with the gt landmarks."
+    )
+
     # self-invented arguments
 
     parser.add_argument(
