@@ -22,18 +22,18 @@ Quantization represents data with fewer bits, making it a useful technique for r
 * independently quantizing each row of a weight matrix with the [GPTQ](https://github.com/PanQiWei/AutoGPTQ) algorithm
 * quantizing to 8-bit and 4-bit precision with the [bitsandbytes](https://github.com/TimDettmers/bitsandbytes) library
 
-However, after a model is quantized it isn't typically further trained for downstream tasks because training can be unstable due to the loss of accuracy of the weights and activations. But since PEFT methods only add *extra* trainable parameters, this allows you to train the quantized model with a PEFT adapter on top! Combining quantization with PEFT can be a good strategy for training even the largest models on a single GPU. For example, [QLoRA](https://hf.co/papers/2305.14314) is a method that quantizes a model to 4-bits and then trains it with LoRA. QLoRA can finetune a 65B parameter model on a single 48GB GPU!
+However, after a model is quantized it isn't typically further trained for downstream tasks because training can be unstable due to the lower precision of the weights and activations. But since PEFT methods only add *extra* trainable parameters, this allows you to train a quantized model with a PEFT adapter on top! Combining quantization with PEFT can be a good strategy for training even the largest models on a single GPU. For example, [QLoRA](https://hf.co/papers/2305.14314) is a method that quantizes a model to 4-bits and then trains it with LoRA. This method allows you to finetune a 65B parameter model on a single 48GB GPU!
 
-This guide will show you how to quantize a model to 4-bits and train it with LoRA.
+In this guide, you'll see how to quantize a model to 4-bits and train it with LoRA.
 
 ## Quantize a model
 
-[bitsandbytes](https://github.com/TimDettmers/bitsandbytes) is a quantization library with an integration in Transformers for quantizing models to 8 and 4-bits. With this integration, you can quantize a model to 4-bits and enabling other techniques by configuring the [`~transformers.BitsAndBytesConfig`] class to:
+[bitsandbytes](https://github.com/TimDettmers/bitsandbytes) is a quantization library with a Transformers integration. With this integration, you can quantize a model to 8 or 4-bits and enable many other options by configuring the [`~transformers.BitsAndBytesConfig`] class. For example, you can:
 
 * set `load_in_4bit=True` to quantize the model to 4-bits when you load it
 * set `bnb_4bit_quant_type="nf4"` to use a special 4-bit data type for weights initialized from a normal distribution
 * set `bnb_4bit_use_double_quant=True` to use a nested quantization scheme to quantize the already quantized weights
-* set `bnb_4bit_compute_dtype=torch.bfloat16` to use bfloat16 for the faster computation
+* set `bnb_4bit_compute_dtype=torch.bfloat16` to use bfloat16 for faster computation
 
 ```py
 import torch
@@ -94,7 +94,7 @@ You're all set for training with whichever training method you prefer!
 
 ### LoftQ initialization
 
-[LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized. In contrast, PEFT initializes the weights from a Gaussian distribution by default. But LoftQ initialization can improve performance when training quantized models. To get started, create a [`LoftQConfig`] instead and set `loftq_bits=4` to for 4-bit quantization.
+[LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized, and it can improve performance when training quantized models. To get started, create a [`LoftQConfig`] and set `loftq_bits=4` for 4-bit quantization.
 
 <Tip warning={true}>
 
