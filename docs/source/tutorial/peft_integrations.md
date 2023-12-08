@@ -34,7 +34,7 @@ pipeline = DiffusionPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16
 ).to("cuda")
 pipeline.load_lora_weights(
-    "artificialguybr/3DRedmond-V1", 
+    "peft-internal-testing/artificialguybr__3DRedmond-V1", 
     weight_name="3DRedmond-3DRenderStyle-3DRenderAF.safetensors", 
     adapter_name="3d"
 )
