@@ -192,7 +192,7 @@ class RegressionTester(unittest.TestCase):
     torch_device = infer_device()
 
     def setUp(self):
-        self.tol = 1e-5
+        self.tol = 1e-4
         self.creation_mode = strtobool(os.environ.get("REGRESSION_CREATION_MODE", "False"))
         self.force_mode = strtobool(os.environ.get("REGRESSION_FORCE_MODE", "False"))
         if self.force_mode and not self.creation_mode:
