@@ -32,8 +32,8 @@ from transformers import (
 )
 
 from peft import (
-    AdaptionPromptConfig,
     AdaLoraConfig,
+    AdaptionPromptConfig,
     IA3Config,
     LoraConfig,
     PeftModel,
