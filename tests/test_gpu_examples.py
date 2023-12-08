@@ -323,7 +323,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             load_in_4bit=True,
-            device_map={'': 'cuda:0'},  # fix for >3 GPUs
+            device_map={"": "cuda:0"},  # fix for >3 GPUs
         )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 

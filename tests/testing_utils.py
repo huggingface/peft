@@ -48,6 +48,7 @@ def require_bitsandbytes(test_case):
     """
     try:
         import bitsandbytes  # noqa: F401
+
         test_case = pytest.mark.bitsandbytes(test_case)
     except ImportError:
         test_case = pytest.mark.skip(reason="test requires bitsandbytes")(test_case)
