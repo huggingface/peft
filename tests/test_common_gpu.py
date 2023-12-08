@@ -301,7 +301,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_lora_causal_lm_mutli_gpu_inference(self):
+    def test_lora_causal_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs.
         """
@@ -331,7 +331,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_torch_multi_gpu
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
-    def test_lora_seq2seq_lm_mutli_gpu_inference(self):
+    def test_lora_seq2seq_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs - 8bit version.
         """
