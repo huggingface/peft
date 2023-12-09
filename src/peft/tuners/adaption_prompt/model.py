@@ -146,9 +146,8 @@ class AdaptionPromptModel(nn.Module):
             setattr(par, config.target_modules, attn.model)
         self._cached_adapters[adapter_name] = adapted_attentions
 
-    def _mark_only_adaption_prompts_as_trainable(self, model: nn.Module = None) -> None:
+    def _mark_only_adaption_prompts_as_trainable(self, model: nn.Module) -> None:
         """Freeze all parameters of the model except the adaption prompts."""
-        model = model or self.model
         for n, p in model.named_parameters():
             if not is_adaption_prompt_trainable(n):
                 p.requires_grad = False

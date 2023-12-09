@@ -167,7 +167,7 @@ class BaseTuner(nn.Module, ABC):
         ...
 
     @abstractmethod
-    def _mark_only_adapters_as_trainable(self, model: nn.Module = None):
+    def _mark_only_adapters_as_trainable(self, model: nn.Module):
         r"""
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
         be overriden for all tuner classes to match the correct key names.
