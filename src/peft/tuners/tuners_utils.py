@@ -18,7 +18,7 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Union
+from typing import Any, List, Optional, Union
 
 import torch
 from torch import nn
@@ -87,11 +87,6 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-
-        # transformers models have a .config attribute, whose presence is assumed later on
-        if not hasattr(self, "config"):
-            self.config = {"model_type": "custom"}
-
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
@@ -270,21 +265,42 @@ class BaseTuner(nn.Module, ABC):
             else:
                 model.modules_to_save.update(set(peft_config.modules_to_save))
 
-    def merge_adapter(self):
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
         """
-        This method merges the LoRa layers into the base model.
+        This method merges the adapter layers into the base model.
+
+        Merging adapters can lead to a speed up of the forward pass. A copy of the adapter weights is still kept in
+        memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
+        in memory, please call `merge_and_unload`.
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.merge()
+                module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
         """
-        This method unmerges the LoRa layers from the base model.
+        This method unmerges all merged adapter layers from the base model.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 module.unmerge()
+
+    def _unloading_checks(self, adapter_names: Optional[List[str]]):
+        adapters_to_consider = adapter_names or self.active_adapters
+        is_modules_to_save_available = any(
+            self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
+        )
+        if is_modules_to_save_available and len(adapters_to_consider) > 1:
+            raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
 
 class BaseTunerLayer(ABC):
@@ -297,6 +313,7 @@ class BaseTunerLayer(ABC):
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
+
     active_adapter = None
 
     # All names of layers that may contain adapter (trainable) weights
@@ -341,10 +358,10 @@ class BaseTunerLayer(ABC):
             weight = base_layer.weight
         return weight
 
-    def merge(self, *args) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         raise NotImplementedError
 
-    def unmerge(self, *args) -> None:
+    def unmerge(self) -> None:
         raise NotImplementedError
 
     @property
@@ -368,7 +385,7 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
-    def enable_adapters(self, enabled: bool):
+    def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
 
         Takes care of setting the requires_grad flag for the adapter weights.
@@ -386,11 +403,11 @@ class BaseTunerLayer(ABC):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_names: str | list[str]):
-        """Set the active adapter
+    def set_adapter(self, adapter_names: str | list[str]) -> None:
+        """Set the active adapter(s).
 
         Args:
-            adapter_name (str): The name of the adapter to set as active
+            adapter_name (`str` or `List[str]`): Name of the adapter(s) to be activated.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]

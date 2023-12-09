@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict
 import torch
 
 from .config import PeftConfig
+from .mixed_model import PeftMixedModel
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,
@@ -99,13 +100,21 @@ def get_peft_config(config_dict: Dict[str, Any]) -> PeftConfig:
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
 
 
-def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default") -> PeftModel:
+def get_peft_model(
+    model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default", mixed: bool = False
+) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
 
     Args:
-        model ([`transformers.PreTrainedModel`]): Model to be wrapped.
-        peft_config ([`PeftConfig`]): Configuration object containing the parameters of the Peft model.
+        model ([`transformers.PreTrainedModel`]):
+            Model to be wrapped.
+        peft_config ([`PeftConfig`]):
+            Configuration object containing the parameters of the Peft model.
+        adapter_name (`str`, `optional`, defaults to `"default"`):
+            The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
+        mixed (`bool`, `optional`, defaults to `False`):
+            Whether to allow mixing different (compatible) adapter types.
     """
     model_config = getattr(model, "config", {"model_type": "custom"})
     if hasattr(model_config, "to_dict"):
@@ -113,8 +122,12 @@ def get_peft_model(model: PreTrainedModel, peft_config: PeftConfig, adapter_name
 
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
 
+    if mixed:
+        return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
+
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
         return PeftModel(model, peft_config, adapter_name=adapter_name)
+
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
     return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)

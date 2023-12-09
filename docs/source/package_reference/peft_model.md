@@ -4,7 +4,7 @@ rendered properly in your Markdown viewer.
 
 # Models
 
-[`PeftModel`] is the base model class for specifying the base Transformer model and configuration to apply a PEFT method to. The base `PeftModel` contains methods for loading and saving models from the Hub, and supports the [`PromptEncoder`] for prompt learning.
+[`PeftModel`] is the base model class for specifying the base Transformer model and configuration to apply a PEFT method to. The base `PeftModel` contains methods for loading and saving models from the Hub.
 
 ## PeftModel
 
@@ -52,3 +52,7 @@ A `PeftModel` for getting extracting features/embeddings from transformer models
 
 [[autodoc]] PeftModelForFeatureExtraction
     - all
+
+## Utilities
+
+[[autodoc]] get_peft_model

@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.6.3.dev0"
+__version__ = "0.7.1.dev0"
 
 from .auto import (
     AutoPeftModel,
@@ -35,6 +35,7 @@ from .mapping import (
     get_peft_model,
     inject_adapter_in_model,
 )
+from .mixed_model import PeftMixedModel
 from .peft_model import (
     PeftModel,
     PeftModelForCausalLM,

@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
+from accelerate.test_utils.testing import run_command
+from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
 from transformers import (
     AutoModelForCausalLM,
@@ -250,7 +252,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
     @pytest.mark.multi_gpu_tests
-    def test_causal_lm_training_mutli_gpu_4bit(self):
+    def test_causal_lm_training_multi_gpu_4bit(self):
         r"""
         Test the CausalLM training on a multi-GPU device with 4bit base model. The test would simply fail if the
         adapters are not set correctly.
@@ -263,7 +265,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 load_in_4bit=True,
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -318,7 +320,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         """
         model_id = "facebook/opt-350m"
 
-        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            load_in_4bit=True,
+            device_map={"": "cuda:0"},  # fix for >3 GPUs
+        )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
         model.gradient_checkpointing_enable()
@@ -438,7 +444,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_causal_lm_training_mutli_gpu(self):
+    def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. This test is a converted version of
         https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
@@ -452,7 +458,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="auto",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_int8_training(model)
@@ -562,7 +568,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_seq2seq_lm_training_mutli_gpu(self):
+    def test_seq2seq_lm_training_multi_gpu(self):
         r"""
         Test the Seq2SeqLM training on a multi-GPU device. This test is a converted version of
         https://github.com/huggingface/peft/blob/main/examples/int8_training/Finetune_opt_bnb_peft.ipynb where we train
@@ -576,7 +582,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="balanced",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_int8_training(model)
@@ -873,7 +879,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_causal_lm_training_mutli_gpu(self):
+    def test_causal_lm_training_multi_gpu(self):
         r"""
         Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
         correctly.
@@ -887,7 +893,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -933,3 +939,13 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+@require_bitsandbytes
+@require_torch_gpu
+class MultiprocessTester(unittest.TestCase):
+    def test_notebook_launcher(self):
+        script_path = os.path.join("scripts", "launch_notebook_mp.py")
+        cmd = ["python", script_path]
+        with patch_environment(omp_num_threads=1):
+            run_command(cmd, env=os.environ.copy())
