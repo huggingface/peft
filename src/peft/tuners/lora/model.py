@@ -163,6 +163,7 @@ class LoraModel(BaseTuner):
             kwargs["gptq_quantization_config"] = quantization_config
 
         # TODO: better deal with that
+        new_module = None
         if isinstance(target, Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
@@ -193,6 +194,13 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
+        
+        if lora_config.use_rslora:
+            # change target.scaling[adapter_name] to alpha/math.sqrt(r)
+            if new_module is not None:
+                new_module.set_scale(adapter_name, math.sqrt(r))
+            else:
+                target.set_scale(adapter_name, math.sqrt(r))
 
     def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
