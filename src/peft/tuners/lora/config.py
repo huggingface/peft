@@ -57,10 +57,10 @@ class LoraConfig(PeftConfig):
         bias (`str`): Bias type for Lora. Can be 'none', 'all' or 'lora_only'. If 'all' or 'lora_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
-        use_rslora (`bool`): When set to True, uses
-            <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a>
-            which sets the adapter scaling factor to the correct value of `lora_alpha/math.sqrt(r)`.
-            Otherwise, it will use the original default value of `lora_alpha/r`.
+        use_rslora (`bool`):
+            When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a> which
+            sets the adapter scaling factor to the correct value of `lora_alpha/math.sqrt(r)`. Otherwise, it will use
+            the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):List of modules apart from LoRA layers to be set as trainable
             and saved in the final checkpoint.
         layers_to_transform (`Union[List[int],int]`):

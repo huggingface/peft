@@ -194,7 +194,7 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
-        
+
         if lora_config.use_rslora:
             # change target.scaling[adapter_name] to alpha/math.sqrt(r)
             if new_module is not None:
