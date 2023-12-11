@@ -57,7 +57,7 @@ class AdaptionPromptModel(nn.Module):
         self._enabled = True
         self.forward = self.model.forward
         self.add_adapter(adapter_name, configs[adapter_name])
-        self._mark_only_adaption_prompts_as_trainable()
+        self._mark_only_adaption_prompts_as_trainable(self.model)
 
     def add_adapter(self, adapter_name: str, config: AdaptionPromptConfig) -> None:
         """Add an adapter with the given name and config."""
@@ -146,9 +146,9 @@ class AdaptionPromptModel(nn.Module):
             setattr(par, config.target_modules, attn.model)
         self._cached_adapters[adapter_name] = adapted_attentions
 
-    def _mark_only_adaption_prompts_as_trainable(self) -> None:
+    def _mark_only_adaption_prompts_as_trainable(self, model: nn.Module) -> None:
         """Freeze all parameters of the model except the adaption prompts."""
-        for n, p in self.model.named_parameters():
+        for n, p in model.named_parameters():
             if not is_adaption_prompt_trainable(n):
                 p.requires_grad = False
 

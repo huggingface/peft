@@ -26,6 +26,7 @@ from itertools import chain
 from typing import List, Optional
 
 import torch
+from torch import nn
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
 
@@ -221,8 +222,8 @@ class LoraModel(BaseTuner):
                 weight = child.qweight if hasattr(child, "qweight") else child.weight
                 module.to(weight.device)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
@@ -232,11 +233,11 @@ class LoraModel(BaseTuner):
                 continue
 
             if bias == "all":
-                for n, p in self.model.named_parameters():
+                for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
             elif bias == "lora_only":
-                for m in self.model.modules():
+                for m in model.modules():
                     if isinstance(m, LoraLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
