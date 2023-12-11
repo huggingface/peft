@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Literal
+from typing import List, Literal, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType

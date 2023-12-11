@@ -45,11 +45,11 @@ from .tuners import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OFTModel,
+    PolyConfig,
+    PolyModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    PolyConfig,
-    PolyModel,
 )
 from .utils import _prepare_prompt_learning_config
 

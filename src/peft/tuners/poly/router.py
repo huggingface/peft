@@ -6,6 +6,7 @@ from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
 from .config import PolyConfig
 
+
 EPS = 1e-12
 
 
@@ -44,7 +45,7 @@ class PolyRouter(Router):
 
     def forward(self, task_ids: torch.Tensor, input_ids: torch.Tensor):
         if task_ids is None:
-            raise ValueError(f"task_ids should not be None.")
+            raise ValueError("task_ids should not be None.")
         if task_ids.max().item() >= self.n_tasks:
             raise ValueError(f"Only {self.n_tasks} tasks available. Found task id = {task_ids.max().item()}")
 

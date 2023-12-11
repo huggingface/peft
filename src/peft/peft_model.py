@@ -47,10 +47,10 @@ from .tuners import (
     LoraModel,
     MultitaskPromptEmbedding,
     OFTModel,
+    PolyModel,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
-    PolyModel,
 )
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,

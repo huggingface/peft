@@ -1,5 +1,5 @@
 from .config import PolyConfig
-from .layer import PolyLayer, Linear
+from .layer import Linear, PolyLayer
 from .model import PolyModel
 
 

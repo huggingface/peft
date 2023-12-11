@@ -170,7 +170,15 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3, PeftType.OFT, PeftType.POLY):
+    if config.peft_type in (
+        PeftType.LORA,
+        PeftType.LOHA,
+        PeftType.LOKR,
+        PeftType.ADALORA,
+        PeftType.IA3,
+        PeftType.OFT,
+        PeftType.POLY,
+    ):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",
