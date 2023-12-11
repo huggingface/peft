@@ -543,7 +543,8 @@ def add_pad_tokens(
     - input_ids: input_ids with padding tokens removed
     - attention_mask: attention_mask with padding tokens removed
     - labels: labels with padding tokens removed
-    - pad_els: a tuple (pad_token_input_ids, pad_token_inputs_embeds, pad_token_attention_mask, pad_token_labels) containing the pad token related tensors
+    - pad_els: a tuple (pad_token_input_ids, pad_token_inputs_embeds, pad_token_attention_mask, pad_token_labels)
+      containing the pad token related tensors
     """
     pad_input_ids, pad_input_embeds, pad_mask, pad_labels = pad_els
     final_input_embeds = torch.stack(
