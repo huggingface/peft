@@ -511,8 +511,7 @@ class PeftCommonTester:
                 or "ia3" in name
                 or "lora_E" in name
                 or "lora_B" in name
-                or "vera_lambda_b" in name
-                or "vera_lambda_d" in name
+                or "vera_lambda" in name
             ):
                 module.data[0] = torch.nan
 
