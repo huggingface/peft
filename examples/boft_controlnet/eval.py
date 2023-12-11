@@ -1,5 +1,5 @@
 import os
-from glob import glob
+import glob
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
@@ -26,6 +26,11 @@ detect_model = face_alignment.FaceAlignment(
 
 end_list = np.array([17, 22, 27, 42, 48, 31, 36, 68], dtype=np.int32) - 1
 
+
+def count_txt_files(directory):
+    pattern = os.path.join(directory, '*.txt')
+    txt_files = glob.glob(pattern)
+    return len(txt_files)
 
 def plot_kpts(image, kpts, color='g'):
     ''' Draw 68 key points
@@ -58,68 +63,85 @@ def plot_kpts(image, kpts, color='g'):
         )
     return image
 
-
-def generate_landmark2d(dataset, input_dir, save_dir, gt_lmk_folder, vis_dir=None):
+def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False):
     print(f'Generate 2d landmarks ...')
-    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(pred_lmk_dir, exist_ok=True)
 
-    imagepath_list = sorted(glob(f"{input_dir}/pred*.png"))
+    imagepath_list = sorted(glob.glob(f"{input_dir}/pred*.png"))
 
     for imagepath in tqdm(imagepath_list):
         name = Path(imagepath).stem
         idx = int(name.split('_')[-1])
-        txt_path = os.path.join(save_dir, f'{idx}.txt')
-        gt_lmk_path = os.path.join(gt_lmk_folder, f'{idx}_gt_lmk.jpg')
+        pred_txt_path = os.path.join(pred_lmk_dir, f'{idx}.txt')
+        gt_lmk_path = os.path.join(gt_lmk_dir, f'{idx}_gt_lmk.jpg')
+        gt_txt_path = os.path.join(gt_lmk_dir, f'{idx}.txt')
 
-        if (not os.path.exists(txt_path)) or (not os.path.exists(gt_lmk_path)):
-            image = imread(imagepath)[:, :, :3]
-            out = detect_model.get_landmarks(image)
-            if out is None:
-                continue
-            
-            kpt = out[0].squeeze()
-            np.savetxt(txt_path, kpt)
+        # if (not os.path.exists(pred_txt_path)) or (not os.path.exists(gt_txt_path)):
+        image = imread(imagepath)[:, :, :3]
+        out = detect_model.get_landmarks(image)
+        if out is None:
+            continue
+        
+        pred_kpt = out[0].squeeze()
+        np.savetxt(pred_txt_path, pred_kpt)
 
-            # Your existing code for obtaining the image tensor
-            gt_lmk_img = dataset[idx]['conditioning_pixel_values']
-            save_image(gt_lmk_img, gt_lmk_path)
-            # gt_image = cv2.resize(cv2.imread(gt_lmk_path), (512, 512))
+        # Your existing code for obtaining the image tensor
+        gt_lmk_img = dataset[idx]['conditioning_pixel_values']
+        save_image(gt_lmk_img, gt_lmk_path)
 
-            if vis_dir is not None:
-                vis_path = os.path.join(vis_dir, f'{idx}_overlay.jpg')
-                image = cv2.imread(imagepath)
-                image_point = plot_kpts(image, kpt)
-                gt_image = cv2.imread(gt_lmk_path)
-                cv2.imwrite(vis_path, np.concatenate([image_point, gt_image], axis=1))
-                sys.exit()
+        gt_img = dataset[idx]['pixel_values']
+        gt_img = (gt_img.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
+        out = detect_model.get_landmarks(gt_img)
+        if out is None:
+            continue
+        
+        gt_kpt = out[0].squeeze()
+        np.savetxt(gt_txt_path, gt_kpt)
+        # gt_image = cv2.resize(cv2.imread(gt_lmk_path), (512, 512))
+
+        if vis:
+            # visualize predicted landmarks
+            vis_path = os.path.join(pred_lmk_dir, f'{idx}_overlay.jpg')
+            # image = cv2.imread(imagepath)
+            image_point = plot_kpts(image, pred_kpt)
+            gt_lmk_image = cv2.imread(gt_lmk_path)
+            cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
+
+            # visualize gt landmarks
+            vis_path = os.path.join(gt_lmk_dir, f'{idx}_overlay.jpg')
+            # image = cv2.imread(imagepath)
+            image_point = plot_kpts(gt_img, gt_kpt)
+            # gt_lmk_image = cv2.imread(gt_lmk_path)
+            cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
+
+            sys.exit()
 
 
-def landmark_comparison(lmk_folder, gt_lmk_folder):
-    # print(f'calculate reprojection error')
+def landmark_comparison(val_dataset, lmk_dir, gt_lmk_dir):
+    print(f'Calculating reprojection error')
     lmk_err = []
 
-    pbar = tqdm(range(len(val_data)))
+    pbar = tqdm(range(len(val_dataset)))
     for i in pbar:
-
-        line = val_data[i]
-        img_name = line["image"].split(".")[0]
-        lmk1_path = os.path.join(gt_lmk_folder, f'{img_name}.txt')
+        # line = val_dataset[i]
+        # img_name = line["image"].split(".")[0]
+        lmk1_path = os.path.join(gt_lmk_dir, f'{i}.txt')
         lmk1 = np.loadtxt(lmk1_path) / 2
-        lmk2_path = os.path.join(lmk_folder, f'{img_name}.txt')
+        lmk2_path = os.path.join(lmk_dir, f'{i}.txt')
+
         if not os.path.exists(lmk2_path):
             print(f'{lmk2_path} not exist')
             continue
+
         lmk2 = np.loadtxt(lmk2_path)
         lmk_err.append(np.mean(np.linalg.norm(lmk1 - lmk2, axis=1)))
         pbar.set_description(f'lmk_err: {np.mean(lmk_err):.5f}')
 
-    # print(np.mean(lmk_err))
-    np.save(os.path.join(lmk_folder, 'lmk_err.npy'), lmk_err)
+    print(f'Reprojection error:', np.mean(lmk_err))
+    np.save(os.path.join(lmk_dir, 'lmk_err.npy'), lmk_err)
 
 
-if __name__ == '__main__':
-    args = parse_args()
-
+def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 
     accelerator = Accelerator(
@@ -152,17 +174,14 @@ if __name__ == '__main__':
     if not os.path.exists(pred_lmk_dir):
         os.makedirs(pred_lmk_dir, exist_ok=True)
 
-    if args.vis_overlays:
-        vis_dir = os.path.join(args.output_dir, "vis_overlays")
-        if not os.path.exists(vis_dir):
-            os.makedirs(vis_dir, exist_ok=True)
-    else:
-        vis_dir = None
-
     input_dir = os.path.join(args.output_dir, "results")
 
-    generate_landmark2d(val_dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis_dir)
+    generate_landmark2d(val_dataset, input_dir, pred_lmk_dir, gt_lmk_dir, args.vis_overlays)
     
-    if len(os.listdir(input_folder)) == len(val_dataset) and len(os.listdir(val_dataset)) == len(val_data):
-        landmark_comparison(save_folder, gt_lmk_folder)
-        print(args.method)
+    if count_txt_files(pred_lmk_dir) == len(val_dataset) and count_txt_files(gt_lmk_dir)== len(val_dataset):
+        landmark_comparison(val_dataset, pred_lmk_dir, gt_lmk_dir)
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    main(args)
