@@ -506,13 +506,7 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         for name, module in model.named_parameters():
-            if (
-                "lora_A" in name
-                or "ia3" in name
-                or "lora_E" in name
-                or "lora_B" in name
-                or "vera_lambda" in name
-            ):
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda" in name:
                 module.data[0] = torch.nan
 
         with self.assertRaises(ValueError) as error_context:

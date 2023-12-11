@@ -33,9 +33,9 @@ class VeraConfig(PeftConfig):
             checkpoint
         did not include these projections.
         save_projection (`bool`):
-            Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b /
-            lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload the
-            checkpoint on all system configurations. Defaults to `True`.
+            Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d
+            weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on
+            all system configurations. Defaults to `True`.
         vera_dropout (`float`): The dropout probability for Vera layers.
         d_initial (`float`): Initial init value for `vera_lambda_d` vector used when `init_vera_weights`.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
