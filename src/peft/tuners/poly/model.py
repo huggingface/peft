@@ -1,6 +1,7 @@
 from dataclasses import asdict
+from collections import OrderedDict
 from enum import Enum
-from typing import Any
+from typing import Any, Dict, Callable
 
 import torch
 from torch import nn
@@ -20,7 +21,6 @@ class PolyModel(BaseTuner):
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
-        self.register_forward_pre_hook(PolyModel._add_task_id_pre_hook, with_kwargs=True)
 
     @staticmethod
     def _check_target_module_exists(poly_config, key):
@@ -137,15 +137,34 @@ class PolyModel(BaseTuner):
             )
         return peft_config
 
-    @classmethod
-    def _add_task_id_pre_hook(cls, module, args, kwargs):
+    def _add_pre_hooks(self, kwargs):
         task_ids = kwargs.get("task_ids", None)
         new_kwargs = {k: v for k, v in kwargs.items() if k != "task_ids"}
-        for m in module.modules():
-            if isinstance(m, PolyLayer):
-                m.task_ids = task_ids
-        return args, new_kwargs
+
+        def _add_task_id_pre_hook(module, args, kwargs):
+            kwargs["task_ids"] = task_ids
+            return args, kwargs
+
+        handles = []
+        for m in self.model.modules():
+            if isinstance(m, PolyLayer) and isinstance(m, nn.Module):
+                h = m.register_forward_pre_hook(_add_task_id_pre_hook, with_kwargs=True)
+                handles.append(h)
+
+        return new_kwargs, handles
+
+    def _remove_hooks(self, handles):
+        for h in handles:
+            h.remove()
+
+    def forward(self, *args, **kwargs):
+        new_kwargs, handles = self._add_pre_hooks(kwargs)
+        output = self.model.forward(*args, **new_kwargs)
+        self._remove_hooks(handles)
+        return output
 
     def generate(self, *args, **kwargs):
-        args, new_kwargs = PolyModel._add_task_id_pre_hook(self.model, args, kwargs)
-        return self.model.generate(*args, **new_kwargs)
+        new_kwargs, handles = self._add_pre_hooks(kwargs)
+        output = self.model.generate(*args, **new_kwargs)
+        self._remove_hooks(handles)
+        return output

@@ -119,11 +119,12 @@ class Linear(nn.Module, PolyLayer):
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
-
+        task_ids = kwargs.get("task_ids", None)
+        new_kwargs = {k: v for k, v in kwargs.items() if k != "task_ids"}
         if self.disable_adapters:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x, *args, **new_kwargs)
         else:
-            result = self.base_layer(x, *args, **kwargs)
+            result = self.base_layer(x, *args, **new_kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.poly_lora_A.keys():
                     continue
@@ -135,7 +136,6 @@ class Linear(nn.Module, PolyLayer):
 
                 # Combine the output of LoRAs
                 # https://github.com/microsoft/mttl/blob/ce4ca51dbca73be656feb9b3e5233633e3c5dec7/mttl/models/poly.py#L293
-                task_ids = self.task_ids
                 mixing_weights = poly_router(task_ids=task_ids, input_ids=x)
                 bs, n_splits, n_skills = mixing_weights.size()
 
