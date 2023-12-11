@@ -557,4 +557,3 @@ def add_pad_tokens(
     if labels is not None:
         final_labels = torch.stack([torch.cat((pad_label, label)) for label, pad_label in zip(labels, pad_labels)])
     return final_input_embeds, final_attention_mask, final_labels
-
