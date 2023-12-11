@@ -60,20 +60,29 @@ class VeraConfig(PeftConfig):
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with Vera."
-            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "help": (
+                "List of module names or regex expression of the module names to replace with Vera."
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            )
         },
     )
     projection_prng_key: Optional[int] = field(
         default=None,
         metadata={
-            "help": "Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint did not include these projections."
+            "help": (
+                "Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint"
+                " did not include these projections."
+            )
         },
     )
     save_projection: bool = field(
         default=True,
         metadata={
-            "help": "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on all system configurations."
+            "help": (
+                "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b /"
+                " lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload"
+                " the checkpoint on all system configurations."
+            )
         },
     )
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
@@ -86,9 +95,11 @@ class VeraConfig(PeftConfig):
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
-            "help": "List of modules apart from Vera layers to be set as trainable and saved in the final checkpoint. "
-            "For example, in Sequence Classification or Token Classification tasks, "
-            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+            "help": (
+                "List of modules apart from Vera layers to be set as trainable and saved in the final checkpoint. For"
+                " example, in Sequence Classification or Token Classification tasks, the final layer"
+                " `classifier/score` are randomly initialized and as such need to be trainable and saved."
+            )
         },
     )
     init_vera_weights: bool = field(
@@ -103,13 +114,20 @@ class VeraConfig(PeftConfig):
     layers_to_transform: Optional[Union[List[int], int]] = field(
         default=None,
         metadata={
-            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index."
+            "help": (
+                "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers"
+                " indexes that are specified inside this list. If a single integer is passed, PEFT will transform only"
+                " the layer at this index."
+            )
         },
     )
     layers_pattern: Optional[str] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
+            "help": (
+                "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer"
+                " pattern is not in the common layers pattern."
+            )
         },
     )
 

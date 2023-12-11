@@ -132,14 +132,16 @@ class VeraModel(BaseTuner):
 
                 if first_linear is not None and module_shape != first_linear:
                     raise ValueError(
-                        f"Multiple target linear layers with different dimensions were specified! Vera only supports a single dimension size. Got '{module_shape}' expected '{first_linear}"
+                        "Multiple target linear layers with different dimensions were specified! Vera only supports a"
+                        f" single dimension size. Got '{module_shape}' expected '{first_linear}"
                     )
                 first_linear = module_shape
 
             elif isinstance(module, Embedding):
                 if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
                     raise ValueError(
-                        "Multiple target embedding layers with different dimensions or vocabulary sizes were specified! Vera only supports a single size."
+                        "Multiple target embedding layers with different dimensions or vocabulary sizes were"
+                        " specified! Vera only supports a single size."
                     )
                 first_embedding = tuple(module.weight.shape)
 
@@ -185,7 +187,9 @@ class VeraModel(BaseTuner):
 
         if not config.save_projection:
             warnings.warn(
-                "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection` to `True` to guarantee restoring the checkpoint correctly on all system configurations."
+                "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored"
+                " using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection`"
+                " to `True` to guarantee restoring the checkpoint correctly on all system configurations."
             )
 
         self.to(self.dtype)
@@ -480,7 +484,8 @@ class VeraModel(BaseTuner):
                         list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
                     )
                     warnings.warn(
-                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to"
+                        f" {resetting_active_adapter}. "
                     )
                     target.set_adapter(resetting_active_adapter)
 

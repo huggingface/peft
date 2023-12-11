@@ -97,7 +97,8 @@ def get_peft_model_state_dict(
             # makes name to match here difficult to predict.
             if "base_model.vera_A" not in state_dict:
                 raise ValueError(
-                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection! Set `config.save_projection` to `False`."
+                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
+                    " Set `config.save_projection` to `False`."
                 )
             to_return["base_model.vera_A"] = state_dict["base_model.vera_A"]
             to_return["base_model.vera_B"] = state_dict["base_model.vera_B"]
@@ -220,11 +221,15 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 )
             elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
                 warnings.warn(
-                    "Specified to not load vera_A and vera_B from state dictionary however they are present in state dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using `peft_config.save_projection = True`"
+                    "Specified to not load vera_A and vera_B from state dictionary however they are present in state"
+                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                    " `peft_config.save_projection = True`"
                 )
             elif not config.save_projection:  # and no vera_A in state dictionary
                 warnings.warn(
-                    "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on PRNG initialisation to restore these projections using `config.projection_prng_key`, which may not be accurate on all system configurations."
+                    "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
+                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                    " not be accurate on all system configurations."
                 )
 
     elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
@@ -296,8 +301,8 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
                 filename = hf_hub_download(model_id, WEIGHTS_NAME, **hf_hub_download_kwargs)
             except EntryNotFoundError:
                 raise ValueError(
-                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. "
-                    f"Please check that the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
+                    f"Can't find weights for {model_id} in {model_id} or in the Hugging Face Hub. Please check that"
+                    f" the file {WEIGHTS_NAME} or {SAFETENSORS_WEIGHTS_NAME} is present at {model_id}."
                 )
 
     if use_safetensors:
