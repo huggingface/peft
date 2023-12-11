@@ -186,13 +186,11 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 
-    def __getattr__(self, name: str):
-        try:
-            return super(ModulesToSaveWrapper, self).__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            if self.active_adapter not in self.modules_to_save:
-                return getattr(self.original_module, name)
-            return getattr(self.modules_to_save[self.active_adapter], name)
+    @property
+    def weight(self):
+        if self.active_adapter not in self.modules_to_save:
+            return self.original_module.weight
+        return self.modules_to_save[self.active_adapter].weight
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
