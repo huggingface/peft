@@ -206,7 +206,6 @@ class VeraModel(BaseTuner):
                 "set bias to 'none' for all adapters."
             )
 
-        # TODO: allow this in conjunction with save_projection=True
         if config.projection_prng_key is None:
             raise ValueError("Vera PRNG initialisation key cannot be `None`. Set `VeraConfig.projection_prng_key`.")
 

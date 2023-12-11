@@ -849,8 +849,12 @@ class PeftCommonTester:
         self.assertLess(nb_trainable, nb_trainable_all)
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        # TODO: test VeRA here?
-        if config_cls not in (LoraConfig, IA3Config):
+        if config_cls not in (LoraConfig, IA3Config, VeraConfig):
+            return
+
+        # TODO: fails with the following runtime error:
+        # leaf Variable that requires grad is being used in an in-place operation.
+        if config_cls == VeraConfig and "Deberta" in model_id:
             return
 
         model = self.transformers_class.from_pretrained(model_id)
@@ -874,7 +878,13 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        if config_cls == IA3Config:
+            parameter_prefix = "ia3"
+        elif config_cls == LoraConfig:
+            parameter_prefix = "lora"
+        elif config_cls == VeraConfig:
+            parameter_prefix = "vera_lambda"
+        # parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
         for n, param in model.named_parameters():
             if parameter_prefix in n:
                 self.assertIsNotNone(param.grad)
@@ -882,7 +892,6 @@ class PeftCommonTester:
                 self.assertIsNone(param.grad)
 
     def _test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
-        # TODO: test VeRA here?
         if config_cls not in (LoraConfig,):
             return
 
