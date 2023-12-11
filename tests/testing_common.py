@@ -677,9 +677,6 @@ class PeftCommonTester:
 
         inputs = self.prepare_inputs_for_testing()
 
-        if config_cls == VeraConfig and hasattr(model, "_add_forward_hooks"):
-            model._add_forward_hooks()
-
         # check if `generate` works
         _ = model.generate(**inputs)
 
@@ -701,8 +698,6 @@ class PeftCommonTester:
 
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
-        if config_cls == VeraConfig and hasattr(model, "_add_forward_hooks"):
-            model._add_forward_hooks()
 
         # check if `generate` works
         _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
@@ -1138,8 +1133,6 @@ class PeftCommonTester:
             if hasattr(model, "generate"):
                 # let's check the scores, not the output ids, since the latter can easily be identical even if the
                 # weights are slightly changed
-                if config_cls == VeraConfig and hasattr(model, "_add_forward_hooks"):
-                    model._add_forward_hooks()
                 output = model.generate(**input, return_dict_in_generate=True, output_scores=True).scores[0]
                 # take element 0, as output is a tuple
             else:

@@ -547,3 +547,16 @@ class VeraModel(BaseTuner):
                 handle.remove()
 
         return outputs
+
+    def generate(self, *args, **kwargs):
+        hook_handles = self._add_forward_hooks()
+        
+        try:
+            outputs = super().generate(*args, **kwargs)
+        finally:
+            # regardless of success or failure of generate call, we should remove
+            # handles to restore the original model.
+            for handle in hook_handles:
+                handle.remove()
+
+        return outputs

@@ -83,9 +83,8 @@ class VeraLayer(BaseTunerLayer):
 
         self.vera_dropout.update(nn.ModuleDict({adapter_name: vera_dropout_layer}))
         # Actual trainable parameters
-        if r > 0:
-            self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
-            self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
+        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
 
         if init_vera_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
@@ -110,9 +109,8 @@ class VeraLayer(BaseTunerLayer):
 
         self.vera_dropout[adapter_name] = vera_dropout_layer
         # Actual trainable parameters
-        if r > 0:
-            self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
-            self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
+        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
 
         if init_vera_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)

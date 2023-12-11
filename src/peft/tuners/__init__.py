@@ -29,12 +29,5 @@ from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
 
-# Mapping of tuners that support direct plugging
-TUNERS_MAPPING = {
-    "LORA": LoraModel,
-    "VERA": VeraModel,
-    "IA3": IA3Model,
-    "ADALORA": AdaLoraModel,
-}
 from .oft import OFTConfig, OFTModel
 from .mixed import MixedModel
