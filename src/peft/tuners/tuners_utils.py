@@ -167,7 +167,7 @@ class BaseTuner(nn.Module, ABC):
         ...
 
     @abstractmethod
-    def _mark_only_adapters_as_trainable(self):
+    def _mark_only_adapters_as_trainable(self, model: nn.Module):
         r"""
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
         be overriden for all tuner classes to match the correct key names.
@@ -252,10 +252,10 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
-        self._mark_only_adapters_as_trainable()
+        self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
-            for n, p in self.model.named_parameters():
+            for n, p in model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
 
