@@ -37,7 +37,7 @@ class Shell(nn.Module):
             self.bias = nn.Parameter(bias, requires_grad=False)
 
 
-def unwarap_model(model, sub_module_name=".base_layer"):
+def unwrap_model(model, sub_module_name=".base_layer"):
     sub_module_name_list = [k.split(sub_module_name)[0] for k in model.state_dict().keys() if sub_module_name in k]
     sub_module_name_set = set(sub_module_name_list)
     for name in sub_module_name_set:
@@ -177,7 +177,7 @@ def quantize_and_save():
     print_model(lora_model, "lora_model")
 
     # remove lora adapters and save the backbone
-    unwarap_model(base_model)
+    unwrap_model(base_model)
     base_model.save_pretrained(base_model_dir)
     tokenizer.save_pretrained(base_model_dir)
 
