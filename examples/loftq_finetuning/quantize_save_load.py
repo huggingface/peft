@@ -127,13 +127,13 @@ def quantize_and_save():
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, token=args.token, trust_remote_code=True)
     if any(name in args.model_name_or_path.lower() for name in ["llama", "mistral", "falcon"]):
         model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path, token=args.token, trust_remote_code=True, device_map="auto"
+            args.model_name_or_path, token=args.token, trust_remote_code=True
         )
         task_type = TaskType.CAUSAL_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
 
     elif any(name in args.model_name_or_path.lower() for name in ["bart", "t5"]):
-        model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path, token=args.token, device_map="auto")
+        model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path, token=args.token)
         task_type = TaskType.SEQ_2_SEQ_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "fc1", "fc2", "out_proj"]
 
