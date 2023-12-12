@@ -192,11 +192,11 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
 
     out_feature, in_feature = weight.size()
 
-    if weight.device.type != "cuda":
-        weight = weight.to("cuda")
-
     device = weight.device
     dtype = weight.dtype
+
+    if device.type != "cuda":
+        weight = weight.to("cuda")
 
     logging.info(
         f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} "
@@ -213,7 +213,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         if num_bits == 4 and is_bnb_4bit_available():
             qweight = bnb.nn.Params4bit(
                 res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type="nf4"
-            ).to(device)
+            ).to("cuda")
             dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
         else:
             quantized_weight, max_abs, shape = quantizer.quantize_block(res)
@@ -228,4 +228,4 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
 
     lora_A, lora_B = R, L
 
-    return dequantized_weight.to(dtype), lora_A, lora_B
+    return dequantized_weight.to(device=device, dtype=dtype), lora_A, lora_B
