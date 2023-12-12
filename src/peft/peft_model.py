@@ -1142,13 +1142,16 @@ class PeftModelForCausalLM(PeftModel):
         # https://github.com/huggingface/transformers/pull/26681/ introduced new cache format
         # for some architectures which requires a special fix for prompt tuning etc.
         # TODO: starting with transformers 4.37, all architectures should support caching.
+        uses_transformers_4_37 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.37.0")
         uses_transformers_4_36 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.36.0")
         transformers_new_cache_archs = ["llama", "mistral", "persimmon", "phi"]
-        uses_cache = self.base_model.config.model_type in transformers_new_cache_archs
+        uses_cache = uses_transformers_4_37 or (
+            uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
+        )
 
         if peft_config.is_prompt_learning:
             if model_kwargs.get("attention_mask", None) is not None:
-                if uses_transformers_4_36 and uses_cache and (model_kwargs["past_key_values"] is not None):
+                if uses_cache and (model_kwargs["past_key_values"] is not None):
                     # TODO figure out why this workaround is necessary, see #1252 for context
                     size = model_kwargs["input_ids"].shape[0], model_kwargs["past_key_values"][0][0].shape[-2]
                 else:
