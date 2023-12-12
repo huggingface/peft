@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Optional
+from typing import Optional, List
 
 import torch
 import torch.nn as nn
@@ -150,7 +150,7 @@ class Linear(nn.Linear, VeraLayer):
         self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, safe_merge: bool = False) -> None:
+    def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, adapter_names: Optional[List[str]] = None, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -159,13 +159,20 @@ class Linear(nn.Linear, VeraLayer):
                 If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
         """
         if self.merged:
             warnings.warn(
                 f"Already following adapters were merged {','.join(self.merged_adapters)}. "
                 f"You are now additionally merging {','.join(self.active_adapters)}."
             )
-        for active_adapter in self.active_adapters:
+
+        if adapter_names is None:
+            adapter_names = self.active_adapter
+
+        for active_adapter in adapter_names:
             if active_adapter in self.vera_lambda_d.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:

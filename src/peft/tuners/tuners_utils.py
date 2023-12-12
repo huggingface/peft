@@ -290,9 +290,7 @@ class BaseTuner(nn.Module, ABC):
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 if hasattr(self, "vera_A"):
-
-                    # TODO: add `adapter_names` to VeRA
-                    module.merge(self.vera_A, self.vera_B)
+                    module.merge(self.vera_A, self.vera_B, adapter_names=adapter_names)
                 else:
                     module.merge(adapter_names=adapter_names)
 
