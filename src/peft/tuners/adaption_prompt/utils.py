@@ -73,7 +73,12 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
 
     seq_len = q_len
     if past_key_value is not None:
-        seq_len += past_key_value[0].shape[-2]
+        if isinstance(past_key_value, tuple):
+            # for transformers <= 4.35
+            seq_len += past_key_value[0].shape[-2]
+        else:
+            # since transformers 4.36, this is a DynamicCache instance
+            seq_len += past_key_value.get_seq_length(model.layer_idx)
     cos, sin = model.rotary_emb(value_states, seq_len=seq_len)
 
     return llama_apply_rotary_pos_emb(query_states, cos, sin, position_ids)
