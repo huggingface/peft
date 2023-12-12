@@ -15,7 +15,6 @@
 
 import importlib
 import os
-import platform
 import tempfile
 from unittest import TestCase
 
@@ -221,14 +220,11 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
 
     def test_use_cache(self) -> None:
         """Test that MultiTaskPromptTuning works when Llama config use_cache=True."""
-        if platform.system() == "Darwin":
-            # TODO: check why this is, may have started with transformers 4.36.0
-            self.skipTest("This test is flaky on macOS.")
-
+        torch.manual_seed(0)
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         task_ids = torch.LongTensor([1, 2]).to(self.torch_device)
 
-        original = LlamaForCausalLM(self._create_test_llama_config())
+        original = LlamaForCausalLM(self._create_test_llama_config()).eval()
         mpt = get_peft_model(original, self._create_multitask_prompt_tuning_config())
         mpt = mpt.to(self.torch_device)
 
