@@ -1141,6 +1141,7 @@ class PeftModelForCausalLM(PeftModel):
 
         # https://github.com/huggingface/transformers/pull/26681/ introduced new cache format
         # for some architectures which requires a special fix for prompt tuning etc.
+        # TODO: starting with transformers 4.37, all architectures should support caching.
         uses_transformers_4_36 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.36.0")
         transformers_new_cache_archs = ["llama", "mistral", "persimmon", "phi"]
         uses_cache = self.base_model.config.model_type in transformers_new_cache_archs
