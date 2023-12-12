@@ -267,7 +267,7 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
                 )
 
     if use_safetensors:
-        if hasattr(torch.backends, "mps")
+        if hasattr(torch.backends, "mps"):
             if device == torch.device("mps"):
                 adapters_weights = safe_load_file(filename, device="cpu")
         else:
