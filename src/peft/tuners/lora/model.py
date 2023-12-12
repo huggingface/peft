@@ -163,6 +163,16 @@ class LoraModel(BaseTuner):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
+        linear_types = (Linear,)
+        if is_bnb_available():
+            from .bnb import Linear8bitLt
+
+            linear_types += (Linear8bitLt,)
+        if is_bnb_4bit_available():
+            from .bnb import Linear4bit
+
+            linear_types += (Linear4bit,)
+
         # TODO: better deal with that
         if isinstance(target, Conv2d):
             target.update_layer_conv2d(
@@ -180,7 +190,7 @@ class LoraModel(BaseTuner):
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
             )
-        elif isinstance(target, Linear):
+        elif isinstance(target, linear_types):
             target.update_layer(
                 adapter_name,
                 r,
@@ -284,15 +294,15 @@ class LoraModel(BaseTuner):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
-                    "compute_dtype": target.compute_dtype,
-                    "compress_statistics": target.weight.compress_statistics,
-                    "quant_type": target.weight.quant_type,
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
                 }
             )
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target_base_layer, AutoGPTQQuantLinear):
             new_module = QuantLinear(target, adapter_name, **kwargs)
-            target.weight = target.qweight
+            target.qweight = target_base_layer.qweight
         elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)

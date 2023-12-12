@@ -173,10 +173,10 @@ class AdaLoraModel(LoraModel):
         if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             kwargs.update(
                 {
-                    "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
-                    "threshold": target.state.threshold,
-                    "index": target.index,
+                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
+                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
+                    "threshold": target_base_layer.state.threshold,
+                    "index": target_base_layer.index,
                 }
             )
             new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
@@ -184,9 +184,9 @@ class AdaLoraModel(LoraModel):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
-                    "compute_dtype": target.compute_dtype,
-                    "compress_statistics": target.weight.compress_statistics,
-                    "quant_type": target.weight.quant_type,
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
                 }
             )
             new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
