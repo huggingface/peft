@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Optional, List, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -148,7 +148,13 @@ class Linear(nn.Linear, VeraLayer):
         self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, vera_A: torch.Tensor, vera_B: torch.Tensor, adapter_names: Optional[List[str]] = None, safe_merge: bool = False) -> None:
+    def merge(
+        self,
+        vera_A: torch.Tensor,
+        vera_B: torch.Tensor,
+        adapter_names: Optional[List[str]] = None,
+        safe_merge: bool = False,
+    ) -> None:
         """
         Merge the active adapter weights into the base weights
 

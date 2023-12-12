@@ -17,7 +17,7 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from functools import partial
-from typing import Union, Optional, List
+from typing import List, Optional, Union
 
 import torch
 from torch.nn.init import _calculate_correct_fan
@@ -430,7 +430,13 @@ class VeraModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+    def _unload_and_optionally_merge(
+        self,
+        merge=True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[List[str]] = None,
+    ):
         key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -470,10 +476,12 @@ class VeraModel(BaseTuner):
                 target.delete_adapter(adapter_name)
                 if new_adapter is None:
                     new_adapter = target.active_adapter[:]
-        
+
         self.active_adapter = new_adapter or []
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ):
         r"""
         This method merges the Vera layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -500,7 +508,9 @@ class VeraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names)
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
 
     def unload(self):
         """
