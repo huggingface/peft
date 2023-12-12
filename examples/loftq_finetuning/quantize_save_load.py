@@ -126,9 +126,7 @@ def quantize_and_save():
     # Download weights and configure LoRA
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, token=args.token, trust_remote_code=True)
     if any(name in args.model_name_or_path.lower() for name in ["llama", "mistral", "falcon"]):
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path, token=args.token, trust_remote_code=True
-        )
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, token=args.token, trust_remote_code=True)
         task_type = TaskType.CAUSAL_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
 
