@@ -75,9 +75,10 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
         pred_txt_path = os.path.join(pred_lmk_dir, f'{idx}.txt')
         gt_lmk_path = os.path.join(gt_lmk_dir, f'{idx}_gt_lmk.jpg')
         gt_txt_path = os.path.join(gt_lmk_dir, f'{idx}.txt')
+        gt_img_path = os.path.join(gt_lmk_dir, f'{idx}_gt_img.jpg')
 
         # if (not os.path.exists(pred_txt_path)) or (not os.path.exists(gt_txt_path)):
-        image = imread(imagepath)[:, :, :3]
+        image = imread(imagepath) # [:, :, :3]
         out = detect_model.get_landmarks(image)
         if out is None:
             continue
@@ -90,6 +91,8 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
         save_image(gt_lmk_img, gt_lmk_path)
 
         gt_img = dataset[idx]['pixel_values']
+        save_image(gt_img, gt_img_path)
+
         gt_img = (gt_img.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
         out = detect_model.get_landmarks(gt_img)
         if out is None:
@@ -102,15 +105,15 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
         if vis:
             # visualize predicted landmarks
             vis_path = os.path.join(pred_lmk_dir, f'{idx}_overlay.jpg')
-            # image = cv2.imread(imagepath)
+            image = cv2.imread(imagepath)
             image_point = plot_kpts(image, pred_kpt)
             gt_lmk_image = cv2.imread(gt_lmk_path)
             cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
 
             # visualize gt landmarks
             vis_path = os.path.join(gt_lmk_dir, f'{idx}_overlay.jpg')
-            # image = cv2.imread(imagepath)
-            image_point = plot_kpts(gt_img, gt_kpt)
+            image = cv2.imread(gt_img_path)
+            image_point = plot_kpts(image, gt_kpt)
             # gt_lmk_image = cv2.imread(gt_lmk_path)
             cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
 
