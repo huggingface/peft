@@ -59,19 +59,6 @@ class VeraLayer(BaseTunerLayer):
     def merged(self) -> bool:
         return bool(self.merged_adapters)
 
-    def _init_empty_weights(self, cls, *args, **kwargs) -> None:
-        # A helper method that allows to initialize the layer of the given class without spending time to initialize the
-        # model weights. The implementation is inspired by
-        # https://pytorch.org/docs/stable/generated/torch.nn.utils.skip_init.html but this function cannot be used
-        # directly.
-        # Instead of this approach, it would be possible to bypass the __init__ of the class but that runs the risk of
-        # omitting important logic inside that __init__.
-        kwargs = kwargs.copy()
-        final_device = kwargs.pop("device", "cpu")
-
-        cls.__init__(self, *args, device="meta", **kwargs)
-        self.to_empty(device=final_device)
-
     def update_layer(self, adapter_name, r, vera_dropout, init_vera_weights, d_initial: float = 1.0):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -154,8 +141,6 @@ class Linear(nn.Linear, VeraLayer):
         # this gets the init from nn.Linear's super perspective, i.e.
         # nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
-        # Note that we don't use self._init_empty_weights() for Linear because it is a bit slower and the benefit of
-        # added robustness is not big enough for Linear.
 
         VeraLayer.__init__(self, base_layer, **kwargs)
         # Freezing the pre-trained weight matrix
