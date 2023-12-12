@@ -139,7 +139,6 @@ def quantize_and_save():
 
     elif any(name in args.model_name_or_path.lower() for name in ["deberta", "roberta", "bert"]):
         model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path, token=args.token)
-        model = model.cuda()
         task_type = TaskType.SEQ_CLS
         target_modules = ["query_proj", "key_proj", "value_proj", "dense"]  # embeddings not supported by peft
     else:
