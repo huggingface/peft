@@ -191,6 +191,10 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         raise ValueError("Number of iterations must be greater than 0")
 
     out_feature, in_feature = weight.size()
+
+    if weight.device.type != "cuda":
+        weight = weight.to("cuda")
+    
     device = weight.device
     dtype = weight.dtype
 
