@@ -11,6 +11,8 @@
   sections:
   - local: tutorial/peft_model_config
     title: PEFT configurations and models
+  - local: tutorial/peft_integrations
+    title: PEFT integrations
 
 - title: Task guides
   sections:
@@ -37,6 +39,8 @@
 
 - title: Developer guides
   sections:
+  - local: developer_guides/quantization
+    title: Quantization
   - local: developer_guides/custom_models
     title: Working with custom models
   - local: developer_guides/low_level_api

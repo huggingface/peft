@@ -56,3 +56,5 @@ A `PeftModel` for getting extracting features/embeddings from transformer models
 ## Utilities
 
 [[autodoc]] get_peft_model
+
+[[autodoc]] utils.prepare_model_for_kbit_training
