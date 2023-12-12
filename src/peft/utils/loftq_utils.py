@@ -194,7 +194,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
 
     if weight.device.type != "cuda":
         weight = weight.to("cuda")
-    
+
     device = weight.device
     dtype = weight.dtype
 
