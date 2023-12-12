@@ -1138,11 +1138,15 @@ class PeftModelForCausalLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+
+        _uses_transformers_4_26 = True
+
         if peft_config.is_prompt_learning:
             if model_kwargs.get("attention_mask", None) is not None:
                 if packaging.version.parse(transformers.__version__) < packaging.version.parse("4.36.0"):
                     # TODO figure out why this workaround is necessary, see #1252 for context
                     size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
+                    _uses_transformers_4_26 = False
                 elif model_kwargs["past_key_values"] is None:
                     size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 else:
@@ -1173,6 +1177,10 @@ class PeftModelForCausalLM(PeftModel):
                     prompts = prompts.to(inputs_embeds.dtype)
                     model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                     model_kwargs["input_ids"] = None
+
+        if _uses_transformers_4_26:
+            # TODO: why?
+            model_kwargs = self.base_model_prepare_inputs_for_generation(**model_kwargs)
 
         return model_kwargs
 
