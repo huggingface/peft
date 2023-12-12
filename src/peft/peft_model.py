@@ -1139,18 +1139,19 @@ class PeftModelForCausalLM(PeftModel):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
 
-        _uses_transformers_4_26 = True
+        # https://github.com/huggingface/transformers/pull/26681/ introduced new cache format
+        # for some architectures which requires a special fix for prompt tuning etc.
+        uses_transformers_4_26 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.36.0")
+        transformers_new_cache_archs = ["llama", "mistral", "persimmon", "phi"]
+        uses_cache = self.base_model.config.model_type in transformers_new_cache_archs
 
         if peft_config.is_prompt_learning:
             if model_kwargs.get("attention_mask", None) is not None:
-                if packaging.version.parse(transformers.__version__) < packaging.version.parse("4.36.0"):
+                if uses_transformers_4_26 and uses_cache and (model_kwargs["past_key_values"] is not None):
                     # TODO figure out why this workaround is necessary, see #1252 for context
-                    size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
-                    _uses_transformers_4_26 = False
-                elif model_kwargs["past_key_values"] is None:
-                    size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
-                else:
                     size = model_kwargs["input_ids"].shape[0], model_kwargs["past_key_values"][0][0].shape[-2]
+                else:
+                    size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
 
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 model_kwargs["attention_mask"] = torch.cat(
@@ -1177,10 +1178,6 @@ class PeftModelForCausalLM(PeftModel):
                     prompts = prompts.to(inputs_embeds.dtype)
                     model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                     model_kwargs["input_ids"] = None
-
-        if _uses_transformers_4_26:
-            # TODO: why?
-            model_kwargs = self.base_model_prepare_inputs_for_generation(**model_kwargs)
 
         return model_kwargs
 
