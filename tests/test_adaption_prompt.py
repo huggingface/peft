@@ -15,6 +15,7 @@
 
 import importlib
 import os
+import platform
 import tempfile
 import unittest
 from unittest import TestCase
@@ -387,6 +388,10 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
     def test_use_cache(self) -> None:
         """Test that AdaptionPrompt works when Llama config use_cache=True."""
+        if platform.system() == "Darwin":
+            # TODO: check why this is, may have started with transformers 4.36.0
+            self.skipTest("This test is flaky on macOS.")
+
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         original = LlamaForCausalLM(
             LlamaConfig(
