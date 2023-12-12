@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import torch
 import torch.nn as nn
@@ -134,19 +134,17 @@ class Linear(nn.Linear, VeraLayer):
         vera_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
+        init_vera_weights: Union[bool, str] = True,
         d_initial: float = 1.0,
         **kwargs,
     ) -> None:
-        init_vera_weights = kwargs.pop("init_vera_weights", True)
         # this gets the init from nn.Linear's super perspective, i.e.
         # nn.Module.__init__, which should always be called
         super(nn.Linear, self).__init__()
-
         VeraLayer.__init__(self, base_layer, **kwargs)
-        # Freezing the pre-trained weight matrix
-
         self.fan_in_fan_out = fan_in_fan_out
 
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 

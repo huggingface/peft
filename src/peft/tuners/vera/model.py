@@ -17,7 +17,7 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from functools import partial
-from typing import Union
+from typing import Union, Optional, List
 
 import torch
 from torch.nn.init import _calculate_correct_fan
@@ -242,16 +242,15 @@ class VeraModel(BaseTuner):
         # TODO: add back once we have quant support
         # kwargs["loaded_in_8bit"] = False
         # kwargs["loaded_in_4bit"] = False
-        kwargs["bias"] = bias
-
-        # TODO: add in quant?
         # quantization_config = get_quantization_config(self.model, method="gptq")
         # if quantization_config is not None:
         # kwargs["gptq_quantization_config"] = quantization_config
 
+        kwargs["bias"] = bias
+
         # the below todo is copied from LoRA
         # TODO: better deal with that
-        if isinstance(target, VeraLayer) and isinstance(target, (torch.nn.Embedding, torch.nn.sparse.Embedding)):
+        if isinstance(target, Embedding):
             target.update_layer_embedding(
                 adapter_name,
                 r,
@@ -259,8 +258,7 @@ class VeraModel(BaseTuner):
                 vera_config.init_vera_weights,
                 d_initial=vera_config.d_initial,
             )
-
-        elif isinstance(target, VeraLayer):
+        elif isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
                 r,
@@ -432,7 +430,7 @@ class VeraModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
+    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
         key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -443,7 +441,7 @@ class VeraModel(BaseTuner):
 
             if hasattr(target, "base_layer"):
                 if merge:
-                    target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge)
+                    target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge, adapter_names=adapter_names)
 
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
@@ -463,33 +461,19 @@ class VeraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
+        # TODO: replace with self.prefix
         key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
+        new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, VeraLayer):
-                for attr in [
-                    "r",
-                    "vera_A",
-                    "vera_B",
-                    "vera_lambda_b",
-                    "vera_lambda_d",
-                    "vera_embedding_A",
-                    "vera_embedding_B",
-                    "vera_dropout",
-                ]:
-                    if adapter_name in getattr(target, attr):
-                        getattr(target, attr).pop(adapter_name)
-                if adapter_name in target.active_adapters:
-                    resetting_active_adapter = (
-                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
-                    )
-                    warnings.warn(
-                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to"
-                        f" {resetting_active_adapter}. "
-                    )
-                    target.set_adapter(resetting_active_adapter)
+                target.delete_adapter(adapter_name)
+                if new_adapter is None:
+                    new_adapter = target.active_adapter[:]
+        
+        self.active_adapter = new_adapter or []
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
         r"""
         This method merges the Vera layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -500,6 +484,9 @@ class VeraModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
 
         Example:
 
@@ -513,7 +500,7 @@ class VeraModel(BaseTuner):
         >>> merged_model = model.merge_and_unload()
         ```
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names)
 
     def unload(self):
         """
