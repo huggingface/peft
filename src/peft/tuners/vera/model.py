@@ -557,7 +557,7 @@ class VeraModel(BaseTuner):
         hook_handles = self._add_forward_hooks()
 
         try:
-            outputs = super().generate(*args, **kwargs)
+            outputs = self.model.generate(*args, **kwargs)
         finally:
             # regardless of success or failure of generate call, we should remove
             # handles to restore the original model.
