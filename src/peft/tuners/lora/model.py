@@ -301,7 +301,7 @@ class LoraModel(BaseTuner):
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target_base_layer, AutoGPTQQuantLinear):
             new_module = QuantLinear(target, adapter_name, **kwargs)
-            target.weight = target_base_layer.qweight
+            target.qweight = target_base_layer.qweight
         elif isinstance(target_base_layer, torch.nn.Embedding):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
