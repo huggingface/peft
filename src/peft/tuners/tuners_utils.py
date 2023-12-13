@@ -505,15 +505,15 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             # COMMON_LAYERS_PATTERN is dropped
             # empty layers_pattern means all layer pattern is ok
             layer_index = None
-            if layers_pattern is None or len(layers_pattern) == 0 {
+            if layers_pattern is None or len(layers_pattern) == 0:
                 layer_index = re.match(r".*\.[^\.]*\.(\d+)", key)
-            } else {
+            else:
                 layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
                 for pattern in layers_pattern:
                     layer_index = re.match(r".*\.{layer}\.(\d+)".format(layer=pattern), key)
                     if layer_index is not None:
                         break
-            }
+            
             if layer_index is None:
                 target_module_found = False
             else:
