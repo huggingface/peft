@@ -14,7 +14,9 @@
 # limitations under the License.
 
 import math
+import tempfile
 import warnings
+from contextlib import contextmanager
 from typing import Any, List, Optional, Union
 
 import torch
@@ -257,6 +259,30 @@ def onload_delta_wrapper(func):
     return wrapper
 
 
+@contextmanager
+def onload_layer(base_layer):
+    if (
+        hasattr(base_layer, "_hf_hook")
+        and isinstance(base_layer._hf_hook, AlignDevicesHook)
+        and base_layer._hf_hook.offload
+    ):
+        base_layer._hf_hook.pre_forward(base_layer)
+
+    yield
+
+    if (
+        hasattr(base_layer, "_hf_hook")
+        and isinstance(base_layer._hf_hook, AlignDevicesHook)
+        and base_layer._hf_hook.offload
+    ):
+        base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
+        # offload weights map to disk if original device is the disk
+        if torch.device("meta") in base_layer._hf_hook.original_devices.values():
+            offload_folder = tempfile.TemporaryFile()
+            offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
+        base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
+
+
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
 
@@ -312,43 +338,24 @@ class Linear(nn.Module, LoraLayer):
             adapter_names = self.active_adapters
 
         for active_adapter in adapter_names:
-
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                if (
-                    hasattr(base_layer, "_hf_hook")
-                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
-                    and base_layer._hf_hook.offload
-                ):
-                    base_layer._hf_hook.pre_forward(base_layer)
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                with onload_layer(base_layer) as base_layer:
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the copy operation.
+                        orig_weights = base_layer.weight.data.clone()
+                        orig_weights += self.get_delta_weight(active_adapter)
 
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                        if not torch.isfinite(orig_weights).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
 
-                    base_layer.weight.data = orig_weights
-                else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                        base_layer.weight.data = orig_weights
+                    else:
+                        base_layer.weight.data += self.get_delta_weight(active_adapter)
 
-                if (
-                    hasattr(base_layer, "_hf_hook")
-                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
-                    and base_layer._hf_hook.offload
-                ):
-                    base_layer._hf_hook.weights_map = {
-                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
-                    }
-                    # offload weights map to disk if original device is the disk
-                    if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-                        offload_folder = "offload_dir"
-                        offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
-                    base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
