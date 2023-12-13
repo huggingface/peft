@@ -230,3 +230,27 @@ class InitializationTest(unittest.TestCase):
         # with init_lora_weights=False, weight B should *not* be zero. We don't care so much about the actual values
         # as long as they are not zero, in order to avoid identity transformation.
         self.assertFalse(torch.allclose(weight_B, torch.zeros_like(weight_B)))
+
+    def test_lora_use_rslora(self):
+        # default is True
+        torch.manual_seed(0)
+
+        _model = self.get_model()
+
+        # check scaling factor use_rslora=False
+        config = LoraConfig(target_modules=["linear", "embed", "conv2d"], lora_alpha=3, r=16, use_rslora=False)
+        expected_scaling = config.lora_alpha / config.r
+        model = get_peft_model(_model, config)
+
+        self.assertTrue(model.linear.scaling["default"] == expected_scaling)
+        self.assertTrue(model.embed.scaling["default"] == expected_scaling)
+        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling)
+
+        # check scaling factor use_rslora=True
+        config = LoraConfig(target_modules=["linear", "embed", "conv2d"], lora_alpha=3, r=16, use_rslora=True)
+        expected_scaling = config.lora_alpha / (config.r**0.5)
+        model = get_peft_model(_model, config)
+
+        self.assertTrue(model.linear.scaling["default"] == expected_scaling)
+        self.assertTrue(model.embed.scaling["default"] == expected_scaling)
+        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling)
