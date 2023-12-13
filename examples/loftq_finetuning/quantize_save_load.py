@@ -23,10 +23,9 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
-    BitsAndBytesConfig,
 )
 
-from peft import LoftQConfig, LoraConfig, PeftModel, TaskType, get_peft_model
+from peft import LoftQConfig, LoraConfig, TaskType, get_peft_model
 
 
 class Shell(nn.Module):
@@ -187,54 +186,8 @@ def quantize_and_save():
     return base_model_dir, lora_model_dir
 
 
-def load_loftq(base_model_path, lora_adapter_path):
-    if any(name in base_model_path.lower() for name in ["llama", "mistral", "falcon"]):
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model_path,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=False,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-    elif any(name in base_model_path.lower() for name in ["bart", "t5"]):
-        model = AutoModelForSeq2SeqLM.from_pretrained(
-            base_model_path,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-            load_in_4bit=True,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=False,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-    elif any(name in base_model_path.lower() for name in ["deberta", "roberta", "bert"]):
-        model = AutoModelForSequenceClassification.from_pretrained(
-            base_model_path,
-            low_cpu_mem_usage=True,
-            load_in_4bit=True,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=False,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-    else:
-        raise NotImplementedError("Other models not supported yet.")
-
-    lora_model = PeftModel.from_pretrained(model, lora_adapter_path, is_trainable=True)
-
-    # Do training or inference below
-    print_model(lora_model, "lora_model")
-    print_model(model, "base_model")
-
-
 if __name__ == "__main__":
     base_dir, lora_dir = quantize_and_save()
-    load_loftq(base_dir, lora_dir)
 
 # example command:
 # python quantize_save_load.py \
