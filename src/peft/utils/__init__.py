@@ -48,5 +48,7 @@ from .other import (
     id_tensor_storage,
     separate_pad_tokens,
     add_pad_tokens,
+    batch_concatenate_with_list_or_tensor,
+    apply_to_list_or_tensor,
 )
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights

@@ -15,7 +15,7 @@
 import copy
 import inspect
 import warnings
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import accelerate
 import torch
@@ -484,12 +484,12 @@ def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
 
 
 def separate_pad_tokens(
-    input_ids: torch.Tensor, inputs_embeds: torch.Tensor, attention_mask: torch.Tensor, labels: torch.Tensor
+    input_ids: Optional[torch.Tensor], inputs_embeds: Optional[torch.Tensor], attention_mask: Optional[torch.Tensor], labels: Optional[torch.Tensor]
 ):
     """
-    Separates out the tokens corresponding to padding in input_ids, inputs_embeds, attention_mask and labels
+    Separates out the tokens/vectors/entries corresponding to padding in input_ids, inputs_embeds, attention_mask and labels
 
-    Returns:
+   . Returns:
     - input_ids: input_ids with padding tokens removed
     - inputs_embeds: inputs_embeds with padding tokens removed
     - attention_mask: attention_mask with padding tokens removed
@@ -502,12 +502,12 @@ def separate_pad_tokens(
     ndim = input_ids.ndim if input_ids is not None else inputs_embeds.ndim - 1
     if not ndim == 2:
         raise ValueError("input_ids must be a 2D tensor")
+    
     # find the first index of a non-padding token
     if attention_mask is not None:
         first_non_padding_tok_ind = torch.argmax(attention_mask, dim=1)
     else:
-        batch_size = _get_batch_size(input_ids, inputs_embeds)
-        first_non_padding_tok_ind = torch.zeros(batch_size, dtype=torch.long)
+        return input_ids, inputs_embeds, attention_mask, labels, None # no special handling needed
 
     input_id_paddings, input_embed_paddings = None, None
     if input_ids is not None:
@@ -535,21 +535,24 @@ def separate_pad_tokens(
 
 
 def add_pad_tokens(
-    input_embeds: List[torch.Tensor],
-    attention_mask: List[torch.Tensor],
-    labels: List[torch.Tensor],
-    pad_els: Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]],
+    input_embeds: Union[List[torch.Tensor], torch.Tensor],
+    attention_mask: Union[List[torch.Tensor], torch.Tensor],
+    labels: Union[List[torch.Tensor], torch.Tensor],
+    pad_els: Optional[Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]],
 ):
     """
-    Adds the padding token elements back to input_ids, attention_mask and labels
+    Adds the padding token elements back to input_embeds, attention_mask and labels
 
+   .
+    
     Returns:
-    - input_ids: input_ids with padding tokens removed
-    - attention_mask: attention_mask with padding tokens removed
-    - labels: labels with padding tokens removed
-    - pad_els: a tuple (pad_token_input_ids, pad_token_inputs_embeds, pad_token_attention_mask, pad_token_labels)
-      containing the pad token related tensors
+    - input_embeds: input_embeds with padding tokens added
+    - attention_mask: attention_mask with padding tokens added
+    - labels: labels with padding tokens added
     """
+    if pad_els is None:
+        return input_embeds, attention_mask, labels # no special handling needed
+    
     pad_input_ids, pad_input_embeds, pad_mask, pad_labels = pad_els
     final_input_embeds = torch.stack(
         [torch.cat((pad_embed, input_embed)) for input_embed, pad_embed in zip(input_embeds, pad_input_embeds)]
@@ -562,3 +565,21 @@ def add_pad_tokens(
     if labels is not None:
         final_labels = torch.stack([torch.cat((pad_label, label)) for label, pad_label in zip(labels, pad_labels)])
     return final_input_embeds, final_attention_mask, final_labels
+
+
+def apply_to_list_or_tensor(f, x: Union[List[torch.Tensor], torch.Tensor]) -> Union[List[torch.Tensor], torch.Tensor]:
+    """
+    Apply the given function `f` which operators on a single/batch of tensors to a tensor or a list of tensors. Helpful when dealing with prompt tuning for causal language models.
+    """
+    if isinstance(x, list):
+        return [f(inp) for inp in x]
+    else:
+        return f(x)
+
+def batch_concatenate_with_list_or_tensor(tensor: torch.Tensor, inp: Union[List[torch.Tensor], torch.Tensor]) -> Union[List[torch.Tensor], torch.Tensor]:
+    """
+    Performs a batch concatenation (along the 1st dimension) between a given tensor `tensor` and another argument `inp` which can be in a list format or as a single tensor.
+    """
+    if isinstance(inp, list):
+        return [torch.cat((a, b)) for a,b in zip(tensor, inp)]
+    return torch.cat((tensor, inp), dim=1) # concatenate at dim=1 for a batch of tensors

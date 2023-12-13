@@ -67,6 +67,8 @@ from .utils import (
     separate_pad_tokens,
     set_peft_model_state_dict,
     shift_tokens_right,
+    apply_to_list_or_tensor,
+    batch_concatenate_with_list_or_tensor,
 )
 
 
@@ -1087,9 +1089,9 @@ class PeftModelForCausalLM(PeftModel):
                 input_ids, inputs_embeds, attention_mask, labels
             )
         if attention_mask is not None:
-            # Concat prompt attention mask. Index into first element for device info since attention_mask can be a list for prompt tuning
+            # Concat prompt attention mask. Index into first element for device info since attentioon_mask can be a list for prompt tuning
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask[0].device)
-            if not peft_config.peft_type == PeftType.PREFIX_TUNING:
+            if isinstance(attention_mask,list): # list of tensors with prompt tuning special handling
                 attention_mask = [
                     torch.cat((prefix_attention_mask_single, mask))
                     for prefix_attention_mask_single, mask in zip(prefix_attention_mask, attention_mask)
@@ -1120,21 +1122,27 @@ class PeftModelForCausalLM(PeftModel):
             )
         else:
             if inputs_embeds is None:
-                inputs_embeds = [self.word_embeddings(input_id) for input_id in input_ids]
+                # get word embeddings for input_ids, which can be a list of 1-D tensors or a 2-D tensor
+                inputs_embeds = apply_to_list_or_tensor(self.word_embeddings, input_ids) 
+            
+            prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
+            prompts = prompts.to(inputs_embeds[0].dtype)
+            inputs_embeds = batch_concatenate_with_list_or_tensor(prompts, inputs_embeds) # prepend prompt embeddings
+            
             # concat prompt labels
             if labels is not None:
                 # index into first element for device info since labels is a list for prompt tuning
                 prefix_labels = torch.full((batch_size, peft_config.num_virtual_tokens), -100).to(labels[0].device)
-                labels = [torch.cat((prefix_label, label)) for prefix_label, label in zip(prefix_labels, labels)]
-            prompts = self.get_prompt(batch_size=batch_size, task_ids=task_ids)
-            prompts = prompts.to(inputs_embeds[0].dtype)
+                labels = batch_concatenate_with_list_or_tensor(prefix_labels, labels) # prepend prefix labels
 
-            inputs_embeds = [torch.cat((prompt, input_embed)) for prompt, input_embed in zip(prompts, inputs_embeds)]
-            input_embed_paddings = pad_els[1]
-            if not input_embed_paddings:
-                # get padding token embeddings
-                padding_embeds = [self.word_embeddings(pad_id) for pad_id in pad_els[0]]
-                pad_els = (pad_els[0], padding_embeds, pad_els[2], pad_els[3])
+            if pad_els is not None: # special handling
+                input_embed_paddings = pad_els[1]
+                if not input_embed_paddings:
+                    # get padding token embeddings
+                    input_id_paddings = pad_els[0]
+                    padding_embeds = apply_to_list_or_tensor(self.word_embeddings, input_id_paddings)
+                    pad_els = (pad_els[0], padding_embeds, pad_els[2], pad_els[3])
+                
             # add the padding tokens again
             inputs_embeds, attention_mask, labels = add_pad_tokens(inputs_embeds, attention_mask, labels, pad_els)
             kwargs.update(
