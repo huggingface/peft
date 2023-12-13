@@ -1087,7 +1087,7 @@ class PeftModelForCausalLM(PeftModel):
                 input_ids, inputs_embeds, attention_mask, labels
             )
         if attention_mask is not None:
-            # concat prompt attention mask. index into first element for device info since attentin_mask can be a list for prompt tuning
+            # Concat prompt attention mask. Index into first element for device info since attention_mask can be a list for prompt tuning
             prefix_attention_mask = torch.ones(batch_size, peft_config.num_virtual_tokens).to(attention_mask[0].device)
             if not peft_config.peft_type == PeftType.PREFIX_TUNING:
                 attention_mask = [

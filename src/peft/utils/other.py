@@ -487,7 +487,9 @@ def separate_pad_tokens(
     input_ids: torch.Tensor, inputs_embeds: torch.Tensor, attention_mask: torch.Tensor, labels: torch.Tensor
 ):
     """
-    Separates out the tokens corresponding to padding in input_ids, inputs_embeds, attention_mask and labels Returns:
+    Separates out the tokens corresponding to padding in input_ids, inputs_embeds, attention_mask and labels
+
+    Returns:
     - input_ids: input_ids with padding tokens removed
     - inputs_embeds: inputs_embeds with padding tokens removed
     - attention_mask: attention_mask with padding tokens removed
@@ -539,7 +541,9 @@ def add_pad_tokens(
     pad_els: Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]],
 ):
     """
-    Adds the padding token elements back to input_ids, attention_mask and labels Returns:
+    Adds the padding token elements back to input_ids, attention_mask and labels
+
+    Returns:
     - input_ids: input_ids with padding tokens removed
     - attention_mask: attention_mask with padding tokens removed
     - labels: labels with padding tokens removed
