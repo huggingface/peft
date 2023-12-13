@@ -145,12 +145,12 @@ class VeraModel(BaseTuner):
                     )
                 first_embedding = tuple(module.weight.shape)
 
-            if first_linear is not None and first_embedding is not None:
-                return first_linear, first_embedding
-
         return first_linear, first_embedding
 
     def __init__(self, model, config, adapter_name) -> None:
+        if config.projection_prng_key is None:
+            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
+            raise ValueError(msg)
         super().__init__(model, config, adapter_name)
         config = config[adapter_name]
 
