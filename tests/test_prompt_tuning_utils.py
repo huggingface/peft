@@ -26,6 +26,11 @@ from peft.tuners.tuners_utils import check_target_module_exists, inspect_matched
 
 
 SEPARATE_PAD_TOKENS_TEST_CASES = (
+    # (input_ids, input_embeds, attn_mask, labels, 
+    # (
+    #   expected_ids, expected_embeds, expected_mask, expected_labels, 
+    #   (expected_pad_ids, expected_pad_embeds, expected_pad_mask, expected_pad_labels))
+    # )
     (
         torch.tensor([[10, 2, 3, 3]]), None, torch.tensor([[0, 1, 1, 1]]), torch.tensor([[-100, 2, 3, 3]]),
         (
@@ -56,6 +61,37 @@ SEPARATE_PAD_TOKENS_TEST_CASES = (
     ),
 )
 
+ADD_PAD_TOKENS_TEST_CASES = (
+    # (input_embeds, attn_mask, labels, 
+    # (pad_input_ids, pad_inputs_embeds, pad_mask, pad_labels), 
+    # (expected_embeds, expected_mask, expected_labels))
+    (
+        [torch.tensor([[2], [3], [3]])], [torch.tensor([1, 1, 1])], [torch.tensor([2, 3, 3])],
+        (None, [torch.tensor([[10]])], [torch.tensor([0])], [torch.tensor([-100])]),
+        (
+            torch.tensor([[[10], [2], [3], [3]]]), torch.tensor([[0, 1, 1, 1]]), torch.tensor([[-100, 2, 3, 3]]),
+        )
+    ),
+    # test case with empty pad elements. Internally, when input_ids is an empty tensor, torch's embedding layer returns an empty tensor
+    # with size torch.Size([0, embedding_dim]). The same is replicated here.
+    (
+        [torch.tensor([[2], [3], [3]])], [torch.tensor([1, 1, 1])], [torch.tensor([2, 3, 3])],
+        (None, [torch.zeros(torch.Size([0, 1]))], [torch.tensor([])], [torch.tensor([])]),
+        (
+            torch.tensor([[[2], [3], [3]]]), torch.tensor([[1, 1, 1]]), torch.tensor([[2, 3, 3]]),
+        )
+    ),
+
+    (
+        torch.tensor([[[2], [3], [3]]]), torch.tensor([[1, 1, 1]]), torch.tensor([[2, 3, 3]]),
+        None,
+        (
+            torch.tensor([[[2], [3], [3]]]), torch.tensor([[1, 1, 1]]), torch.tensor([[2, 3, 3]]),
+        )
+    ),
+
+)
+
 class PromptTuningUtilsTester(unittest.TestCase):
     r"""
     Test if the helper functions used for prompt tuning work as expected.
@@ -79,6 +115,24 @@ class PromptTuningUtilsTester(unittest.TestCase):
             self.assertTrue(len(expected_pad_els) == len(actual_pad_els))
             for i in range(len(actual_pad_els)):
                 self.assert_true_for_tensor_list(expected_pad_els[i], actual_pad_els[i])
+    
+    @parameterized.expand(ADD_PAD_TOKENS_TEST_CASES)
+    def test_add_pad_tokens(self, input_embeds, attn_mask, labels, pad_els, expected_res):
+        expected_embeds, expected_attn_mask, expected_labels = expected_res 
+        actual_embeds, actual_attn_mask, actual_labels = add_pad_tokens(
+            inputs_embeds=input_embeds, attention_mask=attn_mask, labels=labels, pad_els=pad_els
+        )
+        self.assertTrue(torch.equal(expected_embeds, actual_embeds))
+
+        if expected_attn_mask is None or actual_attn_mask is None:
+            self.assertEqual(expected_attn_mask, actual_attn_mask)
+        else:
+            self.assertTrue(torch.equal(expected_attn_mask, actual_attn_mask))
+
+        if expected_labels is None or actual_labels is None:
+            self.assertEqual(expected_labels, actual_labels)
+        else:
+            self.assertTrue(torch.equal(expected_labels, actual_labels))
     
     def assert_true_for_tensor_list(self, list1, list2):
         if list1 is None or list2 is None:
