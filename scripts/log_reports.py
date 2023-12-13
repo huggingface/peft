@@ -3,6 +3,9 @@ from pathlib import Path
 from datetime import date
 from tabulate import tabulate
 
+
+MAX_LEN_MESSAGE = 2900  # slack endpoint has a limit of 3001 characters
+
 failed = []
 passed = []
 
@@ -66,7 +69,7 @@ if total_num_failed > 0:
                 failed_table.append(test[0].split("::"))
             failed_table = tabulate(failed_table, headers=["Test Location", "Test Case", "Test Name"], showindex="always", tablefmt="grid", maxcolwidths=[12, 12, 12])
             message += '\n```\n' +failed_table + '\n```'
-        
+
         if total_empty_files[i]:
             message += f"\n*{name}: Warning! Empty file - please check the GitHub action job *\n"
     print(f'### {message}')
@@ -75,6 +78,10 @@ else:
 
 if os.environ.get("TEST_TYPE", "") != "":
     from slack_sdk import WebClient
+
+    if len(message > MAX_LEN_MESSAGE):
+        print(f"Truncating long message from {len(message)} to {MAX_LEN_MESSAGE}")
+        message = message[:MAX_LEN_MESSAGE] + "..."
 
     if len(message) != 0:
         md_report = {
@@ -105,7 +112,7 @@ if os.environ.get("TEST_TYPE", "") != "":
             {
                 "type": "plain_text",
                 "text": f"Nightly {os.environ.get('TEST_TYPE')} test results for {date.today()}",
-            },  
+            },
         ],
     }
     payload.append(date_report)

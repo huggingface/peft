@@ -14,15 +14,20 @@
 
 from setuptools import find_packages, setup
 
+
+VERSION = "0.7.2.dev0"
+
 extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
-extras["test"] = extras["dev"] + ["pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers<0.21.0"]
+extras["test"] = extras["dev"] + [
+    "pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers<0.21.0", "scipy"
+]
 
 setup(
     name="peft",
-    version="0.6.3.dev0",
+    version=VERSION,
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
     long_description=open("README.md", "r", encoding="utf-8").read(),
@@ -79,7 +84,7 @@ setup(
 # 6. Upload the package to the pypi test server first:
 #      twine upload dist/* -r pypitest
 # 7. Check that you can install it in a virtualenv by running:
-#      pip install -i https://testpypi.python.org/pypi peft
+#      pip install -i https://testpypi.python.org/pypi --extra-index-url https://pypi.org/simple peft
 # 8. Upload the final version to actual pypi:
 #      twine upload dist/* -r pypi
 # 9. Add release notes to the tag on https://github.com/huggingface/peft/releases once everything is looking hunky-dory.

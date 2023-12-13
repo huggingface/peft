@@ -180,10 +180,9 @@ class PeftCommonTester:
         dct = yaml.safe_load(metainfo)
         self.assertEqual(dct["library_name"], "peft")
 
-        model_config = model.config if isinstance(model.config, dict) else model.config.to_dict()
-        if model_config["model_type"] != "custom":
-            self.assertEqual(dct["base_model"], model_config["_name_or_path"])
-        else:
+        if hasattr(model, "config"):
+            self.assertEqual(dct["base_model"], model.config.to_dict()["_name_or_path"])
+        else:  # a custom model
             self.assertTrue("base_model" not in dct)
 
     def check_config_json(self, tmp_dirname, model):
@@ -193,9 +192,8 @@ class PeftCommonTester:
         with open(filename, "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        model_config = model.config if isinstance(model.config, dict) else model.config.to_dict()
-        if model_config["model_type"] != "custom":
-            self.assertEqual(config["base_model_name_or_path"], model_config["_name_or_path"])
+        if hasattr(model, "config"):  # custom models don't have a config attribute
+            self.assertEqual(config["base_model_name_or_path"], model.config.to_dict()["_name_or_path"])
 
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -574,7 +572,7 @@ class PeftCommonTester:
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -886,7 +884,7 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -924,7 +922,7 @@ class PeftCommonTester:
 
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         # same as test_delete_adapter, but this time an inactive adapter is deleted
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(

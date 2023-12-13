@@ -34,6 +34,8 @@ Supported methods:
 7. MultiTask Prompt Tuning: [Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning](https://arxiv.org/abs/2303.02861)
 8. LoHa: [FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning](https://arxiv.org/abs/2108.06098)
 9. LoKr: [KronA: Parameter Efficient Tuning with Kronecker Adapter](https://arxiv.org/abs/2212.10650) based on [Navigating Text-To-Image Customization:From LyCORIS Fine-Tuning to Model Evaluation](https://arxiv.org/abs/2309.14859) implementation
+10. LoftQ: [LoftQ: LoRA-Fine-Tuning-aware Quantization for Large Language Models](https://arxiv.org/abs/2310.08659)
+11. OFT: [Controlling Text-to-Image Diffusion by Orthogonal Finetuning](https://arxiv.org/abs/2306.07280)
 
 ## Getting started
 
@@ -141,7 +143,7 @@ Try out the 🤗 Gradio Space which should run seamlessly on a T4 instance:
 - Here is an example in [trl](https://github.com/lvwerra/trl) library using PEFT+INT8 for tuning policy model: [gpt2-sentiment_peft.py](https://github.com/lvwerra/trl/blob/main/examples/sentiment/scripts/gpt2-sentiment_peft.py) and corresponding [Blog](https://huggingface.co/blog/trl-peft)
 - Example using PEFT for Instruction finetuning, reward model and policy : [stack_llama](https://github.com/lvwerra/trl/tree/main/examples/research_projects/stack_llama/scripts) and corresponding [Blog](https://huggingface.co/blog/stackllama) 
 
-### INT8 training of large models in Colab using PEFT LoRA and bits_and_bytes
+### INT8 training of large models in Colab using PEFT LoRA and bitsandbytes
 
 - Here is now a demo on how to fine tune [OPT-6.7b](https://huggingface.co/facebook/opt-6.7b) (14GB in fp16) in a Google Colab: [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1jCkpikz0J2o20FBQmYmAGdiKmJGOMo-o?usp=sharing)
 
@@ -223,10 +225,12 @@ DeepSpeed version required `v0.8.0`. An example is provided in `~examples/condit
   ```
 
 ### Example of PEFT model inference using 🤗 Accelerate's Big Model Inferencing capabilities
-An example is provided in `~examples/causal_language_modeling/peft_lora_clm_accelerate_big_model_inference.ipynb`. 
+An example is provided in [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_accelerate_big_model_inference.ipynb).
 
 
 ## Models support matrix
+
+Find models that are supported out of the box below. Note that PEFT works with almost all models -- if it is not listed, you just need to [do some manual configuration](https://huggingface.co/docs/peft/developer_guides/custom_models).
 
 ### Causal Language Modeling
 | Model        | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
@@ -239,6 +243,7 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 | GPT-NeoX-20B | ✅  | ✅  | ✅  | ✅  | ✅  |
 | LLaMA        | ✅  | ✅  | ✅  | ✅  | ✅  |
 | ChatGLM      | ✅  | ✅  | ✅  | ✅  | ✅  |
+| Mistral      | ✅  |    |    |    |    |
 
 ### Conditional Generation
 |   Model         | LoRA | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
@@ -274,9 +279,9 @@ An example is provided in `~examples/causal_language_modeling/peft_lora_clm_acce
 
 ### Text-to-Image Generation
 
-|   Model         | LoRA | LoHa | LoKr | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
-| --------- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
-| Stable Diffusion           | ✅  | ✅  | ✅  |  |   |   |
+|   Model         | LoRA | LoHa | LoKr | OFT | Prefix Tuning  | P-Tuning | Prompt Tuning  | IA3 |
+| --------- | ---- | ---- | ---- | ---- | ---- | ---- | ----  | ----  |
+| Stable Diffusion           | ✅  | ✅  | ✅  | ✅  |  |   |   |
 
 
 ### Image Classification
@@ -362,6 +367,8 @@ any GPU memory savings. Please refer issue [[FSDP] FSDP with CPU offload consume
 
 ## 🤗 PEFT as a utility library
 
+### Injecting adapters directly into the model
+
 Inject trainable adapters on any `torch` model using `inject_adapter_in_model` method. Note the method will make no further change to the model.
 
 ```python
@@ -394,6 +401,37 @@ model = inject_adapter_in_model(lora_config, model)
 
 dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
 dummy_outputs = model(dummy_inputs)
+```
+
+Learn more about the [low level API in the docs](https://huggingface.co/docs/peft/developer_guides/low_level_api).
+
+### Mixing different adapter types
+
+Ususally, it is not possible to combine different adapter types in the same model, e.g. combining LoRA with AdaLoRA, LoHa, or LoKr. Using a mixed model, this can, however, be achieved:
+
+```python
+from peft import PeftMixedModel
+
+model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM").eval()
+peft_model = PeftMixedModel.from_pretrained(model, <path-to-adapter-0>, "adapter0")
+peft_model.load_adapter(<path-to-adapter-1>, "adapter1")
+peft_model.set_adapter(["adapter0", "adapter1"])
+result = peft_model(**inputs)
+```
+
+The main intent is to load already trained adapters and use this only for inference. However, it is also possible to create a PEFT model for training by passing `mixed=True` to `get_peft_model`:
+
+```python
+from peft import get_peft_model, LoraConfig, LoKrConfig
+
+base_model = ...
+config0 = LoraConfig(...)
+config1 = LoKrConfig(...)
+peft_model = get_peft_model(base_model, config0, "adapter0", mixed=True)
+peft_model.add_adapter(config1, "adapter1")
+peft_model.set_adapter(["adapter0", "adapter1"])
+for batch in dataloader:
+    ...
 ```
 
 ## Contributing

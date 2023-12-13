@@ -12,6 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import re
 import warnings
@@ -20,6 +21,7 @@ from enum import Enum
 from typing import List, Optional
 
 import torch
+from torch import nn
 from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
@@ -32,15 +34,6 @@ from peft.utils import (
 )
 
 from .layer import Conv2d, IA3Layer, Linear
-
-
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-    from .bnb import Linear8bitLt
-
-if is_bnb_4bit_available():
-    from .bnb import Linear4bit
 
 
 class IA3Model(BaseTuner):
@@ -85,6 +78,15 @@ class IA3Model(BaseTuner):
 
     @staticmethod
     def _create_new_module(ia3_config, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import Linear8bitLt
+
+        if is_bnb_4bit_available():
+            from .bnb import Linear4bit
+
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
         is_feedforward = kwargs.pop("is_feedforward", False)
@@ -98,10 +100,10 @@ class IA3Model(BaseTuner):
             eightbit_kwargs = kwargs.copy()
             eightbit_kwargs.update(
                 {
-                    "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
-                    "threshold": target.state.threshold,
-                    "index": target.index,
+                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
+                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
+                    "threshold": target_base_layer.state.threshold,
+                    "index": target_base_layer.index,
                 }
             )
             new_module = Linear8bitLt(target, adapter_name, is_feedforward=is_feedforward, **eightbit_kwargs)
@@ -109,9 +111,9 @@ class IA3Model(BaseTuner):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
-                    "compute_dtype": target.compute_dtype,
-                    "compress_statistics": target.weight.compress_statistics,
-                    "quant_type": target.weight.quant_type,
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
                 }
             )
             new_module = Linear4bit(target, adapter_name, is_feedforward=is_feedforward, **fourbit_kwargs)
@@ -146,8 +148,8 @@ class IA3Model(BaseTuner):
     def _check_target_module_exists(ia3_config, key):
         return check_target_module_exists(ia3_config, key)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
@@ -250,13 +252,26 @@ class IA3Model(BaseTuner):
             if isinstance(module, (IA3Layer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
-    def enable_adapter_layers(self):
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
         self._set_adapter_layers(enabled=True)
 
-    def disable_adapter_layers(self):
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
         self._set_adapter_layers(enabled=False)
 
-    def set_adapter(self, adapter_name):
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
         for module in self.model.modules():
             if isinstance(module, IA3Layer):
                 if module.merged:
@@ -299,6 +314,7 @@ class IA3Model(BaseTuner):
         if getattr(self.model, "is_loaded_in_4bit", False):
             raise ValueError("Cannot merge ia3 layers when the model is loaded in 4-bit mode")
 
+        self._unloading_checks(adapter_names)
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         for key in key_list:
             try:
@@ -316,7 +332,7 @@ class IA3Model(BaseTuner):
 
         return self.model
 
-    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None):
+    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> torch.nn.Module:
         r"""
         This method merges the IA³ layers into the base model. This is needed if someone wants to use the base model as
         a standalone model.
@@ -343,14 +359,14 @@ class IA3Model(BaseTuner):
         """
         return self._unload_and_optionally_merge(safe_merge=safe_merge, adapter_names=adapter_names)
 
-    def unload(self):
+    def unload(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the IA³ modules without merging. This gives back the original base
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
