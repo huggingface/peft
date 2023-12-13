@@ -278,7 +278,7 @@ def onload_layer(base_layer):
         base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
         # offload weights map to disk if original device is the disk
         if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-            offload_folder = tempfile.TemporaryFile()
+            offload_folder = tempfile.TemporaryDirectory()
             offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
         base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
