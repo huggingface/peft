@@ -340,7 +340,7 @@ class Linear(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                with onload_layer(base_layer) as base_layer:
+                with onload_layer(base_layer):
                     if safe_merge:
                         # Note that safe_merge will be slower than the normal merge
                         # because of the copy operation.
@@ -478,7 +478,7 @@ class Embedding(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
-                with onload_layer(base_layer) as base_layer:
+                with onload_layer(base_layer):
                     if safe_merge:
                         # Note that safe_merge will be slower than the normal merge
                         # because of the copy operation.
@@ -624,7 +624,7 @@ class Conv2d(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                with onload_layer(base_layer) as base_layer:
+                with onload_layer(base_layer):
                     if safe_merge:
                         # Note that safe_merge will be slower than the normal merge
                         # because of the copy operation.
