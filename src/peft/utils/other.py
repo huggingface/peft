@@ -487,9 +487,9 @@ def separate_pad_tokens(
     input_ids: Optional[torch.Tensor], inputs_embeds: Optional[torch.Tensor], attention_mask: Optional[torch.Tensor], labels: Optional[torch.Tensor]
 ):
     """
-    Separates out the tokens/vectors/entries corresponding to padding in input_ids, inputs_embeds, attention_mask and labels
+    Separates out the tokens/vectors/entries corresponding to padding in input_ids, inputs_embeds, attention_mask and labels.
 
-   . Returns:
+    Returns:
     - input_ids: input_ids with padding tokens removed
     - inputs_embeds: inputs_embeds with padding tokens removed
     - attention_mask: attention_mask with padding tokens removed
@@ -501,13 +501,17 @@ def separate_pad_tokens(
         raise ValueError("You have to provide either input_ids or inputs_embeds")
     ndim = input_ids.ndim if input_ids is not None else inputs_embeds.ndim - 1
     if not ndim == 2:
-        raise ValueError("input_ids must be a 2D tensor")
+        raise ValueError("input_ids must be a 2D tensor/ input_embeds must be a 3D tensor")
+    
+    if attention_mask is None:
+        return input_ids, inputs_embeds, attention_mask, labels, None # no special handling needed   
+
+    uniq_values = set(attention_mask.unique(sorted=True).tolist())
+    if not uniq_values.issubset(set([0,1])):
+        raise ValueError(f"Attention mask for prompt tuning should only have values 0 or 1, got values {uniq_values}")
     
     # find the first index of a non-padding token
-    if attention_mask is not None:
-        first_non_padding_tok_ind = torch.argmax(attention_mask, dim=1)
-    else:
-        return input_ids, inputs_embeds, attention_mask, labels, None # no special handling needed
+    first_non_padding_tok_ind = torch.argmax(attention_mask, dim=1) 
 
     input_id_paddings, input_embed_paddings = None, None
     if input_ids is not None:
@@ -541,9 +545,7 @@ def add_pad_tokens(
     pad_els: Optional[Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]],
 ):
     """
-    Adds the padding token elements back to input_embeds, attention_mask and labels
-
-   .
+    Adds the padding token elements back to input_embeds, attention_mask and labels.
     
     Returns:
     - input_embeds: input_embeds with padding tokens added
