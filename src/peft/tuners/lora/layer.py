@@ -478,40 +478,21 @@ class Embedding(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
-                if (
-                    hasattr(base_layer, "_hf_hook")
-                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
-                    and base_layer._hf_hook.offload
-                ):
-                    base_layer._hf_hook.pre_forward(base_layer)
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = base_layer.weight.data.copy()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                with onload_layer(base_layer) as base_layer:
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the copy operation.
+                        orig_weights = base_layer.weight.data.copy()
+                        orig_weights += self.get_delta_weight(active_adapter)
 
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
+                        if not torch.isfinite(orig_weights).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
 
-                    base_layer.weight.data = orig_weights
-                else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
-
-                if (
-                    hasattr(base_layer, "_hf_hook")
-                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
-                    and base_layer._hf_hook.offload
-                ):
-                    base_layer._hf_hook.weights_map = {
-                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
-                    }
-                    # offload weights map to disk if original device is the disk
-                    if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-                        offload_folder = "offload_dir"
-                        offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
-                    base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
+                        base_layer.weight.data = orig_weights
+                    else:
+                        base_layer.weight.data += self.get_delta_weight(active_adapter)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -643,39 +624,20 @@ class Conv2d(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                if (
-                    hasattr(base_layer, "_hf_hook")
-                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
-                    and base_layer._hf_hook.offload
-                ):
-                    base_layer._hf_hook.pre_forward(base_layer)
-                if safe_merge:
-                    # Note that safe_merge will be slower than the normal merge
-                    # because of the copy operation.
-                    orig_weights = base_layer.weight.data.copy()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                with onload_layer(base_layer) as base_layer:
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the copy operation.
+                        orig_weights = base_layer.weight.data.copy()
+                        orig_weights += self.get_delta_weight(active_adapter)
 
-                    if not torch.isfinite(orig_weights).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-                    base_layer.weight.data = orig_weights
-                else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
-
-                if (
-                    hasattr(base_layer, "_hf_hook")
-                    and isinstance(base_layer._hf_hook, AlignDevicesHook)
-                    and base_layer._hf_hook.offload
-                ):
-                    base_layer._hf_hook.weights_map = {
-                        name: param.to("cpu") for name, param in named_module_tensors(base_layer)
-                    }
-                    # offload weights map to disk if original device is the disk
-                    if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-                        offload_folder = "offload_dir"
-                        offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
-                    base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
+                        if not torch.isfinite(orig_weights).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                            )
+                        base_layer.weight.data = orig_weights
+                    else:
+                        base_layer.weight.data += self.get_delta_weight(active_adapter)
 
                 self.merged_adapters.append(active_adapter)
 
