@@ -486,30 +486,43 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         None if no match found
     """
     if isinstance(config.target_modules, str):
-        target_module_found = re.fullmatch(config.target_modules, key)
+        target_module_found = (config.target_modules == key) or re.fullmatch(config.target_modules, key)
+    elif key in config.target_modules:
+        # this module is specified directly in target_modules
+        target_module_found = True
     else:
-        target_module_found = key in config.target_modules or any(
+        target_module_found = any(
             key.endswith(f".{target_key}") for target_key in config.target_modules
         )
-        is_using_layer_indexes = getattr(config, "layers_to_transform", None) is not None
-        layer_indexing_pattern = getattr(config, "layers_pattern", None)
 
+        layer_indexes = getattr(config, "layers_to_transform", None)
+        layers_pattern = getattr(config, "layers_pattern", None)
+
+        is_using_layer_indexes = layer_indexes is not None and (len(layer_indexes) != 0 if isinstance(layer_indexes, list) else True)
         if is_using_layer_indexes and target_module_found:
-            layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-            layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
-
-            for pattern in layers_pattern:
-                layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                if layer_index is not None:
-                    layer_index = int(layer_index.group(1))
-                    if isinstance(config.layers_to_transform, int):
-                        target_module_found = layer_index == config.layers_to_transform
-                    else:
-                        target_module_found = layer_index in config.layers_to_transform
-
-                    break
+            # to keep up with the previous results(if layers_pattern is an empty list, ret is True)
+            # and make the result consistent for all empty layers_pattern: None, [], ""
+            # COMMON_LAYERS_PATTERN is dropped
+            # empty layers_pattern means all layer pattern is ok
+            layer_index = None
+            if layers_pattern is None or len(layers_pattern) == 0 {
+                layer_index = re.match(r".*\.[^\.]*\.(\d+)", key)
+            } else {
+                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+                for pattern in layers_pattern:
+                    layer_index = re.match(r".*\.{layer}\.(\d+)".format(layer=pattern), key)
+                    if layer_index is not None:
+                        break
+            }
+            if layer_index is None:
+                target_module_found = False
+            else:
+                layer_index = int(layer_index.group(1))
+                if isinstance(config.layers_to_transform, int):
+                    target_module_found = layer_index == config.layers_to_transform
                 else:
-                    target_module_found = False
+                    target_module_found = layer_index in config.layers_to_transform
+                    
     return target_module_found
 
 
