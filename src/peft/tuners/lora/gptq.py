@@ -64,9 +64,9 @@ class QuantLinear(torch.nn.Module, LoraLayer):
             result += output
         return result
 
-        def __repr__(self) -> str:
-            rep = super().__repr__()
-            return "lora." + rep
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
 
     # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
     # def reset_lora_parameters(self, adapter_name):
