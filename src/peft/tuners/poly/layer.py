@@ -118,14 +118,12 @@ class Linear(nn.Module, PolyLayer):
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, poly_config)
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args: Any, task_ids: torch.Tensor = None, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
-        task_ids = kwargs.get("task_ids", None)
-        new_kwargs = {k: v for k, v in kwargs.items() if k != "task_ids"}
         if self.disable_adapters:
-            result = self.base_layer(x, *args, **new_kwargs)
+            result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self.base_layer(x, *args, **new_kwargs)
+            result = self.base_layer(x, *args, **kwargs)
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.poly_lora_A.keys():
                     continue

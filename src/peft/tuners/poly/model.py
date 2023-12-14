@@ -135,34 +135,41 @@ class PolyModel(BaseTuner):
             )
         return peft_config
 
-    def _add_pre_hooks(self, kwargs):
-        task_ids = kwargs.get("task_ids", None)
-        new_kwargs = {k: v for k, v in kwargs.items() if k != "task_ids"}
-
-        def _add_task_id_pre_hook(module, args, kwargs):
-            kwargs["task_ids"] = task_ids
+    def forward(self, *args, task_ids=None, **kwargs):
+        def pre_hook(_, args, kwargs):
+            x, *_ = args
+            if x.device == task_ids.device:
+                kwargs["task_ids"] = task_ids
             return args, kwargs
 
         handles = []
-        for m in self.model.modules():
-            if isinstance(m, PolyLayer) and isinstance(m, nn.Module):
-                h = m.register_forward_pre_hook(_add_task_id_pre_hook, with_kwargs=True)
-                handles.append(h)
+        for module in self.model.modules():
+            if isinstance(module, Linear):
+                handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
+                handles.append(handle)
 
-        return new_kwargs, handles
+        try:
+            result = self.model(*args, **kwargs)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return result
 
-    def _remove_hooks(self, handles):
-        for h in handles:
-            h.remove()
+    def generate(self, *args, task_ids=None, **kwargs):
+        def pre_hook(_, args, kwargs):
+            x, *_ = args
+            if x.device == task_ids.device:
+                kwargs["task_ids"] = task_ids
+            return args, kwargs
 
-    def forward(self, *args, **kwargs):
-        new_kwargs, handles = self._add_pre_hooks(kwargs)
-        output = self.model.forward(*args, **new_kwargs)
-        self._remove_hooks(handles)
-        return output
-
-    def generate(self, *args, **kwargs):
-        new_kwargs, handles = self._add_pre_hooks(kwargs)
-        output = self.model.generate(*args, **new_kwargs)
-        self._remove_hooks(handles)
-        return output
+        handles = []
+        for module in self.model.modules():
+            if isinstance(module, Linear):
+                handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
+                handles.append(handle)
+        try:
+            result = self.model.generate(*args, **kwargs)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return result
