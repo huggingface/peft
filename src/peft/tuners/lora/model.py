@@ -37,6 +37,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    gather_params_ctx,
     get_auto_gptq_quant_linear,
     get_quantization_config,
 )
@@ -448,7 +449,8 @@ class LoraModel(BaseTuner):
 
             if hasattr(target, "base_layer"):
                 if merge:
-                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                    with gather_params_ctx(target):
+                        target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`

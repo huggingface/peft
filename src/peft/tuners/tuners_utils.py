@@ -22,12 +22,11 @@ from typing import Any, List, Optional, Union
 
 import torch
 from torch import nn
-from transformers.integrations import is_deepspeed_zero3_enabled
 
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
-from ..utils import ModulesToSaveWrapper, _get_submodules
+from ..utils import ModulesToSaveWrapper, _get_submodules, gather_params_ctx
 
 
 logger = logging.getLogger(__name__)
@@ -285,13 +284,7 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                if is_deepspeed_zero3_enabled():
-                    import deepspeed
-
-                    params_to_gather = module.parameters()
-                    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
-                        module.merge(adapter_names=adapter_names)
-                else:
+                with gather_params_ctx(module):
                     module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
@@ -300,13 +293,7 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                if is_deepspeed_zero3_enabled():
-                    import deepspeed
-
-                    params_to_gather = module.parameters()
-                    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
-                        module.unmerge()
-                else:
+                with gather_params_ctx(module):
                     module.unmerge()
 
     def _unloading_checks(self, adapter_names: Optional[List[str]]):
