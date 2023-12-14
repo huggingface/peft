@@ -79,7 +79,7 @@ else:
 if os.environ.get("TEST_TYPE", "") != "":
     from slack_sdk import WebClient
 
-    if len(message > MAX_LEN_MESSAGE):
+    if len(message) > MAX_LEN_MESSAGE:
         print(f"Truncating long message from {len(message)} to {MAX_LEN_MESSAGE}")
         message = message[:MAX_LEN_MESSAGE] + "..."
 
