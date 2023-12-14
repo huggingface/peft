@@ -141,6 +141,7 @@ class LoraModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
+
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
         target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
@@ -163,7 +164,10 @@ class LoraModel(BaseTuner):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
-        if isinstance(target, LoraLayer):
+        # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
+        from peft.tuners.adalora import AdaLoraLayer
+
+        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer):
             target.update_layer(
                 adapter_name,
                 r,
