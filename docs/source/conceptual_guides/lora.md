@@ -112,8 +112,6 @@ lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_conf
 peft_model = get_peft_model(base_model, lora_config)
 ```
 
-Finally, there is also an option to set `initialize_lora_weights=False`. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform. This is useful for debugging and testing purposes and should not be used otherwise.
+There is also an option to set `initialize_lora_weights=False`. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform. This is useful for debugging and testing purposes and should not be used otherwise.
 
-## Scaling of adapters
-
-The LoRA architecture scales each adapter by a scalar function of the rank `r`. Although the original LoRA method uses the scalar function `lora_alpha/r`, the research [Rank-Stabilized LoRA](https://doi.org/10.48550/arXiv.2312.03732) proves that instead using `lora_alpha/math.sqrt(r)`, stabilizes the adapters and unlocks the increased performance potential from higher ranks. Set `use_rslora=True` to use the rank-stabilized scaling `lora_alpha/math.sqrt(r)`.
+Finally, the LoRA architecture scales each adapter during every forward pass by a fixed scalar, which is set at initialization, and depends on the rank `r`. Although the original LoRA method uses the scalar function `lora_alpha/r`, the research [Rank-Stabilized LoRA](https://doi.org/10.48550/arXiv.2312.03732) proves that instead using `lora_alpha/math.sqrt(r)`, stabilizes the adapters and unlocks the increased performance potential from higher ranks. Set `use_rslora=True` to use the rank-stabilized scaling `lora_alpha/math.sqrt(r)`.
