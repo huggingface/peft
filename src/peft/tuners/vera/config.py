@@ -71,7 +71,7 @@ class VeraConfig(PeftConfig):
         metadata={
             "help": (
                 "Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint"
-                " did not include these projections."
+                " did not include these projections. This value cannot be set to `None`."
             )
         },
     )
@@ -136,3 +136,7 @@ class VeraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+
+        if self.projection_prng_key is None:
+            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
+            raise ValueError(msg)

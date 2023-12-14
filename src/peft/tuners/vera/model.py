@@ -17,7 +17,7 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from functools import partial
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 import torch
 from torch.nn.init import _calculate_correct_fan
@@ -42,9 +42,22 @@ def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
 
 
 def _kaiming_init(
-    tensor_or_shape: Union[torch.Tensor, tuple],
+    tensor_or_shape: Union[torch.Tensor, Tuple[int, ...]],
     generator: torch.Generator,
-):
+) -> torch.Tensor:
+    """
+        Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object
+        for PRNG.
+        
+        Args:
+            tensor_or_shape (`Union[torch.Tensor, Tuple[int, ...]]`): 
+                Tensor to initialise, or shape of new tensor to create and then initialise.
+            generator: (`torch.Generator`): 
+                Generator object that manages the state of the PRNG algorithm in use.
+
+        Returns:
+            `torch.Tensor`: The initialised tensor.
+    """
     if isinstance(tensor_or_shape, tuple):
         tensor = torch.empty(tensor_or_shape)
     else:
@@ -84,7 +97,9 @@ class VeraModel(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> vera_model = VeraModel(model, config, "default")
+        >>> vera_model = VeraModel(model, config        if config.projection_prng_key is None:
+            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
+            raise ValueError(msg), "default")
         ```
 
         ```py
@@ -113,6 +128,8 @@ class VeraModel(BaseTuner):
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
     """
+
+    prefix: str = "vera_lambda"
 
     def _find_first_dim(self) -> int:
         """
@@ -144,6 +161,10 @@ class VeraModel(BaseTuner):
                         " specified! Vera only supports a single size."
                     )
                 first_embedding = tuple(module.weight.shape)
+
+        if first_linear is None and first_embedding is None:
+            msg = "No `VeraLayer`s were found in `self.model`, so cannot determine rank of projection matrices!"
+            raise ValueError(msg)
 
         return first_linear, first_embedding
 
@@ -301,12 +322,10 @@ class VeraModel(BaseTuner):
         for name, module in new_module.named_modules():
             if "vera_" in name:
                 module.to(child.weight.device)
-            if "ranknum" in name:
-                module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self) -> None:
         for n, p in self.model.named_parameters():
-            if "vera_lambda_" not in n:
+            if self.prefix not in n:
                 p.requires_grad = False
 
         for active_adapter in self.active_adapters:
@@ -437,6 +456,7 @@ class VeraModel(BaseTuner):
         safe_merge: bool = False,
         adapter_names: Optional[List[str]] = None,
     ):
+        # we cannot use self.prefix as we want to include non-trainable vera parameters
         key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
@@ -467,7 +487,7 @@ class VeraModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        # TODO: replace with self.prefix
+        # we cannot use self.prefix as we want to include non-trainable vera parameters
         key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
         new_adapter = None
         for key in key_list:
