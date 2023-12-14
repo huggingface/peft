@@ -37,6 +37,9 @@ class AdaLoraLayer(LoraLayer):
         self.ranknum = nn.ParameterDict({})
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:

@@ -75,6 +75,7 @@ class LoraLayer(BaseTunerLayer):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -84,10 +85,9 @@ class LoraLayer(BaseTunerLayer):
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
-        if r > 0:
-            self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-            self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
-            self.scaling[adapter_name] = lora_alpha / r
+        self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+        self.scaling[adapter_name] = lora_alpha / r
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
@@ -339,6 +339,7 @@ class Embedding(nn.Module, LoraLayer):
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -348,12 +349,11 @@ class Embedding(nn.Module, LoraLayer):
 
         self.lora_dropout[adapter_name] = lora_dropout_layer
         # Actual trainable parameters
-        if r > 0:
-            weight_A = torch.randn((r, self.in_features))
-            weight_B = torch.randn((self.out_features, r))
-            self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
-            self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
-            self.scaling[adapter_name] = lora_alpha / r
+        weight_A = torch.randn((r, self.in_features))
+        weight_B = torch.randn((self.out_features, r))
+        self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
+        self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
+        self.scaling[adapter_name] = lora_alpha / r
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
@@ -513,6 +513,7 @@ class Conv2d(nn.Module, LoraLayer):
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -523,13 +524,12 @@ class Conv2d(nn.Module, LoraLayer):
         self.lora_dropout[adapter_name] = lora_dropout_layer
         # Actual trainable parameters
         base_layer = self.get_base_layer()
-        if r > 0:
-            kernel_size = base_layer.kernel_size
-            stride = base_layer.stride
-            padding = base_layer.padding
-            self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
-            self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
-            self.scaling[adapter_name] = lora_alpha / r
+        kernel_size = base_layer.kernel_size
+        stride = base_layer.stride
+        padding = base_layer.padding
+        self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
+        self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
+        self.scaling[adapter_name] = lora_alpha / r
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
