@@ -74,8 +74,8 @@ class PolyModel(BaseTuner):
                 weight = child.qweight if hasattr(child, "qweight") else child.weight
                 module.to(weight.device)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
@@ -126,8 +126,7 @@ class PolyModel(BaseTuner):
             if isinstance(module, PolyLayer):
                 module.set_adapter(adapter_name)
 
-    @staticmethod
-    def _prepare_adapter_config(peft_config, model_config):
+    def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
