@@ -163,34 +163,7 @@ class LoraModel(BaseTuner):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
-        linear_types = (Linear,)
-        if is_bnb_available():
-            from .bnb import Linear8bitLt
-
-            linear_types += (Linear8bitLt,)
-        if is_bnb_4bit_available():
-            from .bnb import Linear4bit
-
-            linear_types += (Linear4bit,)
-
-        # TODO: better deal with that
-        if isinstance(target, Conv2d):
-            target.update_layer_conv2d(
-                adapter_name,
-                r,
-                alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
-            )
-        elif isinstance(target, Embedding):
-            target.update_layer_embedding(
-                adapter_name,
-                r,
-                alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
-            )
-        elif isinstance(target, linear_types):
+        if isinstance(target, LoraLayer):
             target.update_layer(
                 adapter_name,
                 r,
