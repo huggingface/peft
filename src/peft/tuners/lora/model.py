@@ -153,6 +153,7 @@ class LoraModel(BaseTuner):
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
+            "use_rslora": lora_config.use_rslora,
         }
         kwargs["loaded_in_8bit"] = optional_kwargs.pop("loaded_in_8bit", False)
         kwargs["loaded_in_4bit"] = optional_kwargs.pop("loaded_in_4bit", False)
@@ -163,7 +164,6 @@ class LoraModel(BaseTuner):
             kwargs["gptq_quantization_config"] = quantization_config
 
         # TODO: better deal with that
-        new_module = None
         if isinstance(target, Conv2d):
             target.update_layer_conv2d(
                 adapter_name,
@@ -171,6 +171,7 @@ class LoraModel(BaseTuner):
                 alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                lora_config.use_rslora,
             )
         elif isinstance(target, Embedding):
             target.update_layer_embedding(
@@ -179,6 +180,7 @@ class LoraModel(BaseTuner):
                 alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                lora_config.use_rslora,
             )
         elif isinstance(target, Linear):
             target.update_layer(
@@ -187,6 +189,7 @@ class LoraModel(BaseTuner):
                 alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                lora_config.use_rslora,
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
@@ -194,13 +197,6 @@ class LoraModel(BaseTuner):
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
-
-        if lora_config.use_rslora:
-            # change target.scaling[adapter_name] to alpha/math.sqrt(r)
-            if new_module is not None:
-                new_module.set_scale(adapter_name, math.sqrt(r))
-            else:
-                target.set_scale(adapter_name, math.sqrt(r))
 
     def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
