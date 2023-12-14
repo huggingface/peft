@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import math
-import tempfile
 import warnings
 from contextlib import contextmanager
 from typing import Any, List, Optional, Union
@@ -266,6 +265,9 @@ def onload_layer(base_layer):
         and isinstance(base_layer._hf_hook, AlignDevicesHook)
         and base_layer._hf_hook.offload
     ):
+        if torch.device("meta") in base_layer._hf_hook.original_devices.values():
+            # retrieve the name of the original disk-offload directory
+            offload_folder = base_layer._hf_hook.weights_map.dataset.save_folder
         base_layer._hf_hook.pre_forward(base_layer)
 
     yield
@@ -278,7 +280,7 @@ def onload_layer(base_layer):
         base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
         # offload weights map to disk if original device is the disk
         if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-            offload_folder = tempfile.TemporaryDirectory()
+            # rewrite directory with merged weights
             offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
         base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
 
