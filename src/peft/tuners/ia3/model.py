@@ -177,12 +177,7 @@ class IA3Model(BaseTuner):
             "is_feedforward": is_feedforward,
         }
 
-        if isinstance(target, Conv2d):
-            target.update_layer(
-                adapter_name,
-                ia3_config.init_ia3_weights,
-            )
-        elif isinstance(target, Linear):
+        if isinstance(target, IA3Layer):
             target.update_layer(
                 adapter_name,
                 ia3_config.init_ia3_weights,

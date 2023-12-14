@@ -94,13 +94,17 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
-        weight = getattr(self.get_base_layer(), "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
+        # check weight and qweight (for GPTQ)
+        for weight_name in ("weight", "qweight"):
+            weight = getattr(self.get_base_layer(), weight_name, None)
+            if weight is not None:
+                # the layer is already completely initialized, this is an update
+                if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                    self.to(weight.device, dtype=weight.dtype)
+                else:
+                    self.to(weight.device)
+                break
+
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
