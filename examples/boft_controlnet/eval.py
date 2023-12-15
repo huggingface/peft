@@ -90,7 +90,7 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
         gt_lmk_img = dataset[idx]['conditioning_pixel_values']
         save_image(gt_lmk_img, gt_lmk_path)
 
-        gt_img = dataset[idx]['pixel_values']
+        gt_img = (dataset[idx]['pixel_values']) * 0.5 + 0.5
         save_image(gt_img, gt_img_path)
 
         gt_img = (gt_img.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
@@ -117,7 +117,6 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
             # gt_lmk_image = cv2.imread(gt_lmk_path)
             cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
 
-            sys.exit()
 
 
 def landmark_comparison(val_dataset, lmk_dir, gt_lmk_dir):
