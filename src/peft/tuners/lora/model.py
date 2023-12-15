@@ -443,7 +443,6 @@ class LoraModel(BaseTuner):
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
-                # TODO: try activating forward hooks for target sub-modules for generality
             except AttributeError:
                 continue
 
