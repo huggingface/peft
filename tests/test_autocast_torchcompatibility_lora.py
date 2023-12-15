@@ -138,7 +138,7 @@ class TestAutoCast(unittest.TestCase):
         model = model_class().cuda()
 
         # Prepare dummy inputs
-        input_ids, labels = torch.randint(0, 1000, (2, 10)).cuda(), torch.randint(0, 1000, (10,)).cuda()
+        input_ids = torch.randint(0, 1000, (2, 10)).cuda()
 
         # Forward pass with torch.bfloat16
         with torch.autocast(enabled=True, dtype=torch.bfloat16, device_type="cuda"):
