@@ -235,59 +235,8 @@ class LoraLayer(BaseTunerLayer):
                 self.scaling[active_adapter] /= scale
 
 
-def onload_delta_wrapper(func):
-    """
-    Performs LoRA parameter onloading and offloading required for get_delta_weight() to function properly with
-    offloaded modules.
-    """
-
-    def wrapper(self, adapter):
-        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
-            self.lora_A[adapter]._hf_hook.pre_forward(self.lora_A[adapter])
-        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
-            self.lora_B[adapter]._hf_hook.pre_forward(self.lora_B[adapter])
-
-        output = func(self, adapter)
-
-        if hasattr(self.lora_A[adapter], "_hf_hook") and isinstance(self.lora_A[adapter]._hf_hook, AlignDevicesHook):
-            self.lora_A[adapter]._hf_hook.post_forward(self.lora_A[adapter], torch.tensor([]))
-        if hasattr(self.lora_B[adapter], "_hf_hook") and isinstance(self.lora_B[adapter]._hf_hook, AlignDevicesHook):
-            self.lora_B[adapter]._hf_hook.post_forward(self.lora_B[adapter], torch.tensor([]))
-        return output
-
-    return wrapper
-
-
-@contextmanager
-def onload_layer(base_layer):
-    if (
-        hasattr(base_layer, "_hf_hook")
-        and isinstance(base_layer._hf_hook, AlignDevicesHook)
-        and base_layer._hf_hook.offload
-    ):
-        if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-            # retrieve the name of the original disk-offload directory
-            offload_folder = base_layer._hf_hook.weights_map.dataset.save_folder
-        base_layer._hf_hook.pre_forward(base_layer)
-
-    yield
-
-    if (
-        hasattr(base_layer, "_hf_hook")
-        and isinstance(base_layer._hf_hook, AlignDevicesHook)
-        and base_layer._hf_hook.offload
-    ):
-        base_layer._hf_hook.weights_map = {name: param.to("cpu") for name, param in named_module_tensors(base_layer)}
-        # offload weights map to disk if original device is the disk
-        if torch.device("meta") in base_layer._hf_hook.original_devices.values():
-            # rewrite directory with merged weights
-            offload_state_dict(offload_folder, base_layer._hf_hook.weights_map)
-        base_layer._hf_hook.post_forward(base_layer, torch.tensor([]))
-
-
 # Below code is based on https://github.com/microsoft/LoRA/blob/main/loralib/layers.py
 # and modified to work with PyTorch FSDP
-
 
 #  ------------------------------------------------------------------------------------------
 #  Copyright (c) Microsoft Corporation. All rights reserved.
@@ -371,7 +320,6 @@ class Linear(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
-    # @onload_delta_wrapper
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
@@ -479,21 +427,20 @@ class Embedding(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_embedding_A.keys():
                 base_layer = self.get_base_layer()
-                with onload_layer(base_layer):
-                    if safe_merge:
-                        # Note that safe_merge will be slower than the normal merge
-                        # because of the copy operation.
-                        orig_weights = base_layer.weight.data.copy()
-                        orig_weights += self.get_delta_weight(active_adapter)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = base_layer.weight.data.copy()
+                    orig_weights += self.get_delta_weight(active_adapter)
 
-                        if not torch.isfinite(orig_weights).all():
-                            raise ValueError(
-                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                            )
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
 
-                        base_layer.weight.data = orig_weights
-                    else:
-                        base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data = orig_weights
+                else:
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -509,7 +456,6 @@ class Embedding(nn.Module, LoraLayer):
             if active_adapter in self.lora_embedding_A.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
-    @onload_delta_wrapper
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
@@ -625,20 +571,19 @@ class Conv2d(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                with onload_layer(base_layer):
-                    if safe_merge:
-                        # Note that safe_merge will be slower than the normal merge
-                        # because of the copy operation.
-                        orig_weights = base_layer.weight.data.copy()
-                        orig_weights += self.get_delta_weight(active_adapter)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = base_layer.weight.data.copy()
+                    orig_weights += self.get_delta_weight(active_adapter)
 
-                        if not torch.isfinite(orig_weights).all():
-                            raise ValueError(
-                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                            )
-                        base_layer.weight.data = orig_weights
-                    else:
-                        base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+                    base_layer.weight.data = orig_weights
+                else:
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -654,7 +599,6 @@ class Conv2d(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
-    @onload_delta_wrapper
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
