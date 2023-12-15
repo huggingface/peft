@@ -18,9 +18,12 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Any, List, Optional, Union
 
 import torch
+from accelerate.hooks import AlignDevicesHook
+from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
 
 from peft.utils import COMMON_LAYERS_PATTERN
@@ -30,6 +33,47 @@ from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def onload_layer(layer):
+    for name, module in layer.named_modules():
+        if name in ["", "base_layer"]:
+            continue
+        if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
+            module._hf_hook.pre_forward(module)
+
+    if hasattr(layer, "base_layer") and (
+        hasattr(layer.base_layer, "_hf_hook")
+        and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
+        and layer.base_layer._hf_hook.offload
+    ):
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+            # retrieve the name of the original disk-offload directory
+            offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
+        layer.base_layer._hf_hook.pre_forward(layer.base_layer)
+
+    yield
+
+    for name, module in layer.named_modules():
+        if name in ["", "base_layer"]:
+            continue
+        if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
+            module._hf_hook.post_forward(module, torch.tensor([]))
+
+    if hasattr(layer, "base_layer") and (
+        hasattr(layer.base_layer, "_hf_hook")
+        and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
+        and layer.base_layer._hf_hook.offload
+    ):
+        layer.base_layer._hf_hook.weights_map = {
+            name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
+        }
+        # offload weights map to disk if original device is the disk
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+            # rewrite directory with merged weights
+            offload_state_dict(offload_folder, layer.base_layer._hf_hook.weights_map)
+        layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
 
 class BaseTuner(nn.Module, ABC):
@@ -284,7 +328,8 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.merge(adapter_names=adapter_names)
+                with onload_layer(module):
+                    module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
         """
