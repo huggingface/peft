@@ -140,3 +140,4 @@ class VeraConfig(PeftConfig):
         if self.projection_prng_key is None:
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
+        

@@ -4,6 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+# Adapted from https://botorch.org/api/_modules/botorch/utils/torch.html
+
 # TODO: To be removed once (if) https://github.com/pytorch/pytorch/pull/37385 lands
 
 from __future__ import annotations
