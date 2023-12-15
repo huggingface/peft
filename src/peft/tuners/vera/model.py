@@ -436,9 +436,9 @@ class VeraModel(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     if isinstance(module, Linear):
-                        module.unmerge(self.vera_A[adapter_name], self.vera_B[adapter_name])
+                        module.unmerge(self.vera_A, self.vera_B)
                     elif isinstance(module, Embedding):
-                        module.unmerge(self.vera_embedding_A[adapter_name], self.vera_embedding_B[adapter_name])
+                        module.unmerge(self.vera_embedding_A, self.vera_embedding_B)
                 module.set_adapter(adapter_name)
 
     @staticmethod
@@ -549,12 +549,12 @@ class VeraModel(BaseTuner):
         hook_handles = []
         for module in self.modules():
             if isinstance(module, Linear):
-                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A[self.active_adapter], vera_B=self.vera_B[self.active_adapter])
+                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
             elif isinstance(module, Embedding):
-                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A[self.active_adapter], vera_B=self.vera_embedding_B[self.active_adapter])
+                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A, vera_B=self.vera_embedding_B)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 

@@ -186,7 +186,7 @@ class Linear(nn.Linear, VeraLayer):
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
 
-                    orig_weights += self.get_delta_weight(active_adapter, vera_A[active_adapter], vera_B[active_adapter])
+                    orig_weights += self.get_delta_weight(active_adapter, vera_A, vera_B)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -195,19 +195,19 @@ class Linear(nn.Linear, VeraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter, vera_A[active_adapter], vera_B[active_adapter])
+                    base_layer.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
                 self.merged_adapters.append(active_adapter)
 
-    def unmerge(self, vera_A: torch.Tensor, vera_B: torch.Tensor) -> None:
+    def unmerge(self, vera_A: BufferDict, vera_B: BufferDict) -> None:
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter, vera_A[active_adapter], vera_B[active_adapter])
+                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter, vera_A, vera_B)
 
-    def get_delta_weight(self, adapter, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
+    def get_delta_weight(self, adapter, vera_A: BufferDict, vera_B: BufferDict) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
@@ -215,6 +215,8 @@ class Linear(nn.Linear, VeraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        vera_A = vera_A[adapter]
+        vera_B = vera_B[adapter]
         device = vera_B.device
         dtype = vera_B.dtype
 
@@ -248,12 +250,12 @@ class Linear(nn.Linear, VeraLayer):
 
     # we use a forward hook to populate vera_A and vera_B
     # this indirectly enforces the constraint of only supporting a single vera shape for now.
-    def forward(self, x: torch.Tensor, vera_A: torch.Tensor, vera_B: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, vera_A: BufferDict, vera_B: BufferDict, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:
-                self.unmerge()
+                self.unmerge(vera_A, vera_B)
             result = self.base_layer(x, *args, **kwargs)
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
@@ -265,6 +267,9 @@ class Linear(nn.Linear, VeraLayer):
 
                 lambda_d = self.vera_lambda_d[active_adapter]
                 lambda_b = self.vera_lambda_b[active_adapter]
+
+                vera_A = vera_A[active_adapter]
+                vera_B = vera_B[active_adapter]
 
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
@@ -289,7 +294,7 @@ class Embedding(nn.Embedding, VeraLayer):
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.update_layer_embedding(adapter_name, r, vera_dropout, init_vera_weights, d_initial=d_initial)
 
-    def merge(self, vera_A: Dict[str, torch.Tensor], vera_B: Dict[str, torch.Tensor], safe_merge: bool = False) -> None:
+    def merge(self, vera_A: BufferDict, vera_B: BufferDict, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -311,7 +316,7 @@ class Embedding(nn.Embedding, VeraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.copy()
-                    orig_weights += self.get_delta_weight(active_adapter, vera_A[active_adapter], vera_B[active_adapter])
+                    orig_weights += self.get_delta_weight(active_adapter, vera_A, vera_B)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -320,19 +325,19 @@ class Embedding(nn.Embedding, VeraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter, vera_A[active_adapter], vera_B[active_adapter])
+                    base_layer.weight.data += self.get_delta_weight(active_adapter, vera_A, vera_B)
                 self.merged_adapters.append(active_adapter)
 
-    def unmerge(self, vera_A: torch.Tensor, vera_B: torch.Tensor) -> None:
+    def unmerge(self, vera_A: BufferDict, vera_B: BufferDict) -> None:
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
-                self.weight.data -= self.get_delta_weight(active_adapter, vera_A[active_adapter], vera_B[active_adapter])
+                self.weight.data -= self.get_delta_weight(active_adapter, vera_A, vera_B)
 
-    def get_delta_weight(self, adapter, vera_A: torch.Tensor, vera_B: torch.Tensor) -> torch.Tensor:
+    def get_delta_weight(self, adapter, vera_A: BufferDict, vera_B: BufferDict) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
 
@@ -340,6 +345,9 @@ class Embedding(nn.Embedding, VeraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        vera_A = vera_A[adapter]
+        vera_B = vera_B[adapter]
+
         device = vera_A.device
         dtype = vera_A.dtype
 
@@ -382,7 +390,7 @@ class Embedding(nn.Embedding, VeraLayer):
             sparse=self.sparse,
         )
 
-    def forward(self, x: torch.Tensor, vera_A: torch.Tensor, vera_B: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, vera_A: BufferDict, vera_B: BufferDict, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
             if self.merged:
                 self.unmerge(vera_A, vera_B)
@@ -396,6 +404,9 @@ class Embedding(nn.Embedding, VeraLayer):
                     continue
                 lambda_d = self.vera_lambda_d[active_adapter]
                 lambda_b = self.vera_lambda_b[active_adapter]
+
+                vera_A = vera_A[active_adapter]
+                vera_B = vera_B[active_adapter]
 
                 after_A = lambda_d * self._embed(x, vera_A.T)
                 result += lambda_b * (after_A @ vera_B.T)
