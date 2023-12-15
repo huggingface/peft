@@ -387,6 +387,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
     def test_use_cache(self) -> None:
         """Test that AdaptionPrompt works when Llama config use_cache=True."""
+        torch.manual_seed(0)
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         original = LlamaForCausalLM(
             LlamaConfig(
@@ -397,7 +398,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
                 num_attention_heads=4,
                 use_cache=False,
             )
-        )
+        ).eval()
         adapted = get_peft_model(
             original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
         )

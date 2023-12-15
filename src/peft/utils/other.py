@@ -60,6 +60,8 @@ __all__ = [
 def infer_device():
     if torch.cuda.is_available():
         torch_device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        torch_device = torch.device("mps")
     elif is_xpu_available():
         torch_device = "xpu"
     elif is_npu_available():
@@ -185,6 +187,12 @@ class ModulesToSaveWrapper(torch.nn.Module):
     def active_adapter(self) -> str:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
+
+    @property
+    def weight(self):
+        if self.active_adapter not in self.modules_to_save:
+            return self.original_module.weight
+        return self.modules_to_save[self.active_adapter].weight
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))

@@ -23,7 +23,9 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union
 
+import packaging.version
 import torch
+import transformers
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
@@ -1136,11 +1138,26 @@ class PeftModelForCausalLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+
+        # https://github.com/huggingface/transformers/pull/26681/ introduced new cache format
+        # for some architectures which requires a special fix for prompt tuning etc.
+        # TODO: starting with transformers 4.37, all architectures should support caching.
+        uses_transformers_4_37 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.37.0")
+        uses_transformers_4_36 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.36.0")
+        transformers_new_cache_archs = ["llama", "mistral", "persimmon", "phi"]
+        uses_cache = uses_transformers_4_37 or (
+            uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
+        )
+
         if peft_config.is_prompt_learning:
             if model_kwargs.get("attention_mask", None) is not None:
-                prefix_attention_mask = torch.ones(
-                    model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
-                ).to(model_kwargs["input_ids"].device)
+                if uses_cache and (model_kwargs["past_key_values"] is not None):
+                    # TODO figure out why this workaround is necessary, see #1252 for context
+                    size = model_kwargs["input_ids"].shape[0], model_kwargs["past_key_values"][0][0].shape[-2]
+                else:
+                    size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
+
+                prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 model_kwargs["attention_mask"] = torch.cat(
                     (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
                 )

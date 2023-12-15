@@ -1049,6 +1049,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        torch.manual_seed(0)
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
@@ -1089,6 +1090,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        torch.manual_seed(0)
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
@@ -1117,6 +1119,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        torch.manual_seed(0)
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
 
