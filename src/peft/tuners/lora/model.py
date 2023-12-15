@@ -443,10 +443,12 @@ class LoraModel(BaseTuner):
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
+                # TODO: try activating forward hooks for target sub-modules for generality
             except AttributeError:
                 continue
 
             if hasattr(target, "base_layer"):
+                print(target_name)
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
