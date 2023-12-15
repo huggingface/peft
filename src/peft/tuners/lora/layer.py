@@ -342,21 +342,20 @@ class Linear(nn.Module, LoraLayer):
         for active_adapter in adapter_names:
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
-                with onload_layer(base_layer):
-                    if safe_merge:
-                        # Note that safe_merge will be slower than the normal merge
-                        # because of the copy operation.
-                        orig_weights = base_layer.weight.data.clone()
-                        orig_weights += self.get_delta_weight(active_adapter)
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = base_layer.weight.data.clone()
+                    orig_weights += self.get_delta_weight(active_adapter)
 
-                        if not torch.isfinite(orig_weights).all():
-                            raise ValueError(
-                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                            )
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
 
-                        base_layer.weight.data = orig_weights
-                    else:
-                        base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data = orig_weights
+                else:
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -372,7 +371,7 @@ class Linear(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
-    @onload_delta_wrapper
+    # @onload_delta_wrapper
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
         Compute the delta weight for the given adapter.
