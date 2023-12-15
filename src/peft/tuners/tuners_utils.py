@@ -42,9 +42,6 @@ class BaseTuner(nn.Module, ABC):
     - **_prepare_adapter_config**:
         A private method to eventually prepare the adapter config, for example in case the field `target_modules` is
         missing.
-    - **_check_target_module_exists**:
-        A helper private method to check if the passed module's key name matches any of the target modules in the
-        adatper_config.
     - **_create_and_replace**:
         A private method to create and replace the target module with the adapter module.
     - **_check_target_module_exists**:
