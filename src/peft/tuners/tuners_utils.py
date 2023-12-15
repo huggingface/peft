@@ -18,6 +18,7 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Any, List, Optional, Union
 
 import torch
@@ -29,7 +30,7 @@ from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
-import contextmanager
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def onload_layer(layer):
         if name in ["", "base_layer"]:
             continue
         if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
-            module._hf_hook.pre_forward(base_layer)
+            module._hf_hook.pre_forward(module)
 
     if hasattr(layer, "base_layer"):
         base_layer = layer.base_layer
