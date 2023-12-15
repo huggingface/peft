@@ -44,15 +44,15 @@ def onload_layer(layer):
             module._hf_hook.pre_forward(module)
 
     if hasattr(layer, "base_layer") and (
-            hasattr(layer.base_layer, "_hf_hook")
-            and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
-            and layer.base_layer._hf_hook.offload
-        ):
+        hasattr(layer.base_layer, "_hf_hook")
+        and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
+        and layer.base_layer._hf_hook.offload
+    ):
         if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
             # retrieve the name of the original disk-offload directory
             offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
         layer.base_layer._hf_hook.pre_forward(layer.base_layer)
-        print ('pre-core base params: ', layer.base_layer.parameters)
+        print("pre-core base params: ", [i for i in layer.base_layer.parameters])
 
     yield
 
@@ -62,13 +62,12 @@ def onload_layer(layer):
         if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
             module._hf_hook.post_forward(module, torch.tensor([]))
 
- 
     if hasattr(layer, "base_layer") and (
         hasattr(layer.base_layer, "_hf_hook")
         and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
         and layer.base_layer._hf_hook.offload
     ):
-        print ('post-core base params: ', layer.base_layer.parameters)
+        print("post-core base params: ", [i for i in layer.base_layer.parameters])
         layer.base_layer._hf_hook.weights_map = {
             name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
         }
