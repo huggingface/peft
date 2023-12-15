@@ -98,7 +98,7 @@ You're all set for training with whichever training method you prefer!
 
 <Tip warning={true}>
 
-LoftQ initialization does not require quantizing the base model with the `load_in_4bits` parameter in the [`~transformers.AutoModelForCausalLM.from_pretrained`] method! Learn more about LoftQ initialization in the [Initialization options](../conceptual_guides/lora#initialization-options) section.
+LoftQ initialization does not require quantizing the base model with the `load_in_4bits` parameter in the [`~transformers.AutoModelForCausalLM.from_pretrained`] method! Learn more about LoftQ initialization in the [Initialization options](../developer_guides/lora#initialization) section.
 
 </Tip>
 

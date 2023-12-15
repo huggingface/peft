@@ -41,6 +41,8 @@
   sections:
   - local: developer_guides/quantization
     title: Quantization
+  - local: developer_guides/lora
+    title: LoRA
   - local: developer_guides/custom_models
     title: Working with custom models
   - local: developer_guides/low_level_api
@@ -62,9 +64,9 @@
 - title: Conceptual guides
   sections:
   - local: conceptual_guides/lora
-    title: LoRA
+    title: Reparametrization
   - local: conceptual_guides/prompting
-    title: Prompting
+    title: Soft prompts
   - local: conceptual_guides/ia3
     title: IA3
 

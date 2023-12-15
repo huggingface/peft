@@ -14,104 +14,55 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# LoRA 
+# Reparametrization
 
-This conceptual guide gives a brief overview of [LoRA](https://arxiv.org/abs/2106.09685), a technique that accelerates 
-the fine-tuning of large models while consuming less memory. 
+Reparametrization is a way to express a matrix in a different way without changing it's meaning. Often, this means expressing the matrix as a decomposition of a matrix product. This is the key idea behind reparametrization-based methods like Low-Rank Adaptation (LoRA), which represents the matrix of weight updates ∆W as the matrix product of two low-rank matrices. As a result, it is faster and easier to update the weights of these two smaller matrices instead of all of the pretrained model parameters.
 
-To make fine-tuning more efficient, LoRA's approach is to represent the weight updates with two smaller 
-matrices (called **update matrices**) through low-rank decomposition. These new matrices can be trained to adapt to the 
-new data while keeping the overall number of changes low. The original weight matrix remains frozen and doesn't receive 
-any further adjustments. To produce the final results, both the original and the adapted weights are combined.
+This guide will provide a quick conceptual overview of the reparametrization methods supported by PEFT (if you're curious to learn more details, take a look at the linked papers).
 
-This approach has a number of advantages: 
+## Low-Rank Adaptation (LoRA)
 
-* LoRA makes fine-tuning more efficient by drastically reducing the number of trainable parameters.
-* The original pre-trained weights are kept frozen, which means you can have multiple lightweight and portable LoRA models for various downstream tasks built on top of them.
-* LoRA is orthogonal to many other parameter-efficient methods and can be combined with many of them.
-* Performance of models fine-tuned using LoRA is comparable to the performance of fully fine-tuned models.
-* LoRA does not add any inference latency because adapter weights can be merged with the base model.
+As mentioned briefly earlier, [LoRA](https://hf.co/papers/2106.09685) is a technique that accelerates finetuning large models while consuming less memory.
 
-In principle, LoRA can be applied to any subset of weight matrices in a neural network to reduce the number of trainable 
-parameters. However, for simplicity and further parameter efficiency, in Transformer models LoRA is typically applied to 
-attention blocks only. The resulting number of trainable parameters in a LoRA model depends on the size of the low-rank 
-update matrices, which is determined mainly by the rank `r` and the shape of the original weight matrix.
-
-## Merge LoRA weights into the base model
-
-While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA model. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model which allows you to effectively use the newly merged model as a standalone model.
+LoRA represents the weight updates ∆W with two smaller matrices (called *update matrices*) through low-rank decomposition. These new matrices can be trained to adapt to the new data while keeping the overall number of parameters low. The original weight matrix remains frozen and doesn't receive any further updates. To produce the final results, the original and extra adapted weights are combined. You could also merge the adapter weights with the base model to eliminate inference latency.
 
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_diagram.png"/>
 </div>
 
-This works because during training, the smaller weight matrices (*A* and *B* in the diagram above) are separate. But once training is complete, the weights can actually be merged into a new weight matrix that is identical.
+This approach has a number of advantages:
 
-## Utils for LoRA
+* LoRA makes finetuning more efficient by drastically reducing the number of trainable parameters.
+* The original pretrained weights are kept frozen, which means you can have multiple lightweight and portable LoRA models for various downstream tasks built on top of them.
+* LoRA is orthogonal to other parameter-efficient methods and can be combined with many of them.
+* Performance of models finetuned using LoRA is comparable to the performance of fully finetuned models.
 
-Use [`~LoraModel.merge_adapter`] to merge the LoRa layers into the base model while retaining the PeftModel.
-This will help in later unmerging, deleting, loading different adapters and so on.
+In principle, LoRA can be applied to any subset of weight matrices in a neural network to reduce the number of trainable parameters. However, for simplicity and further parameter efficiency, LoRA is typically only applied to the attention blocks in Transformer models. The resulting number of trainable parameters in a LoRA model depends on the size of the update matrices, which is determined mainly by the rank `r` and the shape of the original weight matrix.
 
-Use [`~LoraModel.unmerge_adapter`] to unmerge the LoRa layers from the base model while retaining the PeftModel.
-This will help in later merging, deleting, loading different adapters and so on.
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora.png"/>
+</div>
+<small><a href="https://hf.co/papers/2103.10385">Navigating Text-To-Image Customization: From LyCORIS Fine-Tuning to Model Evaluation</a>.</small>
 
-Use [`~LoraModel.unload`] to get back the base model without the merging of the active lora modules. 
-This will help when you want to get back the pretrained base model in some applications when you want to reset the model to its original state.
-For example, in Stable Diffusion WebUi, when the user wants to infer with base model post trying out LoRAs.
+## Low-Rank Hadamard Product (LoHa)
 
-Use [`~LoraModel.delete_adapter`] to delete an existing adapter.
+Low-rank decomposition can impact performance because the weight updates are limited to the low-rank space. This can constrain a model's expressiveness. However, you don't necessarily want to use a larger rank because it increases the number of trainable parameters. To address this, [LoHa](https://huggingface.co/papers/2108.06098) uses the [Hadamard product](https://en.wikipedia.org/wiki/Hadamard_product_(matrices)) (element-wise product) instead of the matrix product. ∆W is represented by four smaller matrices instead of two - like in LoRA - and each pair of these low-rank matrices are combined with the Hadamard product. As a result, ∆W can have the same number of trainable parameters but a higher rank and expressivity.
 
-Use [`~LoraModel.add_weighted_adapter`] to combine multiple LoRAs into a new adapter based on the user provided weighing scheme.
+## Low-Rank Kronecker Product (LoKr)
 
-## Common LoRA parameters in PEFT
+[LoKr](https://hf.co/papers/2309.14859) is very similar to LoRA and LoHa, but it replaces the matrix product with the [Kronecker product](https://en.wikipedia.org/wiki/Kronecker_product) instead. The Kronecker product decomposition creates a block matrix which preserves the rank of the original weight matrix. Another benefit of the Kronecker product is that it can be vectorized by stacking the matrix columns. This can speed up the process because you're avoiding fully reconstructing ∆W.
 
-As with other methods supported by PEFT, to fine-tune a model using LoRA, you need to:
+## Orthogonal Finetuning (OFT)
 
-1. Instantiate a base model.
-2. Create a configuration (`LoraConfig`) where you define LoRA-specific parameters.
-3. Wrap the base model with `get_peft_model()` to get a trainable `PeftModel`.
-4. Train the `PeftModel` as you normally would train the base model.
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/oft.png"/>
+</div>
+<small><a href="https://hf.co/papers/2306.07280">Controlling Text-to-Image Diffusion by Orthogonal Finetuning</a>.</small>
 
-`LoraConfig` allows you to control how LoRA is applied to the base model through the following parameters: 
+[OFT](https://hf.co/papers/2306.07280) is a method that primarily focuses on preserving a pretrained model's generative performance in the finetuned model. It tries to maintain the same cosine similarity (hyperspherical energy) between all pairwise neurons in a layer because this can capture the semantic information among neurons. OFT preserves this hyperspherical energy by learning an orthogonal transformation for neurons to keep the cosine similarity between them unchanged. In practice, this means taking the matrix product of an orthogonal matrix with the pretrained weight matrix. To be parameter-efficient, the orthogonal matrix is represented as a block-diagonal matrix with rank `r` blocks. Whereas LoRA reduces the number of trainable parameters with low-rank structures, OFT reduces the number of trainable parameters with a sparse block-diagonal matrix structure.
 
-- `r`: the rank of the update matrices, expressed in `int`. Lower rank results in smaller update matrices with fewer trainable parameters.
-- `target_modules`: The modules (for example, attention blocks) to apply the LoRA update matrices.
-- `lora_alpha`: LoRA scaling factor.
-- `bias`: Specifies if the `bias` parameters should be trained. Can be `'none'`, `'all'` or `'lora_only'`.
-- `use_rslora`: When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a> which sets the adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it was proven to work better. Otherwise, it will use the original default value of `lora_alpha/r`.
-- `modules_to_save`: List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
-- `layers_to_transform`: List of layers to be transformed by LoRA. If not specified, all layers in `target_modules` are transformed.
-- `layers_pattern`: Pattern to match layer names in `target_modules`, if `layers_to_transform` is specified. By default `PeftModel` will look at common layer pattern (`layers`, `h`, `blocks`, etc.), use it for exotic and custom models.
-- `rank_pattern`: The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`.
-- `alpha_pattern`: The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `lora_alpha`.
+## Adaptive Low-Rank Adaptation (AdaLoRA)
 
-## LoRA examples
-
-For an example of LoRA method application to various downstream tasks, please refer to the following guides:
-
-* [Image classification using LoRA](../task_guides/image_classification_lora)
-* [Semantic segmentation](../task_guides/semantic_segmentation_lora)
-
-While the original paper focuses on language models, the technique can be applied to any dense layers in deep learning 
-models. As such, you can leverage this technique with diffusion models. See [Dreambooth fine-tuning with LoRA](../task_guides/task_guides/dreambooth_lora) task guide for an example.
-
-## Initialization options
-
-The initialization of LoRA weights is controlled by the parameter `init_lora_weights` of the `LoraConfig`. By default, PEFT initializes LoRA weights the same way as the [reference implementation](https://github.com/microsoft/LoRA), i.e. using Kaiming-uniform for weight A and initializing weight B as zeros, resulting in an identity transform.
-
-It is also possible to pass `init_lora_weights="gaussian"`. As the name suggests, this results in initializing weight A with a Gaussian distribution (weight B is still zeros). This corresponds to the way that [diffusers](https://huggingface.co/docs/diffusers/index) initializes LoRA weights.
-
-When quantizing the base model, e.g. for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve the performance with quantization. The idea is that the LoRA weights are initialized such that the quantization error is minimized. To use this option, *do not* quantize the base model. Instead, proceed as follows:
-
-```python
-from peft import LoftQConfig, LoraConfig, get_peft_model
-
-base_model = AutoModelForCausalLM.from_pretrained(...)  # don't quantize here
-loftq_config = LoftQConfig(loftq_bits=4, ...)           # set 4bit quantization
-lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_config)
-peft_model = get_peft_model(base_model, lora_config)
-```
-
-There is also an option to set `initialize_lora_weights=False`. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform. This is useful for debugging and testing purposes and should not be used otherwise.
+[AdaLoRA](https://hf.co/papers/2303.10512) manages the parameter budget introduced from LoRA by allocating more parameters - in other words, a higher rank `r` - for important weight matrices that are better adapted for a task and pruning less important ones to save on parameter budget. The rank is controlled by a method similar to singular value decomposition (SVD). The ∆W is parameterized with two orthogonal matrices and a diagonal matrix which contains singular values. This parametrization method avoids iteratively applying SVD which is computationally expensive. Based on this method, the rank of ∆W is adjusted according to an importance score. ∆W is divided into triplets and each triplet is scored according to its contribution to model performance. Triplets with low importance scores are pruned and triplets with high importance scores are kept for finetuning.
 
 Finally, the LoRA architecture scales each adapter during every forward pass by a fixed scalar, which is set at initialization, and depends on the rank `r`. Although the original LoRA method uses the scalar function `lora_alpha/r`, the research [Rank-Stabilized LoRA](https://doi.org/10.48550/arXiv.2312.03732) proves that instead using `lora_alpha/math.sqrt(r)`, stabilizes the adapters and unlocks the increased performance potential from higher ranks. Set `use_rslora=True` to use the rank-stabilized scaling `lora_alpha/math.sqrt(r)`.
