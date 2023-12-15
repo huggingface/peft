@@ -71,7 +71,7 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -87,7 +87,10 @@ class LoraLayer(BaseTunerLayer):
         # Actual trainable parameters
         self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
         self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
-        self.scaling[adapter_name] = lora_alpha / r
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
@@ -104,7 +107,6 @@ class LoraLayer(BaseTunerLayer):
                 else:
                     self.to(weight.device)
                 break
-
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
@@ -196,6 +198,7 @@ class Linear(nn.Module, LoraLayer):
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -203,7 +206,7 @@ class Linear(nn.Module, LoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -332,15 +335,16 @@ class Embedding(nn.Module, LoraLayer):
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -357,7 +361,10 @@ class Embedding(nn.Module, LoraLayer):
         weight_B = torch.randn((self.out_features, r))
         self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
         self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
-        self.scaling[adapter_name] = lora_alpha / r
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
@@ -506,15 +513,16 @@ class Conv2d(nn.Module, LoraLayer):
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -533,7 +541,10 @@ class Conv2d(nn.Module, LoraLayer):
         padding = base_layer.padding
         self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
         self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
-        self.scaling[adapter_name] = lora_alpha / r
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
 
         if init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
