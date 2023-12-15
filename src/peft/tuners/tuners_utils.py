@@ -52,6 +52,7 @@ def onload_layer(layer):
             # retrieve the name of the original disk-offload directory
             offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
         layer.base_layer._hf_hook.pre_forward(layer.base_layer)
+        print ('pre-core base params: ', layer.base_layer.parameters)
 
     yield
 
@@ -67,6 +68,7 @@ def onload_layer(layer):
         and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
         and layer.base_layer._hf_hook.offload
     ):
+        print ('post-core base params: ', layer.base_layer.parameters)
         layer.base_layer._hf_hook.weights_map = {
             name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
         }
