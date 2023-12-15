@@ -15,14 +15,11 @@
 
 import math
 import warnings
-from contextlib import contextmanager
 from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from accelerate.hooks import AlignDevicesHook
-from accelerate.utils import named_module_tensors, offload_state_dict
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer

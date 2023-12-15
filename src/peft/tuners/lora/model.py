@@ -448,7 +448,6 @@ class LoraModel(BaseTuner):
                 continue
 
             if hasattr(target, "base_layer"):
-                print(target_name)
                 if merge:
                     target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
