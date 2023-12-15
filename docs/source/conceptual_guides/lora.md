@@ -76,8 +76,9 @@ As with other methods supported by PEFT, to fine-tune a model using LoRA, you ne
 
 - `r`: the rank of the update matrices, expressed in `int`. Lower rank results in smaller update matrices with fewer trainable parameters.
 - `target_modules`: The modules (for example, attention blocks) to apply the LoRA update matrices.
-- `alpha`: LoRA scaling factor.
+- `lora_alpha`: LoRA scaling factor.
 - `bias`: Specifies if the `bias` parameters should be trained. Can be `'none'`, `'all'` or `'lora_only'`.
+- `use_rslora`: When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a> which sets the adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it was proven to work better. Otherwise, it will use the original default value of `lora_alpha/r`.
 - `modules_to_save`: List of modules apart from LoRA layers to be set as trainable and saved in the final checkpoint. These typically include model's custom head that is randomly initialized for the fine-tuning task.
 - `layers_to_transform`: List of layers to be transformed by LoRA. If not specified, all layers in `target_modules` are transformed.
 - `layers_pattern`: Pattern to match layer names in `target_modules`, if `layers_to_transform` is specified. By default `PeftModel` will look at common layer pattern (`layers`, `h`, `blocks`, etc.), use it for exotic and custom models.
@@ -111,4 +112,6 @@ lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_conf
 peft_model = get_peft_model(base_model, lora_config)
 ```
 
-Finally, there is also an option to set `initialize_lora_weights=False`. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform. This is useful for debugging and testing purposes and should not be used otherwise.
+There is also an option to set `initialize_lora_weights=False`. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform. This is useful for debugging and testing purposes and should not be used otherwise.
+
+Finally, the LoRA architecture scales each adapter during every forward pass by a fixed scalar, which is set at initialization, and depends on the rank `r`. Although the original LoRA method uses the scalar function `lora_alpha/r`, the research [Rank-Stabilized LoRA](https://doi.org/10.48550/arXiv.2312.03732) proves that instead using `lora_alpha/math.sqrt(r)`, stabilizes the adapters and unlocks the increased performance potential from higher ranks. Set `use_rslora=True` to use the rank-stabilized scaling `lora_alpha/math.sqrt(r)`.

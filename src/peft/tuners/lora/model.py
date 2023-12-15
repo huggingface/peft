@@ -154,6 +154,7 @@ class LoraModel(BaseTuner):
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
+            "use_rslora": lora_config.use_rslora,
         }
         kwargs["loaded_in_8bit"] = optional_kwargs.pop("loaded_in_8bit", False)
         kwargs["loaded_in_4bit"] = optional_kwargs.pop("loaded_in_4bit", False)
@@ -181,6 +182,7 @@ class LoraModel(BaseTuner):
                 alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                lora_config.use_rslora,
             )
         elif isinstance(target, Embedding):
             target.update_layer_embedding(
@@ -189,6 +191,7 @@ class LoraModel(BaseTuner):
                 alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                lora_config.use_rslora,
             )
         elif isinstance(target, linear_types):
             target.update_layer(
@@ -197,6 +200,7 @@ class LoraModel(BaseTuner):
                 alpha,
                 lora_config.lora_dropout,
                 lora_config.init_lora_weights,
+                lora_config.use_rslora,
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
