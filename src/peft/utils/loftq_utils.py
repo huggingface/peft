@@ -200,8 +200,11 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     )
     if not is_bnb_4bit_available():
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
+        compute_device = device
+    else:
+        compute_device = "cuda"
 
-    weight = weight.to(torch.float32)
+    weight = weight.to(device=compute_device, dtype=torch.float32)
     res = weight.clone()
     for i in range(num_iter):
         torch.cuda.empty_cache()
@@ -209,7 +212,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         if num_bits == 4 and is_bnb_4bit_available():
             qweight = bnb.nn.Params4bit(
                 res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type="nf4"
-            ).to(device)
+            ).to(compute_device)
             dequantized_weight = bnb.functional.dequantize_4bit(qweight.data, qweight.quant_state)
         else:
             quantized_weight, max_abs, shape = quantizer.quantize_block(res)
@@ -224,4 +227,4 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
 
     lora_A, lora_B = R, L
 
-    return dequantized_weight.to(dtype), lora_A, lora_B
+    return dequantized_weight.to(device=device, dtype=dtype), lora_A, lora_B
