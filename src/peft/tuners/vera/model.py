@@ -33,6 +33,7 @@ from peft.utils import (
 
 from .config import VeraConfig
 from .layer import Embedding, Linear, VeraLayer
+from .buffer_dict import BufferDict
 
 
 def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
@@ -169,7 +170,7 @@ class VeraModel(BaseTuner):
         return first_linear, first_embedding
 
     def __init__(self, model, config, adapter_name) -> None:
-        if config.projection_prng_key is None:
+        if config[adapter_name].projection_prng_key is None:
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
         super().__init__(model, config, adapter_name)
@@ -182,29 +183,30 @@ class VeraModel(BaseTuner):
         if first_linear is not None:
             first_linear_out_dim, first_linear_in_dim = first_linear
 
+        # use of persistent to exclude vera_A and vera_B from the state dict
+        # if we choose not to save them.
+        self.vera_A = BufferDict({}, persistent = config.save_projection)
+        self.vera_B = BufferDict({}, persistent = config.save_projection)
+
+        self.vera_embedding_A = BufferDict({}, persistent = config.save_projection)
+        self.vera_embedding_B = BufferDict({}, persistent = config.save_projection)
+
         # deterministic init of vera_A and vera_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
         if first_linear is not None:
             vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
             vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
 
-            # use of persistent to exclude vera_A and vera_B from the state dict
-            # if we choose not to save them.
-            self.register_buffer("vera_A", vera_A, persistent=config.save_projection)
-            self.register_buffer("vera_B", vera_B, persistent=config.save_projection)
-        else:
-            self.vera_A = None
-            self.vera_B = None
+            self.vera_A[adapter_name] = vera_A
+            self.vera_B[adapter_name] = vera_B
 
         # as above, but for embedding layer if at least one has been wrapped with Vera.
         if first_embedding is not None:
             vera_embedding_A = torch.randn((config.r, first_embedding_vocab_size), generator=generator)
             vera_embedding_B = torch.randn((first_embedding_dim, config.r), generator=generator)
-            self.register_buffer("vera_embedding_A", vera_embedding_A, persistent=config.save_projection)
-            self.register_buffer("vera_embedding_B", vera_embedding_B, persistent=config.save_projection)
-        else:
-            self.vera_embedding_A = None
-            self.vera_embedding_B = None
+
+            self.vera_embedding_A[adapter_name] = vera_embedding_A
+            self.vera_embedding_B[adapter_name] = vera_embedding_B
 
         if not config.save_projection:
             warnings.warn(
@@ -434,9 +436,9 @@ class VeraModel(BaseTuner):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     if isinstance(module, Linear):
-                        module.unmerge(self.vera_A, self.vera_B)
+                        module.unmerge(self.vera_A[adapter_name], self.vera_B[adapter_name])
                     elif isinstance(module, Embedding):
-                        module.unmerge(self.vera_embedding_A, self.vera_embedding_B)
+                        module.unmerge(self.vera_embedding_A[adapter_name], self.vera_embedding_B[adapter_name])
                 module.set_adapter(adapter_name)
 
     @staticmethod
@@ -547,12 +549,12 @@ class VeraModel(BaseTuner):
         hook_handles = []
         for module in self.modules():
             if isinstance(module, Linear):
-                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
+                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A[self.active_adapter], vera_B=self.vera_B[self.active_adapter])
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
             elif isinstance(module, Embedding):
-                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A, vera_B=self.vera_embedding_B)
+                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A[self.active_adapter], vera_B=self.vera_embedding_B[self.active_adapter])
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
