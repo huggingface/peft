@@ -49,6 +49,14 @@ Learn more about how PEFT works with quantization in the [Quantization](quantiza
 
 </Tip>
 
+Another way to initialize [`LoraConfig`] is with the [rank-stabilized LoRA (rsLoRA)](https://huggingface.co/papers/2312.03732) method. The LoRA architecture scales each adapter during every forward pass by a fixed scalar which is set at initialization, and depends on the rank `r`. The scalar is given by `lora_alpha/r` in the original implementation, but rsLoRA uses `lora_alpha/math.sqrt(r)` which stabilizes the adapters and increases the performance potential from using a higher `r`.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(use_rslora=True, ...)
+```
+
 Finally, there is also an option to set `init_lora_weights=False` which is useful for debugging and testing. This should be the only time you use this option. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform.
 
 ```py
