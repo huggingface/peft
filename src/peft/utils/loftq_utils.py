@@ -198,7 +198,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         f"Weight: ({out_feature}, {in_feature}) | Rank: {reduced_rank} "
         f"| Num Iter: {num_iter} | Num Bits: {num_bits}"
     )
-    if not is_bnb_4bit_available():
+    if not is_bnb_4bit_available() or num_bits in [2, 8]:
         quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
         compute_device = device
     else:
