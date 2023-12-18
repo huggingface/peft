@@ -1060,11 +1060,6 @@ class LoftQTests(unittest.TestCase):
 
     @parameterized.expand(["cuda", "cpu"])
     def test_bloomz_loftq_8bit(self, device):
-        # this currently does not work:
-        # https://github.com/huggingface/peft/pull/1150#issuecomment-1838891499
-        if True:  # TODO: remove as soon as the issue is fixed
-            return
-
         # Same test as test_bloomz_loftq_4bit but with 8 bits.
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device)
 
@@ -1080,11 +1075,6 @@ class LoftQTests(unittest.TestCase):
 
     @parameterized.expand(["cuda", "cpu"])
     def test_bloomz_loftq_8bit_iter_5(self, device):
-        # this currently does not work:
-        # https://github.com/huggingface/peft/pull/1150#issuecomment-1838891499
-        if True:  # TODO: remove as soon as the issue is fixed
-            return
-
         # Same test as test_bloomz_loftq_4bit_iter_5 but with 8 bits.
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, loftq_iter=5, device=device)
 
