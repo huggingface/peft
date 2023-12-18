@@ -144,7 +144,7 @@ class PolyModel(BaseTuner):
 
         handles = []
         for module in self.model.modules():
-            if isinstance(module, Linear):
+            if task_ids is not None and isinstance(module, Linear):
                 handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
                 handles.append(handle)
 
@@ -158,13 +158,13 @@ class PolyModel(BaseTuner):
     def generate(self, *args, task_ids=None, **kwargs):
         def pre_hook(_, args, kwargs):
             x, *_ = args
-            if x.device == task_ids.device:
+            if task_ids is not None and x.device == task_ids.device:
                 kwargs["task_ids"] = task_ids
             return args, kwargs
 
         handles = []
         for module in self.model.modules():
-            if isinstance(module, Linear):
+            if task_ids is not None and isinstance(module, Linear):
                 handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
                 handles.append(handle)
         try:
