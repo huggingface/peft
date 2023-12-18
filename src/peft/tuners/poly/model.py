@@ -158,7 +158,7 @@ class PolyModel(BaseTuner):
     def generate(self, *args, task_ids=None, **kwargs):
         def pre_hook(_, args, kwargs):
             x, *_ = args
-            if task_ids is not None and x.device == task_ids.device:
+            if x.device == task_ids.device:
                 kwargs["task_ids"] = task_ids
             return args, kwargs
 
