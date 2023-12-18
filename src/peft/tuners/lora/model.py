@@ -141,6 +141,7 @@ class LoraModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
+
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
         target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
@@ -164,36 +165,10 @@ class LoraModel(BaseTuner):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
-        linear_types = (Linear,)
-        if is_bnb_available():
-            from .bnb import Linear8bitLt
+        # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
+        from peft.tuners.adalora import AdaLoraLayer
 
-            linear_types += (Linear8bitLt,)
-        if is_bnb_4bit_available():
-            from .bnb import Linear4bit
-
-            linear_types += (Linear4bit,)
-
-        # TODO: better deal with that
-        if isinstance(target, Conv2d):
-            target.update_layer_conv2d(
-                adapter_name,
-                r,
-                alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
-                lora_config.use_rslora,
-            )
-        elif isinstance(target, Embedding):
-            target.update_layer_embedding(
-                adapter_name,
-                r,
-                alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
-                lora_config.use_rslora,
-            )
-        elif isinstance(target, linear_types):
+        if isinstance(target, LoraLayer) and not isinstance(target, AdaLoraLayer):
             target.update_layer(
                 adapter_name,
                 r,
