@@ -153,6 +153,8 @@ class LoKrLayer(nn.Module, LycorisLayer):
             decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
             decompose_factor (`int`): Kronecker product decomposition factor.
         """
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
         self.alpha[adapter_name] = alpha
