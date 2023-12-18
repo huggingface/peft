@@ -37,8 +37,6 @@ ENV PATH /opt/conda/bin:$PATH
 
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
-RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir optimum auto-gptq
 
 # Install apt libs
 RUN apt-get update && \
@@ -46,7 +44,8 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
-# Activate the conda env and install transformers + accelerate from source
+# Activate the conda env and install transformers + accelerate from latest pypi
+# Also clone BNB and build it from source.
 RUN source activate peft && \
     python3 -m pip install -U --no-cache-dir \
     librosa \
@@ -54,14 +53,12 @@ RUN source activate peft && \
     scipy \
     transformers \
     accelerate \
-    peft
-
-RUN source activate peft && \ 
+    peft \
+    optimum \
+    auto-gptq && \
     git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && \
     CUDA_VERSION=121 make cuda12x && \
-    python setup.py develop
-
-RUN source activate peft && \ 
+    python setup.py develop && \ 
     pip freeze | grep bitsandbytes
 
 RUN echo "source activate peft" >> ~/.profile
