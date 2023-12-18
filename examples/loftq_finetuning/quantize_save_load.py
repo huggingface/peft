@@ -23,10 +23,9 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoTokenizer,
-    BitsAndBytesConfig,
 )
 
-from peft import LoftQConfig, LoraConfig, PeftModel, TaskType, get_peft_model
+from peft import LoftQConfig, LoraConfig, TaskType, get_peft_model
 
 
 class Shell(nn.Module):
@@ -37,7 +36,7 @@ class Shell(nn.Module):
             self.bias = nn.Parameter(bias, requires_grad=False)
 
 
-def unwarap_model(model, sub_module_name=".base_layer"):
+def unwrap_model(model, sub_module_name=".base_layer"):
     sub_module_name_list = [k.split(sub_module_name)[0] for k in model.state_dict().keys() if sub_module_name in k]
     sub_module_name_set = set(sub_module_name_list)
     for name in sub_module_name_set:
@@ -126,20 +125,17 @@ def quantize_and_save():
     # Download weights and configure LoRA
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, token=args.token, trust_remote_code=True)
     if any(name in args.model_name_or_path.lower() for name in ["llama", "mistral", "falcon"]):
-        model = AutoModelForCausalLM.from_pretrained(
-            args.model_name_or_path, token=args.token, trust_remote_code=True, device_map="auto"
-        )
+        model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path, token=args.token, trust_remote_code=True)
         task_type = TaskType.CAUSAL_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj", "gate_proj"]
 
     elif any(name in args.model_name_or_path.lower() for name in ["bart", "t5"]):
-        model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path, token=args.token, device_map="auto")
+        model = AutoModelForSeq2SeqLM.from_pretrained(args.model_name_or_path, token=args.token)
         task_type = TaskType.SEQ_2_SEQ_LM
         target_modules = ["q_proj", "k_proj", "v_proj", "fc1", "fc2", "out_proj"]
 
     elif any(name in args.model_name_or_path.lower() for name in ["deberta", "roberta", "bert"]):
         model = AutoModelForSequenceClassification.from_pretrained(args.model_name_or_path, token=args.token)
-        model = model.cuda()
         task_type = TaskType.SEQ_CLS
         target_modules = ["query_proj", "key_proj", "value_proj", "dense"]  # embeddings not supported by peft
     else:
@@ -178,7 +174,7 @@ def quantize_and_save():
     print_model(lora_model, "lora_model")
 
     # remove lora adapters and save the backbone
-    unwarap_model(base_model)
+    unwrap_model(base_model)
     base_model.save_pretrained(base_model_dir)
     tokenizer.save_pretrained(base_model_dir)
 
@@ -187,54 +183,8 @@ def quantize_and_save():
     return base_model_dir, lora_model_dir
 
 
-def load_loftq(base_model_path, lora_adapter_path):
-    if any(name in base_model_path.lower() for name in ["llama", "mistral", "falcon"]):
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model_path,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=False,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-    elif any(name in base_model_path.lower() for name in ["bart", "t5"]):
-        model = AutoModelForSeq2SeqLM.from_pretrained(
-            base_model_path,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-            load_in_4bit=True,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=False,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-    elif any(name in base_model_path.lower() for name in ["deberta", "roberta", "bert"]):
-        model = AutoModelForSequenceClassification.from_pretrained(
-            base_model_path,
-            low_cpu_mem_usage=True,
-            load_in_4bit=True,
-            quantization_config=BitsAndBytesConfig(
-                load_in_4bit=True,
-                bnb_4bit_use_double_quant=False,
-                bnb_4bit_quant_type="nf4",
-            ),
-        )
-    else:
-        raise NotImplementedError("Other models not supported yet.")
-
-    lora_model = PeftModel.from_pretrained(model, lora_adapter_path, is_trainable=True)
-
-    # Do training or inference below
-    print_model(lora_model, "lora_model")
-    print_model(model, "base_model")
-
-
 if __name__ == "__main__":
     base_dir, lora_dir = quantize_and_save()
-    load_loftq(base_dir, lora_dir)
 
 # example command:
 # python quantize_save_load.py \

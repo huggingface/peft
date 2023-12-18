@@ -230,3 +230,89 @@ class InitializationTest(unittest.TestCase):
         # with init_lora_weights=False, weight B should *not* be zero. We don't care so much about the actual values
         # as long as they are not zero, in order to avoid identity transformation.
         self.assertFalse(torch.allclose(weight_B, torch.zeros_like(weight_B)))
+
+    def test_lora_scaling_default(self):
+        # default is True
+        torch.manual_seed(0)
+
+        model = self.get_model()
+
+        # check scaling factor use_rslora=False
+        config = LoraConfig(target_modules=["linear", "embed", "conv2d"], lora_alpha=3, r=16, use_rslora=False)
+        model = get_peft_model(model, config)
+
+        expected_scaling = config.lora_alpha / config.r
+
+        self.assertTrue(model.linear.scaling["default"] == expected_scaling)
+        self.assertTrue(model.embed.scaling["default"] == expected_scaling)
+        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling)
+
+    def test_rslora_scaling(self):
+        # default is True
+        torch.manual_seed(0)
+
+        model = self.get_model()
+
+        # check scaling factor use_rslora=True
+        config = LoraConfig(target_modules=["linear", "embed", "conv2d"], lora_alpha=3, r=16, use_rslora=True)
+        model = get_peft_model(model, config)
+
+        expected_scaling = config.lora_alpha / (config.r**0.5)
+
+        self.assertTrue(model.linear.scaling["default"] == expected_scaling)
+        self.assertTrue(model.embed.scaling["default"] == expected_scaling)
+        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling)
+
+    def test_lora_default_scaling_pattern(self):
+        # default is True
+        torch.manual_seed(0)
+
+        model = self.get_model()
+
+        # check scaling factor use_rslora=False with rank and alpha pattern
+        config = LoraConfig(
+            target_modules=["linear", "embed", "conv2d"],
+            rank_pattern={"embed": 9, "conv2d": 16},
+            alpha_pattern={"linear": 11, "conv2d": 13},
+            lora_alpha=17,
+            r=25,
+            use_rslora=False,
+        )
+        model = get_peft_model(model, config)
+
+        expected_scaling = {
+            "linear": config.alpha_pattern["linear"] / config.r,
+            "embed": config.lora_alpha / config.rank_pattern["embed"],
+            "conv2d": config.alpha_pattern["conv2d"] / config.rank_pattern["conv2d"],
+        }
+
+        self.assertTrue(model.linear.scaling["default"] == expected_scaling["linear"])
+        self.assertTrue(model.embed.scaling["default"] == expected_scaling["embed"])
+        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling["conv2d"])
+
+    def test_rslora_scaling_pattern(self):
+        # default is True
+        torch.manual_seed(0)
+
+        model = self.get_model()
+
+        # check scaling factor use_rslora=True with rank and alpha pattern
+        config = LoraConfig(
+            target_modules=["linear", "embed", "conv2d"],
+            rank_pattern={"embed": 9, "conv2d": 16},
+            alpha_pattern={"linear": 11, "conv2d": 13},
+            lora_alpha=17,
+            r=25,
+            use_rslora=True,
+        )
+        model = get_peft_model(model, config)
+
+        expected_scaling = {
+            "linear": config.alpha_pattern["linear"] / (config.r**0.5),
+            "embed": config.lora_alpha / (config.rank_pattern["embed"] ** 0.5),
+            "conv2d": config.alpha_pattern["conv2d"] / (config.rank_pattern["conv2d"] ** 0.5),
+        }
+
+        self.assertTrue(model.linear.scaling["default"] == expected_scaling["linear"])
+        self.assertTrue(model.embed.scaling["default"] == expected_scaling["embed"])
+        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling["conv2d"])

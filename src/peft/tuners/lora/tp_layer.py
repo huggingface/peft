@@ -25,6 +25,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,
         init_lora_weights: bool = True,
+        use_rslora: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -52,6 +53,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             lora_alpha,
             lora_dropout,
             init_lora_weights,
+            use_rslora,
             init_method,
             input_is_parallel,
             gather_output,
@@ -67,6 +69,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         lora_alpha,
         lora_dropout,
         init_lora_weights,
+        use_rslora,
         init_method=init.xavier_normal_,
         input_is_parallel=True,
         gather_output=False,
@@ -109,7 +112,10 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             )
         self.lora_A[adapter_name] = lora_a
         self.lora_B[adapter_name] = lora_b
-        self.scaling[adapter_name] = lora_alpha / r
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / (r**0.5)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
