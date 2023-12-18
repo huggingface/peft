@@ -16,9 +16,9 @@ rendered properly in your Markdown viewer.
 
 # Adapters
 
-Adapter-based methods add extra trainable parameters after the attention and fully-connected layers of a frozen pretrained model to reduce memory-usage and speed up training. The adapters are typically small, but demonstrate comparable performance to a fully finetuned model. Adapters enable training larger models with fewer resources.
+Adapter-based methods add extra trainable parameters after the attention and fully-connected layers of a frozen pretrained model to reduce memory-usage and speed up training. The adapters are typically small, but demonstrate comparable performance to a fully finetuned model. These methods enable training larger models with fewer resources.
 
-This guide will give you a brief overview of adapter methods supported by PEFT (if you're curious to learn more details about a specific method, take a look at the linked paper).
+This guide will give you a brief overview of adapter methods supported by PEFT (if you're interested in learning more details about a specific method, take a look at the linked paper).
 
 ## Llama-Adapter
 

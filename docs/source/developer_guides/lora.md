@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # LoRA
 
-LoRA uses low-rank decomposition to reduce the number of trainable parameters which speeds up finetuning large models and uses less memory. In PEFT, using LoRA is as easy as setting up a [`LoraConfig`] and wrapping it with [`get_peft_model`] to create a trainable [`PeftModel`].
+LoRA is low-rank decomposition method to reduce the number of trainable parameters which speeds up finetuning large models and uses less memory. In PEFT, using LoRA is as easy as setting up a [`LoraConfig`] and wrapping it with [`get_peft_model`] to create a trainable [`PeftModel`].
 
 This guide explores in more detail other options and features for using LoRA.
 
@@ -24,7 +24,7 @@ This guide explores in more detail other options and features for using LoRA.
 
 The initialization of LoRA weights is controlled by the parameter `init_lora_weights` in [`LoraConfig`]. By default, PEFT initializes LoRA weights with Kaiming-uniform for weight A and zeros for weight B resulting in an identity transform (same as the reference [implementation](https://github.com/microsoft/LoRA)).
 
-It is also possible to pass `init_lora_weights="gaussian"`. As the name suggests, this initializes weight A with a Gaussian distribution (weight B is still zeros). This is how [Diffusers](https://huggingface.co/docs/diffusers/index) initializes LoRA weights.
+It is also possible to pass `init_lora_weights="gaussian"`. As the name suggests, this initializes weight A with a Gaussian distribution and zeros for weight B (this is how [Diffusers](https://huggingface.co/docs/diffusers/index) initializes LoRA weights).
 
 ```py
 from peft import LoraConfig
@@ -32,7 +32,17 @@ from peft import LoraConfig
 config = LoraConfig(init_lora_weights="gaussian", ...)
 ```
 
-When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve the performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. If you're using LoftQ, *do not* quantize the base model. You should set up a [`LoftQConfig`] instead:
+There is also an option to set `init_lora_weights=False` which is useful for debugging and testing. This should be the only time you use this option. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(init_lora_weights=False, ...)
+```
+
+### LoftQ
+
+When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. If you're using LoftQ, *do not* quantize the base model. You should set up a [`LoftQConfig`] instead:
 
 ```python
 from peft import LoftQConfig, LoraConfig, get_peft_model
@@ -49,20 +59,14 @@ Learn more about how PEFT works with quantization in the [Quantization](quantiza
 
 </Tip>
 
-Another way to initialize [`LoraConfig`] is with the [rank-stabilized LoRA (rsLoRA)](https://huggingface.co/papers/2312.03732) method. The LoRA architecture scales each adapter during every forward pass by a fixed scalar which is set at initialization, and depends on the rank `r`. The scalar is given by `lora_alpha/r` in the original implementation, but rsLoRA uses `lora_alpha/math.sqrt(r)` which stabilizes the adapters and increases the performance potential from using a higher `r`.
+### Rank-stabilized LoRA
+
+Another way to initialize [`LoraConfig`] is with the [rank-stabilized LoRA (rsLoRA)](https://huggingface.co/papers/2312.03732) method. The LoRA architecture scales each adapter during every forward pass by a fixed scalar which is set at initialization and depends on the rank `r`. The scalar is given by `lora_alpha/r` in the original implementation, but rsLoRA uses `lora_alpha/math.sqrt(r)` which stabilizes the adapters and increases the performance potential from using a higher `r`.
 
 ```py
 from peft import LoraConfig
 
 config = LoraConfig(use_rslora=True, ...)
-```
-
-Finally, there is also an option to set `init_lora_weights=False` which is useful for debugging and testing. This should be the only time you use this option. When choosing this option, the LoRA weights are initialized such that they do *not* result in an identity transform.
-
-```py
-from peft import LoraConfig
-
-config = LoraConfig(init_lora_weights=False, ...)
 ```
 
 ## Merge adapters
@@ -79,7 +83,7 @@ model = PeftModel.from_pretrained(base_model, peft_model_id)
 model.merge_and_unload()
 ```
 
-If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~BaseTuner.merge_adapter`] function instead. Then you can use [`~LoraModel.unmerge_adapter`] to return the base model.
+If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~tuners.tuner_utils.BaseTuner.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
 
 ```py
 from transformers import AutoModelForCausalLM
@@ -94,7 +98,7 @@ model.merge_adapter()
 model.unmerge_adapter()
 ```
 
-The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme.
+The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme in the `weights` parameter.
 
 ```py
 model.add_weighted_adapter(
