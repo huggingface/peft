@@ -7,6 +7,8 @@ from peft.tuners.lora import Conv2d as LoraConv2d
 from peft.tuners.lora import Embedding as LoraEmbedding
 from peft.tuners.lora import Linear as LoraLinear
 
+from .testing_utils import require_torch_gpu
+
 
 class SimpleModel(nn.Module):
     def __init__(self):
@@ -117,6 +119,7 @@ class SimpleLorAConv2DModel(nn.Module):
         return conv_output
 
 
+@require_torch_gpu
 class TestAutoCast(unittest.TestCase):
     def test_simple_model(self):
         self._test_model(SimpleModel)
