@@ -302,7 +302,6 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -325,7 +324,6 @@ class Linear(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_B[adapter].weight.dtype
 
@@ -438,7 +436,6 @@ class Embedding(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -581,7 +578,6 @@ class Conv2d(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     base_layer.weight.data += self.get_delta_weight(active_adapter)
-
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -604,7 +600,6 @@ class Conv2d(nn.Module, LoraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-
         device = self.lora_B[adapter].weight.device
         dtype = self.lora_A[adapter].weight.dtype
 

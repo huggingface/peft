@@ -40,8 +40,7 @@ from transformers import (
     WhisperTokenizer,
 )
 
-# A full testing suite that tests all the necessary features on GPU. The tests should
-# rely on the example scripts to test the features.
+
 from peft import (
     AdaLoraConfig,
     LoftQConfig,
@@ -61,6 +60,9 @@ from .testing_utils import (
     require_torch_gpu,
     require_torch_multi_gpu,
 )
+
+# A full testing suite that tests all the necessary features on GPU. The tests should
+# rely on the example scripts to test the features.
 
 
 @dataclass
@@ -983,7 +985,7 @@ class OffloadSaveTests(unittest.TestCase):
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
         pre_merge_olayer = model(input_tokens)[0]
-        model = model.merge_and_unload()
+        model.merge_adapter()
         post_merge_olayer = model(input_tokens)[0]
 
         self.assertTrue(torch.allclose(pre_merge_olayer, post_merge_olayer))

@@ -37,12 +37,21 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def onload_layer(layer):
+    r"""
+    Moves a module's sub-modules to the execution device before context, after remakes the model state dict 
+    if necessary and offloads model parameters.
+
+    Args:
+        layer ('torch.nn.Module'):
+            layer with tuners to be merged
+    """
     for name, module in layer.named_modules():
         if name in ["", "base_layer"]:
             continue
         if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
             module._hf_hook.pre_forward(module)
 
+    base_layer_offload = False
     if hasattr(layer, "base_layer") and (
         hasattr(layer.base_layer, "_hf_hook")
         and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
@@ -52,6 +61,7 @@ def onload_layer(layer):
             # retrieve the name of the original disk-offload directory
             offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
         layer.base_layer._hf_hook.pre_forward(layer.base_layer)
+        base_layer_offload = True
 
     yield
 
@@ -61,11 +71,8 @@ def onload_layer(layer):
         if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
             module._hf_hook.post_forward(module, torch.tensor([]))
 
-    if hasattr(layer, "base_layer") and (
-        hasattr(layer.base_layer, "_hf_hook")
-        and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
-        and layer.base_layer._hf_hook.offload
-    ):
+    if base_layer_offload:
+        # re-make weights map (must be on cpu to send params to the disk via memmap if disk offload)
         layer.base_layer._hf_hook.weights_map = {
             name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
         }
