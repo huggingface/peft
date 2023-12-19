@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from dataclasses import asdict
 from enum import Enum
 from typing import Any
@@ -135,41 +136,38 @@ class PolyModel(BaseTuner):
             )
         return peft_config
 
-    def forward(self, *args, task_ids=None, **kwargs):
+    def _register_pre_hooks(self, task_ids):
+        """Helper method to register pre hooks."""
+        if task_ids is None:
+            return []
+
         def pre_hook(_, args, kwargs):
-            x, *_ = args
-            if x.device == task_ids.device:
-                kwargs["task_ids"] = task_ids
+            kwargs["task_ids"] = task_ids
             return args, kwargs
 
         handles = []
+
         for module in self.model.modules():
-            if task_ids is not None and isinstance(module, Linear):
-                handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
+            if isinstance(module, Linear):
+                handle = module.register_forward_pre_hook(pre_hook)
                 handles.append(handle)
 
+        return handles
+
+    @contextmanager
+    def _manage_pre_hooks(self, task_ids):
+        """Context manager to handle the lifecycle of pre hooks."""
+        handles = self._register_pre_hooks(task_ids)
         try:
-            result = self.model(*args, **kwargs)
+            yield
         finally:
             for handle in handles:
                 handle.remove()
-        return result
+
+    def forward(self, *args, task_ids=None, **kwargs):
+        with self._manage_pre_hooks(task_ids):
+            return self.model(*args, **kwargs)
 
     def generate(self, *args, task_ids=None, **kwargs):
-        def pre_hook(_, args, kwargs):
-            x, *_ = args
-            if x.device == task_ids.device:
-                kwargs["task_ids"] = task_ids
-            return args, kwargs
-
-        handles = []
-        for module in self.model.modules():
-            if task_ids is not None and isinstance(module, Linear):
-                handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
-                handles.append(handle)
-        try:
-            result = self.model.generate(*args, **kwargs)
-        finally:
-            for handle in handles:
-                handle.remove()
-        return result
+        with self._manage_pre_hooks(task_ids):
+            return self.model.generate(*args, **kwargs)
