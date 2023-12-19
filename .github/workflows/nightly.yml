@@ -106,4 +106,3 @@ jobs:
         run: |
           pip install slack_sdk tabulate
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
-          
