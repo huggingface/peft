@@ -17,12 +17,14 @@ jobs:
   run_all_tests_single_gpu:
     strategy:
       fail-fast: false
+      matrix:
+          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", huggingface/peft-gpu-bnb-latest:latest]
     runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0"
       TEST_TYPE: "single_gpu"
     container:
-      image: huggingface/peft-gpu:latest
+      image: ${{ matrix.docker-image-name }}
       options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
@@ -64,12 +66,14 @@ jobs:
   run_all_tests_multi_gpu:
     strategy:
       fail-fast: false
+      matrix:
+        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", huggingface/peft-gpu-bnb-latest:latest]
     runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
       TEST_TYPE: "multi_gpu"
     container:
-      image: huggingface/peft-gpu:latest
+      image: ${{ matrix.docker-image-name }}
       options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
