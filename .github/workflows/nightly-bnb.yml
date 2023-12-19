@@ -1,9 +1,9 @@
 name: Self-hosted runner with slow tests (scheduled)
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * *"
+  push:
+    branches:
+      - add-bnb-tests
 
 env:
   RUN_SLOW: "yes"
@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", huggingface/peft-gpu-bnb-latest:latest]
+          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
     runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0"
@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", huggingface/peft-gpu-bnb-latest:latest]
+        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
     runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
