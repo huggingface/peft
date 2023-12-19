@@ -35,5 +35,21 @@ tests_common_gpu:
 	python -m pytest tests/test_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
 	python -m pytest tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_encoder_decoder.log",)
 
+tests_examples_multi_gpu_bnb:
+	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)
+
+tests_examples_single_gpu_bnb:
+	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "single_gpu_examples.log",)
+
+tests_core_multi_gpu_bnb:
+	python -m pytest -m "multi_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_multi_gpu.log",)
+
+tests_core_single_gpu_bnb:
+	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
+
+tests_common_gpu_bnb:
+	python -m pytest -m bitsandbytes tests/test_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_decoder.log",)
+	python -m pytest -m bitsandbytes tests/test_encoder_decoder_models.py $(if $(IS_GITHUB_CI),--report-log "common_encoder_decoder.log",)
+
 tests_regression:
 	python -m pytest -s --regression tests/regression/ $(if $(IS_GITHUB_CI),--report-log "regression_tests.log",)
