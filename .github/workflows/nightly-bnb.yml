@@ -1,9 +1,9 @@
 name: Self-hosted runner with slow tests with bnb from source (scheduled)
 
 on:
-  push:
-    branches:
-      - add-bnb-tests
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
 
 env:
   RUN_SLOW: "yes"
