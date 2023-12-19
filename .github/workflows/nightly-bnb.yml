@@ -25,7 +25,7 @@ jobs:
       TEST_TYPE: "single_gpu_${{ matrix.docker-image-name }}"
     container:
       image: ${{ matrix.docker-image-name }}
-      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
+      options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/ -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         shell: bash
@@ -70,7 +70,7 @@ jobs:
       TEST_TYPE: "multi_gpu_${{ matrix.docker-image-name }}"
     container:
       image: ${{ matrix.docker-image-name }}
-      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
+      options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/ -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
         shell: bash
