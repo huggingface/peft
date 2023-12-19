@@ -22,7 +22,7 @@ jobs:
     runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0"
-      TEST_TYPE: "single_gpu"
+      TEST_TYPE: "single_gpu_${{ matrix.docker-image-name }}"
     container:
       image: ${{ matrix.docker-image-name }}
       options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
@@ -36,7 +36,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog pytest-cov parameterized datasets scipy
-          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git
+          mkdir transformers-clone && cd transformers-clone && git clone https://github.com/huggingface/transformers.git && cd ..
 
       - name: Run examples on single GPU
         run: |
@@ -67,7 +67,7 @@ jobs:
     runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
-      TEST_TYPE: "multi_gpu"
+      TEST_TYPE: "multi_gpu_${{ matrix.docker-image-name }}"
     container:
       image: ${{ matrix.docker-image-name }}
       options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
@@ -81,7 +81,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog pytest-cov parameterized datasets scipy
-          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git
+          mkdir transformers-clone && cd transformers-clone && git clone https://github.com/huggingface/transformers.git && cd ..
 
       - name: Run core GPU tests on multi-gpu
         run: |
