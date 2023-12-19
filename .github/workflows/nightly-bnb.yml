@@ -36,7 +36,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
-          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone
+          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone # rename to transformers clone to avoid modules conflict
 
       - name: Run examples on single GPU
         run: |
