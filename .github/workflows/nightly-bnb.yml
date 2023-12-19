@@ -47,6 +47,11 @@ jobs:
         run: |
           source activate peft
           make tests_core_single_gpu_bnb
+
+        - name: Run transformers tests on single GPU
+        run: |
+          source activate peft
+          make transformers_tests
           
       - name: Generate Report
         if: always()
@@ -76,6 +81,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog
+          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git
 
       - name: Run core GPU tests on multi-gpu
         run: |
@@ -90,6 +96,11 @@ jobs:
         run: |
           source activate peft
           make tests_core_multi_gpu_bnb
+
+        - name: Run transformers tests on multi GPU
+        run: |
+          source activate peft
+          make transformers_tests
           
       - name: Generate Report
         if: always()
