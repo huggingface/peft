@@ -1,4 +1,4 @@
-name: Self-hosted runner with slow tests with bnb from source (scheduled)
+name: BNB from source self-hosted runner with slow tests (scheduled)
 
 on:
   workflow_dispatch:
