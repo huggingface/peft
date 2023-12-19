@@ -47,6 +47,7 @@ tests_core_multi_gpu_bnb:
 tests_core_single_gpu_bnb:
 	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
 
+# For testing transformers tests for bnb runners
 transformers_tests:
 	RUN_SLOW=1 python -m pytest transformers-clone/tests/quantization/bnb $(if $(IS_GITHUB_CI),--report-log "transformers_tests.log",)
 
