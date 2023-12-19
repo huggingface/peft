@@ -35,7 +35,7 @@ jobs:
         run: |
           source activate peft
           pip install -e . --no-deps
-          pip install pytest-reportlog pytest-cov parameterized datasets scipy
+          pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
           mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone
 
       - name: Run examples on single GPU
@@ -80,7 +80,7 @@ jobs:
         run: |
           source activate peft
           pip install -e . --no-deps
-          pip install pytest-reportlog pytest-cov parameterized datasets scipy
+          pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
           mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone
 
       - name: Run core GPU tests on multi-gpu
