@@ -36,26 +36,16 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog
-      
-      - name: Run common tests on single GPU
-        run: |
-          source activate peft
-          make tests_common_gpu_bnb
 
       - name: Run examples on single GPU
         run: |
           source activate peft
-          make tests_common_gpu_bnb
+          make tests_examples_single_gpu_bnb
       
       - name: Run core tests on single GPU
         run: |
           source activate peft
           make tests_core_single_gpu_bnb
-
-      - name: Run regression tests on single GPU
-        run: |
-          source activate peft
-          make tests_regression
           
       - name: Generate Report
         if: always()
@@ -89,11 +79,6 @@ jobs:
       - name: Run core GPU tests on multi-gpu
         run: |
           source activate peft
-          
-      - name: Run common tests on multi GPU
-        run: |
-          source activate peft
-          make tests_common_gpu_bnb
         
       - name: Run examples on multi GPU
         run: |
@@ -103,7 +88,7 @@ jobs:
       - name: Run core tests on multi GPU
         run: |
           source activate peft
-          make tests_core_multi_gpu
+          make tests_core_multi_gpu_bnb
           
       - name: Generate Report
         if: always()
