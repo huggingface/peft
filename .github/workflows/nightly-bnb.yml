@@ -36,6 +36,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog
+          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git
 
       - name: Run examples on single GPU
         run: |
