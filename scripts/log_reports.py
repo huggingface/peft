@@ -10,15 +10,11 @@ MAX_LEN_MESSAGE = 2900  # slack endpoint has a limit of 3001 characters
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--slack_channel_name",
-    default=None
+    default="peft-ci-daily"
 )
 
 
 def main(slack_channel_name=None):
-    # Default it to the peft daily ci
-    if slack_channel_name is None:
-        slack_channel_name = "peft-ci-daily"
-
     failed = []
     passed = []
 
