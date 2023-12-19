@@ -48,7 +48,7 @@ tests_core_single_gpu_bnb:
 	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
 
 transformers_tests:
-	RUN_SLOW=1 python -m pytest transformers-clone/transformers/tests/quantization/bnb $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
+	RUN_SLOW=1 python -m pytest transformers-clone/transformers/tests/quantization/bnb $(if $(IS_GITHUB_CI),--report-log "transformers_tests.log",)
 
 tests_regression:
 	python -m pytest -s --regression tests/regression/ $(if $(IS_GITHUB_CI),--report-log "regression_tests.log",)
