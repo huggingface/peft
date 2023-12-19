@@ -40,7 +40,6 @@ from transformers import (
     WhisperTokenizer,
 )
 
-
 from peft import (
     AdaLoraConfig,
     LoftQConfig,
@@ -60,6 +59,7 @@ from .testing_utils import (
     require_torch_gpu,
     require_torch_multi_gpu,
 )
+
 
 # A full testing suite that tests all the necessary features on GPU. The tests should
 # rely on the example scripts to test the features.

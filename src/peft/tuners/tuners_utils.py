@@ -38,18 +38,21 @@ logger = logging.getLogger(__name__)
 @contextmanager
 def onload_layer(layer):
     r"""
-    Moves a module's sub-modules to the execution device before context, after remakes the model state dict 
-    if necessary and offloads model parameters.
+    Moves a module's sub-modules to the execution device before context, after remakes the model state dict if
+    necessary and offloads model parameters.
 
     Args:
         layer ('torch.nn.Module'):
             layer with tuners to be merged
     """
+
+    offloaded_modules = []
     for name, module in layer.named_modules():
         if name in ["", "base_layer"]:
             continue
         if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
             module._hf_hook.pre_forward(module)
+            offloaded_modules.append(module)
 
     base_layer_offload = False
     if hasattr(layer, "base_layer") and (
@@ -65,11 +68,8 @@ def onload_layer(layer):
 
     yield
 
-    for name, module in layer.named_modules():
-        if name in ["", "base_layer"]:
-            continue
-        if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
-            module._hf_hook.post_forward(module, torch.tensor([]))
+    for module in offloaded_modules:
+        module._hf_hook.post_forward(module, torch.tensor([]))
 
     if base_layer_offload:
         # re-make weights map (must be on cpu to send params to the disk via memmap if disk offload)
