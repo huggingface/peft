@@ -65,8 +65,6 @@
   sections:
   - local: conceptual_guides/adapter
     title: Adapters
-  - local: conceptual_guides/lora
-    title: Reparametrization
   - local: conceptual_guides/prompting
     title: Soft prompts
   - local: conceptual_guides/ia3
