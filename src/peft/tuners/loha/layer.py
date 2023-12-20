@@ -114,6 +114,8 @@ class LoHaLayer(nn.Module, LycorisLayer):
             use_effective_conv2d (`bool`, *optional*, defaults to `False`):
                 Use parameter effective decomposition for Conv2d with ksize > 1.
         """
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
         self.alpha[adapter_name] = alpha

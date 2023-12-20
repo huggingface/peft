@@ -211,6 +211,10 @@ class PeftGPUCommonTests(unittest.TestCase):
         model.set_adapter("adapter2")
         model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
+        # check that both adapters are in the same layer
+        self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+        self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
     @pytest.mark.single_gpu_tests
@@ -243,6 +247,10 @@ class PeftGPUCommonTests(unittest.TestCase):
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
             model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -277,6 +285,10 @@ class PeftGPUCommonTests(unittest.TestCase):
             model.set_adapter("adapter2")
             model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
+            # check that both adapters are in the same layer
+            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l)
+            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l)
+
     @pytest.mark.single_gpu_tests
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
         r"""
@@ -310,6 +322,10 @@ class PeftGPUCommonTests(unittest.TestCase):
             model.load_adapter(tmp_dir, "adapter2")
             model.set_adapter("adapter2")
             model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests

@@ -24,6 +24,7 @@ import torch
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
+from parameterized import parameterized
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -950,16 +951,31 @@ class LoftQTests(unittest.TestCase):
         self.error_factor = 3
         self.model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self.inputs = self.tokenizer("All I want is", padding=True, return_tensors="pt").to("cuda")
 
-    def get_errors(self, bits=4, loftq_iter=1):
+    def get_input(self, device):
+        inputs = self.tokenizer("All I want is", padding=True, return_tensors="pt")
+        if device == "cuda":
+            inputs = inputs.to("cuda")
+        return inputs
+
+    def get_base_model(self, model_id, device, **kwargs):
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs).eval()
+        if device == "cuda":
+            model = model.to("cuda")
+        return model
+
+    def get_errors(self, bits=4, loftq_iter=1, device="cuda"):
         # Helper function that returns the quantization errors (MAE and MSE) when comparing the quantized LoRA model
         # to the base model, vs the LoftQ quantized model to the base model. We expect the LoftQ quantized model to
         # have less error than the normal LoRA quantized model. Since we compare logits, the observed error is
         # already somewhat dampened because of the softmax.
-        model = AutoModelForCausalLM.from_pretrained(self.model_id).cuda().eval()
+        model = self.get_base_model(self.model_id, device)
+        if device == "cuda":
+            model = model.to("cuda")
+
         torch.manual_seed(0)
-        logits_base = model(**self.inputs).logits
+        inputs = self.get_input(device)
+        logits_base = model(**inputs).logits
         # clean up
         del model
         gc.collect()
@@ -976,11 +992,11 @@ class LoftQTests(unittest.TestCase):
             raise ValueError("bits must be 4 or 8")
 
         quantized_model = get_peft_model(
-            AutoModelForCausalLM.from_pretrained(self.model_id, device_map="auto", **kwargs).eval(),
+            self.get_base_model(self.model_id, device=None, **kwargs),
             lora_config,
         )
         torch.manual_seed(0)
-        logits_quantized = quantized_model(**self.inputs).logits
+        logits_quantized = quantized_model(**inputs).logits
         del quantized_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -988,9 +1004,15 @@ class LoftQTests(unittest.TestCase):
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
         lora_config = LoraConfig(task_type=TaskType.CAUSAL_LM, init_lora_weights="loftq", loftq_config=loftq_config)
-        loftq_model = get_peft_model(AutoModelForCausalLM.from_pretrained(self.model_id).cuda().eval(), lora_config)
+        model = self.get_base_model(self.model_id, device)
+        if device == "cuda":
+            model = model.to("cuda")
+        loftq_model = get_peft_model(model, lora_config)
+        if device == "cuda":
+            loftq_model = loftq_model.to("cuda")
+
         torch.manual_seed(0)
-        logits_loftq = loftq_model(**self.inputs).logits
+        logits_loftq = loftq_model(**inputs).logits
         del loftq_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -1001,14 +1023,15 @@ class LoftQTests(unittest.TestCase):
         mse_loftq = torch.pow(logits_base - logits_loftq, 2).mean()
         return mae_quantized, mse_quantized, mae_loftq, mse_loftq
 
-    def test_bloomz_loftq_4bit(self):
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_4bit(self, device):
         # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
         # using LoftQ. When quantizing, we expect a certain level of error. However, we expect the LoftQ quantized
         # model to have less error than the normal LoRA quantized model. Note that when using normal LoRA, the
         # quantization error is simply the error from quantization without LoRA, as LoRA is a no-op before training.
         # We still apply LoRA for the test for consistency.
 
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device)
         # first, sanity check that all errors are > 0.0
         self.assertTrue(mae_quantized > 0.0)
         self.assertTrue(mse_quantized > 0.0)
@@ -1020,10 +1043,11 @@ class LoftQTests(unittest.TestCase):
         self.assertTrue(mae_loftq < mae_quantized / factor)
         self.assertTrue(mse_loftq < mse_quantized / factor)
 
-    def test_bloomz_loftq_4bit_iter_5(self):
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_4bit_iter_5(self, device):
         # Same test as the previous one but with 5 iterations. We should expect the error to be even smaller with more
         # iterations, but in practice the difference is not that large, at least not for this small base model.
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, loftq_iter=5)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, loftq_iter=5, device=device)
         # first, sanity check that all errors are > 0.0
         self.assertTrue(mae_quantized > 0.0)
         self.assertTrue(mse_quantized > 0.0)
@@ -1034,14 +1058,10 @@ class LoftQTests(unittest.TestCase):
         self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
         self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
 
-    def test_bloomz_loftq_8bit(self):
-        # this currently does not work:
-        # https://github.com/huggingface/peft/pull/1150#issuecomment-1838891499
-        if True:  # TODO: remove as soon as the issue is fixed
-            return
-
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_8bit(self, device):
         # Same test as test_bloomz_loftq_4bit but with 8 bits.
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device)
 
         # first, sanity check that all errors are > 0.0
         self.assertTrue(mae_quantized > 0.0)
@@ -1053,14 +1073,10 @@ class LoftQTests(unittest.TestCase):
         self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
         self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
 
-    def test_bloomz_loftq_8bit_iter_5(self):
-        # this currently does not work:
-        # https://github.com/huggingface/peft/pull/1150#issuecomment-1838891499
-        if True:  # TODO: remove as soon as the issue is fixed
-            return
-
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_8bit_iter_5(self, device):
         # Same test as test_bloomz_loftq_4bit_iter_5 but with 8 bits.
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, loftq_iter=5)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, loftq_iter=5, device=device)
 
         # first, sanity check that all errors are > 0.0
         self.assertTrue(mae_quantized > 0.0)
