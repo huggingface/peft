@@ -76,6 +76,31 @@ class LoraConfig(PeftConfig):
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `lora_alpha`.
+        megatron_config (`dict`):
+            The TransformerConfig from Megatron, it is used to create LoRA's parallel linear layer.
+            You can get it like this, `core_transformer_config_from_args(get_args())`, this two functions are from
+            Megatron.
+            You need to specify this parameter when you want to loraize the ColumnParallelLinear and RowParallelLinear
+            layers of megatron.
+            It should be noted that we may not be able to use the `save_pretrained` and `from_pretrained` functions,
+            because TransformerConfig may not necessarily be serialized.
+            But when using megatron, we can use `get_peft_model_state_dict` function and megatron's framework, they can
+            also save and load models and configurations.
+        megatron_core (`str`):
+            The core module from Megatron, it is used to judge and create LoRA's parallel linear layer.
+            It only needs to be passed in when you need to use your own modified megatron core module.
+            Otherwise, it will use the default value `megatron.core`.
+        loftq_config (`dict`):
+            The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
+            and initialize Lora layers.
+
+        fast_train_mode (`bool`, defaults to `False`):
+            If this is True, then the model will use specialized layers for faster training, especially in conjunction
+            with torch.compile. These layers lack a couple of features, e.g. they cannot be merged or disabled, and
+            there can only ever be a single adapter. However, for many training use cases, those features do not matter.
+            Later, for example for inference, the adapters can be loaded as normal adapters, enabling all these
+            missing features. A good workflow is thus to train the adapter using `fast_train_modle=True`, and then
+            load the adapter using `fast_train_modle=False` (the default).
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -189,6 +214,19 @@ class LoraConfig(PeftConfig):
             "help": (
                 "The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone "
                 "weights and initialize Lora layers."
+            )
+        },
+    )
+    fast_train_mode: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "If this is True, then the model will use specialized layers for faster training, especially in "
+                "conjunction with torch.compile. These layers lack a couple of features, e.g. they cannot be merged or "
+                "disabled, and there can only ever be a single adapter. However, for many training use cases, those "
+                "features do not matter. Later, for example for inference, the adapters can be loaded as normal "
+                "adapters, enabling all these missing features. A good workflow is thus to train the adapter using "
+                "`fast_train_modle=True`, and then load the adapter using `fast_train_modle=False` (the default)."
             )
         },
     )
