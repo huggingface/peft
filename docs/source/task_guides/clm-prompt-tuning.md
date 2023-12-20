@@ -188,7 +188,7 @@ print(model.print_trainable_parameters())
 Setup an optimizer and learning rate scheduler:
 
 ```py
-optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
 lr_scheduler = get_linear_schedule_with_warmup(
     optimizer=optimizer,
     num_warmup_steps=0,
