@@ -27,6 +27,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
         init_lora_weights: bool = True,
+        use_rslora: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -35,7 +36,7 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
         # for backwards compatibility
         self.quant_linear_module = base_layer
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
@@ -64,9 +65,9 @@ class QuantLinear(torch.nn.Module, LoraLayer):
             result += output
         return result
 
-        def __repr__(self) -> str:
-            rep = super().__repr__()
-            return "lora." + rep
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
 
     # TODO: Check if it is better as suggested by users https://github.com/PanQiWei/AutoGPTQ/pull/102
     # def reset_lora_parameters(self, adapter_name):
