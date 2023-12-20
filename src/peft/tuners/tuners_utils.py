@@ -495,11 +495,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
             len(layer_indexes) != 0 if isinstance(layer_indexes, list) else True
         )
         if is_using_layer_indexes and target_module_found:
-            # to keep up with the previous results(if layers_pattern is an empty list, ret is True)
-            # and make the result consistent for all empty layers_pattern: None, [], ""
-            # COMMON_LAYERS_PATTERN is dropped
-            # empty layers_pattern means all layer pattern is ok
             layer_index = None
+            # fixme: It's still unclear how empty layers_pattern(None, [], or "") should behave
+            # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
                 layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
             else:
@@ -513,10 +511,10 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
                 target_module_found = False
             else:
                 layer_index = int(layer_index.group(1))
-                if isinstance(config.layers_to_transform, int):
-                    target_module_found = layer_index == config.layers_to_transform
+                if isinstance(layer_indexes, int):
+                    target_module_found = layer_index == layer_indexes
                 else:
-                    target_module_found = layer_index in config.layers_to_transform
+                    target_module_found = layer_index in layer_indexes
 
     return target_module_found
 
