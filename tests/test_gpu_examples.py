@@ -962,7 +962,7 @@ class OffloadSaveTests(unittest.TestCase):
     @require_torch_gpu
     def test_offload_merge(self):
         r"""
-        Test merging and unloading of a model with offloaded modules.
+        Test merging, unmerging, and unloading of a model with offloaded modules.
         """
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
@@ -984,13 +984,26 @@ class OffloadSaveTests(unittest.TestCase):
             model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        model.eval()
+
+        # test peft model adapter merge
         pre_merge_olayer = model(input_tokens)[0]
         model.merge_adapter()
         post_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
 
-        self.assertTrue(torch.allclose(pre_merge_olayer, post_merge_olayer))
+        # test peft model adapter unmerge
+        model.unmerge_adapter()
+        post_unmerge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unmerge_olayer, pre_merge_olayer))
+
+        # test LoRA merge and unload
+        model = model.merge_and_unload()
+        post_unload_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unload_merge_olayer, pre_merge_olayer))
 
 
+@require_torch_gpu
 class LoftQTests(unittest.TestCase):
     r"""
     Tests for LoftQ
