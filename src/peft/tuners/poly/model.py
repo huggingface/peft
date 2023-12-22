@@ -149,7 +149,7 @@ class PolyModel(BaseTuner):
 
         for module in self.model.modules():
             if isinstance(module, Linear):
-                handle = module.register_forward_pre_hook(pre_hook)
+                handle = module.register_forward_pre_hook(pre_hook, with_kwargs=True)
                 handles.append(handle)
 
         return handles
