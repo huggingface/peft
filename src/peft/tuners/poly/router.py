@@ -14,7 +14,11 @@ def get_router(poly_config: PolyConfig) -> nn.Module:
     if poly_config.poly_type == "poly":
         return PolyRouter(poly_config)
     else:
-        raise NotImplementedError
+        raise ValueError(
+            f"Unsupported poly_type: {poly_config.poly_type}. "
+            "Currently, only the following types are supported: "
+            "`poly`."
+        )
 
 
 class Router(nn.Module, ABC):
