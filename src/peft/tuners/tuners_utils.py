@@ -496,7 +496,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         )
         if is_using_layer_indexes and target_module_found:
             layer_index = None
-            # fixme: It's still unclear how empty layers_pattern(None, [], or "") should behave
+            # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
             # For now, empty layers_pattern means any layer pattern is ok
             if layers_pattern is None or len(layers_pattern) == 0:
                 layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)

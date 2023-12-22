@@ -141,7 +141,6 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     # "layoutlm": ["query", "value"],
 }
 
-COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"

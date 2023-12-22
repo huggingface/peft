@@ -25,7 +25,6 @@ from safetensors.torch import storage_ptr, storage_size
 
 from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
 from .constants import (
-    COMMON_LAYERS_PATTERN,
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
     SAFETENSORS_WEIGHTS_NAME,
@@ -41,7 +40,6 @@ from .constants import (
 
 
 __all__ = [
-    "COMMON_LAYERS_PATTERN",
     "CONFIG_NAME",
     "EMBEDDING_LAYER_NAMES",
     "SAFETENSORS_WEIGHTS_NAME",
