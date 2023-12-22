@@ -88,6 +88,7 @@ jobs:
             echo "Checking out tag for Transformers version: v$transformers_version"
             git fetch --tags
             git checkout tags/v$transformers_version
+            cd .. 
 
       - name: Run core GPU tests on multi-gpu
         run: |
