@@ -38,10 +38,10 @@ logger = logging.getLogger(__name__)
 @contextmanager
 def onload_layer(layer):
     r"""
-    A utility for modifying a module containing one or more tuners and a base layer, any of which are offloaded.
-    Moves a module's sub-modules to the execution device before some action is performed, after that that the
-    state dictionary is re-assigned and parameters are offloaded. If the module has no offloaded sub-modules, 
-    this function does nothing.
+    A utility for modifying a module containing one or more tuners and a base layer, any of which are offloaded. Moves
+    a module's sub-modules to the execution device before some action is performed, after that that the state
+    dictionary is re-assigned and parameters are offloaded. If the module has no offloaded sub-modules, this function
+    does nothing.
 
     Args:
         layer ('torch.nn.Module'):
