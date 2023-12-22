@@ -48,7 +48,10 @@ class LoraConfig(PeftConfig):
 
     Args:
         r (`int`): Lora attention dimension.
-        target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
+        target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply LoRA to. If this is
+            specified, only the modules with the specified names will be replaced. If this is not specified, modules
+            will be chosen according to the model architecture. If the architecture is not known, an error will be
+            raised -- in this case, you should specify the target modules manually.
         lora_alpha (`int`): The alpha parameter for Lora scaling.
         lora_dropout (`float`): The dropout probability for Lora layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
@@ -82,8 +85,12 @@ class LoraConfig(PeftConfig):
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with Lora."
-            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "help": (
+                "List of module names or regex expression of the module names to replace with LoRA."
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
+                "If not specified, modules will be chosen according to the model architecture, If the architecture is "
+                "not known, an error will be raised -- in this case, you shoud specify the target modules manually."
+            ),
         },
     )
     lora_alpha: int = field(default=8, metadata={"help": "Lora alpha"})
