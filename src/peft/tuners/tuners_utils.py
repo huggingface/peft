@@ -22,10 +22,12 @@ from typing import Any, List, Optional, Union
 
 import torch
 from torch import nn
+from transformers.pytorch_utils import Conv1D
 
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
+from ..import_utils import is_bnb_4bit_available, is_bnb_available
 from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
@@ -200,6 +202,7 @@ class BaseTuner(nn.Module, ABC):
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
+        _maybe_include_all_linear_layers(peft_config, model)
 
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
@@ -523,3 +526,34 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
         else:
             module_dict["unmatched"].append(key)
     return module_dict
+
+
+def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
+    """
+    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'ALL'. Adapted from the QLoRA
+    repository: https://github.com/artidoro/qlora/blob/main/qlora.py
+    """
+    if peft_config.target_modules == "ALL":
+        is_loaded_in_8bit = (getattr(model, "is_loaded_in_8bit", False),)
+        is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
+        cls = torch.nn.Linear
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            cls = bnb.nn.Linear8bitLt if is_loaded_in_8bit else cls
+            if is_bnb_4bit_available():
+                cls = bnb.nn.Linear4bit if is_loaded_in_4bit else cls
+
+        linear_module_names = set()
+        for name, module in model.named_modules():
+            if isinstance(module, cls) or isinstance(module, Conv1D):
+                names = name.split(".")
+                linear_module_names.add(names[0] if len(names) == 1 else names[-1])
+            elif isinstance(module, Conv1D):
+                names = name.split(".")
+                linear_module_names.add(names[0] if len(names) == 1 else names[-1])
+        if "lm_head" in linear_module_names:  # needed for 16-bit
+            linear_module_names.remove("lm_head")
+        peft_config.target_modules = list(linear_module_names)
+        print("new target modules: ", peft_config.target_modules)
+    return peft_config

@@ -20,13 +20,18 @@ from parameterized import parameterized
 from transformers import AutoModel
 
 from peft import IA3Config, LoraConfig, get_peft_model
-from peft.tuners.tuners_utils import check_target_module_exists, inspect_matched_modules
+from peft.tuners.tuners_utils import (
+    _maybe_include_all_linear_layers,
+    check_target_module_exists,
+    inspect_matched_modules,
+)
 
 
-# Implements tests for regex matching logic common for all BaseTuner subclasses, and also
-# tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc)
+# Implements tests for regex matching logic common for all BaseTuner subclasses, and
+# tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc) and
+# tests for utlity function to include all linear layers
 
-TEST_CASES = [
+REGEX_TEST_CASES = [
     # tuple of
     # 1. key
     # 2. target_modules
@@ -92,6 +97,25 @@ TEST_CASES = [
     ("mlp.blocks.1.bias", ["weight"], [1], ["blocks"], False),
 ]
 
+MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
+    # model_name, initial_target_modules, final_expected_target_modules
+    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", ["k_proj"], ["k_proj"]),
+    # test with target_modules as None
+    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", None, None),
+    # test with target_modules as a regex expression
+    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", ".*(q|v)$", ".*(q|v)$"),
+    # test for a causal Llama model
+    (
+        "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+        "ALL",
+        ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
+    ),
+    # test for gpt2 with Conv1D layers
+    ("hf-internal-testing/tiny-random-gpt2", "ALL", ["c_attn", "c_proj", "c_fc"]),
+    # test for T5 model
+    ("hf-internal-testing/tiny-random-t5", "ALL", ["k", "q", "v", "o", "wi", "wo"]),
+]
+
 
 class PeftCustomKwargsTester(unittest.TestCase):
     r"""
@@ -103,7 +127,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
 
     transformers_class = AutoModel
 
-    @parameterized.expand(TEST_CASES)
+    @parameterized.expand(REGEX_TEST_CASES)
     def test_regex_matching_valid(self, key, target_modules, layers_to_transform, layers_pattern, expected_result):
         # We use a LoRA Config for testing, but the regex matching function is common for all BaseTuner subclasses.
         # example model_id for config initialization. key is matched only against the target_modules given, so this can be any model
@@ -175,3 +199,14 @@ class PeftCustomKwargsTester(unittest.TestCase):
                 self.assertTrue(module.is_feedforward)
             else:  # other IA3 modules should not be marked as feedforward
                 self.assertFalse(module.is_feedforward)
+
+    @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
+    def test_maybe_include_all_linear_layers(self, model_id, initial_target_modules, expected_target_modules):
+        model = self.transformers_class.from_pretrained(model_id)
+        lora_config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules)
+        new_lora_config = _maybe_include_all_linear_layers(lora_config, model)
+        if isinstance(expected_target_modules, list):
+            # assert that expected and actual target_modules have the same items
+            self.assertCountEqual(new_lora_config.target_modules, expected_target_modules)
+        else:
+            self.assertEqual(new_lora_config.target_modules, expected_target_modules)
