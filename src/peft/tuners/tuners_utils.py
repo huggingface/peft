@@ -27,7 +27,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
-from ..import_utils import is_bnb_4bit_available, is_bnb_available
+from ..import_utils import is_bnb_available
 from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
@@ -555,5 +555,4 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         if "lm_head" in linear_module_names:  # needed for 16-bit
             linear_module_names.remove("lm_head")
         peft_config.target_modules = list(linear_module_names)
-        print("new target modules: ", peft_config.target_modules)
     return peft_config
