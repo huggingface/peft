@@ -534,24 +534,24 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
     if peft_config.target_modules == "ALL":
-        is_loaded_in_8bit = (getattr(model, "is_loaded_in_8bit", False),)
+        is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
         is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
-        cls = torch.nn.Linear
+        # match with a list of linear layer classes. this is needed as sometimes you can
+        # have a mix Eg. T5 with 8bit has instances of torch.nn.Linear and bnb.nn.Linear8bitLt
+        linear_classes = [torch.nn.Linear, Conv1D]
         if is_bnb_available():
             import bitsandbytes as bnb
 
-            cls = bnb.nn.Linear8bitLt if is_loaded_in_8bit else cls
-            if is_bnb_4bit_available():
-                cls = bnb.nn.Linear4bit if is_loaded_in_4bit else cls
+            linear_classes = [bnb.nn.Linear8bitLt] + linear_classes if is_loaded_in_8bit else linear_classes
+            linear_classes = [bnb.nn.Linear4bit] + linear_classes if is_loaded_in_4bit else linear_classes
 
         linear_module_names = set()
         for name, module in model.named_modules():
-            if isinstance(module, cls) or isinstance(module, Conv1D):
-                names = name.split(".")
-                linear_module_names.add(names[0] if len(names) == 1 else names[-1])
-            elif isinstance(module, Conv1D):
-                names = name.split(".")
-                linear_module_names.add(names[0] if len(names) == 1 else names[-1])
+            # match with all linear classes.
+            for cls in linear_classes:
+                if isinstance(module, cls):
+                    names = name.split(".")
+                    linear_module_names.add(names[0] if len(names) == 1 else names[-1])
         if "lm_head" in linear_module_names:  # needed for 16-bit
             linear_module_names.remove("lm_head")
         peft_config.target_modules = list(linear_module_names)

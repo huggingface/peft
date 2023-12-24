@@ -207,28 +207,35 @@ class PeftCustomKwargsTester(unittest.TestCase):
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
     def test_maybe_include_all_linear_layers(self, model_id, initial_target_modules, expected_target_modules):
         model = self.transformers_class.from_pretrained(model_id)
-        self._check_match_with_expected_target_modules(model_id, model, initial_target_modules, expected_target_modules)
+        self._check_match_with_expected_target_modules(
+            model_id, model, initial_target_modules, expected_target_modules
+        )
 
     @parameterized.expand(bnb_test_cases)
     @require_torch_gpu
     @require_bitsandbytes
-    def test_maybe_include_all_linear_layers_bnb(self, model_id, initial_target_modules, expected_target_modules, quantization):
+    def test_maybe_include_all_linear_layers_bnb(
+        self, model_id, initial_target_modules, expected_target_modules, quantization
+    ):
         if quantization == "4bit":
-            config_kwargs = {"load_in_4bit" :  True}
+            config_kwargs = {"load_in_4bit": True}
         elif quantization == "8bit":
-            config_kwargs = {"load_in_8bit" : True}
+            config_kwargs = {"load_in_8bit": True}
         model = self.transformers_class.from_pretrained(model_id, device_map="auto", **config_kwargs)
-        self._check_match_with_expected_target_modules(model_id, model, initial_target_modules, expected_target_modules, **config_kwargs)
-    
-    def _check_match_with_expected_target_modules(self, model_id, model, initial_target_modules, expected_target_modules, **config_kwargs):
+        self._check_match_with_expected_target_modules(
+            model_id, model, initial_target_modules, expected_target_modules
+        )
+
+    def _check_match_with_expected_target_modules(
+        self, model_id, model, initial_target_modules, expected_target_modules
+    ):
         """
         Helper function for the test for `_maybe_include_all_linear_layers`
         """
-        lora_config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules, **config_kwargs)
+        lora_config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules)
         new_lora_config = _maybe_include_all_linear_layers(lora_config, model)
         if isinstance(expected_target_modules, list):
             # assert that expected and actual target_modules have the same items
             self.assertCountEqual(new_lora_config.target_modules, expected_target_modules)
         else:
             self.assertEqual(new_lora_config.target_modules, expected_target_modules)
- 
