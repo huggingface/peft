@@ -49,7 +49,7 @@ class IA3Config(PeftConfig):
         metadata={
             "help": (
                 "List of module names or regex expression of the module names to replace with (IA)³."
-                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. Can also be a wildcard 'ALL' to match all linear layers"
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
                 "not known, an error will be raised -- in this case, you shoud specify the target modules manually."
             ),
