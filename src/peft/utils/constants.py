@@ -44,6 +44,10 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
 
+TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
+    "llama": ["input_layernorm", "post_attention_layernorm", "norm"],
+    "llava": ["multi_modal_projector", "input_layernorm", "post_attention_layernorm", "norm", "embed_tokens", "lm_head"],
+}
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
