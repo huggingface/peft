@@ -38,7 +38,47 @@ from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_mod
 
 class LNTuningModel(BaseTuner):
     """
-    Creates 
+    Creates LayerNorm tuning from a pretrained transformer model.
+    
+    The method is described in detail in https://arxiv.org/abs/2312.11420.
+    
+    Args:
+        model ([`torch.nn.Module`]): The model to be adapted.
+        config ([`LNTuningConfig`]): The configuration of the Lora model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+
+    Returns:
+        'torch.nn.Module': The adapted model with LayerNorm tuned on.
+
+    Example:
+
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import LNTuningModel, LNTuningConfig
+
+        >>> config = LNTuningConfig(
+        ...     task_type="CAUSAL_LM",
+        ... )
+
+        >>> model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
+        >>> ln_model = LNTuningModel(model, config, "default")
+        ```
+        
+        ```py
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import get_peft_model, TaskType, LNTuningConfig
+        >>> peft_config = LNTuningConfig(
+        >>>    task_type=TaskType.CAUSAL_LM, 
+        >>> )
+        
+        >>> model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
+        >>> model = get_peft_model(model, peft_config)
+        >>> model.print_trainable_parameters()
+        ```
+        
+    **Attributes**:
+        - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
+        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
     def __init__(self, model, config, adapter_name) -> None:
         self.adapter_name = adapter_name
