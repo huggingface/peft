@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from __future__ import annotations
-import math
 
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Union
@@ -25,7 +24,12 @@ from peft.utils import PeftType
 class LNTuningConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a :class:`~peft.tuners.LNTuningModel`. 
-
+    
+    Args: 
+        target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply LayerNorm Tuning to. If this is
+            specified, only the modules with the specified names will be replaced. If this is not specified, modules
+            will be chosen according to the model architecture. If the architecture is not known, an error will be
+            raised -- in this case, you should specify the target modules manually.
     """
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
@@ -40,7 +44,3 @@ class LNTuningConfig(PeftConfig):
     )
     def __post_init__(self):
         self.peft_type = PeftType.LN_TUNING
-        # if self.target_modules is not None:
-        #     if isinstance(self.target_modules, str):
-        #         self.target_modules = [self.target_modules]
-        #     self.target_modules = [re.compile(regex) for regex in self.target_modules]
