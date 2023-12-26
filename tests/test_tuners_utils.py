@@ -17,7 +17,7 @@
 import unittest
 
 from parameterized import parameterized
-from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoModel
+from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
 from peft import IA3Config, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
@@ -108,7 +108,8 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", ".*(q|v)$", ".*(q|v)$"),
     # test for a causal Llama model
     (
-        "HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal",
+        "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+        "causal",
         "ALL",
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
@@ -117,7 +118,12 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     # test for T5 model
     ("hf-internal-testing/tiny-random-t5", "seq2seq", "ALL", ["k", "q", "v", "o", "wi", "wo"]),
     # test for GPTNeoX. output module list should exclude classification head - which is named as "embed_out" instead of the usual "lm_head" for GPTNeoX
-    ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", "causal", "ALL", ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"])
+    (
+        "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
+        "causal",
+        "ALL",
+        ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
+    ),
 ]
 
 bnb_quantizations = [("4bit",), ("8bit",)]
@@ -208,7 +214,9 @@ class PeftCustomKwargsTester(unittest.TestCase):
                 self.assertFalse(module.is_feedforward)
 
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
-    def test_maybe_include_all_linear_layers(self, model_id, model_type, initial_target_modules, expected_target_modules):
+    def test_maybe_include_all_linear_layers(
+        self, model_id, model_type, initial_target_modules, expected_target_modules
+    ):
         model = self.transformers_class_map[model_type].from_pretrained(model_id)
         self._check_match_with_expected_target_modules(
             model_id, model, initial_target_modules, expected_target_modules
