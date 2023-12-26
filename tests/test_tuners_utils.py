@@ -113,6 +113,13 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
         "ALL",
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
+    # test for a Llama model without the LM head
+    (
+        "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+        "base",
+        "ALL",
+        ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
+    ),
     # test for gpt2 with Conv1D layers
     ("hf-internal-testing/tiny-random-gpt2", "causal", "ALL", ["c_attn", "c_proj", "c_fc"]),
     # test for T5 model
@@ -138,7 +145,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
 
     """
 
-    transformers_class_map = {"causal": AutoModelForCausalLM, "seq2seq": AutoModelForSeq2SeqLM}
+    transformers_class_map = {"causal": AutoModelForCausalLM, "seq2seq": AutoModelForSeq2SeqLM, "base": AutoModel}
 
     @parameterized.expand(REGEX_TEST_CASES)
     def test_regex_matching_valid(self, key, target_modules, layers_to_transform, layers_pattern, expected_result):
