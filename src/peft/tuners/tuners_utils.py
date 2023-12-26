@@ -202,7 +202,9 @@ class BaseTuner(nn.Module, ABC):
         # This way, we can raise early if something goes wrong, without leaving the model
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
-        _maybe_include_all_linear_layers(peft_config, model)
+
+        # update peft_config.target_modules if required
+        peft_config = _maybe_include_all_linear_layers(peft_config, model)
 
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
