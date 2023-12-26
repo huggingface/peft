@@ -17,7 +17,7 @@
 import unittest
 
 from parameterized import parameterized
-from transformers import AutoModel
+from transformers import AutoModelForCausalLM, AutoModelForSeq2SeqLM, AutoModel
 
 from peft import IA3Config, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
@@ -100,22 +100,24 @@ REGEX_TEST_CASES = [
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
-    # model_name, initial_target_modules, final_expected_target_modules
-    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", ["k_proj"], ["k_proj"]),
+    # model_name, model_type, initial_target_modules, final_expected_target_modules
+    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", ["k_proj"], ["k_proj"]),
     # test with target_modules as None
-    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", None, None),
+    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", None, None),
     # test with target_modules as a regex expression
-    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", ".*(q|v)$", ".*(q|v)$"),
+    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", ".*(q|v)$", ".*(q|v)$"),
     # test for a causal Llama model
     (
-        "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+        "HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal",
         "ALL",
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
     # test for gpt2 with Conv1D layers
-    ("hf-internal-testing/tiny-random-gpt2", "ALL", ["c_attn", "c_proj", "c_fc"]),
+    ("hf-internal-testing/tiny-random-gpt2", "causal", "ALL", ["c_attn", "c_proj", "c_fc"]),
     # test for T5 model
-    ("hf-internal-testing/tiny-random-t5", "ALL", ["k", "q", "v", "o", "wi", "wo"]),
+    ("hf-internal-testing/tiny-random-t5", "seq2seq", "ALL", ["k", "q", "v", "o", "wi", "wo"]),
+    # test for GPTNeoX. output module list should exclude classification head - which is named as "embed_out" instead of the usual "lm_head" for GPTNeoX
+    ("hf-internal-testing/tiny-random-GPTNeoXForCausalLM", "causal", "ALL", ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"])
 ]
 
 bnb_quantizations = [("4bit",), ("8bit",)]
@@ -130,7 +132,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
 
     """
 
-    transformers_class = AutoModel
+    transformers_class_map = {"causal": AutoModelForCausalLM, "seq2seq": AutoModelForSeq2SeqLM}
 
     @parameterized.expand(REGEX_TEST_CASES)
     def test_regex_matching_valid(self, key, target_modules, layers_to_transform, layers_pattern, expected_result):
@@ -152,7 +154,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # configs that could exist. This is okay as the method calls `check_target_module_exists` internally, which
         # has been extensively tested above.
         model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
-        model = self.transformers_class.from_pretrained(model_id)
+        model = AutoModel.from_pretrained(model_id)
         # by default, this model matches query_key_value
         config = LoraConfig()
         peft_model = get_peft_model(model, config)
@@ -175,7 +177,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
 
     def test_feedforward_matching_ia3(self):
         model_id = "hf-internal-testing/tiny-random-T5ForConditionalGeneration"
-        model = self.transformers_class.from_pretrained(model_id)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
         # simple example for just one t5 block for testing
         config_kwargs = {
             "target_modules": ".*encoder.*block.0.*(SelfAttention|EncDecAttention|DenseReluDense).(k|q|v|wo|wi)$",
@@ -206,8 +208,8 @@ class PeftCustomKwargsTester(unittest.TestCase):
                 self.assertFalse(module.is_feedforward)
 
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
-    def test_maybe_include_all_linear_layers(self, model_id, initial_target_modules, expected_target_modules):
-        model = self.transformers_class.from_pretrained(model_id)
+    def test_maybe_include_all_linear_layers(self, model_id, model_type, initial_target_modules, expected_target_modules):
+        model = self.transformers_class_map[model_type].from_pretrained(model_id)
         self._check_match_with_expected_target_modules(
             model_id, model, initial_target_modules, expected_target_modules
         )
@@ -216,13 +218,13 @@ class PeftCustomKwargsTester(unittest.TestCase):
     @require_torch_gpu
     @require_bitsandbytes
     def test_maybe_include_all_linear_layers_bnb(
-        self, model_id, initial_target_modules, expected_target_modules, quantization
+        self, model_id, model_type, initial_target_modules, expected_target_modules, quantization
     ):
         if quantization == "4bit":
             config_kwargs = {"load_in_4bit": True}
         elif quantization == "8bit":
             config_kwargs = {"load_in_8bit": True}
-        model = self.transformers_class.from_pretrained(model_id, device_map="auto", **config_kwargs)
+        model = self.transformers_class_map[model_type].from_pretrained(model_id, device_map="auto", **config_kwargs)
         self._check_match_with_expected_target_modules(
             model_id, model, initial_target_modules, expected_target_modules
         )

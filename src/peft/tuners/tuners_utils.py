@@ -24,7 +24,7 @@ import torch
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft.utils import COMMON_LAYERS_PATTERN
+from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_ALL_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..import_utils import is_bnb_available
@@ -533,7 +533,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'ALL'. Adapted from the QLoRA
     repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
-    if peft_config.target_modules == "ALL":
+    if peft_config.target_modules == INCLUDE_ALL_LAYERS_SHORTHAND:
         is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
         is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
         # match with a list of linear layer classes. this is needed as sometimes you can
@@ -552,7 +552,11 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
                 if isinstance(module, cls):
                     names = name.split(".")
                     linear_module_names.add(names[0] if len(names) == 1 else names[-1])
-        if "lm_head" in linear_module_names:  # needed for 16-bit
-            linear_module_names.remove("lm_head")
+        # ignore the last classification head for text generation models
+        output_emb = model.get_output_embeddings()
+        if output_emb is not None:
+            last_module_name = [name for name, module in model.named_modules() if id(module) == id(output_emb)][0]
+            if last_module_name in linear_module_names:
+                linear_module_names.remove(last_module_name)
         peft_config.target_modules = list(linear_module_names)
     return peft_config

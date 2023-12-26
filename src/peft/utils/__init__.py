@@ -29,6 +29,7 @@ from .other import (
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
+    INCLUDE_ALL_LAYERS_SHORTHAND,
     _set_trainable,
     bloom_model_postprocess_past_key_value,
     prepare_model_for_int8_training,

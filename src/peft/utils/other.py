@@ -35,6 +35,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
     WEIGHTS_NAME,
+    INCLUDE_ALL_LAYERS_SHORTHAND,
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "WEIGHTS_NAME",
+    "INCLUDE_ALL_LAYERS_SHORTHAND",
     "bloom_model_postprocess_past_key_value",
     "starcoder_model_postprocess_past_key_value",
 ]
