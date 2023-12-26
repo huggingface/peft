@@ -360,6 +360,10 @@ def fsdp_auto_wrap_policy(model):
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
 
+    default_transformer_cls_names_to_wrap = (
+        model._no_split_modules[0] if getattr(model, "_no_split_modules", None) is not None else ""
+    )
+
     def lambda_policy_fn(module):
         if (
             len(list(module.named_children())) == 0
@@ -377,7 +381,7 @@ def fsdp_auto_wrap_policy(model):
             PromptEncoder,
             PromptEmbedding,
             FullyShardedDataParallelPlugin.get_module_class_from_name(
-                model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
+                model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap)
             ),
         ),
     )
