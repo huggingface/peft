@@ -97,7 +97,7 @@ class BaseTuner(nn.Module, ABC):
         return self.active_adapter
 
     def forward(self, *args: Any, **kwargs: Any):
-        return self.model.forward(*args, **kwargs)
+        return self.model(*args, **kwargs)
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
