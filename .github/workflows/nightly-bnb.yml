@@ -37,7 +37,14 @@ jobs:
           pip install -e . --no-deps
           pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
           mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone # rename to transformers clone to avoid modules conflict
-
+          if [ "${{ matrix.docker-image-name }}" == "huggingface/peft-gpu-bnb-latest:latest" ]; then
+            cd transformers-clone
+            transformers_version=$(pip show transformers | grep '^Version:' | cut -d ' ' -f2 | sed 's/\.dev0//')
+            echo "Checking out tag for Transformers version: v$transformers_version"
+            git fetch --tags
+            git checkout tags/v$transformers_version
+            cd .. 
+          fi
       - name: Run examples on single GPU
         if: always()
         run: |
@@ -91,7 +98,8 @@ jobs:
             echo "Checking out tag for Transformers version: v$transformers_version"
             git fetch --tags
             git checkout tags/v$transformers_version
-            cd .. 
+            cd ..
+          fi 
 
       - name: Run core GPU tests on multi-gpu
         if: always()
