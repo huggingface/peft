@@ -266,7 +266,6 @@ class Embedding(nn.Module, FastLoraLayer):
         if init_lora_weights is False:
             return
 
-        nn.init.zeros_(self.lora_B.weight)
         # initialize a the same way as the default for nn.linear and b to zero
         nn.init.zeros_(self.lora_embedding_A)
         nn.init.normal_(self.lora_embedding_B)
@@ -300,9 +299,11 @@ class Embedding(nn.Module, FastLoraLayer):
         )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        embedding_A = self.lora_embedding_A.T
+        embedding_B = self.lora_embedding_B.T
         result = self.base_layer(x, *args, **kwargs)
-        after_A = self._embed(x, self.lora_embedding_A)
-        result += (after_A @ self.lora_embedding_B) * self.scaling
+        after_A = self._embed(x, embedding_A)
+        result += (after_A @ embedding_B) * self.scaling
         return result
 
     def __repr__(self) -> str:
