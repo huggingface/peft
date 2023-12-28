@@ -49,7 +49,6 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    LNTuningConfig,
 )
 from .utils import _prepare_prompt_learning_config
 

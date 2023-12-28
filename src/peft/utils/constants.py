@@ -46,7 +46,14 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
 
 TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "llama": ["input_layernorm", "post_attention_layernorm", "norm"],
-    "llava": ["multi_modal_projector", "input_layernorm", "post_attention_layernorm", "norm", "embed_tokens", "lm_head"],
+    "llava": [
+        "multi_modal_projector",
+        "input_layernorm",
+        "post_attention_layernorm",
+        "norm",
+        "embed_tokens",
+        "lm_head",
+    ],
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
