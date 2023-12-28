@@ -42,6 +42,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     IA3Model,
+    LNTuningModel,
     LoHaModel,
     LoKrModel,
     LoraModel,
@@ -51,7 +52,6 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
-    LNTuningModel,
 )
 from .tuners.tuners_utils import BaseTunerLayer
 from .utils import (

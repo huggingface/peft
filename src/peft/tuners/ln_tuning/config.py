@@ -15,22 +15,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional, Union
+from typing import List, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
+
 @dataclass
 class LNTuningConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a :class:`~peft.tuners.LNTuningModel`. 
-    
-    Args: 
-        target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply LayerNorm Tuning to. If this is
-            specified, only the modules with the specified names will be replaced. If this is not specified, modules
-            will be chosen according to the model architecture. If the architecture is not known, an error will be
-            raised -- in this case, you should specify the target modules manually.
+    This is the configuration class to store the configuration of a :class:`~peft.tuners.LNTuningModel`.
+
+    Args:
+        target_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to apply LayerNorm Tuning to. If this is specified, only the modules with the
+            specified names will be replaced. If this is not specified, modules will be chosen according to the model
+            architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
+            the target modules manually.
     """
+
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
@@ -42,5 +45,6 @@ class LNTuningConfig(PeftConfig):
             ),
         },
     )
+
     def __post_init__(self):
         self.peft_type = PeftType.LN_TUNING
