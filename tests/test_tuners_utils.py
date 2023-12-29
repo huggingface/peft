@@ -110,25 +110,25 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     (
         "HuggingFaceH4/tiny-random-LlamaForCausalLM",
         "causal",
-        "ALL",
+        "LINEAR",
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
     # test for a Llama model without the LM head
     (
         "HuggingFaceH4/tiny-random-LlamaForCausalLM",
         "base",
-        "ALL",
+        "LINEAR",
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
     # test for gpt2 with Conv1D layers
-    ("hf-internal-testing/tiny-random-gpt2", "causal", "ALL", ["c_attn", "c_proj", "c_fc"]),
+    ("hf-internal-testing/tiny-random-gpt2", "causal", "LINEAR", ["c_attn", "c_proj", "c_fc"]),
     # test for T5 model
-    ("hf-internal-testing/tiny-random-t5", "seq2seq", "ALL", ["k", "q", "v", "o", "wi", "wo"]),
+    ("hf-internal-testing/tiny-random-t5", "seq2seq", "LINEAR", ["k", "q", "v", "o", "wi", "wo"]),
     # test for GPTNeoX. output module list should exclude classification head - which is named as "embed_out" instead of the usual "lm_head" for GPTNeoX
     (
         "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
         "causal",
-        "ALL",
+        "LINEAR",
         ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     ),
 ]
