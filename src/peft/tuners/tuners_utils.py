@@ -552,7 +552,8 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
             # match with all linear classes.
             if isinstance(module, linear_classes):
                 names = name.split(".")
-                linear_module_names.add(names[0] if len(names) == 1 else names[-1])
+                linear_module_names.add(names[-1])  # get the base name
+
         # ignore the last classification head for text generation models
         output_emb = model.get_output_embeddings()
         if output_emb is not None:
