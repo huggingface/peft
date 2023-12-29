@@ -24,7 +24,7 @@ import torch
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_ALL_LAYERS_SHORTHAND
+from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..import_utils import is_bnb_available
@@ -535,25 +535,24 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'ALL'. Adapted from the QLoRA
     repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
-    if peft_config.target_modules == INCLUDE_ALL_LAYERS_SHORTHAND:
+    if peft_config.target_modules == INCLUDE_LINEAR_LAYERS_SHORTHAND:
         is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
         is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
         # match with a list of linear layer classes. this is needed as sometimes you can
         # have a mix Eg. T5 with 8bit has instances of torch.nn.Linear and bnb.nn.Linear8bitLt
-        linear_classes = [torch.nn.Linear, Conv1D]
+        linear_classes = (torch.nn.Linear, Conv1D)
         if is_bnb_available():
             import bitsandbytes as bnb
 
-            linear_classes = [bnb.nn.Linear8bitLt] + linear_classes if is_loaded_in_8bit else linear_classes
-            linear_classes = [bnb.nn.Linear4bit] + linear_classes if is_loaded_in_4bit else linear_classes
+            linear_classes = (bnb.nn.Linear8bitLt,) + linear_classes if is_loaded_in_8bit else linear_classes
+            linear_classes = (bnb.nn.Linear4bit,) + linear_classes if is_loaded_in_4bit else linear_classes
 
         linear_module_names = set()
         for name, module in model.named_modules():
             # match with all linear classes.
-            for cls in linear_classes:
-                if isinstance(module, cls):
-                    names = name.split(".")
-                    linear_module_names.add(names[0] if len(names) == 1 else names[-1])
+            if isinstance(module, linear_classes):
+                names = name.split(".")
+                linear_module_names.add(names[0] if len(names) == 1 else names[-1])
         # ignore the last classification head for text generation models
         output_emb = model.get_output_embeddings()
         if output_emb is not None:
