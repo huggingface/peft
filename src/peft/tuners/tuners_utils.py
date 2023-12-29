@@ -532,10 +532,14 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
 
 def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
     """
-    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'ALL'. Adapted from the QLoRA
-    repository: https://github.com/artidoro/qlora/blob/main/qlora.py
+    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all_linear'. Adapted from
+    the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
-    if peft_config.target_modules == INCLUDE_LINEAR_LAYERS_SHORTHAND:
+    # if `target_modules` is a string, forgive case issues and match
+    if (
+        isinstance(peft_config.target_modules, str)
+        and peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
+    ):
         is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
         is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
         # match with a list of linear layer classes. this is needed as sometimes you can

@@ -28,9 +28,9 @@ class IA3Config(PeftConfig):
     Args:
         target_modules (`Union[List[str],str]`):
             The names of the modules to apply (IA)³ to. If this is specified, only the modules with the specified names
-            will be replaced. If this is specified as 'ALL', then all linear/Conv1D modules are chosen. If this is not
-            specified, modules will be chosen according to the model architecture. If the architecture is not known, an
-            error will be raised -- in this case, you should specify the target modules manually.
+            will be replaced. If this is specified as 'all_linear', then all linear/Conv1D modules are chosen. If this
+            is not specified, modules will be chosen according to the model architecture. If the architecture is not
+            known, an error will be raised -- in this case, you should specify the target modules manually.
         feedforward_modules (`Union[List[str],str]`):
             The names of the modules to be treated as feedforward modules, as in the original paper. These modules will
             have (IA)^3 vectors multiplied to the input, instead of the output. feedforward_modules must be a name or a
