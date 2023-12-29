@@ -21,6 +21,7 @@ from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
 from peft import IA3Config, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
+    INCLUDE_LINEAR_LAYERS_SHORTHAND,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
@@ -110,25 +111,30 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     (
         "HuggingFaceH4/tiny-random-LlamaForCausalLM",
         "causal",
-        "LINEAR",
+        INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
     # test for a Llama model without the LM head
     (
         "HuggingFaceH4/tiny-random-LlamaForCausalLM",
         "base",
-        "LINEAR",
+        INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
     ),
     # test for gpt2 with Conv1D layers
-    ("hf-internal-testing/tiny-random-gpt2", "causal", "LINEAR", ["c_attn", "c_proj", "c_fc"]),
+    ("hf-internal-testing/tiny-random-gpt2", "causal", INCLUDE_LINEAR_LAYERS_SHORTHAND, ["c_attn", "c_proj", "c_fc"]),
     # test for T5 model
-    ("hf-internal-testing/tiny-random-t5", "seq2seq", "LINEAR", ["k", "q", "v", "o", "wi", "wo"]),
+    (
+        "hf-internal-testing/tiny-random-t5",
+        "seq2seq",
+        INCLUDE_LINEAR_LAYERS_SHORTHAND,
+        ["k", "q", "v", "o", "wi", "wo"],
+    ),
     # test for GPTNeoX. output module list should exclude classification head - which is named as "embed_out" instead of the usual "lm_head" for GPTNeoX
     (
         "hf-internal-testing/tiny-random-GPTNeoXForCausalLM",
         "causal",
-        "LINEAR",
+        INCLUDE_LINEAR_LAYERS_SHORTHAND,
         ["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],
     ),
 ]
