@@ -30,10 +30,11 @@ import os
 os.environ["CC"] = "gcc"
 os.environ["CXX"] = "gcc"
 curr_dir = os.path.dirname(__file__)
+
 fbd_cuda = \
     load(name='fbd_cuda', 
         sources=[f'{curr_dir}/fbd/fbd_cuda.cpp', f'{curr_dir}/fbd/fbd_cuda_kernel.cu'], verbose=True,
-        # build_directory='/tmp/'
+        # build_directory='/tmp/'  # for debugging
         )
         # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7 
 
@@ -329,7 +330,7 @@ class Linear(nn.Linear, BOFTLayer):
         self.update_layer(adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights)
         self.set_adapter(adapter_name)
 
-    def merge(self) -> None:
+    def merge(self, safe_merge: bool = False) -> None:
         """
         Merge the active adapter weights into the base weights
 

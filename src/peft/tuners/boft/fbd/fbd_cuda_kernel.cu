@@ -1,7 +1,7 @@
-// Ref: https://github.com/daniilidis-group/neural_renderer/blob/master/neural_renderer/cuda/rasterize_cuda_kernel.cu
-// https://github.com/YadiraF/face3d/blob/master/face3d/mesh/cython/mesh_core.cpp
+// Author: Yao Feng
+// Date: 2023/08
+// Description: cuda kernel for fast block diag
 
-// #include <torch/extension.h>
 #include <ATen/ATen.h>
 
 #include <cuda.h>
