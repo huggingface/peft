@@ -26,9 +26,10 @@ wget https://huggingface.co/datasets/huggingface/documentation-images/resolve/ma
 
 # Train controllable generation (ControlNet) with BOFT
 
-Navigate to the directory containing the training scripts for fine-tuning Dreambooth with BOFT:
+Navigate to the directory containing the training scripts for fine-tuning Stable Diffusion with BOFT for controllable generation:
 
 ```python
-cd peft/examples/boft_controlnet
 ./train_controlnet.sh
 ```
+
+Navigate to the directory containing the training scripts for fine-tuning Stable Diffusion with BOFT for controllable generation:
