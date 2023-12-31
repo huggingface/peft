@@ -156,6 +156,9 @@ if is_bnb_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
+                
+                result = result.clone()
+
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
                         continue
