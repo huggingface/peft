@@ -77,45 +77,45 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
         gt_txt_path = os.path.join(gt_lmk_dir, f'{idx}.txt')
         gt_img_path = os.path.join(gt_lmk_dir, f'{idx}_gt_img.jpg')
 
-        # if (not os.path.exists(pred_txt_path)) or (not os.path.exists(gt_txt_path)):
-        image = imread(imagepath) # [:, :, :3]
-        out = detect_model.get_landmarks(image)
-        if out is None:
-            continue
-        
-        pred_kpt = out[0].squeeze()
-        np.savetxt(pred_txt_path, pred_kpt)
+        if (not os.path.exists(pred_txt_path)) or (not os.path.exists(gt_txt_path)):
+            image = imread(imagepath) # [:, :, :3]
+            out = detect_model.get_landmarks(image)
+            if out is None:
+                continue
+            
+            pred_kpt = out[0].squeeze()
+            np.savetxt(pred_txt_path, pred_kpt)
 
-        # Your existing code for obtaining the image tensor
-        gt_lmk_img = dataset[idx]['conditioning_pixel_values']
-        save_image(gt_lmk_img, gt_lmk_path)
+            # Your existing code for obtaining the image tensor
+            gt_lmk_img = dataset[idx]['conditioning_pixel_values']
+            save_image(gt_lmk_img, gt_lmk_path)
 
-        gt_img = (dataset[idx]['pixel_values']) * 0.5 + 0.5
-        save_image(gt_img, gt_img_path)
+            gt_img = (dataset[idx]['pixel_values']) * 0.5 + 0.5
+            save_image(gt_img, gt_img_path)
 
-        gt_img = (gt_img.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
-        out = detect_model.get_landmarks(gt_img)
-        if out is None:
-            continue
-        
-        gt_kpt = out[0].squeeze()
-        np.savetxt(gt_txt_path, gt_kpt)
-        # gt_image = cv2.resize(cv2.imread(gt_lmk_path), (512, 512))
+            gt_img = (gt_img.permute(1, 2, 0) * 255).type(torch.uint8).cpu().numpy()
+            out = detect_model.get_landmarks(gt_img)
+            if out is None:
+                continue
+            
+            gt_kpt = out[0].squeeze()
+            np.savetxt(gt_txt_path, gt_kpt)
+            # gt_image = cv2.resize(cv2.imread(gt_lmk_path), (512, 512))
 
-        if vis:
-            # visualize predicted landmarks
-            vis_path = os.path.join(pred_lmk_dir, f'{idx}_overlay.jpg')
-            image = cv2.imread(imagepath)
-            image_point = plot_kpts(image, pred_kpt)
-            gt_lmk_image = cv2.imread(gt_lmk_path)
-            cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
+            if vis:
+                gt_lmk_image = cv2.imread(gt_lmk_path)
+                
+                # visualize predicted landmarks
+                vis_path = os.path.join(pred_lmk_dir, f'{idx}_overlay.jpg')
+                image = cv2.imread(imagepath)
+                image_point = plot_kpts(image, pred_kpt)
+                cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
 
-            # visualize gt landmarks
-            vis_path = os.path.join(gt_lmk_dir, f'{idx}_overlay.jpg')
-            image = cv2.imread(gt_img_path)
-            image_point = plot_kpts(image, gt_kpt)
-            # gt_lmk_image = cv2.imread(gt_lmk_path)
-            cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
+                # visualize gt landmarks
+                vis_path = os.path.join(gt_lmk_dir, f'{idx}_overlay.jpg')
+                image = cv2.imread(gt_img_path)
+                image_point = plot_kpts(image, gt_kpt)
+                cv2.imwrite(vis_path, np.concatenate([image_point, gt_lmk_image], axis=1))
 
 
 
@@ -128,7 +128,7 @@ def landmark_comparison(val_dataset, lmk_dir, gt_lmk_dir):
         # line = val_dataset[i]
         # img_name = line["image"].split(".")[0]
         lmk1_path = os.path.join(gt_lmk_dir, f'{i}.txt')
-        lmk1 = np.loadtxt(lmk1_path) / 2
+        lmk1 = np.loadtxt(lmk1_path)
         lmk2_path = os.path.join(lmk_dir, f'{i}.txt')
 
         if not os.path.exists(lmk2_path):

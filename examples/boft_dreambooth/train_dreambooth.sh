@@ -53,7 +53,7 @@ if [[ $CLASS_IDX =~ ^(0|1|2|3|4|5|8|9|17|18|19|20|21|22|23|24|25|26|27|28|29)$ ]
     "a purple ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
     "a shiny ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
     "a wet ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
-    "a cube shaped ${UNIQUE_TOKEN} ${CLASS_TOKEN}"
+    "a cube shaped ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
   )
 
   prompt_test_list=(
@@ -110,7 +110,7 @@ else
     "a purple ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
     "a shiny ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
     "a wet ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
-    "a cube shaped ${UNIQUE_TOKEN} ${CLASS_TOKEN}"
+    "a cube shaped ${UNIQUE_TOKEN} ${CLASS_TOKEN}."
   )
 
   prompt_test_list=(
@@ -146,7 +146,6 @@ VALIDATION_PROMPT=${PROMPT_LIST[@]}
 INSTANCE_PROMPT="a photo of ${UNIQUE_TOKEN} ${CLASS_TOKEN}"
 CLASS_PROMPT="a photo of ${CLASS_TOKEN}"
 
-# export HF_HOME="/is/cluster/yxiu/.cache"
 export CUDA_HOME="/is/software/nvidia/cuda-11.7"
 
 export MODEL_NAME="stabilityai/stable-diffusion-2-1" 

@@ -106,7 +106,7 @@ def save_adaptor(accelerator, step, unet, text_encoder, args):
 
 def main(args):
 
-    validation_prompts = args.validation_prompt[0].split(".")
+    validation_prompts = list(filter(None, args.validation_prompt[0].split(".")))
 
     logging_dir = Path(args.output_dir, args.logging_dir)
     accelerator_project_config = ProjectConfiguration(
@@ -558,7 +558,7 @@ def main(args):
 
                     logger.info(
                         f"Running validation... \n Generating {len(validation_prompts)} images with prompt:"
-                        f" {validation_prompts[0]}, {validation_prompts[1]}, {validation_prompts[2]}, {validation_prompts[3]} ......"
+                        f" {validation_prompts[0]}, ......"
                     )
                     # create pipeline
                     pipeline = DiffusionPipeline.from_pretrained(
