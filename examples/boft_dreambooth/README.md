@@ -18,8 +18,10 @@ conda install xformers -c xformers
 ```
 
 ## Download the data
-
-As an example, we download the [dreambooth](https://github.com/google/dreambooth) dataset in the example folder:
+```
+bash get_data.sh
+```
+This will download [dreambooth](https://github.com/google/dreambooth) dataset, the structure is:
 
 ```
 boft_dreambooth
@@ -31,6 +33,7 @@ boft_dreambooth
 │           └── backpack_dog
 │           ...
 ```
+You can also put your own data into `boft_dreambooth/data/dreambooth`
 
 ## Finetune Dreambooth with BOFT
 

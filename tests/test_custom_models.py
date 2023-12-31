@@ -24,7 +24,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoraConfig, PeftModel, get_peft_model
+from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoraConfig, BOFTConfig, PeftModel, get_peft_model
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
@@ -58,6 +58,25 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    # BOFT #
+    ########
+    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 BOFT",
+        "MLP",
+        BOFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "module_dropout": 0.1,
+        },
+    ),
+    ## TODO: test boft settings
+    ("Conv2d 1 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d", "lin0"]}),
     #######
     # IA³ #
     #######

@@ -30,6 +30,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    BOFTConfig,
 )
 
 
@@ -44,6 +45,7 @@ class PeftConfigTestMixin:
         PromptTuningConfig,
         AdaptionPromptConfig,
         IA3Config,
+        BOFTConfig,
     )
 
 

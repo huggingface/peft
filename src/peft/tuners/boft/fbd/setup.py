@@ -1,6 +1,5 @@
 # To install, run 
 # python setup.py build_ext -i
-# Ref: https://github.com/pytorch/pytorch/blob/11a40410e755b1fe74efe9eaa635e7ba5712846b/test/cpp_extensions/setup.py#L62
 
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension

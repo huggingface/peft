@@ -26,5 +26,3 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("forward", &forward_fast_block_diag, "FAST BLOCK DIAG (CUDA)");
     m.def("backward", &backward_fast_block_diag, "FAST BLOCK DIAG backward (CUDA)");
 }
-
-// TODO: backward 
