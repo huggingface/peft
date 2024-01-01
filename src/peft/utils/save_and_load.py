@@ -135,7 +135,7 @@ def get_peft_model_state_dict(
     elif (
         save_embedding_layers == "auto"
         and hasattr(model, "config")
-        and config.base_model_name_or_path is not None
+        and config.base_model_name_or_path
         and model.config.vocab_size != AutoConfig.from_pretrained(config.base_model_name_or_path).vocab_size
     ):
         warnings.warn(
