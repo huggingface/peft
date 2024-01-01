@@ -33,7 +33,7 @@ def has_valid_embedding_base_layer(layer):
 def get_embedding_layer_name(model, layer, is_prompt_learning):
     """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
-        if (is_prompt_learning and module == layer) or module == layer.base_layer:
+        if (is_prompt_learning and module == layer) or module == getattr(layer, "base_layer", None):
             return name
     return None
 
