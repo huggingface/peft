@@ -134,10 +134,11 @@ def get_peft_model_state_dict(
         save_embedding_layers = False
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
+        is_prompt_learning_method = config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
-            if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
+            if is_prompt_learning_method or has_valid_embedding_base_layer(layer):
                 # support from version >= 0.6.2
-                embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
+                embedding_module_name = get_embedding_layer_name(model, layer, is_prompt_learning_method)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
