@@ -50,7 +50,7 @@ class LoraConfig(PeftConfig):
         r (`int`): Lora attention dimension.
         target_modules (`Optional[Union[List[str], str]]`): The names of the modules to apply LoRA to. If this is
             specified, only the modules with the specified names will be replaced. If this is specified as
-            'all_linear', then all linear/Conv1D modules are chosen, excluding the output layer. If this is not
+            'all-linear', then all linear/Conv1D modules are chosen, excluding the output layer. If this is not
             specified, modules will be chosen according to the model architecture. If the architecture is not known, an
             error will be raised -- in this case, you should specify the target modules manually.
         lora_alpha (`int`): The alpha parameter for Lora scaling.
