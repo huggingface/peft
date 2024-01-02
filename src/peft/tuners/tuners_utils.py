@@ -536,10 +536,6 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
     the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
-    if not isinstance(model, PreTrainedModel):
-        raise ValueError(
-            f"Only instances of PreTrainedModel are supported for the '{INCLUDE_LINEAR_LAYERS_SHORTHAND}' flag"
-        )
 
     # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
     if not (
@@ -547,6 +543,11 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         and peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
     ):
         return peft_config
+
+    if not isinstance(model, PreTrainedModel):
+        raise ValueError(
+            f"Only instances of PreTrainedModel are supported for the '{INCLUDE_LINEAR_LAYERS_SHORTHAND}' flag"
+        )
 
     is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
     is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
