@@ -22,6 +22,7 @@ from typing import Any, List, Optional, Union
 
 import torch
 from torch import nn
+from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
@@ -535,6 +536,11 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
     the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
+    if not isinstance(model, PreTrainedModel):
+        raise ValueError(
+            f"Only instances of PreTrainedModel are supported for the '{INCLUDE_LINEAR_LAYERS_SHORTHAND}' flag"
+        )
+
     # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
     if not (
         isinstance(peft_config.target_modules, str)
@@ -561,7 +567,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
             linear_module_names.add(names)
 
     # ignore the last classification head for text generation models
-    output_emb = model.get_output_embeddings() if hasattr(model, "get_output_embeddings") else None
+    output_emb = model.get_output_embeddings()
     if output_emb is not None:
         last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
         linear_module_names -= {last_module_name}

@@ -16,6 +16,7 @@
 # limitations under the License.
 import unittest
 
+from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
@@ -268,6 +269,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         actual_model = get_peft_model(model, peft_config=actual_config)
         expected_model = get_peft_model(model, peft_config=expected_config)
         expected_model_module_dict = dict(expected_model.named_modules())
+        # compare the two models and assert that all layers are of the same type
         for name, actual_module in actual_model.named_modules():
             expected_module = expected_model_module_dict[name]
             self.assertEqual(type(actual_module), type(expected_module))
@@ -296,3 +298,13 @@ class PeftCustomKwargsTester(unittest.TestCase):
             self.assertCountEqual(new_config.target_modules, expected_target_modules)
         else:
             self.assertEqual(new_config.target_modules, expected_target_modules)
+
+    def test_maybe_include_all_linear_layers_diffusion(self):
+        model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
+        model = StableDiffusionPipeline.from_pretrained(model_id)
+        config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Only instances of PreTrainedModel are supported for the '{INCLUDE_LINEAR_LAYERS_SHORTHAND}' flag",
+        ):
+            model.unet = get_peft_model(model.unet, config)
