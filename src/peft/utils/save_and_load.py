@@ -131,20 +131,17 @@ def get_peft_model_state_dict(
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
         save_embedding_layers = True
-    # check if the vocab size of the base model is different from the vocab size of the finetuned model
-    elif (
-        save_embedding_layers == "auto"
-        and hasattr(model, "config")
-        and config.base_model_name_or_path
-        and model.config.vocab_size != AutoConfig.from_pretrained(config.base_model_name_or_path).vocab_size
-    ):
-        warnings.warn(
-            "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
-        )
-        save_embedding_layers = True
-
     elif save_embedding_layers == "auto":
-        save_embedding_layers = False
+        vocab_size = getattr(getattr(model, config, None), "vocab_size", None)
+        model_id = getattr(config, "base_model_name_or_path", None)
+        # check if the vocab size of the base model is different from the vocab size of the finetuned model
+        if vocab_size and model_id and (vocab_size != AutoConfig.from_pretrained(model_id).vocab_size):
+            warnings.warn(
+                "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
+            )
+            save_embedding_layers = True
+        else:
+            save_embedding_layers = False
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
         is_prompt_learning_method = config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT
