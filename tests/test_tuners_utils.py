@@ -101,7 +101,7 @@ REGEX_TEST_CASES = [
 ]
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
-    # model_name, model_type, initial_target_modules, final_expected_target_modules
+    # model_name, model_type, initial_target_modules, expected_target_modules
     ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", ["k_proj"], ["k_proj"]),
     # test with target_modules as None
     ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", None, None),
