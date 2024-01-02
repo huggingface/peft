@@ -532,37 +532,38 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
 
 def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
     """
-    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all_linear'. Adapted from
+    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
     the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
-    # if `target_modules` is a string, forgive case issues and match
-    if (
+    # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
+    if not (
         isinstance(peft_config.target_modules, str)
         and peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
     ):
-        is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
-        is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
-        # match with a list of linear layer classes. this is needed as sometimes you can
-        # have a mix Eg. T5 with 8bit has instances of torch.nn.Linear and bnb.nn.Linear8bitLt
-        linear_classes = (torch.nn.Linear, Conv1D)
-        if is_bnb_available():
-            import bitsandbytes as bnb
+        return peft_config
 
-            linear_classes = (bnb.nn.Linear8bitLt,) + linear_classes if is_loaded_in_8bit else linear_classes
-            linear_classes = (bnb.nn.Linear4bit,) + linear_classes if is_loaded_in_4bit else linear_classes
+    is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
+    is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
+    # match with a list of linear layer classes. this is needed as sometimes you can
+    # have a mix Eg. T5 with 8bit has instances of torch.nn.Linear and bnb.nn.Linear8bitLt
+    linear_classes = (torch.nn.Linear, Conv1D)
+    if is_bnb_available():
+        import bitsandbytes as bnb
 
-        linear_module_names = set()
-        for name, module in model.named_modules():
-            # match with all linear classes.
-            if isinstance(module, linear_classes):
-                name = name.rsplit(".", 1)[-1]  # get the base name
-                linear_module_names.add(name)
+        linear_classes = (bnb.nn.Linear8bitLt,) + linear_classes if is_loaded_in_8bit else linear_classes
+        linear_classes = (bnb.nn.Linear4bit,) + linear_classes if is_loaded_in_4bit else linear_classes
 
-        # ignore the last classification head for text generation models
-        output_emb = model.get_output_embeddings()
-        if output_emb is not None:
-            last_module_name = [name for name, module in model.named_modules() if id(module) == id(output_emb)][0]
-            if last_module_name in linear_module_names:
-                linear_module_names.remove(last_module_name)
-        peft_config.target_modules = list(linear_module_names)
+    linear_module_names = set()
+    for name, module in model.named_modules():
+        # match with all linear classes.
+        if isinstance(module, linear_classes):
+            names = name.rsplit(".", 1)[-1]  # get the base name
+            linear_module_names.add(names)
+
+    # ignore the last classification head for text generation models
+    output_emb = model.get_output_embeddings() if hasattr(model, "get_output_embeddings") else None
+    if output_emb is not None:
+        last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
+        linear_module_names -= {last_module_name}
+    peft_config.target_modules = list(linear_module_names)
     return peft_config

@@ -19,7 +19,7 @@ import unittest
 from parameterized import parameterized
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
-from peft import IA3Config, LoraConfig, get_peft_model
+from peft import IA3Config, LoHaConfig, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     _maybe_include_all_linear_layers,
@@ -102,11 +102,6 @@ REGEX_TEST_CASES = [
 
 MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     # model_name, model_type, initial_target_modules, expected_target_modules
-    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", ["k_proj"], ["k_proj"]),
-    # test with target_modules as None
-    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", None, None),
-    # test with target_modules as a regex expression
-    ("HuggingFaceH4/tiny-random-LlamaForCausalLM", "causal", ".*(q|v)$", ".*(q|v)$"),
     # test for a causal Llama model
     (
         "HuggingFaceH4/tiny-random-LlamaForCausalLM",
@@ -139,8 +134,18 @@ MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES = [
     ),
 ]
 
-bnb_quantizations = [("4bit",), ("8bit",)]
-bnb_test_cases = [(x + y) for x in MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES for y in bnb_quantizations]
+# tests for a few args that should remain unchanged
+MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_INTERNALS = [
+    # initial_target_modules, expected_target_modules
+    (["k_proj"], ["k_proj"]),
+    # test with target_modules as None
+    (None, None),
+    # test with target_modules as a regex expression
+    (".*(q_proj|v_proj)$", ".*(q_proj|v_proj)$"),
+]
+
+BNB_QUANTIZATIONS = [("4bit",), ("8bit",)]
+BNB_TEST_CASES = [(x + y) for x in MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES for y in BNB_QUANTIZATIONS]
 
 
 class PeftCustomKwargsTester(unittest.TestCase):
@@ -227,18 +232,19 @@ class PeftCustomKwargsTester(unittest.TestCase):
                 self.assertFalse(module.is_feedforward)
 
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
-    def test_maybe_include_all_linear_layers(
+    def test_maybe_include_all_linear_layers_lora(
         self, model_id, model_type, initial_target_modules, expected_target_modules
     ):
         model = self.transformers_class_map[model_type].from_pretrained(model_id)
+        config_cls = LoraConfig
         self._check_match_with_expected_target_modules(
-            model_id, model, initial_target_modules, expected_target_modules
+            model_id, model, config_cls, initial_target_modules, expected_target_modules
         )
 
-    @parameterized.expand(bnb_test_cases)
+    @parameterized.expand(BNB_TEST_CASES)
     @require_torch_gpu
     @require_bitsandbytes
-    def test_maybe_include_all_linear_layers_bnb(
+    def test_maybe_include_all_linear_layers_lora_bnb(
         self, model_id, model_type, initial_target_modules, expected_target_modules, quantization
     ):
         if quantization == "4bit":
@@ -246,20 +252,47 @@ class PeftCustomKwargsTester(unittest.TestCase):
         elif quantization == "8bit":
             config_kwargs = {"load_in_8bit": True}
         model = self.transformers_class_map[model_type].from_pretrained(model_id, device_map="auto", **config_kwargs)
+        config_cls = LoraConfig
         self._check_match_with_expected_target_modules(
-            model_id, model, initial_target_modules, expected_target_modules
+            model_id, model, config_cls, initial_target_modules, expected_target_modules
         )
 
     def _check_match_with_expected_target_modules(
-        self, model_id, model, initial_target_modules, expected_target_modules
+        self, model_id, model, config_cls, initial_target_modules, expected_target_modules
     ):
         """
         Helper function for the test for `_maybe_include_all_linear_layers`
         """
-        lora_config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules)
-        new_lora_config = _maybe_include_all_linear_layers(lora_config, model)
+        actual_config = config_cls(base_model_name_or_path=model_id, target_modules=initial_target_modules)
+        expected_config = config_cls(base_model_name_or_path=model_id, target_modules=expected_target_modules)
+        actual_model = get_peft_model(model, peft_config=actual_config)
+        expected_model = get_peft_model(model, peft_config=expected_config)
+        expected_model_module_dict = dict(expected_model.named_modules())
+        for name, actual_module in actual_model.named_modules():
+            expected_module = expected_model_module_dict[name]
+            self.assertEqual(type(actual_module), type(expected_module))
+
+    def test_maybe_include_all_linear_layers_ia3_loha(self):
+        model_id, initial_target_modules, expected_target_modules = (
+            "HuggingFaceH4/tiny-random-LlamaForCausalLM",
+            INCLUDE_LINEAR_LAYERS_SHORTHAND,
+            ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
+        )
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        config_cls = IA3Config
+        for config_cls in [IA3Config, LoHaConfig]:
+            self._check_match_with_expected_target_modules(
+                model_id, model, config_cls, initial_target_modules, expected_target_modules
+            )
+
+    @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_INTERNALS)
+    def test_maybe_include_all_linear_layers_internals(self, initial_target_modules, expected_target_modules):
+        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        config = LoraConfig(base_model_name_or_path=model_id, target_modules=initial_target_modules)
+        new_config = _maybe_include_all_linear_layers(config, model)
         if isinstance(expected_target_modules, list):
             # assert that expected and actual target_modules have the same items
-            self.assertCountEqual(new_lora_config.target_modules, expected_target_modules)
+            self.assertCountEqual(new_config.target_modules, expected_target_modules)
         else:
-            self.assertEqual(new_lora_config.target_modules, expected_target_modules)
+            self.assertEqual(new_config.target_modules, expected_target_modules)
