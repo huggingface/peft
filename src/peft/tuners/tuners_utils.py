@@ -572,5 +572,5 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     if output_emb is not None:
         last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
         linear_module_names -= {last_module_name}
-    peft_config.target_modules = list(linear_module_names)
+    peft_config.target_modules = linear_module_names
     return peft_config
