@@ -309,6 +309,6 @@ class PeftCustomKwargsTester(unittest.TestCase):
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
         with self.assertRaisesRegex(
             ValueError,
-            f"Only instances of PreTrainedModel support `target_modules='all-linear'`",
+            "Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
