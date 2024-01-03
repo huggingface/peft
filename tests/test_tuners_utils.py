@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import unittest
+from copy import deepcopy
 
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
@@ -241,10 +242,10 @@ class PeftCustomKwargsTester(unittest.TestCase):
         self._check_match_with_expected_target_modules(
             model_id, model, config_cls, initial_target_modules, expected_target_modules
         )
-
+        
     @parameterized.expand(BNB_TEST_CASES)
-    @require_torch_gpu
     @require_bitsandbytes
+    @require_torch_gpu
     def test_maybe_include_all_linear_layers_lora_bnb(
         self, model_id, model_type, initial_target_modules, expected_target_modules, quantization
     ):
@@ -266,8 +267,9 @@ class PeftCustomKwargsTester(unittest.TestCase):
         """
         actual_config = config_cls(base_model_name_or_path=model_id, target_modules=initial_target_modules)
         expected_config = config_cls(base_model_name_or_path=model_id, target_modules=expected_target_modules)
+        model_copy = deepcopy(model)
         actual_model = get_peft_model(model, peft_config=actual_config)
-        expected_model = get_peft_model(model, peft_config=expected_config)
+        expected_model = get_peft_model(model_copy, peft_config=expected_config)
         expected_model_module_dict = dict(expected_model.named_modules())
         # compare the two models and assert that all layers are of the same type
         for name, actual_module in actual_model.named_modules():
@@ -280,8 +282,11 @@ class PeftCustomKwargsTester(unittest.TestCase):
             INCLUDE_LINEAR_LAYERS_SHORTHAND,
             ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
         )
-        model = AutoModelForCausalLM.from_pretrained(model_id)
-        for config_cls in [IA3Config, LoHaConfig]:
+        model_ia3 = AutoModelForCausalLM.from_pretrained(model_id)
+        model_loha = deepcopy(model_ia3)
+        config_classes = [IA3Config, LoHaConfig]
+        models = [model_ia3, model_loha]
+        for config_cls, model in zip(config_classes, models):
             self._check_match_with_expected_target_modules(
                 model_id, model, config_cls, initial_target_modules, expected_target_modules
             )
