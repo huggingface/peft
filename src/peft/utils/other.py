@@ -496,3 +496,39 @@ def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
         unique_id = storage_ptr(tensor)
 
     return tensor.device, unique_id, storage_size(tensor)
+
+
+# adapted from https://github.com/Bavest/fin-llama/blob/8ba68f4b49753358ffbe693d38f2461c031625e3/qlora.py#L229
+def get_linear_layer_names(model):
+    """
+    Returns a list of linear layers in the model.
+
+    Args:
+        model (`torch.nn.Module`):
+            The model for which to get the layer names.
+    """
+    lora_module_names = set()
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Linear):
+            names = name.split(".")
+            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
+
+    if "lm_head" in lora_module_names:  # needed for 16-bit
+        lora_module_names.remove("lm_head")
+    return list(lora_module_names)
+
+
+def cast_non_trainable_to_dtype(model, dtype):
+    """
+    Cast all non-trainable parameters of the model to the given `dtype`.
+    This is meant to reduce the GPU memory usage when using PEFT methods.
+
+    Args:
+        model (`torch.nn.Module`):
+            The model to cast the non-trainable parameters of.
+        dtype (`torch.dtype`):
+            The dtype to cast the non-trainable parameters to.
+    """
+    for p in model.parameters():
+        if not p.requires_grad:
+            p.data = p.to(dtype)

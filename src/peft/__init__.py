@@ -83,5 +83,7 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
     load_peft_weights,
+    get_linear_layer_names,
+    cast_non_trainable_to_dtype,
 )
 from .config import PeftConfig, PromptLearningConfig
