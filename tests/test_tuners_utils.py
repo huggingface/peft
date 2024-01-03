@@ -281,7 +281,6 @@ class PeftCustomKwargsTester(unittest.TestCase):
             ["k_proj", "v_proj", "q_proj", "o_proj", "down_proj", "up_proj", "gate_proj"],
         )
         model = AutoModelForCausalLM.from_pretrained(model_id)
-        config_cls = IA3Config
         for config_cls in [IA3Config, LoHaConfig]:
             self._check_match_with_expected_target_modules(
                 model_id, model, config_cls, initial_target_modules, expected_target_modules
