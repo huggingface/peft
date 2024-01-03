@@ -60,7 +60,8 @@ class TaskType(str, enum.Enum):
     - Causal LM: Causal language modeling.
     - TOKEN_CLS: Token classification.
     - QUESTION_ANS: Question answering.
-    - FEATURE_EXTRACTION: Feature extraction. Provides the hidden states which can be used as exmbeddings or features for downstream tasks.
+    - FEATURE_EXTRACTION: Feature extraction. Provides the hidden states which can be used as exmbeddings or features
+      for downstream tasks.
     """
 
     SEQ_CLS = "SEQ_CLS"

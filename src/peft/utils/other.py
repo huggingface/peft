@@ -520,8 +520,8 @@ def get_linear_layer_names(model):
 
 def cast_non_trainable_to_dtype(model, dtype):
     """
-    Cast all non-trainable parameters of the model to the given `dtype`.
-    This is meant to reduce the GPU memory usage when using PEFT methods.
+    Cast all non-trainable parameters of the model to the given `dtype`. This is meant to reduce the GPU memory usage
+    when using PEFT methods by using half-precision dtype for non-trainable parameters.
 
     Args:
         model (`torch.nn.Module`):
