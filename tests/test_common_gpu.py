@@ -13,15 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import gc
+import tempfile
 import unittest
 
 import pytest
 import torch
 import torch.nn.functional as F
+from parameterized import parameterized
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
+    AutoModelForTokenClassification,
     AutoTokenizer,
     BitsAndBytesConfig,
     LlamaForCausalLM,
@@ -29,10 +32,12 @@ from transformers import (
 )
 
 from peft import (
+    AdaLoraConfig,
     AdaptionPromptConfig,
     IA3Config,
     LoraConfig,
     PeftModel,
+    TaskType,
     get_peft_model,
     prepare_model_for_kbit_training,
 )
@@ -158,12 +163,12 @@ class PeftGPUCommonTests(unittest.TestCase):
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
 
         opt_ia3_config = IA3Config(
-            target_modules=["q_proj", "v_proj"],
-            feedforward_modules=["down_proj"],
+            target_modules=["q_proj", "v_proj", "fc2"],
+            feedforward_modules=["fc2"],
             task_type="CAUSAL_LM",
         )
 
-        config = IA3Config(target_modules=["q_proj", "v_proj"], feedforward_modules=["down_proj"])
+        config = IA3Config(target_modules=["q_proj", "v_proj", "fc2"], feedforward_modules=["fc2"])
 
         flan_8bit = get_peft_model(flan_8bit, flan_ia3_config)
         self.assertTrue(
@@ -183,17 +188,144 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
     @pytest.mark.single_gpu_tests
-    def test_lora_bnb_4bit_quantization_from_pretrained_safetensors(self):
+    @parameterized.expand(["4bit", "8bit"])
+    def test_lora_bnb_quantization_from_pretrained_safetensors(self, quantization):
         r"""
-        Test that tests if the 4bit quantization using LoRA works as expected with safetensors weights.
+        Tests that the bnb quantization using LoRA works as expected with safetensors weights.
         """
         model_id = "facebook/opt-350m"
         peft_model_id = "ybelkada/test-st-lora"
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["load_in_4bit"] = True
+        else:
+            kwargs["load_in_8bit"] = True
 
-        model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto", load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         model = PeftModel.from_pretrained(model, peft_model_id)
 
-        _ = model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+        model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        # loading a 2nd adapter works, #1239
+        model.load_adapter(peft_model_id, "adapter2")
+        model.set_adapter("adapter2")
+        model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        # check that both adapters are in the same layer
+        self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+        self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    @parameterized.expand(["4bit", "8bit"])
+    def test_adalora_bnb_quantization_from_pretrained_safetensors(self, quantization):
+        r"""
+        Tests that the bnb quantization using AdaLora works as expected with safetensors weights.
+        """
+        model_id = "facebook/opt-350m"
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["load_in_4bit"] = True
+        else:
+            kwargs["load_in_8bit"] = True
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        config = AdaLoraConfig(task_type=TaskType.CAUSAL_LM)
+        peft_model = get_peft_model(model, config)
+        peft_model = prepare_model_for_kbit_training(peft_model)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(peft_model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+
+    @require_bitsandbytes
+    @pytest.mark.multi_gpu_tests
+    @pytest.mark.single_gpu_tests
+    @parameterized.expand(["4bit", "8bit"])
+    def test_ia3_bnb_quantization_from_pretrained_safetensors(self, quantization):
+        r"""
+        Tests that the bnb quantization using IA³ works as expected with safetensors weights.
+        """
+        model_id = "facebook/opt-350m"
+        kwargs = {"device_map": "auto"}
+        if quantization == "4bit":
+            kwargs["load_in_4bit"] = True
+        else:
+            kwargs["load_in_8bit"] = True
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        config = IA3Config(task_type=TaskType.CAUSAL_LM)
+        peft_model = get_peft_model(model, config)
+        peft_model = prepare_model_for_kbit_training(peft_model)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l)
+            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l)
+
+    @pytest.mark.single_gpu_tests
+    def test_lora_gptq_quantization_from_pretrained_safetensors(self):
+        r"""
+        Tests that the autogptq quantization using LoRA works as expected with safetensors weights.
+        """
+        from transformers import GPTQConfig
+
+        model_id = "marcsun13/opt-350m-gptq-4bit"
+        quantization_config = GPTQConfig(bits=4, use_exllama=False)
+        kwargs = {
+            "pretrained_model_name_or_path": model_id,
+            "torch_dtype": torch.float16,
+            "device_map": "auto",
+            "quantization_config": quantization_config,
+        }
+        model = AutoModelForCausalLM.from_pretrained(**kwargs)
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(task_type="CAUSAL_LM")
+        peft_model = get_peft_model(model, config)
+        peft_model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(**kwargs)
+            model = PeftModel.from_pretrained(model, tmp_dir)
+            model = prepare_model_for_kbit_training(model)
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # loading a 2nd adapter works, #1239
+            model.load_adapter(tmp_dir, "adapter2")
+            model.set_adapter("adapter2")
+            model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
+
+            # check that both adapters are in the same layer
+            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -276,12 +408,12 @@ class PeftGPUCommonTests(unittest.TestCase):
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
 
         opt_ia3_config = IA3Config(
-            target_modules=["q_proj", "v_proj"],
-            feedforward_modules=["down_proj"],
+            target_modules=["q_proj", "v_proj", "fc2"],
+            feedforward_modules=["fc2"],
             task_type="CAUSAL_LM",
         )
 
-        config = IA3Config(target_modules=["q_proj", "v_proj"], feedforward_modules=["down_proj"])
+        config = IA3Config(target_modules=["q_proj", "v_proj", "fc2"], feedforward_modules=["fc2"])
 
         flan_4bit = get_peft_model(flan_4bit, flan_ia3_config)
         self.assertTrue(
@@ -298,7 +430,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
-    def test_lora_causal_lm_mutli_gpu_inference(self):
+    def test_lora_causal_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs.
         """
@@ -314,7 +446,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="balanced")
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+        self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
         model = get_peft_model(model, lora_config)
         self.assertTrue(isinstance(model, PeftModel))
@@ -328,7 +460,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_torch_multi_gpu
     @pytest.mark.multi_gpu_tests
     @require_bitsandbytes
-    def test_lora_seq2seq_lm_mutli_gpu_inference(self):
+    def test_lora_seq2seq_lm_multi_gpu_inference(self):
         r"""
         Test if LORA can be used for inference on multiple GPUs - 8bit version.
         """
@@ -339,7 +471,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForSeq2SeqLM.from_pretrained(self.seq2seq_model_id, device_map="balanced", load_in_8bit=True)
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        self.assertEqual(set(model.hf_device_map.values()), {0, 1})
+        self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
 
         model = get_peft_model(model, lora_config)
         self.assertTrue(isinstance(model, PeftModel))
@@ -631,3 +763,16 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.assertTrue(isinstance(model, PeftModel))
         self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit))
         self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit))
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_serialization_shared_tensors(self):
+        model_checkpoint = "roberta-base"
+        peft_config = LoraConfig(
+            task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
+        )
+        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to("cuda")
+        model = get_peft_model(model, peft_config)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir, safe_serialization=True)

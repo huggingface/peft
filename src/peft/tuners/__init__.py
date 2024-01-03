@@ -18,8 +18,9 @@
 # limitations under the License.
 
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
-from .lora import LoraConfig, LoraModel
+from .lora import LoraConfig, LoraModel, LoftQConfig
 from .loha import LoHaConfig, LoHaModel
+from .lokr import LoKrConfig, LoKrModel
 from .ia3 import IA3Config, IA3Model
 from .adalora import AdaLoraConfig, AdaLoraModel
 from .boft import BOFTConfig, BOFTModel
@@ -27,10 +28,5 @@ from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparamet
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
-
-# Mapping of tuners that support direct plugging
-TUNERS_MAPPING = {
-    "LORA": LoraModel,
-    "IA3": IA3Model,
-    "ADALORA": AdaLoraModel,
-}
+from .oft import OFTConfig, OFTModel
+from .mixed import MixedModel

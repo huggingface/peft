@@ -20,6 +20,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.lora import LoraConfig, LoraModel
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     _freeze_adapter,
@@ -30,14 +31,6 @@ from peft.utils import (
 
 from .gptq import SVDQuantLinear
 from .layer import AdaLoraLayer, RankAllocator, SVDLinear
-
-
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-    from .bnb import SVDLinear8bitLt
-if is_bnb_4bit_available():
-    from .bnb import SVDLinear4bit
 
 
 class AdaLoraModel(LoraModel):
@@ -66,6 +59,8 @@ class AdaLoraModel(LoraModel):
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`AdaLoraConfig`]): The configuration of the AdaLora model.
     """
+
+    # Note: don't redefine prefix here, it should be inherited from LoraModel
 
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
@@ -121,7 +116,7 @@ class AdaLoraModel(LoraModel):
         loaded_in_4bit = optional_kwargs.get("loaded_in_4bit", False)
         if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
             raise ImportError(
-                "To use Lora with 8-bit quantization, please install the `bitsandbytes` package. "
+                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
                 "You can install it with `pip install bitsandbytes`."
             )
         kwargs = {
@@ -138,7 +133,7 @@ class AdaLoraModel(LoraModel):
         if quantization_config is not None:
             kwargs["gptq_quantization_config"] = quantization_config
 
-        # If it is not a LoraLayer, create a new module, else update it with new adapters
+        # If it is not an AdaLoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:
@@ -156,51 +151,56 @@ class AdaLoraModel(LoraModel):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import SVDLinear8bitLt
+        if is_bnb_4bit_available():
+            from .bnb import SVDLinear4bit
+
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
         AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
-        bias = target.bias is not None
         loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
         loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
 
-        if loaded_in_8bit and isinstance(target, bnb.nn.Linear8bitLt):
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             kwargs.update(
                 {
-                    "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
-                    "threshold": target.state.threshold,
-                    "index": target.index,
+                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
+                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
+                    "threshold": target_base_layer.state.threshold,
+                    "index": target_base_layer.index,
                 }
             )
-            new_module = SVDLinear8bitLt(adapter_name, target.in_features, target.out_features, bias=bias, **kwargs)
-        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target, bnb.nn.Linear4bit):
+            new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
-                    "compute_dtype": target.compute_dtype,
-                    "compress_statistics": target.weight.compress_statistics,
-                    "quant_type": target.weight.quant_type,
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
                 }
             )
-            new_module = SVDLinear4bit(
-                adapter_name, target.in_features, target.out_features, bias=bias, **fourbit_kwargs
-            )
+            new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
         elif AutoGPTQQuantLinear is not None and isinstance(target, AutoGPTQQuantLinear):
-            new_module = SVDQuantLinear(adapter_name, target, **kwargs)
-            target.weight = target.qweight
+            new_module = SVDQuantLinear(target, adapter_name, **kwargs)
         else:
-            if isinstance(target, torch.nn.Linear):
-                in_features, out_features = target.in_features, target.out_features
+            if isinstance(target_base_layer, torch.nn.Linear):
                 if kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                         "Setting fan_in_fan_out to False."
                     )
                     kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-            elif isinstance(target, Conv1D):
-                in_features, out_features = (
-                    target.weight.ds_shape if hasattr(target.weight, "ds_shape") else target.weight.shape
-                )
+            elif isinstance(target_base_layer, Conv1D):
                 if not kwargs["fan_in_fan_out"]:
                     warnings.warn(
                         "fan_in_fan_out is set to False but the target module is `Conv1D`. "
@@ -212,7 +212,7 @@ class AdaLoraModel(LoraModel):
                     f"Target module {target} is not supported. "
                     f"Currently, only `torch.nn.Linear` and `Conv1D` are supported."
                 )
-            new_module = SVDLinear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+            new_module = SVDLinear(target, adapter_name, **kwargs)
 
         return new_module
 
@@ -236,7 +236,7 @@ class AdaLoraModel(LoraModel):
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 
-        if getattr(outputs, "loss", None) is not None:
+        if (getattr(outputs, "loss", None) is not None) and isinstance(outputs.loss, torch.Tensor):
             # Calculate the orthogonal regularization
             orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 

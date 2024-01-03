@@ -15,20 +15,53 @@
 import copy
 import inspect
 import warnings
-from typing import Optional
+from typing import Optional, Tuple
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
+from safetensors.torch import storage_ptr, storage_size
 
-from ..import_utils import is_auto_gptq_available
+from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
+from .constants import (
+    COMMON_LAYERS_PATTERN,
+    CONFIG_NAME,
+    EMBEDDING_LAYER_NAMES,
+    SAFETENSORS_WEIGHTS_NAME,
+    TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    WEIGHTS_NAME,
+    bloom_model_postprocess_past_key_value,
+    starcoder_model_postprocess_past_key_value,
+)
+
+
+__all__ = [
+    "COMMON_LAYERS_PATTERN",
+    "CONFIG_NAME",
+    "EMBEDDING_LAYER_NAMES",
+    "SAFETENSORS_WEIGHTS_NAME",
+    "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "WEIGHTS_NAME",
+    "bloom_model_postprocess_past_key_value",
+    "starcoder_model_postprocess_past_key_value",
+]
 
 
 # Get current device name based on available devices
 def infer_device():
     if torch.cuda.is_available():
         torch_device = "cuda"
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        torch_device = torch.device("mps")
     elif is_xpu_available():
         torch_device = "xpu"
     elif is_npu_available():
@@ -38,43 +71,29 @@ def infer_device():
     return torch_device
 
 
-# needed for prefix-tuning of bloom model
-def bloom_model_postprocess_past_key_value(past_key_values):
-    past_key_values = torch.cat(past_key_values)
-    total_layers, batch_size, num_attention_heads, num_virtual_tokens, head_dim = past_key_values.shape
-    keys = past_key_values[: total_layers // 2]
-    keys = keys.transpose(2, 3).reshape(
-        total_layers // 2, batch_size * num_attention_heads, head_dim, num_virtual_tokens
-    )
-    values = past_key_values[total_layers // 2 :]
-    values = values.reshape(total_layers // 2, batch_size * num_attention_heads, num_virtual_tokens, head_dim)
-
-    return tuple(zip(keys, values))
-
-
-# needed for prefix-tuning of StarCoder models
-def starcoder_model_postprocess_past_key_value(past_key_values):
-    result = []
-    for k in past_key_values:
-        k = k[:, :, 0]
-        k = k.permute([1, 2, 0, 3])
-        k = k.reshape(*k.shape[:-2], -1)
-        result.append(k)
-    return tuple(result)
-
-
-def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
+def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
     r"""
+    Note this method only works for `transformers` models.
+
     This method wraps the entire protocol for preparing a model before running a training. This includes:
         1- Cast the layernorm in fp32 2- making output embedding layer require grads 3- Add the upcasting of the lm
         head to fp32
 
     Args:
-        model, (`transformers.PreTrainedModel`):
+        model (`transformers.PreTrainedModel`):
             The loaded model from `transformers`
+        use_gradient_checkpointing (`bool`, *optional*, defaults to `True`):
+            If True, use gradient checkpointing to save memory at the expense of slower backward pass.
+        gradient_checkpointing_kwargs (`dict`, *optional*, defaults to `None`):
+            Keyword arguments to pass to the gradient checkpointing function, please refer to the documentation of
+            `torch.utils.checkpoint.checkpoint` for more details about the arguments that you can pass to that method.
+            Note this is only available in the latest transformers versions (> 4.34.1).
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
+    if gradient_checkpointing_kwargs is None:
+        gradient_checkpointing_kwargs = {}
+
     for name, param in model.named_parameters():
         # freeze base model's layers
         param.requires_grad = False
@@ -86,19 +105,36 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
                 param.data = param.data.to(torch.float32)
 
     if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
-        # For backward compatibility
-        if hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        else:
+        # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
+        if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
+            # For backward compatibility
+            if hasattr(model, "enable_input_require_grads"):
+                model.enable_input_require_grads()
+            else:
 
-            def make_inputs_require_grad(module, input, output):
-                output.requires_grad_(True)
+                def make_inputs_require_grad(module, input, output):
+                    output.requires_grad_(True)
 
-            model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+                model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+        # To support older transformers versions, check if the model supports gradient_checkpointing_kwargs
+        _supports_gc_kwargs = "gradient_checkpointing_kwargs" in list(
+            inspect.signature(model.gradient_checkpointing_enable).parameters
+        )
+
+        if not _supports_gc_kwargs and len(gradient_checkpointing_kwargs) > 0:
+            warnings.warn(
+                "gradient_checkpointing_kwargs is not supported in this version of transformers. The passed kwargs will be ignored."
+                " if you want to use that feature, please upgrade to the latest version of transformers.",
+                FutureWarning,
+            )
+
+        gc_enable_kwargs = (
+            {} if not _supports_gc_kwargs else {"gradient_checkpointing_kwargs": gradient_checkpointing_kwargs}
+        )
 
         # enable gradient checkpointing for memory efficiency
-        model.gradient_checkpointing_enable()
-
+        model.gradient_checkpointing_enable(**gc_enable_kwargs)
     return model
 
 
@@ -151,6 +187,12 @@ class ModulesToSaveWrapper(torch.nn.Module):
     def active_adapter(self) -> str:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
+
+    @property
+    def weight(self):
+        if self.active_adapter not in self.modules_to_save:
+            return self.original_module.weight
+        return self.modules_to_save[self.active_adapter].weight
 
     def update(self, adapter_name):
         self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
@@ -248,8 +290,22 @@ def _set_trainable(model, adapter_name):
 
 
 def _set_adapter(model, adapter_name):
+    def check_adapter_name(adapter_name):
+        if isinstance(adapter_name, str):
+            return adapter_name
+
+        # adapter_name is a list of str
+        if len(adapter_name) > 1:
+            raise ValueError("Only one adapter can be set at a time for modules_to_save")
+        elif len(adapter_name) == 0:
+            raise ValueError("Please specify at least one adapter to set")
+        adapter_name = adapter_name[0]
+        return adapter_name
+
     for module in model.modules():
         if isinstance(module, ModulesToSaveWrapper):
+            # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
+            adapter_name = check_adapter_name(adapter_name)
             module.set_adapter(adapter_name)
 
 
@@ -304,6 +360,20 @@ def fsdp_auto_wrap_policy(model):
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
 
+    default_transformer_cls_names_to_wrap = (
+        ",".join(model._no_split_modules) if getattr(model, "_no_split_modules", None) is not None else ""
+    )
+    transformer_cls_names_to_wrap = os.environ.get(
+        "FSDP_TRANSFORMER_CLS_TO_WRAP", default_transformer_cls_names_to_wrap
+    ).split(",")
+    transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
+    for layer_class in transformer_cls_names_to_wrap:
+        transformer_cls = FullyShardedDataParallelPlugin.get_module_class_from_name(model, layer_class)
+        if transformer_cls is None:
+            raise Exception("Could not find the transformer layer class to wrap in the model.")
+        else:
+            transformer_cls_to_wrap.add(transformer_cls)
+
     def lambda_policy_fn(module):
         if (
             len(list(module.named_children())) == 0
@@ -316,14 +386,7 @@ def fsdp_auto_wrap_policy(model):
     lambda_policy = functools.partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
     transformer_wrap_policy = functools.partial(
         transformer_auto_wrap_policy,
-        transformer_layer_cls=(
-            PrefixEncoder,
-            PromptEncoder,
-            PromptEmbedding,
-            FullyShardedDataParallelPlugin.get_module_class_from_name(
-                model, os.environ.get("FSDP_TRANSFORMER_CLS_TO_WRAP", "")
-            ),
-        ),
+        transformer_layer_cls=transformer_cls_to_wrap,
     )
 
     auto_wrap_policy = functools.partial(_or_policy, policies=[lambda_policy, transformer_wrap_policy])
@@ -384,126 +447,52 @@ def get_auto_gptq_quant_linear(gptq_quantization_config):
     """
     Get the right AutoGPTQQuantLinear class based on the quantization config file
     """
-    if is_auto_gptq_available():
+    if gptq_quantization_config is not None and is_auto_gptq_available():
         from auto_gptq.utils.import_utils import dynamically_import_QuantLinear
 
-        if gptq_quantization_config is not None:
-            desc_act = gptq_quantization_config.desc_act
-            group_size = gptq_quantization_config.group_size
-            bits = gptq_quantization_config.bits
-            disable_exllama = gptq_quantization_config.disable_exllama
-            AutoGPTQQuantLinear = dynamically_import_QuantLinear(
-                use_triton=False,
-                desc_act=desc_act,
-                group_size=group_size,
-                bits=bits,
-                disable_exllama=disable_exllama,
-            )
-            return AutoGPTQQuantLinear
+        desc_act = gptq_quantization_config.desc_act
+        group_size = gptq_quantization_config.group_size
+        bits = gptq_quantization_config.bits
+        if hasattr(gptq_quantization_config, "use_exllama"):
+            use_exllama = gptq_quantization_config.use_exllama
+        else:
+            use_exllama = not gptq_quantization_config.disable_exllama
+        if hasattr(gptq_quantization_config, "exllama_config"):
+            exllama_version = gptq_quantization_config.exllama_config["version"]
+        else:
+            exllama_version = 1
+        AutoGPTQQuantLinear = dynamically_import_QuantLinear(
+            use_triton=False,
+            desc_act=desc_act,
+            group_size=group_size,
+            bits=bits,
+            disable_exllama=not (use_exllama and exllama_version == 1),
+            disable_exllamav2=not (use_exllama and exllama_version == 2),
+        )
+        return AutoGPTQQuantLinear
     return None
 
 
-TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
-    "t5": ["q", "v"],
-    "mt5": ["q", "v"],
-    "bart": ["q_proj", "v_proj"],
-    "gpt2": ["c_attn"],
-    "bloom": ["query_key_value"],
-    "blip-2": ["q", "v", "q_proj", "v_proj"],
-    "opt": ["q_proj", "v_proj"],
-    "gptj": ["q_proj", "v_proj"],
-    "gpt_neox": ["query_key_value"],
-    "gpt_neo": ["q_proj", "v_proj"],
-    "bert": ["query", "value"],
-    "roberta": ["query", "value"],
-    "xlm-roberta": ["query", "value"],
-    "electra": ["query", "value"],
-    "deberta-v2": ["query_proj", "value_proj"],
-    "deberta": ["in_proj"],
-    "layoutlm": ["query", "value"],
-    "llama": ["q_proj", "v_proj"],
-    "chatglm": ["query_key_value"],
-    "gpt_bigcode": ["c_attn"],
-    "mpt": ["Wqkv"],
-    "RefinedWebModel": ["query_key_value"],
-    "RefinedWeb": ["query_key_value"],
-    "falcon": ["query_key_value"],
-    "btlm": ["c_proj", "c_attn"],
-    "codegen": ["qkv_proj"],
-    "mistral": ["q_proj", "v_proj"],
-    "stablelm": ["q_proj", "v_proj"],
-}
+def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
+    """
+    Unique identifier to a tensor storage. Multiple different tensors can share the same underlying storage. For
+    example, "meta" tensors all share the same storage, and thus their identifier will all be equal. This identifier is
+    guaranteed to be unique and constant for this tensor's storage during its lifetime. Two tensor storages with
+    non-overlapping lifetimes may have the same id.
 
-TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
-    "t5": ["k", "v", "wo"],
-    "mt5": ["k", "v", "wi_1"],
-    "gpt2": ["c_attn", "mlp.c_proj"],
-    "bloom": ["query_key_value", "mlp.dense_4h_to_h"],
-    "roberta": ["key", "value", "output.dense"],
-    "opt": ["q_proj", "k_proj", "fc2"],
-    "gptj": ["q_proj", "v_proj", "fc_out"],
-    "gpt_neox": ["query_key_value", "dense_4h_to_h"],
-    "gpt_neo": ["q_proj", "v_proj", "c_proj"],
-    "bart": ["q_proj", "v_proj", "fc2"],
-    "gpt_bigcode": ["c_attn", "mlp.c_proj"],
-    "llama": ["k_proj", "v_proj", "down_proj"],
-    "bert": ["key", "value", "output.dense"],
-    "deberta-v2": ["key_proj", "value_proj", "output.dense"],
-    "deberta": ["in_proj", "output.dense"],
-    "RefinedWebModel": ["query_key_value"],
-    "RefinedWeb": ["query_key_value"],
-    "falcon": ["query_key_value"],
-}
+    This method is the exact same copy of
+    https://github.com/huggingface/transformers/blob/main/src/transformers/pytorch_utils.py#L282C1-L300C58 but we added
+    it here manually to avoid import issue with old versions of transformers.
+    """
+    if tensor.device.type == "xla" and is_torch_tpu_available():
+        # NOTE: xla tensors dont have storage
+        # use some other unique id to distinguish.
+        # this is a XLA tensor, it must be created using torch_xla's
+        # device. So the following import is safe:
+        import torch_xla
 
-TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
-    "t5": ["wo"],
-    "mt5": [],
-    "gpt2": ["mlp.c_proj"],
-    "bloom": ["mlp.dense_4h_to_h"],
-    "roberta": ["output.dense"],
-    "opt": ["fc2"],
-    "gptj": ["fc_out"],
-    "gpt_neox": ["dense_4h_to_h"],
-    "gpt_neo": ["c_proj"],
-    "bart": ["fc2"],
-    "gpt_bigcode": ["mlp.c_proj"],
-    "llama": ["down_proj"],
-    "bert": ["output.dense"],
-    "deberta-v2": ["output.dense"],
-    "deberta": ["output.dense"],
-    "RefinedWeb": ["query_key_value"],
-    "RefinedWebModel": ["query_key_value"],
-    "falcon": ["query_key_value"],
-}
+        unique_id = torch_xla._XLAC._xla_get_tensor_id(tensor)
+    else:
+        unique_id = storage_ptr(tensor)
 
-COMMON_LAYERS_PATTERN = ["layers", "h", "block", "blocks", "layer"]
-
-TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
-    "t5": ["q", "k", "v", "o", "wi", "wo"],
-    "mt5": ["q", "k", "v", "o", "wi_0", "wi_1", "wo"],
-    "bart": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
-    "gpt2": ["c_attn"],
-    "bloom": ["query_key_value"],
-    "opt": ["q_proj", "k_proj", "v_proj", "out_proj", "fc1", "fc2"],
-    "gptj": ["q_proj", "v_proj"],
-    "gpt_neox": ["query_key_value"],
-    "gpt_neo": ["q_proj", "v_proj"],
-    "llama": ["q_proj", "v_proj"],
-    "bert": ["query", "value"],
-    "roberta": ["query", "key", "value", "dense"],
-    # "xlm-roberta": ["query", "value"],
-    # "electra": ["query", "value"],
-    "deberta-v2": ["query_proj", "key_proj", "value_proj", "dense"],
-    "gpt_bigcode": ["c_attn"],
-    "deberta": ["in_proj"],
-    # "layoutlm": ["query", "value"],
-}
-
-TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
-    "bloom": bloom_model_postprocess_past_key_value,
-    "gpt_bigcode": starcoder_model_postprocess_past_key_value,
-}
-
-WEIGHTS_NAME = "adapter_model.bin"
-SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
-CONFIG_NAME = "adapter_config.json"
+    return tensor.device, unique_id, storage_size(tensor)

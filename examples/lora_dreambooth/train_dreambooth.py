@@ -7,6 +7,7 @@ import math
 import os
 import threading
 import warnings
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 
@@ -211,6 +212,17 @@ def parse_args(input_args=None):
         type=str,
         default="none",
         help="Bias type for Lora. Can be 'none', 'all' or 'lora_only', only used if use_lora and `train_text_encoder` are True",
+    )
+
+    parser.add_argument(
+        "--num_dataloader_workers", type=int, default=1, help="Num of workers for the training dataloader."
+    )
+
+    parser.add_argument(
+        "--no_tracemalloc",
+        default=False,
+        action="store_true",
+        help="Flag to stop memory allocation tracing during training. This could speed up training on Windows.",
     )
 
     parser.add_argument(
@@ -799,7 +811,7 @@ def main(args):
         batch_size=args.train_batch_size,
         shuffle=True,
         collate_fn=lambda examples: collate_fn(examples, args.with_prior_preservation),
-        num_workers=1,
+        num_workers=args.num_dataloader_workers,
     )
 
     # Scheduler and math around the number of training steps.
@@ -893,7 +905,7 @@ def main(args):
         unet.train()
         if args.train_text_encoder:
             text_encoder.train()
-        with TorchTracemalloc() as tracemalloc:
+        with TorchTracemalloc() if not args.no_tracemalloc else nullcontext() as tracemalloc:
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
                 if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
@@ -1034,23 +1046,29 @@ def main(args):
                 if global_step >= args.max_train_steps:
                     break
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
-        accelerator.print(
-            "GPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
-            )
-        )
 
-        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
-        accelerator.print(
-            "CPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+        if not args.no_tracemalloc:
+            accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
+            accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
+            accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
+            accelerator.print(
+                "GPU Total Peak Memory consumed during the train (max): {}".format(
+                    tracemalloc.peaked + b2mb(tracemalloc.begin)
+                )
             )
-        )
+
+            accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
+            accelerator.print(
+                "CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used)
+            )
+            accelerator.print(
+                "CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked)
+            )
+            accelerator.print(
+                "CPU Total Peak Memory consumed during the train (max): {}".format(
+                    tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+                )
+            )
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()

@@ -16,15 +16,17 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Union
+from typing import Any, List, Optional, Union
 
+import torch
 from torch import nn
 
 from peft.utils import COMMON_LAYERS_PATTERN
 
 from ..config import PeftConfig
-from ..utils import _get_submodules
+from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
@@ -40,9 +42,6 @@ class BaseTuner(nn.Module, ABC):
     - **_prepare_adapter_config**:
         A private method to eventually prepare the adapter config, for example in case the field `target_modules` is
         missing.
-    - **_check_target_module_exists**:
-        A helper private method to check if the passed module's key name matches any of the target modules in the
-        adatper_config.
     - **_create_and_replace**:
         A private method to create and replace the target module with the adapter module.
     - **_check_target_module_exists**:
@@ -85,11 +84,6 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-
-        # transformers models have a .config attribute, whose presence is assumed later on
-        if not hasattr(self, "config"):
-            self.config = {"model_type": "custom"}
-
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
@@ -170,7 +164,7 @@ class BaseTuner(nn.Module, ABC):
         ...
 
     @abstractmethod
-    def _mark_only_adapters_as_trainable(self):
+    def _mark_only_adapters_as_trainable(self, model: nn.Module):
         r"""
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
         be overriden for all tuner classes to match the correct key names.
@@ -210,6 +204,9 @@ class BaseTuner(nn.Module, ABC):
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
 
+        _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
+        _has_modules_to_save = False
+
         model_config = getattr(model, "config", {"model_type": "custom"})
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
@@ -217,6 +214,22 @@ class BaseTuner(nn.Module, ABC):
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
         for key in key_list:
+            # Check for modules_to_save in case
+            if _check_for_modules_to_save and any(
+                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+            ):
+                # Optionally set the modules to save
+                parent, target, target_name = _get_submodules(model, key)
+
+                if not isinstance(target, ModulesToSaveWrapper):
+                    new_module = ModulesToSaveWrapper(target, adapter_name)
+                    setattr(parent, target_name, new_module)
+                else:
+                    target.update(adapter_name)
+
+                _has_modules_to_save = True
+                continue
+
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
@@ -236,28 +249,55 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
-        self._mark_only_adapters_as_trainable()
+        self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
-            for n, p in self.model.named_parameters():
+            for n, p in model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
 
-    def merge_adapter(self):
+        if _has_modules_to_save:
+            if not hasattr(model, "modules_to_save"):
+                model.modules_to_save = set(peft_config.modules_to_save)
+            else:
+                model.modules_to_save.update(set(peft_config.modules_to_save))
+
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
         """
-        This method merges the LoRa layers into the base model.
+        This method merges the adapter layers into the base model.
+
+        Merging adapters can lead to a speed up of the forward pass. A copy of the adapter weights is still kept in
+        memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
+        in memory, please call `merge_and_unload`.
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.merge()
+                module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
         """
-        This method unmerges the LoRa layers from the base model.
+        This method unmerges all merged adapter layers from the base model.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 module.unmerge()
+
+    def _unloading_checks(self, adapter_names: Optional[List[str]]):
+        adapters_to_consider = adapter_names or self.active_adapters
+        is_modules_to_save_available = any(
+            self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
+        )
+        if is_modules_to_save_available and len(adapters_to_consider) > 1:
+            raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
 
 class BaseTunerLayer(ABC):
@@ -270,10 +310,13 @@ class BaseTunerLayer(ABC):
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
+
     active_adapter = None
 
-    # List all names of layers that may contain adapter weights
-    adapter_layer_names: list[str] = []
+    # All names of layers that may contain adapter (trainable) weights
+    adapter_layer_names: tuple[str] = ()
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names: tuple[str] = ()
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -281,11 +324,46 @@ class BaseTunerLayer(ABC):
     # the currently active adapter(s)
     _active_adapter: str | list[str] = "default"
 
-    def merge(self, *args) -> None:
+    # List all merged adapters
+    merged_adapters: list[str] = []
+
+    def get_base_layer(self) -> nn.Module:
+        """
+        (Recursively) get the base_layer.
+
+        This is necessary for the case that the tuner layer wraps another tuner layer.
+
+        """
+        base_layer = self
+        while hasattr(base_layer, "base_layer"):
+            base_layer = base_layer.base_layer
+        return base_layer
+
+    @property
+    def weight(self) -> torch.Tensor:
+        # This is required for some transformers code, e.g. for T5, weight is accessed as:
+        #     self.wo.weight
+        # where "wo" is the adapter layer.
+        # https://github.com/huggingface/transformers/blob/78f6ed6c70b29c1560780e3869a7ad4c6b3d2710/src/transformers
+        # /models/t5/modeling_t5.py#L292
+        base_layer = self.get_base_layer()
+        if hasattr(base_layer, "qweight"):
+            # QuantLinear
+            weight = base_layer.qweight
+        else:
+            # Other layers
+            weight = base_layer.weight
+        return weight
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         raise NotImplementedError
 
-    def unmerge(self, *args) -> None:
+    def unmerge(self) -> None:
         raise NotImplementedError
+
+    @property
+    def merged(self) -> bool:
+        return bool(self.merged_adapters)
 
     @property
     def disable_adapters(self) -> bool:
@@ -304,7 +382,7 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
-    def enable_adapters(self, enabled: bool):
+    def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
 
         Takes care of setting the requires_grad flag for the adapter weights.
@@ -322,11 +400,11 @@ class BaseTunerLayer(ABC):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_names: str | list[str]):
-        """Set the active adapter
+    def set_adapter(self, adapter_names: str | list[str]) -> None:
+        """Set the active adapter(s).
 
         Args:
-            adapter_name (str): The name of the adapter to set as active
+            adapter_name (`str` or `List[str]`): Name of the adapter(s) to be activated.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
@@ -344,12 +422,60 @@ class BaseTunerLayer(ABC):
 
         self._active_adapter = adapter_names
 
+    def _all_available_adapter_names(self) -> list[str]:
+        """Return a sorted list of all available adapter names"""
+        adapter_names = set()
+        for name in self.adapter_layer_names + self.other_param_names:
+            # we check each possible attribute and if it's a dict or ModuleDict, we assume that the keys are the adapter
+            # names
+            attr = getattr(self, name)
+            if hasattr(attr, "keys"):
+                adapter_names.update(attr.keys())
+        return sorted(adapter_names)
+
+    def delete_adapter(self, adapter_name: str) -> None:
+        """
+        Delete an adapter from the layer
+
+        This should be called on all adapter layers, or else we will get an inconsistent state.
+
+        This method will also set a new active adapter if the deleted adapter was an active adapter. It is important
+        that the new adapter is chosen in a deterministic way, so that the same adapter is chosen on all layers.
+
+        Args:
+            adapter_name (`str`): The name of the adapter to delete
+
+        """
+        for attr in self.adapter_layer_names + self.other_param_names:
+            if adapter_name in getattr(self, attr):
+                del getattr(self, attr)[adapter_name]
+
+        if adapter_name in self.active_adapters:
+            # choose a new active adapter
+            active_adapters = self.active_adapters[:]
+            active_adapters.remove(adapter_name)
+            if active_adapters:
+                self.set_adapter(active_adapters)
+            else:
+                # no active adapters left, set a new default adapter
+                # here we get the list of all adapters existing adapter names and choose the first one
+                remaining_adapters = self._all_available_adapter_names()
+                if not remaining_adapters:
+                    self.set_adapter([])
+                else:
+                    new_active_adapter = remaining_adapters[0]
+                    warnings.warn(
+                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to "
+                        f"{new_active_adapter}."
+                    )
+                    self.set_adapter(remaining_adapters[0])
+
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """A helper method to check if the passed module's key name matches any of the target modules in the adapter_config.
 
     Args:
-        config (`LoraConfig` | `LoHaConfig`): A config to match target modules from
+        config (`LoraConfig` | `LycorisConfig`): A config to match target modules from
         key (`str`): A key to search any matches in config
 
     Returns:
@@ -382,3 +508,18 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
                 else:
                     target_module_found = False
     return target_module_found
+
+
+def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> dict:
+    """
+    A helper function to inspect the set of matched and unmatched modules for a PEFT model and the given adapter.
+    """
+    config = tuner.peft_config[adapter_name]
+    key_list = [key for key, _ in tuner.model.named_modules()]
+    module_dict = {"matched": [], "unmatched": []}
+    for key in key_list:
+        if tuner._check_target_module_exists(config, key):
+            module_dict["matched"].append(key)
+        else:
+            module_dict["unmatched"].append(key)
+    return module_dict
