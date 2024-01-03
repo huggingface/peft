@@ -242,10 +242,10 @@ class PeftCustomKwargsTester(unittest.TestCase):
         self._check_match_with_expected_target_modules(
             model_id, model, config_cls, initial_target_modules, expected_target_modules
         )
-        
+
     @parameterized.expand(BNB_TEST_CASES)
-    @require_bitsandbytes
     @require_torch_gpu
+    @require_bitsandbytes
     def test_maybe_include_all_linear_layers_lora_bnb(
         self, model_id, model_type, initial_target_modules, expected_target_modules, quantization
     ):
@@ -309,6 +309,6 @@ class PeftCustomKwargsTester(unittest.TestCase):
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
         with self.assertRaisesRegex(
             ValueError,
-            f"Only instances of PreTrainedModel are supported for the '{INCLUDE_LINEAR_LAYERS_SHORTHAND}' flag",
+            f"Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
