@@ -1,12 +1,8 @@
-import argparse
-import gc
 import hashlib
 import itertools
 import logging
 import math
 import os
-import threading
-import warnings
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
@@ -14,7 +10,6 @@ from typing import Optional
 import datasets
 import diffusers
 import numpy as np
-import psutil
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
@@ -25,7 +20,6 @@ from accelerate.utils import ProjectConfiguration, set_seed
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
-    DDPMScheduler,
     DiffusionPipeline,
     DPMSolverMultistepScheduler,
     UNet2DConditionModel,
@@ -35,15 +29,10 @@ from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from huggingface_hub import HfFolder, Repository, whoami
 from PIL import Image
-from torch.utils.data import Dataset
-from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
 
-import sys
-
-sys.path.append('../../src')
-from peft import BOFTConfig, LoraConfig, get_peft_model
+from peft import BOFTConfig, get_peft_model
 
 from utils.args_loader import parse_args, import_model_class_from_model_name_or_path
 from utils.tracemalloc import TorchTracemalloc, b2mb
@@ -55,9 +44,7 @@ check_min_version("0.16.0.dev0")
 
 logger = get_logger(__name__)
 
-UNET_TARGET_MODULES = [
-    "to_q", "to_v", "to_k", "query", "value", "key", "to_out.0", "add_k_proj", "add_v_proj"
-]
+UNET_TARGET_MODULES = ["to_q", "to_v", "to_k", "query", "value", "key", "to_out.0", "add_k_proj", "add_v_proj"]
 TEXT_ENCODER_TARGET_MODULES = ["q_proj", "v_proj"]
 
 
@@ -92,7 +79,6 @@ def get_full_repo_name(model_id: str, organization: Optional[str] = None, token:
 
 
 def save_adaptor(accelerator, step, unet, text_encoder, args):
-
     unwarpped_unet = accelerator.unwrap_model(unet)
     unwarpped_unet.save_pretrained(
         os.path.join(args.output_dir, f"unet/{step}"), state_dict=accelerator.get_state_dict(unet)
@@ -104,14 +90,12 @@ def save_adaptor(accelerator, step, unet, text_encoder, args):
             state_dict=accelerator.get_state_dict(text_encoder),
         )
 
-def main(args):
 
+def main(args):
     validation_prompts = list(filter(None, args.validation_prompt[0].split(".")))
 
     logging_dir = Path(args.output_dir, args.logging_dir)
-    accelerator_project_config = ProjectConfiguration(
-        project_dir=args.output_dir, logging_dir=logging_dir
-    )
+    accelerator_project_config = ProjectConfiguration(project_dir=args.output_dir, logging_dir=logging_dir)
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -121,11 +105,14 @@ def main(args):
     )
     if args.report_to == "wandb":
         import wandb
-        wandb_init = {"wandb": {
-            "name": args.wandb_run_name,
-            "mode": "online",
-        }}
-        
+
+        wandb_init = {
+            "wandb": {
+                "name": args.wandb_run_name,
+                "mode": "online",
+            }
+        }
+
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
     # TODO (patil-suraj): Remove this check when gradient accumulation with two models is enabled in accelerate.
@@ -182,9 +169,7 @@ def main(args):
             logger.info(f"Number of class images to sample: {num_new_images}.")
 
             sample_dataset = PromptDataset(args.class_prompt, num_new_images)
-            sample_dataloader = torch.utils.data.DataLoader(
-                sample_dataset, batch_size=args.sample_batch_size
-            )
+            sample_dataloader = torch.utils.data.DataLoader(sample_dataset, batch_size=args.sample_batch_size)
 
             sample_dataloader = accelerator.prepare(sample_dataloader)
             pipeline.to(accelerator.device)
@@ -235,16 +220,12 @@ def main(args):
     text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
 
     # Load scheduler and models
-    noise_scheduler = DDIMScheduler.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="scheduler"
-    )
+    noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
 
     text_encoder = text_encoder_cls.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
     )
-    vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
-    )
+    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision
     )
@@ -256,12 +237,9 @@ def main(args):
             boft_n_butterfly_factor=args.boft_n_butterfly_factor,
             target_modules=UNET_TARGET_MODULES,
             boft_dropout=args.boft_dropout,
-            bias=args.boft_bias
+            bias=args.boft_bias,
         )
-        # config = LoraConfig(
-        #     r=8, lora_alpha=32, lora_dropout=0.1, target_modules=UNET_TARGET_MODULES,
-        # )
-        unet = get_peft_model(unet, config)
+        unet = get_peft_model(unet, config, adapter_name=args.wandb_run_name)
         unet.print_trainable_parameters()
 
     vae.requires_grad_(False)
@@ -276,9 +254,6 @@ def main(args):
             boft_dropout=args.boft_dropout,
             bias=args.boft_bias,
         )
-        # config = LoraConfig(
-        #     r=8, lora_alpha=32, lora_dropout=0.1, target_modules=UNET_TARGET_MODULES,
-        # )
         text_encoder = get_peft_model(text_encoder, config, adapter_name=args.wandb_run_name)
         text_encoder.print_trainable_parameters()
         text_encoder.train()
@@ -297,7 +272,7 @@ def main(args):
     unet.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
-        
+
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
             unet.enable_xformers_memory_efficient_attention()
@@ -415,9 +390,7 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers(
-            args.wandb_project_name, config=vars(args), init_kwargs=wandb_init
-        )
+        accelerator.init_trackers(args.wandb_project_name, config=vars(args), init_kwargs=wandb_init)
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -540,11 +513,9 @@ def main(args):
                         accelerator.print(progress_bar)
                     global_step += 1
 
-                    # if global_step % args.checkpointing_steps == 0:
-                    #     if accelerator.is_main_process:
-                    #         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    #         accelerator.save_state(save_path)
-                    #         logger.info(f"Saved state to {save_path}")
+                if global_step % args.checkpointing_steps == 0 and global_step != 0:
+                    if accelerator.is_main_process:
+                        save_adaptor(accelerator, global_step, unet, text_encoder, args)
 
                 logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
                 progress_bar.set_postfix(**logs)
@@ -552,7 +523,8 @@ def main(args):
 
                 if (
                     args.validation_prompt is not None
-                    and (step + num_update_steps_per_epoch * epoch) % args.validation_steps == 0 and global_step > 10
+                    and (step + num_update_steps_per_epoch * epoch) % args.validation_steps == 0
+                    and global_step > 10
                 ):
                     unet.eval()
 
@@ -593,11 +565,8 @@ def main(args):
                     os.makedirs(val_img_dir, exist_ok=True)
 
                     for val_promot in validation_prompts:
-                        image = pipeline(val_promot, num_inference_steps=50,
-                                         generator=generator).images[0]
-                        image.save(
-                            os.path.join(val_img_dir, f"{'_'.join(val_promot.split(' '))}.png"[1:])
-                        )
+                        image = pipeline(val_promot, num_inference_steps=50, generator=generator).images[0]
+                        image.save(os.path.join(val_img_dir, f"{'_'.join(val_promot.split(' '))}.png"[1:]))
                         images.append(image)
 
                     for tracker in accelerator.trackers:
@@ -606,6 +575,7 @@ def main(args):
                             tracker.writer.add_images("validation", np_images, epoch, dataformats="NHWC")
                         if tracker.name == "wandb":
                             import wandb
+
                             tracker.log(
                                 {
                                     "validation": [
@@ -617,8 +587,6 @@ def main(args):
 
                     del pipeline
                     torch.cuda.empty_cache()
-
-                    
 
                 if global_step >= args.max_train_steps:
                     break

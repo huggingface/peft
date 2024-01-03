@@ -49,40 +49,37 @@ class BOFTConfig(PeftConfig):
     """
 
     boft_block_size: int = field(
-        default=8, 
+        default=2,
         metadata={
             "help": "BOFT block size across different layers.",
-            "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension."
+            "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension.",
         },
     )
     boft_block_num: int = field(
-        default=0, 
+        default=0,
         metadata={
             "help": "Number of BOFT blocks per injected layer.",
-            "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension."
+            "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension.",
         },
     )
     boft_n_butterfly_factor: int = field(
-        default=0, 
+        default=1,
         metadata={
             "help": "Number of butterfly factors.",
             "note": (
-                "For example boft_n_butterfly_factor=1, the effective block size of OFT becomes twice as big and the number of blocks become half.",
-                "Note: for boft_n_butterfly_factor=0, BOFT is the same as vanilla OFT."
-            )
+                "for example, boft_n_butterfly_factor=2, the effective block size of OFT becomes twice as big and the number of blocks become half.",
+                "note: for boft_n_butterfly_factor=1, BOFT is the same as vanilla OFT.",
+            ),
         },
     )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
             "help": "List of module names or regex expression of the module names to replace with BOFT.",
-            "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' ",
         },
     )
-    boft_dropout: float = field(
-        default=0.0, 
-        metadata={"help": "BOFT multiplicative dropout"}
-    )
+    boft_dropout: float = field(default=0.0, metadata={"help": "BOFT multiplicative dropout"})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -94,7 +91,7 @@ class BOFTConfig(PeftConfig):
             "help": "List of modules apart from BOFT layers to be set as trainable and saved in the final checkpoint. ",
             "note": (
                 "For example, in Sequence Classification or Token Classification tasks, ",
-                "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+                "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved.",
             ),
         },
     )
@@ -103,7 +100,7 @@ class BOFTConfig(PeftConfig):
         metadata={
             "help": (
                 "Whether to initialize the weights of the BOFT layers with their default initialization. Don't change ",
-                "this setting, except if you know exactly what you're doing."
+                "this setting, except if you know exactly what you're doing.",
             ),
         },
     )

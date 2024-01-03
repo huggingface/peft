@@ -1,0 +1,4 @@
+[submodule "data/dreambooth"]
+	path = data/dreambooth
+	url = git@github.com:google/dreambooth.git
+	ignore = dirty

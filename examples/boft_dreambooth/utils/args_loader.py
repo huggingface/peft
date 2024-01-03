@@ -26,9 +26,7 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
         raise ValueError(f"{model_class} is not supported.")
 
 
-def get_full_repo_name(
-    model_id: str, organization: Optional[str] = None, token: Optional[str] = None
-):
+def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
     if organization is None:
@@ -93,12 +91,7 @@ def parse_args(input_args=None):
         action="store_true",
         help="Flag to add prior preservation loss.",
     )
-    parser.add_argument(
-        "--prior_loss_weight",
-        type=float,
-        default=1.0,
-        help="The weight of prior preservation loss."
-    )
+    parser.add_argument("--prior_loss_weight", type=float, default=1.0, help="The weight of prior preservation loss.")
     parser.add_argument(
         "--num_class_images",
         type=int,
@@ -145,13 +138,9 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--center_crop",
-        action="store_true",
-        help="Whether to center crop images before resizing to resolution"
+        "--center_crop", action="store_true", help="Whether to center crop images before resizing to resolution"
     )
-    parser.add_argument(
-        "--train_text_encoder", action="store_true", help="Whether to train the text encoder"
-    )
+    parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
 
     parser.add_argument(
         "--set_grads_to_none",
@@ -164,28 +153,16 @@ def parse_args(input_args=None):
     )
 
     # boft args
-    parser.add_argument(
-        "--use_boft",
-        action="store_true",
-        help="Whether to use BOFT for parameter efficient tuning"
-    )
+    parser.add_argument("--use_boft", action="store_true", help="Whether to use BOFT for parameter efficient tuning")
     parser.add_argument("--boft_block_num", type=int, default=4, help="The number of BOFT blocks")
     parser.add_argument("--boft_block_size", type=int, default=0, help="The size of BOFT blocks")
-    parser.add_argument(
-        "--boft_n_butterfly_factor", type=int, default=2, help="The number of butterfly factors"
-    )
-    parser.add_argument("--boft_bias_fit", action="store_true", help="Whether to use bias fit")
-    parser.add_argument(
-        "--boft_dropout",
-        type=float,
-        default=0.1,
-        help="BOFT dropout, only used if use_boft is True"
-    )
+    parser.add_argument("--boft_n_butterfly_factor", type=int, default=2, help="The number of butterfly factors")
+    parser.add_argument("--boft_dropout", type=float, default=0.1, help="BOFT dropout, only used if use_boft is True")
     parser.add_argument(
         "--boft_bias",
         type=str,
         default="none",
-        help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True"
+        help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True",
     )
     parser.add_argument(
         "--num_dataloader_workers", type=int, default=1, help="Num of workers for the training dataloader."
@@ -198,16 +175,10 @@ def parse_args(input_args=None):
     )
 
     parser.add_argument(
-        "--train_batch_size",
-        type=int,
-        default=4,
-        help="Batch size (per device) for the training dataloader."
+        "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
     parser.add_argument(
-        "--sample_batch_size",
-        type=int,
-        default=4,
-        help="Batch size (per device) for sampling images."
+        "--sample_batch_size", type=int, default=4, help="Batch size (per device) for sampling images."
     )
     parser.add_argument("--num_train_epochs", type=int, default=1)
     parser.add_argument(
@@ -244,8 +215,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help=
-        "Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
         "--learning_rate",
@@ -257,8 +227,7 @@ def parse_args(input_args=None):
         "--scale_lr",
         action="store_true",
         default=False,
-        help=
-        "Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
+        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
     )
     parser.add_argument(
         "--lr_scheduler",
@@ -270,10 +239,7 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--lr_warmup_steps",
-        type=int,
-        default=500,
-        help="Number of steps for the warmup in the lr scheduler."
+        "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
         "--lr_num_cycles",
@@ -281,36 +247,17 @@ def parse_args(input_args=None):
         default=1,
         help="Number of hard resets of the lr in cosine_with_restarts scheduler.",
     )
+    parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.")
     parser.add_argument(
-        "--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler."
+        "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
     )
-    parser.add_argument(
-        "--use_8bit_adam",
-        action="store_true",
-        help="Whether or not to use 8-bit Adam from bitsandbytes."
-    )
-    parser.add_argument(
-        "--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer."
-    )
-    parser.add_argument(
-        "--adam_beta2",
-        type=float,
-        default=0.999,
-        help="The beta2 parameter for the Adam optimizer."
-    )
-    parser.add_argument(
-        "--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use."
-    )
-    parser.add_argument(
-        "--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer"
-    )
+    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
+    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument(
-        "--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub."
-    )
-    parser.add_argument(
-        "--hub_token", type=str, default=None, help="The token to use to push to the Model Hub."
-    )
+    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
+    parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
     parser.add_argument(
         "--hub_model_id",
         type=str,
@@ -382,13 +329,9 @@ def parse_args(input_args=None):
             " 1.10.and an Nvidia Ampere GPU.  Default to  fp16 if a GPU is available else fp32."
         ),
     )
+    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     parser.add_argument(
-        "--local_rank", type=int, default=-1, help="For distributed training: local_rank"
-    )
-    parser.add_argument(
-        "--enable_xformers_memory_efficient_attention",
-        action="store_true",
-        help="Whether or not to use xformers."
+        "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
 
     if input_args is not None:
@@ -415,8 +358,5 @@ def parse_args(input_args=None):
             warnings.warn("You need not use --class_data_dir without --with_prior_preservation.")
         if args.class_prompt is not None:
             warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
-
-    if args.train_text_encoder and args.pre_compute_text_embeddings:
-        raise ValueError("`--train_text_encoder` cannot be used with `--pre_compute_text_embeddings`")
 
     return args

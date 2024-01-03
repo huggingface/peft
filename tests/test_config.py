@@ -30,12 +30,12 @@ from peft import (
     LoraConfig,
     MultitaskPromptTuningConfig,
     OFTConfig,
+    BOFTConfig,
     PeftConfig,
     PrefixTuningConfig,
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
-    BOFTConfig,
 )
 
 
@@ -191,7 +191,7 @@ class PeftConfigTester(unittest.TestCase):
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
 
-    @parameterized.expand([LoHaConfig, LoraConfig, IA3Config, OFTConfig])
+    @parameterized.expand([LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig])
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045
         config = config_class(target_modules=["a", "list"])

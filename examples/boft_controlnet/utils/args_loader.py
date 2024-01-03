@@ -6,9 +6,7 @@ from huggingface_hub import HfFolder, whoami
 from transformers import PretrainedConfig
 
 
-def get_full_repo_name(
-    model_id: str, organization: Optional[str] = None, token: Optional[str] = None
-):
+def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
     if organization is None:
@@ -94,21 +92,13 @@ def parse_args(input_args=None):
             " resolution"
         ),
     )
-    parser.add_argument(
-        "--train_text_encoder", action="store_true", help="Whether to train the text encoder"
-    )
+    parser.add_argument("--train_text_encoder", action="store_true", help="Whether to train the text encoder")
 
     parser.add_argument(
-        "--train_batch_size",
-        type=int,
-        default=4,
-        help="Batch size (per device) for the training dataloader."
+        "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
     )
     parser.add_argument(
-        "--sample_batch_size",
-        type=int,
-        default=4,
-        help="Batch size (per device) for sampling images."
+        "--sample_batch_size", type=int, default=4, help="Batch size (per device) for sampling images."
     )
 
     parser.add_argument("--num_train_epochs", type=int, default=1)
@@ -154,8 +144,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--gradient_checkpointing",
         action="store_true",
-        help=
-        "Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
         "--learning_rate",
@@ -167,8 +156,7 @@ def parse_args(input_args=None):
         "--scale_lr",
         action="store_true",
         default=False,
-        help=
-        "Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
+        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
     )
     parser.add_argument(
         "--lr_scheduler",
@@ -180,10 +168,7 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--lr_warmup_steps",
-        type=int,
-        default=500,
-        help="Number of steps for the warmup in the lr scheduler."
+        "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
         "--lr_num_cycles",
@@ -191,13 +176,9 @@ def parse_args(input_args=None):
         default=1,
         help="Number of hard resets of the lr in cosine_with_restarts scheduler.",
     )
+    parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.")
     parser.add_argument(
-        "--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler."
-    )
-    parser.add_argument(
-        "--use_8bit_adam",
-        action="store_true",
-        help="Whether or not to use 8-bit Adam from bitsandbytes."
+        "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
     )
     parser.add_argument(
         "--dataloader_num_workers",
@@ -207,28 +188,13 @@ def parse_args(input_args=None):
             "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
         ),
     )
-    parser.add_argument(
-        "--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer."
-    )
-    parser.add_argument(
-        "--adam_beta2",
-        type=float,
-        default=0.999,
-        help="The beta2 parameter for the Adam optimizer."
-    )
-    parser.add_argument(
-        "--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use."
-    )
-    parser.add_argument(
-        "--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer"
-    )
+    parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
+    parser.add_argument("--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use.")
+    parser.add_argument("--adam_epsilon", type=float, default=1e-08, help="Epsilon value for the Adam optimizer")
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
-    parser.add_argument(
-        "--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub."
-    )
-    parser.add_argument(
-        "--hub_token", type=str, default=None, help="The token to use to push to the Model Hub."
-    )
+    parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
+    parser.add_argument("--hub_token", type=str, default=None, help="The token to use to push to the Model Hub.")
     parser.add_argument(
         "--hub_model_id",
         type=str,
@@ -291,9 +257,7 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--enable_xformers_memory_efficient_attention",
-        action="store_true",
-        help="Whether or not to use xformers."
+        "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
     parser.add_argument(
         "--set_grads_to_none",
@@ -331,10 +295,7 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--image_column",
-        type=str,
-        default="image",
-        help="The column of the dataset containing the target image."
+        "--image_column", type=str, default="image", help="The column of the dataset containing the target image."
     )
     parser.add_argument(
         "--conditioning_image_column",
@@ -361,8 +322,7 @@ def parse_args(input_args=None):
         "--proportion_empty_prompts",
         type=float,
         default=0,
-        help=
-        "Proportion of image prompts to be replaced with empty strings. Defaults to 0 (no prompt replacement).",
+        help="Proportion of image prompts to be replaced with empty strings. Defaults to 0 (no prompt replacement).",
     )
     parser.add_argument(
         "--validation_prompt",
@@ -391,8 +351,7 @@ def parse_args(input_args=None):
         "--num_validation_images",
         type=int,
         default=4,
-        help=
-        "Number of images to be generated for each `--validation_image`, `--validation_prompt` pair",
+        help="Number of images to be generated for each `--validation_image`, `--validation_prompt` pair",
     )
     parser.add_argument(
         "--validation_steps",
@@ -415,24 +374,14 @@ def parse_args(input_args=None):
     )
 
     # evaluation arguments
-    parser.add_argument(
-        "--controlnet_path", type=str, default=None, help="Path to pretrained controlnet."
-    )
-    parser.add_argument(
-        "--unet_path", type=str, default=None, help="Path to pretrained unet."
-    )
-    parser.add_argument(
-        "--adapter_name", type=str, default=None, help="Name of the adapter to use."
-    )
-    parser.add_argument(
-        "--vis_overlays", action="store_true", help="Whether to visualize the landmarks."
-    )
+    parser.add_argument("--controlnet_path", type=str, default=None, help="Path to pretrained controlnet.")
+    parser.add_argument("--unet_path", type=str, default=None, help="Path to pretrained unet.")
+    parser.add_argument("--adapter_name", type=str, default=None, help="Name of the adapter to use.")
+    parser.add_argument("--vis_overlays", action="store_true", help="Whether to visualize the landmarks.")
 
     # self-invented arguments
 
-    parser.add_argument(
-        "--local_rank", type=int, default=-1, help="For distributed training: local_rank"
-    )
+    parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
 
     parser.add_argument(
         "--name",
@@ -441,40 +390,16 @@ def parse_args(input_args=None):
     )
 
     # BOFT args
-    parser.add_argument(
-        "--use_boft",
-        action="store_true",
-        help="Whether to use BOFT for parameter efficient tuning"
-    )
-    parser.add_argument(
-        "--boft_block_num", 
-        type=int, 
-        default=8, 
-        help="The number of BOFT blocks"
-    )
-    parser.add_argument(
-        "--boft_block_size", 
-        type=int, 
-        default=0, 
-        help="The size of BOFT blocks"
-    )
-    parser.add_argument(
-        "--boft_n_butterfly_factor", 
-        type=int, 
-        default=0, 
-        help="The number of butterfly factors"
-    )
-    parser.add_argument(
-        "--boft_dropout",
-        type=float,
-        default=0.1,
-        help="BOFT dropout, only used if use_boft is True"
-    )
+    parser.add_argument("--use_boft", action="store_true", help="Whether to use BOFT for parameter efficient tuning")
+    parser.add_argument("--boft_block_num", type=int, default=8, help="The number of BOFT blocks")
+    parser.add_argument("--boft_block_size", type=int, default=0, help="The size of BOFT blocks")
+    parser.add_argument("--boft_n_butterfly_factor", type=int, default=0, help="The number of butterfly factors")
+    parser.add_argument("--boft_dropout", type=float, default=0.1, help="BOFT dropout, only used if use_boft is True")
     parser.add_argument(
         "--boft_bias",
         type=str,
         default="none",
-        help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True"
+        help="Bias type for BOFT. Can be 'none', 'all' or 'boft_only', only used if use_boft is True",
     )
 
     if input_args is not None:

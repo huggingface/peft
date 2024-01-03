@@ -7,4 +7,7 @@ diffusers==0.17.1
 Pillow
 huggingface_hub
 safetensors
+nb_conda_kernels
+ipykernel
+ipywidgets
 wandb==0.16.1

@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 from diffusers.utils import BaseOutput, logging
 from dataclasses import dataclass
 
-logger = logging.get_logger(__name__)    # pylint: disable=invalid-name
+logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
 @dataclass
@@ -179,11 +179,9 @@ class UNet2DConditionNewModel(UNet2DConditionModel):
         sample = guided_hint + sample if guided_hint is not None else sample
 
         # 3. down
-        down_block_res_samples = (sample, )
+        down_block_res_samples = (sample,)
         for downsample_block in self.down_blocks:
-            if hasattr(
-                downsample_block, "has_cross_attention"
-            ) and downsample_block.has_cross_attention:
+            if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
                     temb=emb,
@@ -204,7 +202,7 @@ class UNet2DConditionNewModel(UNet2DConditionModel):
                 down_block_res_samples, down_block_additional_residuals
             ):
                 down_block_res_sample = down_block_res_sample + down_block_additional_residual
-                new_down_block_res_samples = new_down_block_res_samples + (down_block_res_sample, )
+                new_down_block_res_samples = new_down_block_res_samples + (down_block_res_sample,)
 
             down_block_res_samples = new_down_block_res_samples
 
@@ -226,17 +224,15 @@ class UNet2DConditionNewModel(UNet2DConditionModel):
         for i, upsample_block in enumerate(self.up_blocks):
             is_final_block = i == len(self.up_blocks) - 1
 
-            res_samples = down_block_res_samples[-len(upsample_block.resnets):]
-            down_block_res_samples = down_block_res_samples[:-len(upsample_block.resnets)]
+            res_samples = down_block_res_samples[-len(upsample_block.resnets) :]
+            down_block_res_samples = down_block_res_samples[: -len(upsample_block.resnets)]
 
             # if we have not reached the final block and need to forward the
             # upsample size, we do it here
             if not is_final_block and forward_upsample_size:
                 upsample_size = down_block_res_samples[-1].shape[2:]
 
-            if hasattr(
-                upsample_block, "has_cross_attention"
-            ) and upsample_block.has_cross_attention:
+            if hasattr(upsample_block, "has_cross_attention") and upsample_block.has_cross_attention:
                 sample = upsample_block(
                     hidden_states=sample,
                     temb=emb,
@@ -249,10 +245,7 @@ class UNet2DConditionNewModel(UNet2DConditionModel):
                 )
             else:
                 sample = upsample_block(
-                    hidden_states=sample,
-                    temb=emb,
-                    res_hidden_states_tuple=res_samples,
-                    upsample_size=upsample_size
+                    hidden_states=sample, temb=emb, res_hidden_states_tuple=res_samples, upsample_size=upsample_size
                 )
 
         # 6. post-process
@@ -262,6 +255,6 @@ class UNet2DConditionNewModel(UNet2DConditionModel):
         sample = self.conv_out(sample)
 
         if not return_dict:
-            return (sample, )
+            return (sample,)
 
         return UNet2DConditionOutput(sample=sample)

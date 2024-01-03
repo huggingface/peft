@@ -21,7 +21,7 @@ from utils.args_loader import parse_args
 
 from transformers import AutoTokenizer
 
-sys.path.append('../../src')
+sys.path.append("../../src")
 from peft import PeftModel
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -41,9 +41,7 @@ def main(args):
 
     # Load the tokenizer
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.tokenizer_name, revision=args.revision, use_fast=False
-        )
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
     elif args.pretrained_model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.pretrained_model_name_or_path,
@@ -67,23 +65,23 @@ def main(args):
         controlnet=controlnet,
         unet=unet.model,
         torch_dtype=torch.float32,
-        requires_safety_checker=False
+        requires_safety_checker=False,
     ).to(device)
 
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-    
+
     if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir, exist_ok=True)      
+        os.makedirs(args.output_dir, exist_ok=True)
 
     exist_lst = [int(img.split("_")[-1][:-4]) for img in os.listdir(args.output_dir)]
     all_lst = np.arange(len(val_dataset))
     idx_lst = [item for item in all_lst if item not in exist_lst]
-    
+
     print("Number of images to be processed: ", len(idx_lst))
-    
+
     np.random.seed(seed=int(time.time()))
     np.random.shuffle(idx_lst)
-    
+
     for idx in tqdm(idx_lst):
         output_path = os.path.join(args.output_dir, f"pred_img_{idx:04d}.png")
 
@@ -93,10 +91,11 @@ def main(args):
 
             with torch.no_grad():
                 pred_img = pipe(
-                    data["text"], [data["conditioning_pixel_values"]],
+                    data["text"],
+                    [data["conditioning_pixel_values"]],
                     num_inference_steps=50,
                     guidance_scale=7,
-                    negative_prompt=negative_prompt
+                    negative_prompt=negative_prompt,
                 ).images[0]
 
             pred_img.save(output_path)

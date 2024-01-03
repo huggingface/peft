@@ -20,7 +20,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import LoHaConfig, LoraConfig, OFTConfig, get_peft_model
+from peft import LoHaConfig, LoraConfig, OFTConfig, BOFTConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -78,6 +78,7 @@ CLASSES_MAPPING = {
     "loha": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
     "lokr": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[2]),
+    "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[2]),
 }
 
 
@@ -129,6 +130,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
+                "boft_kwargs": {"init_boft_weights": [False]},
             },
         )
     )
@@ -142,7 +144,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             peft_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Merge adapter and model
-        if config_cls not in [LoHaConfig, OFTConfig]:
+        if config_cls not in [LoHaConfig, OFTConfig, BOFTConfig]:
             # TODO: Merging the text_encoder is leading to issues on CPU with PyTorch 2.1
             model.text_encoder = model.text_encoder.merge_and_unload()
         model.unet = model.unet.merge_and_unload()
@@ -160,7 +162,9 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft"])],
+            filter_params_func=lambda tests: [
+                x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "boft"])
+            ],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
@@ -191,6 +195,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "loha_kwargs": {"init_weights": [False]},
                 "lokr_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
+                "boft_kwargs": {"init_boft_weights": [False]},
             },
         )
     )

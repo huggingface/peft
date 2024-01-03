@@ -239,7 +239,6 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         self,
         controlnet_cond: torch.FloatTensor,
     ) -> Union[ControlNetOutput, Tuple]:
-        
         # check channel order
         channel_order = self.config.controlnet_conditioning_channel_order
 

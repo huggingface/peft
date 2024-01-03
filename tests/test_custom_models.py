@@ -24,7 +24,17 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, BOFTConfig, PeftModel, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    IA3Config,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    OFTConfig,
+    BOFTConfig,
+    PeftModel,
+    get_peft_model,
+)
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
@@ -58,25 +68,6 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
-    # BOFT #
-    ########
-    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
-    (
-        "Vanilla MLP 6 BOFT",
-        "MLP",
-        BOFTConfig,
-        {
-            "target_modules": ["lin0"],
-            "module_dropout": 0.1,
-        },
-    ),
-    ## TODO: test boft settings
-    ("Conv2d 1 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d 2 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d", "lin0"]}),
     #######
     # IA³ #
     #######
@@ -232,6 +223,38 @@ TEST_CASES = [
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
     ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
     ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    ########
+    # BOFT #
+    ########
+    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 2 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "modules_to_save": ["lin0"]}),
+    (
+        "Vanilla MLP 3 BOFT",
+        "MLP",
+        BOFTConfig,
+        {
+            "target_modules": ["lin1"],
+            "boft_dropout": 0.1,
+        },
+    ),
+    (
+        "Vanilla MLP 4 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 0},
+    ),
+    (
+        "Vanilla MLP 5 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 2, "boft_n_butterfly_factor": 0},
+    ),
+    (
+        "Vanilla MLP 6 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -300,6 +323,7 @@ PREFIXES = {
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
+    BOFTConfig: "boft_",
 }
 
 
@@ -1974,4 +1998,47 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+        )
+
+    def test_requires_grad_boft_same_targets(self):
+        # same as previous test, except that BOFT adapters target the same layer
+        config0 = BOFTConfig(target_modules=["lin1"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = BOFTConfig(target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.default",
+            "base_model.model.lin1.boft_s.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.default",
+            "base_model.model.lin1.boft_s.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
         )

@@ -90,7 +90,7 @@ def get_peft_model_state_dict(
                 rank_pattern = {k.replace(f".{adapter_name}", ""): v for k, v in rank_pattern.items()}
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
-    
+
     elif config.peft_type == PeftType.BOFT:
         bias = config.bias
         if bias == "none":
@@ -185,7 +185,15 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3, PeftType.OFT, PeftType.BOFT):
+    if config.peft_type in (
+        PeftType.LORA,
+        PeftType.LOHA,
+        PeftType.LOKR,
+        PeftType.ADALORA,
+        PeftType.IA3,
+        PeftType.OFT,
+        PeftType.BOFT,
+    ):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",

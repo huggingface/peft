@@ -146,12 +146,10 @@ VALIDATION_PROMPT=${PROMPT_LIST[@]}
 INSTANCE_PROMPT="a photo of ${UNIQUE_TOKEN} ${CLASS_TOKEN}"
 CLASS_PROMPT="a photo of ${CLASS_TOKEN}"
 
-export CUDA_HOME="/is/software/nvidia/cuda-11.7"
-
 export MODEL_NAME="stabilityai/stable-diffusion-2-1" 
 # export MODEL_NAME="runwayml/stable-diffusion-v1-5"
 
-export PEFT_TYPE="boft"
+PEFT_TYPE="boft"
 BLOCK_NUM=8
 BLOCK_SIZE=0
 N_BUTTERFLY_FACTOR=1
@@ -187,8 +185,8 @@ accelerate launch train_dreambooth.py \
   --boft_dropout=0.1 \
   --boft_bias="boft_only" \
   --learning_rate=3e-5 \
-  --max_train_steps=2000 \
-  --checkpointing_steps=1000 \
-  --validation_steps=400 
-  # --enable_xformers_memory_efficient_attention \
-  # --report_to="wandb" \
+  --max_train_steps=1010 \
+  --checkpointing_steps=200 \
+  --validation_steps=200 \
+  --enable_xformers_memory_efficient_attention \
+  --report_to="wandb" \

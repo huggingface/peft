@@ -24,7 +24,7 @@ import shutil
 from pathlib import Path
 from PIL import Image
 
-sys.path.append('../../src')
+sys.path.append("../../src")
 import datasets
 import diffusers
 import torch
@@ -81,7 +81,6 @@ TEXT_ENCODER_TARGET_MODULES = ["q_proj", "v_proj"]
 
 @torch.no_grad()
 def save_adaptor(accelerator, output_dir, nets_dict):
-
     for net_key in nets_dict.keys():
         net_model = nets_dict[net_key]
         unwarpped_net = accelerator.unwrap_model(net_model)
@@ -98,6 +97,7 @@ def save_adaptor(accelerator, output_dir, nets_dict):
                 os.path.join(output_dir, net_key),
                 safe_serialization=True,
             )
+
 
 def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step):
     logger.info("Running validation... ")
@@ -194,6 +194,7 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
             logger.warn(f"image logging not implemented for {tracker.name}")
 
         return image_logs
+
 
 def make_train_dataset(args, tokenizer, accelerator):
     # Get the datasets: you can either provide your own training and evaluation files (see below)
@@ -337,10 +338,12 @@ def main(args):
     )
 
     if args.report_to == "wandb":
-        wandb_init = {"wandb": {
-            "name": args.wandb_run_name,
-            "mode": "online",
-        }}
+        wandb_init = {
+            "wandb": {
+                "name": args.wandb_run_name,
+                "mode": "online",
+            }
+        }
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -371,9 +374,7 @@ def main(args):
 
     # Load the tokenizer
     if args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.tokenizer_name, revision=args.revision, use_fast=False
-        )
+        tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_name, revision=args.revision, use_fast=False)
     elif args.pretrained_model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             args.pretrained_model_name_or_path,
@@ -383,31 +384,25 @@ def main(args):
         )
 
     # import correct text encoder class
-    text_encoder_cls = import_model_class_from_model_name_or_path(
-        args.pretrained_model_name_or_path, args.revision
-    )
+    text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
 
     # Load scheduler and models
-    noise_scheduler = DDIMScheduler.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="scheduler"
-    )
-    
+    noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+
     text_encoder = text_encoder_cls.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
     )
-    vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision
-    )
+    vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
     unet = UNet2DConditionNewModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision,
+        args.pretrained_model_name_or_path,
+        subfolder="unet",
+        revision=args.revision,
     )
 
     controlnet = ControlNetModel()
 
     if args.controlnet_model_name_or_path != "":
-        logger.info(
-            f"Loading existing controlnet weights from {args.controlnet_model_name_or_path}"
-        )
+        logger.info(f"Loading existing controlnet weights from {args.controlnet_model_name_or_path}")
         controlnet.load_state_dict(torch.load(args.controlnet_model_name_or_path))
 
     if args.use_boft:
@@ -422,7 +417,6 @@ def main(args):
 
         unet = get_peft_model(unet, config, adapter_name=args.wandb_run_name)
         unet.print_trainable_parameters()
-        
 
     vae.requires_grad_(False)
     controlnet.requires_grad_(True)
@@ -509,8 +503,7 @@ def main(args):
 
     if args.scale_lr:
         args.learning_rate = (
-            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size *
-            accelerator.num_processes
+            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
@@ -586,9 +579,7 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers(
-            args.wandb_project_name, config=vars(args), init_kwargs=wandb_init
-        )
+        accelerator.init_trackers(args.wandb_project_name, config=vars(args), init_kwargs=wandb_init)
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -598,12 +589,10 @@ def main(args):
     logger.info(f"  Num batches each epoch = {len(train_dataloader)}")
     logger.info(f"  Num Epochs = {args.num_train_epochs}")
     logger.info(f"  Instantaneous batch size per device = {args.train_batch_size}")
-    logger.info(
-        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
-    )
+    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logger.info(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
-    
+
     global_step = 0
     first_epoch = 0
 
@@ -619,7 +608,7 @@ def main(args):
                 path = "checkpoint-current"
                 dirs = [d for d in dirs if d.startswith("checkpoint") and d.endswith("0")]
                 dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-                
+
             else:
                 dirs = [d for d in dirs if d.startswith("checkpoint")]
                 dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
@@ -642,9 +631,7 @@ def main(args):
             initial_global_step = global_step
             resume_global_step = global_step * args.gradient_accumulation_steps
             first_epoch = global_step // num_update_steps_per_epoch
-            resume_step = resume_global_step % (
-                num_update_steps_per_epoch * args.gradient_accumulation_steps
-            )
+            resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
     else:
         initial_global_step = 0
 
@@ -658,11 +645,8 @@ def main(args):
     progress_bar.set_description("Steps")
 
     for epoch in range(first_epoch, args.num_train_epochs):
-        
         with TorchTracemalloc() as tracemalloc:
-
             for step, batch in enumerate(train_dataloader):
-
                 # Skip steps until we reach the resumed step
                 if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
                     if step % args.gradient_accumulation_steps == 0:
@@ -679,12 +663,10 @@ def main(args):
                     # Sample noise that we'll add to the latents
                     noise = torch.randn_like(latents)
                     bsz = latents.shape[0]
-                    
+
                     # Sample a random timestep for each image
                     timesteps = torch.randint(
-                        0,
-                        noise_scheduler.config.num_train_timesteps, (bsz, ),
-                        device=latents.device
+                        0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device
                     )
                     timesteps = timesteps.long()
 
@@ -716,9 +698,7 @@ def main(args):
                     elif noise_scheduler.config.prediction_type == "v_prediction":
                         target = noise_scheduler.get_velocity(latents, noise, timesteps)
                     else:
-                        raise ValueError(
-                            f"Unknown prediction type {noise_scheduler.config.prediction_type}"
-                        )
+                        raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
                     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
@@ -726,8 +706,11 @@ def main(args):
 
                     if accelerator.sync_gradients:
                         params_to_clip = (
-                            itertools.chain(controlnet.parameters(), text_encoder.parameters()) if
-                            args.train_text_encoder else itertools.chain(controlnet.parameters(), )
+                            itertools.chain(controlnet.parameters(), text_encoder.parameters())
+                            if args.train_text_encoder
+                            else itertools.chain(
+                                controlnet.parameters(),
+                            )
                         )
 
                         accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
@@ -746,12 +729,12 @@ def main(args):
                     step_save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
 
                     if accelerator.is_main_process:
-
-                        if args.validation_prompt is not None and global_step % args.validation_steps == 0 or global_step == 1:
-
-                            logger.info(
-                                f"Running validation... \n Generating {args.num_validation_images} images."
-                            )
+                        if (
+                            args.validation_prompt is not None
+                            and global_step % args.validation_steps == 0
+                            or global_step == 1
+                        ):
+                            logger.info(f"Running validation... \n Generating {args.num_validation_images} images.")
                             logger.info("Running validation... ")
 
                             with torch.no_grad():
@@ -768,17 +751,11 @@ def main(args):
                                 )
 
                         if global_step % args.checkpointing_steps == 0:
-
-                            save_adaptor(
-                                accelerator, step_save_path,
-                                {"controlnet": controlnet, "unet": unet}
-                            )
+                            save_adaptor(accelerator, step_save_path, {"controlnet": controlnet, "unet": unet})
 
                             # save text_encoder if any
                             if args.train_text_encoder:
-                                save_adaptor(
-                                    accelerator, step_save_path, {"text_encoder": text_encoder}
-                                )
+                                save_adaptor(accelerator, step_save_path, {"text_encoder": text_encoder})
 
                             accelerator.save_state(step_save_path)
 
@@ -793,36 +770,22 @@ def main(args):
                     break
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
+        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
+        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
+        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
         accelerator.print(
-            "GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin))
-        )
-        accelerator.print(
-            "GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used)
-        )
-        accelerator.print(
-            "GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked)
-        )
-        accelerator.print(
-            "GPU Total Peak Memory consumed during the train (max): {}".
-            format(tracemalloc.peaked + b2mb(tracemalloc.begin))
+            "GPU Total Peak Memory consumed during the train (max): {}".format(
+                tracemalloc.peaked + b2mb(tracemalloc.begin)
+            )
         )
 
+        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
+        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
+        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
         accelerator.print(
-            "CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin))
-        )
-        accelerator.print(
-            "CPU Memory consumed at the end of the train (end-begin): {}".format(
-                tracemalloc.cpu_used
+            "CPU Total Peak Memory consumed during the train (max): {}".format(
+                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
             )
-        )
-        accelerator.print(
-            "CPU Peak Memory consumed during the train (max-begin): {}".format(
-                tracemalloc.cpu_peaked
-            )
-        )
-        accelerator.print(
-            "CPU Total Peak Memory consumed during the train (max): {}".
-            format(tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin))
         )
 
     # Create the pipeline using using the trained modules and save it.

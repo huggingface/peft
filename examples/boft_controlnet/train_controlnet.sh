@@ -1,8 +1,8 @@
-# export HF_HOME="/is/cluster/zqiu/.cache"
 PEFT_TYPE="boft"
 BLOCK_NUM=8
 BLOCK_SIZE=0
 N_BUTTERFLY_FACTOR=1
+
 export CUDA_HOME="/is/software/nvidia/cuda-11.7"
 export DATASET_NAME="oftverse/control-celeba-hq"
 export PROJECT_NAME="controlnet_${PEFT_TYPE}"
@@ -23,9 +23,9 @@ accelerate launch train_controlnet.py \
   --dataset_name=$DATASET_NAME \
   --resolution=512 \
   --learning_rate=1e-5 \
-  --checkpointing_steps=5000 \
+  --checkpointing_steps=500 \
   --max_train_steps=50000 \
-  --validation_steps=2000 \
+  --validation_steps=5000 \
   --num_validation_images=12 \
   --train_batch_size=4 \
   --dataloader_num_workers=2 \

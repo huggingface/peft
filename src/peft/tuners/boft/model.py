@@ -20,6 +20,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
+from typing import List, Optional
 
 import torch
 from torch import nn
@@ -46,7 +47,7 @@ class BOFTModel(BaseTuner):
     Creates BOFT and OFT model from a pretrained transformers model. Paper:
     https://arxiv.org/abs/2311.06243
     https://arxiv.org/abs/2306.07280
-    
+
     Args:
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`BOFTConfig`]): The configuration of the BOFT model.
@@ -59,15 +60,14 @@ class BOFTModel(BaseTuner):
 
         ```py
         >>> import transformers
-        >>> from transformers import AutoModelForSeq2SeqLM, BOFTConfig 
+        >>> from transformers import AutoModelForSeq2SeqLM, BOFTConfig
         >>> from peft import BOFTConfig, get_peft_model
 
         >>> config = BOFTConfig(
         ...     boft_block_size=8,
-        ...     boft_block_num=args.block_num,
-        ...     boft_n_butterfly_factor=args.n_butterfly_factor,
+        ...     boft_n_butterfly_factor=1,
         ...     target_modules=["query", "value", "key", "output.dense", "mlp.fc1", "mlp.fc2"],
-        ...     boft_dropout=args.boft_dropout,
+        ...     boft_dropout=0.1,
         ...     bias="boft_only",
         ...     modules_to_save=["classifier"],
         ... )
@@ -84,7 +84,9 @@ class BOFTModel(BaseTuner):
         - **peft_config** ([`BOFTConfig`]): The configuration of the BOFT model.
     """
 
-    def __init__(self, model, config, adapter_name):
+    prefix: str = "boft_"
+
+    def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
     def _check_new_adapter_config(self, config: BOFTConfig) -> None:
@@ -113,8 +115,12 @@ class BOFTModel(BaseTuner):
         target,
         target_name,
         parent,
+        current_key,
         **optional_kwargs,
     ):
+        if current_key is None:
+            raise ValueError("Current Key shouldn't be `None`")
+
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "boft_block_size": boft_config.boft_block_size,
@@ -139,13 +145,11 @@ class BOFTModel(BaseTuner):
                 boft_config.boft_block_size,
                 boft_config.boft_block_num,
                 boft_config.boft_n_butterfly_factor,
-                boft_config.boft_bias_fit,
                 boft_config.boft_dropout,
                 boft_config.init_boft_weights,
             )
 
-    @staticmethod
-    def _replace_module(parent, child_name, new_module, child):
+    def _replace_module(self, parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
         # It's not necessary to set requires_grad here, as that is handled by
         # _mark_only_adapters_as_trainable
@@ -154,7 +158,6 @@ class BOFTModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
         if not hasattr(new_module, "base_layer"):
             new_module.weight = child.weight
             if hasattr(child, "bias"):
@@ -169,12 +172,12 @@ class BOFTModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "boft_" in name:
+            if self.prefix in name:
                 module.to(child.weight.device)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
-            if "boft_" not in n:
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
+            if self.prefix not in n:
                 p.requires_grad = False
 
         for active_adapter in self.active_adapters:
@@ -183,22 +186,24 @@ class BOFTModel(BaseTuner):
                 continue
 
             if bias == "all":
-                for n, p in self.model.named_parameters():
+                for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
             elif bias == "boft_only":
-                for m in self.model.modules():
+                for name, m in model.named_modules():
                     if isinstance(m, BOFTLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
-
     @staticmethod
     def _create_new_module(boft_config, adapter_name, target, **kwargs):
-        bias = kwargs.pop("bias", False)
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
 
-        if isinstance(target, torch.nn.Linear):
+        if isinstance(target_base_layer, torch.nn.Linear):
             in_features, out_features = target.in_features, target.out_features
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(
@@ -206,21 +211,20 @@ class BOFTModel(BaseTuner):
                     "Setting fan_in_fan_out to False."
                 )
                 kwargs["fan_in_fan_out"] = boft_config.fan_in_fan_out = False
+            new_module = Linear(target, adapter_name, **kwargs)
         else:
             raise ValueError(
-                f"Target module {target} is not supported. "
-                f"Currently, only `torch.nn.Linear` is supported."
+                f"Target module {target} is not supported. " f"Currently, only `torch.nn.Linear` is supported."
             )
-        new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
 
         return new_module
 
     def __getattr__(self, name: str):
-            """Forward missing attributes to the wrapped module."""
-            try:
-                return super().__getattr__(name)  # defer to nn.Module's logic
-            except AttributeError:
-                return getattr(self.model, name)
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.model, name)
 
     def get_peft_config_as_dict(self, inference: bool = False):
         config_dict = {}
@@ -252,7 +256,7 @@ class BOFTModel(BaseTuner):
 
     def set_adapter(self, adapter_name):
         for module in self.model.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, BOFTLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -268,28 +272,33 @@ class BOFTModel(BaseTuner):
             )
         return peft_config
 
-    def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False, safe_merge: bool = False):
-        key_list = [key for key, _ in self.model.named_modules() if "boft" not in key]
+    def _unload_and_optionally_merge(
+        self,
+        merge=True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[List[str]] = None,
+    ):
+        self._unloading_checks(adapter_names)
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:
                 continue
-            if isinstance(target, BOFTLayer):
-                bias = target.bias is not None
-                new_module = torch.nn.Linear(target.in_features, target.out_features, bias=bias)
-                if merge:
-                    target.merge(safe_merge=safe_merge)
-                self._replace_module(parent, target_name, new_module, target)
 
-            # save any additional trainable modules part of `modules_to_save`
-            if isinstance(target, ModulesToSaveWrapper):
+            if hasattr(target, "base_layer"):
+                if merge:
+                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
+            elif isinstance(target, ModulesToSaveWrapper):
+                # save any additional trainable modules part of `modules_to_save`
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
 
-    def delete_adapter(self, adapter_name: str):
+    def delete_adapter(self, adapter_name: str) -> None:
         """
         Deletes an existing adapter.
 
@@ -300,29 +309,20 @@ class BOFTModel(BaseTuner):
             raise ValueError(f"Adapter {adapter_name} does not exist")
         del self.peft_config[adapter_name]
 
-        key_list = [key for key, _ in self.model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        new_adapter = None
         for key in key_list:
             _, target, _ = _get_submodules(self.model, key)
             if isinstance(target, BOFTLayer):
-                for attr in [
-                    "boft_block_size",
-                    "boft_block_num",
-                    "boft_R",
-                    "boft_s",
-                    "boft_dropout",
-                ]:
-                    if adapter_name in getattr(target, attr):
-                        getattr(target, attr).pop(adapter_name)
-                if adapter_name in target.active_adapters:
-                    resetting_active_adapter = (
-                        list(self.peft_config.keys())[0] if len(self.peft_config) > 0 else "default"
-                    )
-                    warnings.warn(
-                        f"Adapter {adapter_name} was active which is now deleted. Setting active adapter to {resetting_active_adapter}. "
-                    )
-                    target.set_adapter(resetting_active_adapter)
+                target.delete_adapter(adapter_name)
+                if new_adapter is None:
+                    new_adapter = target.active_adapters[:]
 
-    def merge_and_unload(self, progressbar: bool = False, safe_merge: bool = False):
+        self.active_adapter = new_adapter or []
+
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ) -> torch.nn.Module:
         r"""
         This method merges the BOFT layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -333,11 +333,16 @@ class BOFTModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
 
         """
-        return self._unload_and_optionally_merge(progressbar=progressbar, safe_merge=safe_merge)
+        return self._unload_and_optionally_merge(
+            progressbar=progressbar, safe_merge=safe_merge, adapter_names=adapter_names
+        )
 
-    def unload(self):
+    def unload(self) -> torch.nn.Module:
         """
         Gets back the base model by removing all the boft modules without merging. This gives back the original base
         model.

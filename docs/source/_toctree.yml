@@ -36,6 +36,12 @@
       title: int8 training for automatic speech recognition
     - local: task_guides/dreambooth_lora
       title: DreamBooth
+  - title: OFT/BOFT
+    sections:
+    - local: task_guides/boft_dreambooth
+      title: Dreambooth finetuning with BOFT
+    - local: task_guides/boft_controlnet
+      title: Controllable generation with BOFT
 
 - title: Developer guides
   sections:
@@ -69,6 +75,8 @@
     title: Soft prompts
   - local: conceptual_guides/ia3
     title: IA3
+  - local: conceptual_guides/oft
+    title: OFT/BOFT
 
 - sections:
   - sections:
@@ -102,6 +110,8 @@
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
+    - local: package_reference/boft
+      title: BOFT
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/prefix_tuning

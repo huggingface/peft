@@ -22,25 +22,26 @@ class MHE_LoRA(nn.Module):
             self.extracted_params[name] = tensor.detach().clone()
 
         for name in self.extracted_params:
-            if 'attn' in name and 'processor' not in name:
-                if 'weight' in name:
-                    if 'to_q' in name:
-                        lora_down = name.replace('to_q', 'processor.to_q_lora.down')
-                        lora_up = name.replace('to_q', 'processor.to_q_lora.up')
-                    elif 'to_k' in name:
-                        lora_down = name.replace('to_k', 'processor.to_k_lora.down')
-                        lora_up = name.replace('to_k', 'processor.to_k_lora.up')
-                    elif 'to_v' in name:
-                        lora_down = name.replace('to_v', 'processor.to_v_lora.down')
-                        lora_up = name.replace('to_v', 'processor.to_v_lora.up')
-                    elif 'to_out' in name:
-                        lora_down = name.replace('to_out.0', 'processor.to_out_lora.down')
-                        lora_up = name.replace('to_out.0', 'processor.to_out_lora.up')
+            if "attn" in name and "processor" not in name:
+                if "weight" in name:
+                    if "to_q" in name:
+                        lora_down = name.replace("to_q", "processor.to_q_lora.down")
+                        lora_up = name.replace("to_q", "processor.to_q_lora.up")
+                    elif "to_k" in name:
+                        lora_down = name.replace("to_k", "processor.to_k_lora.down")
+                        lora_up = name.replace("to_k", "processor.to_k_lora.up")
+                    elif "to_v" in name:
+                        lora_down = name.replace("to_v", "processor.to_v_lora.down")
+                        lora_up = name.replace("to_v", "processor.to_v_lora.up")
+                    elif "to_out" in name:
+                        lora_down = name.replace("to_out.0", "processor.to_out_lora.down")
+                        lora_up = name.replace("to_out.0", "processor.to_out_lora.up")
                     else:
                         pass
                     with torch.no_grad():
-                        self.extracted_params[name] += self.extracted_params[lora_up].cuda(
-                        ) @ self.extracted_params[lora_down].cuda()
+                        self.extracted_params[name] += (
+                            self.extracted_params[lora_up].cuda() @ self.extracted_params[lora_down].cuda()
+                        )
                     keys_to_delete.append(lora_up)
                     keys_to_delete.append(lora_down)
 
@@ -68,7 +69,7 @@ class MHE_LoRA(nn.Module):
             inner_pro = torch.matmul(filt.t(), filt)
             inner_pro /= norm_mat
 
-            cross_terms = (2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda())
+            cross_terms = 2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda()
             final = torch.pow(cross_terms, torch.ones_like(cross_terms) * (-0.5))
             final -= torch.tril(final)
             cnt = n_filt * (n_filt - 1) / 2.0
@@ -87,7 +88,7 @@ class MHE_LoRA(nn.Module):
             inner_pro = torch.matmul(filt.t(), filt)
             inner_pro /= norm_mat
 
-            cross_terms = (2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda())
+            cross_terms = 2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda()
             final = torch.pow(cross_terms, torch.ones_like(cross_terms) * (-0.5))
             final -= torch.tril(final)
             cnt = n_filt * (n_filt - 1) / 2.0
@@ -121,8 +122,7 @@ def project(R, eps):
 def project_batch(R, eps=1e-5):
     # scaling factor for each of the smaller block matrix
     eps = eps * 1 / torch.sqrt(torch.tensor(R.shape[0]))
-    I = torch.zeros((R.size(1), R.size(1)), device=R.device,
-                    dtype=R.dtype).unsqueeze(0).expand_as(R)
+    I = torch.zeros((R.size(1), R.size(1)), device=R.device, dtype=R.dtype).unsqueeze(0).expand_as(R)
     diff = R - I
     norm_diff = torch.norm(R - I, dim=(1, 2), keepdim=True)
     mask = (norm_diff <= eps).bool()
@@ -147,16 +147,16 @@ class MHE_OFT(nn.Module):
             self.extracted_params[name] = tensor.detach().clone()
 
         for name in self.extracted_params:
-            if 'attn' in name and 'processor' not in name:
-                if 'weight' in name:
-                    if 'to_q' in name:
-                        oft_R = name.replace('to_q.weight', 'processor.to_q_oft.R')
-                    elif 'to_k' in name:
-                        oft_R = name.replace('to_k.weight', 'processor.to_k_oft.R')
-                    elif 'to_v' in name:
-                        oft_R = name.replace('to_v.weight', 'processor.to_v_oft.R')
-                    elif 'to_out' in name:
-                        oft_R = name.replace('to_out.0.weight', 'processor.to_out_oft.R')
+            if "attn" in name and "processor" not in name:
+                if "weight" in name:
+                    if "to_q" in name:
+                        oft_R = name.replace("to_q.weight", "processor.to_q_oft.R")
+                    elif "to_k" in name:
+                        oft_R = name.replace("to_k.weight", "processor.to_k_oft.R")
+                    elif "to_v" in name:
+                        oft_R = name.replace("to_v.weight", "processor.to_v_oft.R")
+                    elif "to_out" in name:
+                        oft_R = name.replace("to_out.0.weight", "processor.to_out_oft.R")
                     else:
                         pass
 
@@ -172,8 +172,7 @@ class MHE_OFT(nn.Module):
                             R.copy_(project_batch(R, eps=self.eps))
                             orth_rotate = self.cayley_batch(R)
 
-                        self.extracted_params[
-                            name] = self.extracted_params[name] @ self.block_diagonal(orth_rotate)
+                        self.extracted_params[name] = self.extracted_params[name] @ self.block_diagonal(orth_rotate)
                     keys_to_delete.append(oft_R)
 
         for key in keys_to_delete:
@@ -240,7 +239,7 @@ class MHE_OFT(nn.Module):
             inner_pro = torch.matmul(filt.t(), filt)
             inner_pro /= norm_mat
 
-            cross_terms = (2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda())
+            cross_terms = 2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda()
             final = torch.pow(cross_terms, torch.ones_like(cross_terms) * (-0.5))
             final -= torch.tril(final)
             cnt = n_filt * (n_filt - 1) / 2.0
@@ -259,7 +258,7 @@ class MHE_OFT(nn.Module):
             inner_pro = torch.matmul(filt.t(), filt)
             inner_pro /= norm_mat
 
-            cross_terms = (2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda())
+            cross_terms = 2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda()
             final = torch.pow(cross_terms, torch.ones_like(cross_terms) * (-0.5))
             final -= torch.tril(final)
             cnt = n_filt * (n_filt - 1) / 2.0
@@ -300,8 +299,8 @@ class MHE_db:
         # self.model.load_state_dict(model.state_dict())
         # self.model = self.copy_without_grad(model)
 
-        #self.extracted_params = {}
-        #for name, param in model.named_parameters():
+        # self.extracted_params = {}
+        # for name, param in model.named_parameters():
         #    self.extracted_params[name] = param
 
         self.extracted_params = {}
@@ -322,7 +321,7 @@ class MHE_db:
             inner_pro = torch.matmul(filt.t(), filt)
             inner_pro /= norm_mat
 
-            cross_terms = (2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda())
+            cross_terms = 2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda()
             final = torch.pow(cross_terms, torch.ones_like(cross_terms) * (-0.5))
             final -= torch.tril(final)
             cnt = n_filt * (n_filt - 1) / 2.0
@@ -341,7 +340,7 @@ class MHE_db:
             inner_pro = torch.matmul(filt.t(), filt)
             inner_pro /= norm_mat
 
-            cross_terms = (2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda())
+            cross_terms = 2.0 - 2.0 * inner_pro + torch.diag(torch.tensor([1.0] * n_filt)).cuda()
             final = torch.pow(cross_terms, torch.ones_like(cross_terms) * (-0.5))
             final -= torch.tril(final)
             cnt = n_filt * (n_filt - 1) / 2.0

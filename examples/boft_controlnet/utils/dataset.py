@@ -10,6 +10,7 @@ from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
 from datasets import load_dataset
 
+
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
 
@@ -22,7 +23,6 @@ def image_grid(imgs, rows, cols):
 
 
 def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerator):
-
     pipeline = LightControlNetPipeline.from_pretrained(
         args.pretrained_model_name_or_path,
         controlnet=accelerator.unwrap_model(controlnet, keep_fp32_wrapper=True),
@@ -43,21 +43,25 @@ def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerato
 
     for idx in range(args.num_validation_images):
         data = val_dataset[idx]
-        validation_prompt = data['text']
-        validation_image = data['conditioning_pixel_values']
+        validation_prompt = data["text"]
+        validation_image = data["conditioning_pixel_values"]
 
         image = pipeline(
             validation_prompt,
             [validation_image],
             num_inference_steps=50,
             generator=generator,
-        )[0][0]
+        )[
+            0
+        ][0]
 
-        image_logs.append({
-            "validation_image": validation_image,
-            "image": image,
-            "validation_prompt": validation_prompt,
-        })
+        image_logs.append(
+            {
+                "validation_image": validation_image,
+                "image": image,
+                "validation_prompt": validation_prompt,
+            }
+        )
 
     for tracker in accelerator.trackers:
         formatted_images = []
@@ -67,9 +71,7 @@ def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerato
             validation_prompt = log["validation_prompt"]
             validation_image = log["validation_image"]
 
-            formatted_images.append(
-                wandb.Image(validation_image, caption="Controlnet conditioning")
-            )
+            formatted_images.append(wandb.Image(validation_image, caption="Controlnet conditioning"))
 
             image = wandb.Image(image, caption=validation_prompt)
             formatted_images.append(image)
