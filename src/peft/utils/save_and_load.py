@@ -135,7 +135,7 @@ def get_peft_model_state_dict(
         vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
         model_id = getattr(config, "base_model_name_or_path", None)
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
-        if vocab_size and model_id and (vocab_size != AutoConfig.from_pretrained(model_id).vocab_size):
+        if vocab_size and model_id and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size):
             warnings.warn(
                 "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
             )
