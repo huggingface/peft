@@ -546,7 +546,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
 
     if not isinstance(model, PreTrainedModel):
         raise ValueError(
-            f"Only instances of PreTrainedModel are supported for the '{INCLUDE_LINEAR_LAYERS_SHORTHAND}' flag"
+            f"Only instances of PreTrainedModel support `target_modules={INCLUDE_LINEAR_LAYERS_SHORTHAND!r}`"
         )
 
     is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
