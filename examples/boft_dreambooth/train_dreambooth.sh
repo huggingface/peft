@@ -154,15 +154,14 @@ export MODEL_NAME="stabilityai/stable-diffusion-2-1"
 export PEFT_TYPE="boft"
 BLOCK_NUM=8
 BLOCK_SIZE=0
-N_BUTTERFLY_FACTOR=0
+N_BUTTERFLY_FACTOR=1
+
 export PROJECT_NAME="dreambooth_${PEFT_TYPE}"
 export RUN_NAME="${SELECTED_SUBJECT}_${PEFT_TYPE}_${BLOCK_NUM}${BLOCK_SIZE}${N_BUTTERFLY_FACTOR}"
 export INSTANCE_DIR="./data/dreambooth/dataset/${SELECTED_SUBJECT}"
 export CLASS_DIR="./data/class_data/${CLASS_TOKEN}"
 export OUTPUT_DIR="./data/output/${PEFT_TYPE}"
 
-. /home/zqiu/miniconda3/etc/profile.d/conda.sh
-conda activate peft
 
 accelerate launch train_dreambooth.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \

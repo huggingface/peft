@@ -1,11 +1,10 @@
-transformers
-accelerate
+transformers==4.36.2
+accelerate==0.25.0
 evaluate
 tqdm
-datasets
-diffusers
+datasets==2.16.1
+diffusers==0.17.1
 Pillow
-torchvision
 huggingface_hub
 safetensors
-wandb
+wandb==0.16.1

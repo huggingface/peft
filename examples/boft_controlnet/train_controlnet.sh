@@ -2,7 +2,7 @@
 PEFT_TYPE="boft"
 BLOCK_NUM=8
 BLOCK_SIZE=0
-N_BUTTERFLY_FACTOR=0
+N_BUTTERFLY_FACTOR=1
 export CUDA_HOME="/is/software/nvidia/cuda-11.7"
 export DATASET_NAME="oftverse/control-celeba-hq"
 export PROJECT_NAME="controlnet_${PEFT_TYPE}"
@@ -13,9 +13,6 @@ export MODEL_NAME="stabilityai/stable-diffusion-2-1"
 # export MODEL_NAME="runwayml/stable-diffusion-v1-5"
 
 export OUTPUT_DIR="./output/${DATASET_NAME}/${RUN_NAME}"
-
-. /home/zqiu/miniconda3/etc/profile.d/conda.sh
-conda activate peft
 
 accelerate launch train_controlnet.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
