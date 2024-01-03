@@ -28,7 +28,6 @@ from transformers.pytorch_utils import Conv1D
 from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
-from ..import_utils import is_bnb_available
 from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
@@ -549,16 +548,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
             f"Only instances of PreTrainedModel support `target_modules={INCLUDE_LINEAR_LAYERS_SHORTHAND!r}`"
         )
 
-    is_loaded_in_8bit = getattr(model, "is_loaded_in_8bit", False)
-    is_loaded_in_4bit = getattr(model, "is_loaded_in_4bit", False)
-    # match with a list of linear layer classes. this is needed as sometimes you can
-    # have a mix Eg. T5 with 8bit has instances of torch.nn.Linear and bnb.nn.Linear8bitLt
     linear_classes = (torch.nn.Linear, Conv1D)
-    if is_bnb_available():
-        import bitsandbytes as bnb
-
-        linear_classes = (bnb.nn.Linear8bitLt,) + linear_classes if is_loaded_in_8bit else linear_classes
-        linear_classes = (bnb.nn.Linear4bit,) + linear_classes if is_loaded_in_4bit else linear_classes
 
     linear_module_names = set()
     for name, module in model.named_modules():
