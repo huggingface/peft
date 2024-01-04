@@ -14,7 +14,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import importlib
 import math
 import operator
 import re
@@ -28,7 +27,6 @@ from typing import List, Optional
 import torch
 from torch import nn
 from tqdm import tqdm
-from transformers.pytorch_utils import Conv1D
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
@@ -37,13 +35,13 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
-    get_auto_gptq_quant_linear,
     get_quantization_config,
 )
 
 from .config import LoraConfig
-from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
+from .gptq import dispatch_gptq
+from .layer import Conv2d, LoraLayer, dispatch_default
+from .tp_layer import dispatch_megatron
 
 
 class LoraModel(BaseTuner):
@@ -137,7 +135,6 @@ class LoraModel(BaseTuner):
         target_name,
         parent,
         current_key,
-        **optional_kwargs,
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
@@ -145,10 +142,9 @@ class LoraModel(BaseTuner):
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
         target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
-
         r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
-        bias = hasattr(target, "bias") and target.bias is not None
+
         kwargs = {
             "r": r,
             "lora_alpha": alpha,
@@ -156,10 +152,9 @@ class LoraModel(BaseTuner):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
-        kwargs["loaded_in_8bit"] = optional_kwargs.pop("loaded_in_8bit", False)
-        kwargs["loaded_in_4bit"] = optional_kwargs.pop("loaded_in_4bit", False)
-        kwargs["bias"] = bias
 
         quantization_config = get_quantization_config(self.model, method="gptq")
         if quantization_config is not None:
@@ -234,103 +229,31 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
+        # because the first match is always used. Therefore, the default layers should be checked last.
+        dispatchers = []
+
         # avoid eager bnb import
         if is_bnb_available():
-            import bitsandbytes as bnb
+            from .bnb import dispatch_bnb_8bit
 
-            from .bnb import Linear8bitLt
+            dispatchers.append(dispatch_bnb_8bit)
 
         if is_bnb_4bit_available():
-            from .bnb import Linear4bit
+            from .bnb import dispatch_bnb_4bit
 
-        gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
-        AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
+            dispatchers.append(dispatch_bnb_4bit)
 
-        loaded_in_8bit = kwargs.pop("loaded_in_8bit", False)
-        loaded_in_4bit = kwargs.pop("loaded_in_4bit", False)
+        dispatchers.extend([dispatch_gptq, dispatch_megatron, dispatch_default])
 
-        if isinstance(target, BaseTunerLayer):
-            target_base_layer = target.get_base_layer()
-        else:
-            target_base_layer = target
+        new_module = None
+        for dispatcher in dispatchers:
+            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            if new_module is not None:  # first match wins
+                break
 
-        megatron_core = None
-        if lora_config.megatron_config:
-            megatron_core = importlib.import_module(lora_config.megatron_core)
-
-        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
-            eightbit_kwargs = kwargs.copy()
-            eightbit_kwargs.update(
-                {
-                    "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
-                    "threshold": target.state.threshold,
-                    "index": target.index,
-                }
-            )
-            new_module = Linear8bitLt(target, adapter_name, **eightbit_kwargs)
-        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
-            fourbit_kwargs = kwargs.copy()
-            fourbit_kwargs.update(
-                {
-                    "compute_dtype": target_base_layer.compute_dtype,
-                    "compress_statistics": target_base_layer.weight.compress_statistics,
-                    "quant_type": target_base_layer.weight.quant_type,
-                }
-            )
-            new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
-        elif AutoGPTQQuantLinear is not None and isinstance(target_base_layer, AutoGPTQQuantLinear):
-            new_module = QuantLinear(target, adapter_name, **kwargs)
-            target.qweight = target_base_layer.qweight
-        elif isinstance(target_base_layer, torch.nn.Embedding):
-            embedding_kwargs = kwargs.copy()
-            embedding_kwargs.pop("fan_in_fan_out", None)
-            embedding_kwargs.update(lora_config.loftq_config)
-            new_module = Embedding(target, adapter_name, **embedding_kwargs)
-        elif isinstance(target_base_layer, torch.nn.Conv2d):
-            kwargs.update(lora_config.loftq_config)
-            new_module = Conv2d(target, adapter_name, **kwargs)
-        elif isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-            kwargs.update(lora_config.loftq_config)
-            new_module = Linear(target, adapter_name, **kwargs)
-        elif megatron_core and isinstance(
-            target_base_layer,
-            (megatron_core.tensor_parallel.ColumnParallelLinear, megatron_core.tensor_parallel.RowParallelLinear),
-        ):
-            from .tp_layer import LoraParallelLinear
-
-            megatron_kwargs = kwargs.copy()
-            megatron_config = lora_config.megatron_config
-            if isinstance(megatron_config, dict):
-                transformer_config_class = megatron_core.transformer.transformer_config.TransformerConfig
-                megatron_config = transformer_config_class(**lora_config.megatron_config)
-            megatron_kwargs["megatron_config"] = megatron_config
-            if megatron_kwargs["fan_in_fan_out"]:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `ColumnParallelLinear` "
-                    "or `RowParallelLinear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                megatron_kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
-            new_module = LoraParallelLinear(
-                base_layer=target, adapter_name=adapter_name, backend=megatron_core.tensor_parallel, **megatron_kwargs
-            )
-        elif isinstance(target_base_layer, Conv1D):
-            if not kwargs["fan_in_fan_out"]:
-                warnings.warn(
-                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                    "Setting fan_in_fan_out to True."
-                )
-                kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
-            kwargs.update(lora_config.loftq_config)
-            new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
-        else:
+        if new_module is None:
+            # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
