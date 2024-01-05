@@ -43,7 +43,7 @@ from peft.utils import (
 
 from .config import LoraConfig
 from .gptq import QuantLinear
-from .layer import Conv2d, Embedding, Linear, LoraLayer
+from .layer import Conv2d, Embedding, Linear, LoraLayer, MultiheadAttention
 
 
 class LoraModel(BaseTuner):
@@ -208,7 +208,16 @@ class LoraModel(BaseTuner):
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
-                weight = child.qweight if hasattr(child, "qweight") else child.weight
+                if hasattr(child, "qweight"):
+                    weight = child.qweight
+                elif hasattr(child, "weight"):
+                    weight = child.weight
+                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
+                    weight = child.in_proj_weight
+                elif getattr(child, "q_proj_weight", None) is not None:   # MHA
+                    weight = child.q_proj_weight
+                else:
+                    raise ValueError(f"Encountered unknown module type: {type(child)}")
                 module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
@@ -290,6 +299,9 @@ class LoraModel(BaseTuner):
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             kwargs.update(lora_config.loftq_config)
             new_module = Conv2d(target, adapter_name, **kwargs)
+        elif isinstance(target_base_layer, torch.nn.MultiheadAttention):
+            kwargs.update(lora_config.loftq_config)
+            new_module = MultiheadAttention(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Linear):
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(
@@ -333,7 +345,8 @@ class LoraModel(BaseTuner):
         else:
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`, "
+                "`torch.nn.MultiheadAttention.`"
             )
 
         return new_module
