@@ -58,6 +58,7 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
     #######
     # IA³ #
     #######
@@ -402,6 +403,21 @@ class ModelConv2D(nn.Module):
         return X
 
 
+class ModelMha(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(10, 2)
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X, _ = self.mha(X, X, X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -425,6 +441,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "MHA":
+            return ModelMha().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -543,7 +562,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        # we get exploding gradients with MHA when learning rate is too high
+        lr = 0.5 if "mha" not in model_id.lower() else 1e-3
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -580,7 +601,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        # we get exploding gradients with MHA when learning rate is too high
+        lr = 0.5 if "mha" not in model_id.lower() else 1e-3
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)

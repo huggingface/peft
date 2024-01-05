@@ -832,6 +832,27 @@ class MultiheadAttention(nn.Module, LoraLayer):
         result = (result[0].to(previous_dtype), result[1].to(previous_dtype) if result[1] is not None else result[1])
         return result
 
+    def _restore_weights(self):
+        # Restore the weights as registered parameters on the base layer.
+        # This is necessary because the way that weights are merged/unmerged (which is necessary for forward to work
+        # correctly), the Module "forgets" these attributes. Therefore, we need to call register_parameter explicitly.
+        # We cannot call register_parameter for merging/unmerging because that cuts them off from the autograd graph.
+        # Note that this is hacky, since we need to ensure that _restore_weights is called by each method that needs it.
+
+        # TODO work with separate weights
+        base_layer = self.get_base_layer()
+        weight = base_layer.in_proj_weight.data
+        del base_layer.in_proj_weight
+        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight))
+
+    def state_dict(self, *args, **kwargs):
+        self._restore_weights()
+        return super().state_dict(*args, **kwargs)
+
+    def named_modules(self, *args, **kwargs):
+        self._restore_weights()
+        return super().named_modules(*args, **kwargs)
+
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep
