@@ -214,7 +214,7 @@ class LoraModel(BaseTuner):
                     weight = child.weight
                 elif getattr(child, "in_proj_weight", None) is not None:  # MHA
                     weight = child.in_proj_weight
-                elif getattr(child, "q_proj_weight", None) is not None:   # MHA
+                elif getattr(child, "q_proj_weight", None) is not None:  # MHA
                     weight = child.q_proj_weight
                 else:
                     raise ValueError(f"Encountered unknown module type: {type(child)}")

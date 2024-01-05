@@ -829,10 +829,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 # i.e. there is was no merged layer before
                 self.unmerge()
 
-        result = (
-            result[0].to(previous_dtype),
-            result[1].to(previous_dtype) if result[1] is not None else result[1]
-        )
+        result = (result[0].to(previous_dtype), result[1].to(previous_dtype) if result[1] is not None else result[1])
         return result
 
     # def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
