@@ -193,11 +193,6 @@ class LoraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
         if getattr(child, "state", None) is not None:
             if hasattr(new_module, "base_layer"):
                 new_module.base_layer.state = child.state
