@@ -535,6 +535,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         return self.get_base_model()(*args, **kwargs)
 
+    def generate(self, *args: Any, **kwargs: Any):
+        """
+        Generate output.
+        """
+        return self.get_base_model().generate(*args, **kwargs)
+
     def _get_base_model_class(self, is_prompt_tuning=False):
         """
         Returns the base model class.
