@@ -832,35 +832,6 @@ class MultiheadAttention(nn.Module, LoraLayer):
         result = (result[0].to(previous_dtype), result[1].to(previous_dtype) if result[1] is not None else result[1])
         return result
 
-    # def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-    #     previous_dtype = x.dtype
-
-    #     if self.disable_adapters:
-    #         if self.merged:
-    #             self.unmerge()
-    #         result = self.base_layer(x, *args, **kwargs)
-    #     elif self.merged:
-    #         result = self.base_layer(x, *args, **kwargs)
-    #     else:
-    #         assert len(self.active_adapters) <= 1, "multiple adapters not supported yet for MHA"
-    #         for active_adapter in self.active_adapters:
-    #             if active_adapter not in self.lora_A.keys():
-    #                 continue
-
-    #             try:
-    #                 self.merge(adapter_names=[active_adapter])
-    #                 result = self.base_layer(x, *args, **kwargs)
-    #             finally:
-    #                 # it's safe to call unmerge all adapters here because we checked that not self.merged, i.e. there is
-    #                 # no merged layer
-    #                 self.unmerge()
-
-    #     result = (
-    #         result[0].to(previous_dtype),
-    #         result[1].to(previous_dtype) if result[1] is not None else result[1]
-    #     )
-    #     return result
-
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep
