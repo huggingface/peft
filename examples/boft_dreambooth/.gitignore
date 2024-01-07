@@ -1,7 +1,0 @@
-.ipynb_checkpoints/
-logs/
-wandb/
-peft/
-data/class_data
-data/output
-train_dreambooth_mpi.sh

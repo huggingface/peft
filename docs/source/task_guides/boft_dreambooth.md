@@ -22,7 +22,7 @@ By using BOFT from 🤗 PEFT, we can significantly reduce the number of trainabl
 
 As a member of the **orthogonal finetuning** class, BOFT presents a systematic and principled method for fine-tuning. It possesses several unique properties and has demonstrated superior performance compared to LoRA in a variety of scenarios. For further details on BOFT, please consult the [PEFT's GitHub repo's concept guide OFT](https://https://huggingface.co/docs/peft/index), the [original BOFT paper](https://arxiv.org/abs/2311.06243) and the [original OFT paper](https://arxiv.org/abs/2306.07280).
 
-In this guide we provide a Dreambooth fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth). You can try it out and finetune on your custom images.
+In this guide we provide a Dreambooth fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth). This implementation is adapted from [peft's lora_dreambooth](https://github.com/huggingface/peft/tree/main/examples/lora_dreambooth). You can try it out and finetune on your custom images.
 
 ## Set up your environment
 
@@ -51,7 +51,7 @@ pip install git+https://github.com/huggingface/peft
 
 ## Download the data
 
-[dreambooth](https://github.com/google/dreambooth) dataset should have been automatically cloned in the following structure as a submodule. If not, `git submodule update --init --recursive`
+[dreambooth](https://github.com/google/dreambooth) dataset should have been automatically cloned in the following structure as a submodule if cloned with `--recursive`. Otherwise, `git submodule update --init --recursive` to clone the submodule.
 
 ```
 boft_dreambooth
@@ -66,9 +66,7 @@ boft_dreambooth
 
 You can also put your custom images into `boft_dreambooth/data/dreambooth`.
 
-
 ## Finetune Dreambooth with BOFT
-
 
 ```python
 ./train_dreambooth.sh
@@ -77,13 +75,14 @@ You can also put your custom images into `boft_dreambooth/data/dreambooth`.
 or using the following script arguments:
 
 ```bash
-export MODEL_NAME="CompVis/stable-diffusion-v1-4" 
+export MODEL_NAME="CompVis/stable-diffusion-v1-4"
 export INSTANCE_DIR="path-to-instance-images"
 export CLASS_DIR="path-to-class-images"
 export OUTPUT_DIR="path-to-save-model"
 ```
 
-Here: 
+Here:
+
 - `INSTANCE_DIR`: The directory containing the images that you intend to use for training your model.
 - `CLASS_DIR`: The directory containing class-specific images. In this example, we use prior preservation to avoid overfitting and language-drift. For prior preservation, you need other images of the same class as part of the training process. However, these images can be generated and the training script will save them to a local path you specify here.
 - `OUTPUT_DIR`: The destination folder for storing the trained model's weights.
@@ -92,11 +91,11 @@ To learn more about DreamBooth fine-tuning with prior-preserving loss, check out
 
 Launch the training script with `accelerate` and pass hyperparameters, as well as LoRa-specific arguments to it such as:
 
-- `use_boft`: Enables BOFT in the training script. 
-- `boft_block_size`: the BOFT matrix block size across different layers, expressed in ``int``. Smaller block size results in sparser update matrices with fewer trainable paramters. **Note**, please choose it to be dividable to most layer ``in_features`` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
-- `boft_block_num`: the number of BOFT matrix blocks across different layers, expressed in ``int``. Fewer blocks result in sparser update matrices with fewer trainable paramters. **Note**, please choose it to be dividable to most layer ``in_features`` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
+- `use_boft`: Enables BOFT in the training script.
+- `boft_block_size`: the BOFT matrix block size across different layers, expressed in `int`. Smaller block size results in sparser update matrices with fewer trainable paramters. **Note**, please choose it to be dividable to most layer `in_features` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
+- `boft_block_num`: the number of BOFT matrix blocks across different layers, expressed in `int`. Fewer blocks result in sparser update matrices with fewer trainable paramters. **Note**, please choose it to be dividable to most layer `in_features` dimension, e.g., 4, 8, 16. Also, you can only specify either `boft_block_size` or `boft_block_num`, but not both simultaneously, because `boft_block_size` x `boft_block_num` = layer dimension.
 - `boft_n_butterfly_factor`: the number of butterfly factors. **Note**, for `boft_n_butterfly_factor=1`, BOFT is the same as vanilla OFT, for `boft_n_butterfly_factor=2`, the effective block size of OFT becomes twice as big and the number of blocks become half.
-- `bias`: specify if the ``bias`` paramteres should be traind. Can be ``none``, ``all`` or ``boft_only``.
+- `bias`: specify if the `bias` paramteres should be traind. Can be `none`, `all` or `boft_only`.
 - `boft_dropout`: specify the probability of multiplicative dropout.
 
 Here's what the full set of script arguments may look like:
@@ -111,7 +110,7 @@ VALIDATION_PROMPT=${PROMPT_LIST[@]}
 INSTANCE_PROMPT="a photo of ${UNIQUE_TOKEN} ${CLASS_TOKEN}"
 CLASS_PROMPT="a photo of ${CLASS_TOKEN}"
 
-export MODEL_NAME="stabilityai/stable-diffusion-2-1" 
+export MODEL_NAME="stabilityai/stable-diffusion-2-1"
 # export MODEL_NAME="runwayml/stable-diffusion-v1-5"
 export PROJECT_NAME="dreambooth_${PEFT_TYPE}"
 export RUN_NAME="${SELECTED_SUBJECT}_${PEFT_TYPE}_${BLOCK_NUM}${BLOCK_SIZE}${N_BUTTERFLY_FACTOR}"
@@ -152,6 +151,7 @@ accelerate launch train_dreambooth.py \
 ```
 
 or use this training script:
+
 ```bash
 ./train_dreambooth.sh $idx
 ```

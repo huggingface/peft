@@ -11,8 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
@@ -26,8 +28,6 @@ from diffusers.models.unet_2d_blocks import (
     CrossAttnDownBlock2D,
     DownBlock2D,
 )
-from diffusers.models.unet_2d_condition import UNet2DConditionModel
-
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

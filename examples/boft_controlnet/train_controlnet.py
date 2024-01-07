@@ -17,38 +17,29 @@ import itertools
 import logging
 import math
 import os
-import sys
-import argparse
-import random
-import shutil
 from pathlib import Path
-from PIL import Image
 
 import datasets
 import diffusers
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from torchvision import transforms
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from diffusers import (
     AutoencoderKL,
-    DDPMScheduler,
-    PNDMScheduler,
     DDIMScheduler,
 )
 from diffusers.optimization import get_scheduler
-from diffusers.utils import check_min_version, is_wandb_available
+from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from packaging import version
 from peft import BOFTConfig, get_peft_model
 from peft.peft_model import PeftModel
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
-import wandb
 
 from utils.args_loader import (
     import_model_class_from_model_name_or_path,
@@ -57,7 +48,6 @@ from utils.args_loader import (
 from utils.dataset import collate_fn, log_validation, make_dataset
 from utils.tracemalloc import TorchTracemalloc, b2mb
 from utils.light_controlnet import ControlNetModel
-from utils.pipeline_controlnet import LightControlNetPipeline
 from utils.unet_2d_condition import UNet2DConditionNewModel
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -88,103 +78,6 @@ def save_adaptor(accelerator, output_dir, nets_dict):
                 os.path.join(output_dir, net_key),
                 safe_serialization=True,
             )
-
-
-def log_validation1(vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step):
-    logger.info("Running validation... ")
-
-    controlnet = accelerator.unwrap_model(controlnet)
-
-    pipeline = LightControlNetPipeline.from_pretrained(
-        args.pretrained_model_name_or_path,
-        controlnet=accelerator.unwrap_model(controlnet, keep_fp32_wrapper=True),
-        unet=accelerator.unwrap_model(unet, keep_fp32_wrapper=True).model,
-        text_encoder=accelerator.unwrap_model(text_encoder, keep_fp32_wrapper=True),
-        safety_checker=None,
-        revision=args.revision,
-    )
-
-    pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
-    pipeline = pipeline.to(accelerator.device)
-    pipeline.set_progress_bar_config(disable=True)
-
-    if args.enable_xformers_memory_efficient_attention:
-        pipeline.enable_xformers_memory_efficient_attention()
-
-    if args.seed is None:
-        generator = None
-    else:
-        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
-
-    if len(args.validation_image) == len(args.validation_prompt):
-        validation_images = args.validation_image
-        validation_prompts = args.validation_prompt
-    elif len(args.validation_image) == 1:
-        validation_images = args.validation_image * len(args.validation_prompt)
-        validation_prompts = args.validation_prompt
-    elif len(args.validation_prompt) == 1:
-        validation_images = args.validation_image
-        validation_prompts = args.validation_prompt * len(args.validation_image)
-    else:
-        raise ValueError(
-            "number of `args.validation_image` and `args.validation_prompt` should be checked in `parse_args`"
-        )
-
-    image_logs = []
-
-    for validation_prompt, validation_image in zip(validation_prompts, validation_images):
-        validation_image = Image.open(validation_image).convert("RGB")
-
-        images = []
-
-        for _ in range(args.num_validation_images):
-            with torch.autocast("cuda"):
-                image = pipeline(
-                    validation_prompt, validation_image, num_inference_steps=20, generator=generator
-                ).images[0]
-
-            images.append(image)
-
-        image_logs.append(
-            {"validation_image": validation_image, "images": images, "validation_prompt": validation_prompt}
-        )
-
-    for tracker in accelerator.trackers:
-        if tracker.name == "tensorboard":
-            for log in image_logs:
-                images = log["images"]
-                validation_prompt = log["validation_prompt"]
-                validation_image = log["validation_image"]
-
-                formatted_images = []
-
-                formatted_images.append(np.asarray(validation_image))
-
-                for image in images:
-                    formatted_images.append(np.asarray(image))
-
-                formatted_images = np.stack(formatted_images)
-
-                tracker.writer.add_images(validation_prompt, formatted_images, step, dataformats="NHWC")
-        elif tracker.name == "wandb":
-            formatted_images = []
-
-            for log in image_logs:
-                images = log["images"]
-                validation_prompt = log["validation_prompt"]
-                validation_image = log["validation_image"]
-
-                formatted_images.append(wandb.Image(validation_image, caption="Controlnet conditioning"))
-
-                for image in images:
-                    image = wandb.Image(image, caption=validation_prompt)
-                    formatted_images.append(image)
-
-            tracker.log({"validation": formatted_images})
-        else:
-            logger.warn(f"image logging not implemented for {tracker.name}")
-
-        return image_logs
 
 
 def main(args):

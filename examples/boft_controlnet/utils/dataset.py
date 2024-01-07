@@ -1,11 +1,8 @@
-import json
-import os
 import random
 import wandb
-from diffusers import UniPCMultistepScheduler, DDIMScheduler
+from diffusers import DDIMScheduler
 from PIL import Image
 import torch
-from torch.utils.data import Dataset
 from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
 from datasets import load_dataset

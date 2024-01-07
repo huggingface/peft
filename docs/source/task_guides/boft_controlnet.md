@@ -23,7 +23,7 @@ By using BOFT from 🤗 PEFT, we can significantly reduce the number of trainabl
 
 As a member of the **orthogonal finetuning** class, BOFT presents a systematic and principled method for fine-tuning. It possesses several unique properties and has demonstrated superior performance compared to LoRA in a variety of scenarios. For further details on BOFT, please consult the [PEFT's GitHub repo's concept guide OFT](https://https://huggingface.co/docs/peft/index), the [original BOFT paper](https://arxiv.org/abs/2311.06243) and the [original OFT paper](https://arxiv.org/abs/2306.07280).
 
-In this guide we provide a controllable generation (ControlNet) fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/boft_controlnet). You can try it out and finetune on your custom images.
+In this guide we provide a controllable generation (ControlNet) fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/boft_controlnet). This implementation is adapted from [diffusers's ControlNet](https://github.com/huggingface/diffusers/tree/main/examples/controlnet) and [Hecong Wu's ControlLoRA](https://github.com/HighCWu/ControlLoRA). You can try it out and finetune on your custom images.
 
 ## Set up your environment
 Start by cloning the PEFT repository:

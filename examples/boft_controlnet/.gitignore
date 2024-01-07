@@ -1,8 +1,0 @@
-data/*
-.ipynb_checkpoints/
-
-logs/
-wandb/
-output/
-
-*.png

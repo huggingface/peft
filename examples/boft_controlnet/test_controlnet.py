@@ -1,16 +1,14 @@
-import argparse
 import sys
 import os
 import time
 import numpy as np
 from tqdm import tqdm
 import torch
-import contextlib
 from pathlib import Path
 from safetensors.torch import load_file
 import torch.utils.checkpoint
 from accelerate import Accelerator
-from diffusers import UniPCMultistepScheduler, DDIMScheduler
+from diffusers import DDIMScheduler
 from diffusers.utils import check_min_version
 
 from utils.dataset import make_dataset
