@@ -967,7 +967,7 @@ class OffloadSaveTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        # TODO: add disk offload once PeftModel.from_pretrained supports 
+        # TODO: add disk offload once PeftModel.from_pretrained supports
         memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
