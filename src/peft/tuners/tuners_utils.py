@@ -481,7 +481,7 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         None if no match found
     """
     if isinstance(config.target_modules, str):
-        target_module_found = (config.target_modules == key) or re.fullmatch(config.target_modules, key)
+        target_module_found = re.fullmatch(config.target_modules, key)
     elif key in config.target_modules:
         # this module is specified directly in target_modules
         target_module_found = True
