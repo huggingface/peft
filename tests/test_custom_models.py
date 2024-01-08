@@ -59,6 +59,7 @@ TEST_CASES = [
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
+    ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
     # IA³ #
     #######
