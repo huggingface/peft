@@ -962,11 +962,12 @@ class OffloadSaveTests(unittest.TestCase):
     @require_torch_gpu
     def test_offload_merge(self):
         r"""
-        Test merging, unmerging, and unloading of a model with offloaded modules.
+        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
         """
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # TODO: add disk offload once PeftModel.from_pretrained supports 
         memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
