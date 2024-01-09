@@ -102,4 +102,6 @@ model.save_adapter("my_adapter", save_embedding_layers=True)
 
 This requires the model to have the methods `get_input_embeddings` and `get_output_embeddings`, which is generally the case for 🤗 Transformers models.
 
+For inference, please ensure that you first load the base model, then resize it in the same way as you did before you trained the model, and only then load the PEFT checkpoint.
+
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
