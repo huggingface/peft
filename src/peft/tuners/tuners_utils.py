@@ -18,9 +18,12 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import Any, List, Optional, Union
 
 import torch
+from accelerate.hooks import AlignDevicesHook
+from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
 
 from peft.utils import COMMON_LAYERS_PATTERN
@@ -30,6 +33,58 @@ from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def onload_layer(layer):
+    r"""
+    A utility for modifying a module containing one or more tuners and a base layer, any of which are offloaded to the
+    CPU or disk. Moves a module's sub-modules to the execution device before some action is performed, after that the
+    base layer state dictionary is re-assigned (if that layer was offloaded to the disk) and finally the parameters are
+    offloaded.
+
+    If the module has no offloaded sub-modules, this function does nothing.
+
+    Args:
+        layer ('torch.nn.Module'):
+            layer with tuners to be merged
+    """
+
+    offloaded_modules = []
+    for name, module in layer.named_modules():
+        if name in ["", "base_layer"]:
+            continue
+        if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
+            module._hf_hook.pre_forward(module)
+            offloaded_modules.append(module)
+
+    base_layer_offload = False
+    if hasattr(layer, "base_layer") and (
+        hasattr(layer.base_layer, "_hf_hook")
+        and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
+        and layer.base_layer._hf_hook.offload
+    ):
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+            # retrieve the name of the original disk-offload directory
+            offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
+        layer.base_layer._hf_hook.pre_forward(layer.base_layer)
+        base_layer_offload = True
+
+    yield
+
+    for module in offloaded_modules:
+        module._hf_hook.post_forward(module, torch.tensor([]))
+
+    if base_layer_offload:
+        # re-make weights map (must be on cpu to send params to the disk via memmap if disk offload)
+        layer.base_layer._hf_hook.weights_map = {
+            name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
+        }
+        # offload weights map to disk if original device is the disk
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+            # rewrite directory with merged weights
+            offload_state_dict(offload_folder, layer.base_layer._hf_hook.weights_map)
+        layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
 
 class BaseTuner(nn.Module, ABC):
@@ -281,7 +336,8 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.merge(adapter_names=adapter_names)
+                with onload_layer(module):
+                    module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
         """
@@ -289,7 +345,8 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.unmerge()
+                with onload_layer(module):
+                    module.unmerge()
 
     def _unloading_checks(self, adapter_names: Optional[List[str]]):
         adapters_to_consider = adapter_names or self.active_adapters
