@@ -81,3 +81,25 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 ```
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
+
+### Extending the vocabulary
+
+For many language fine-tuning tasks, it's necessary to extend the vocabulary of the model, since new tokens are being introduced. When this is done, the embedding layer needs to be extended to account for the new tokens. But this means that the embedding layer should be stored in addition to the adapter weights when saving the adapter.
+
+To ensure that this works, add the embedding layer to the `target_modules` of the config. As an example, for Mistral, the config could look like this:
+
+```python
+config = LoraConfig(..., target_modules=["embed_tokens", "lm_head", "q_proj", "v_proj"])
+```
+
+Then, PEFT will automatically take care of storing the embedding layer when saving the adapter. However, for this to work, the name of the embedding layer needs to follow the standard naming scheme of 🤗 Transformers. If it doesn't, you can manually pass `save_embedding_layers=True` when saving the adapter:
+
+```python
+model = get_peft_model(...)
+# train the model
+model.save_adapter("my_adapter", save_embedding_layers=True)
+```
+
+This requires the model to have the methods `get_input_embeddings` and `get_output_embeddings`, which is generally the case for 🤗 Transformers models.
+
+For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
