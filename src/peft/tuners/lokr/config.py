@@ -34,7 +34,8 @@ class LoKrConfig(LycorisConfig):
             Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
         decompose_both (`bool`): Perform rank decomposition of left kronecker product matrix.
         decompose_factor (`int`): Kronecker product decomposition factor.
-        target_modules (`Union[List[str],str]`): The names of the modules to apply LoKr to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply LoKr to. If this is specified as
+            'all-linear', then all linear/Conv1D modules are chosen, excluding the output layer.
         init_weights (`bool`): Whether to perform initialization of LoKr weights.
         layers_to_transform (`Union[List[int],int]`):
             The layer indexes to transform, if this argument is specified, it will apply the LoKr transformations on
@@ -76,6 +77,7 @@ class LoKrConfig(LycorisConfig):
         metadata={
             "help": "List of module names or regex expression of the module names to replace with LoKr."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
     init_weights: bool = field(
