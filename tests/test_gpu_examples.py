@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
+from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
@@ -44,6 +45,7 @@ from peft import (
     AdaLoraConfig,
     LoftQConfig,
     LoraConfig,
+    PeftModel,
     TaskType,
     get_peft_model,
     prepare_model_for_int8_training,
@@ -939,6 +941,65 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+@require_torch_gpu
+class OffloadSaveTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "gpt2"
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_offload_merge(self):
+        r"""
+        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
+        """
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # TODO: add disk offload once PeftModel.from_pretrained supports
+        memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
+        # offloads around half of all transformer modules
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        self.assertTrue(0 in device_map.values())
+        self.assertTrue("cpu" in device_map.values())
+
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+
+        model = get_peft_model(model, config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            # load the model with device_map
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
+            self.assertTrue(len({p.device for p in model.parameters()}) == 2)
+            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
+
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        model.eval()
+
+        # test peft model adapter merge
+        pre_merge_olayer = model(input_tokens)[0]
+        model.merge_adapter()
+        post_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
+
+        # test peft model adapter unmerge
+        model.unmerge_adapter()
+        post_unmerge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unmerge_olayer, pre_merge_olayer))
+
+        # test LoRA merge and unload
+        model = model.merge_and_unload()
+        post_unload_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unload_merge_olayer, pre_merge_olayer))
 
 
 @require_torch_gpu
