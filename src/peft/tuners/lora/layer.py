@@ -699,6 +699,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
     This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch. It works by
     merging the weights before the forward call and unmerging them after the forward call.
     """
+
     def __init__(
         self,
         base_layer,
