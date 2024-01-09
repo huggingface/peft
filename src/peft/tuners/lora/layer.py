@@ -60,7 +60,8 @@ class LoraLayer(BaseTunerLayer):
                 base_layer.weight.ds_shape if hasattr(base_layer.weight, "ds_shape") else base_layer.weight.shape
             )
         elif isinstance(base_layer, nn.MultiheadAttention):
-            assert base_layer._qkv_same_embed_dim, "Only same embed dim supported as of now"
+            if not base_layer._qkv_same_embed_dim:
+                raise ValueError(f"Only same dim for query/key/value is supported as of now for {self.__class__}.")
             in_features, out_features = base_layer.embed_dim, 3 * base_layer.embed_dim
         elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
             # QuantLinear
@@ -690,6 +691,14 @@ class Conv2d(nn.Module, LoraLayer):
 
 
 class MultiheadAttention(nn.Module, LoraLayer):
+    """LoRA implemented in a multihead attention layer
+
+    This is currently only implemented for the case of `_qkv_same_embed_dim = True`, i.e. query, key, and value having
+    the same dimension.
+
+    This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch. It works by
+    merging the weights before the forward call and unmerging them after the forward call.
+    """
     def __init__(
         self,
         base_layer,
@@ -697,18 +706,17 @@ class MultiheadAttention(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         **kwargs,
     ) -> None:
         # TODO work with separate weights
-        assert base_layer._qkv_same_embed_dim, "Only same embed dim supported as of now"
+        if not base_layer._qkv_same_embed_dim:
+            raise ValueError(f"Only same embed for query/key/value is supported as of now for {self.__class__}.")
 
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
@@ -798,7 +806,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
             weight_A = weight_A.float()
             weight_B = weight_B.float()
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        output_tensor = (weight_B @ weight_A) * self.scaling[adapter]
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -850,6 +858,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         return super().state_dict(*args, **kwargs)
 
     def named_modules(self, *args, **kwargs):
+        # Note: no need to also implement modules(), as modules() calls named_modules() under the hood
         self._restore_weights()
         return super().named_modules(*args, **kwargs)
 
