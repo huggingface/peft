@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
+from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
@@ -44,6 +45,7 @@ from peft import (
     AdaLoraConfig,
     LoftQConfig,
     LoraConfig,
+    PeftModel,
     TaskType,
     get_peft_model,
     prepare_model_for_int8_training,
@@ -942,47 +944,112 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
 
 @require_torch_gpu
+class OffloadSaveTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "gpt2"
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_offload_merge(self):
+        r"""
+        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
+        """
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # TODO: add disk offload once PeftModel.from_pretrained supports
+        memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
+        # offloads around half of all transformer modules
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        self.assertTrue(0 in device_map.values())
+        self.assertTrue("cpu" in device_map.values())
+
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+
+        model = get_peft_model(model, config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            # load the model with device_map
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
+            self.assertTrue(len({p.device for p in model.parameters()}) == 2)
+            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
+
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        model.eval()
+
+        # test peft model adapter merge
+        pre_merge_olayer = model(input_tokens)[0]
+        model.merge_adapter()
+        post_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
+
+        # test peft model adapter unmerge
+        model.unmerge_adapter()
+        post_unmerge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unmerge_olayer, pre_merge_olayer))
+
+        # test LoRA merge and unload
+        model = model.merge_and_unload()
+        post_unload_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unload_merge_olayer, pre_merge_olayer))
+
+
+@require_torch_gpu
 class LoftQTests(unittest.TestCase):
     r"""
-    Tests for LoftQ
+    Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
 
     def setUp(self):
         self.error_factor = 3
-        self.model_id = "hf-internal-testing/tiny-random-BloomForCausalLM"
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id)
 
-    def get_input(self, device):
-        inputs = self.tokenizer("All I want is", padding=True, return_tensors="pt")
+    def get_input(self, model_id, device):
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
         if device == "cuda":
             inputs = inputs.to("cuda")
         return inputs
 
     def get_base_model(self, model_id, device, **kwargs):
-        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs).eval()
+        cls = AutoModelForSeq2SeqLM if "t5" in model_id else AutoModelForCausalLM
+        model = cls.from_pretrained(model_id, **kwargs).eval()
         if device == "cuda":
             model = model.to("cuda")
         return model
 
-    def get_errors(self, bits=4, loftq_iter=1, device="cuda"):
+    def get_logits(self, model, inputs):
+        if model.config.is_encoder_decoder:
+            input_ids = inputs["input_ids"]
+            return model(input_ids=input_ids, decoder_input_ids=input_ids).logits
+        return model(**inputs).logits
+
+    def get_errors(
+        self, bits=4, loftq_iter=1, device="cuda", model_id="hf-internal-testing/tiny-random-BloomForCausalLM"
+    ):
         # Helper function that returns the quantization errors (MAE and MSE) when comparing the quantized LoRA model
         # to the base model, vs the LoftQ quantized model to the base model. We expect the LoftQ quantized model to
         # have less error than the normal LoRA quantized model. Since we compare logits, the observed error is
         # already somewhat dampened because of the softmax.
-        model = self.get_base_model(self.model_id, device)
-        if device == "cuda":
-            model = model.to("cuda")
-
         torch.manual_seed(0)
-        inputs = self.get_input(device)
-        logits_base = model(**inputs).logits
+        model = self.get_base_model(model_id, device)
+        task_type = TaskType.SEQ_2_SEQ_LM if model.config.is_encoder_decoder else TaskType.CAUSAL_LM
+        inputs = self.get_input(model_id, device)
+        logits_base = self.get_logits(model, inputs)
         # clean up
         del model
         gc.collect()
         torch.cuda.empty_cache()
 
         # logits from the normal quantized LoRA model
-        lora_config = LoraConfig(task_type=TaskType.CAUSAL_LM)
+        lora_config = LoraConfig(task_type=task_type)
         kwargs = {}
         if bits == 4:
             kwargs["load_in_4bit"] = True
@@ -992,11 +1059,11 @@ class LoftQTests(unittest.TestCase):
             raise ValueError("bits must be 4 or 8")
 
         quantized_model = get_peft_model(
-            self.get_base_model(self.model_id, device=None, **kwargs),
+            self.get_base_model(model_id, device=None, **kwargs),
             lora_config,
         )
         torch.manual_seed(0)
-        logits_quantized = quantized_model(**inputs).logits
+        logits_quantized = self.get_logits(quantized_model, inputs)
         del quantized_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -1004,7 +1071,7 @@ class LoftQTests(unittest.TestCase):
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
         lora_config = LoraConfig(task_type=TaskType.CAUSAL_LM, init_lora_weights="loftq", loftq_config=loftq_config)
-        model = self.get_base_model(self.model_id, device)
+        model = self.get_base_model(model_id, device)
         if device == "cuda":
             model = model.to("cuda")
         loftq_model = get_peft_model(model, lora_config)
@@ -1012,7 +1079,7 @@ class LoftQTests(unittest.TestCase):
             loftq_model = loftq_model.to("cuda")
 
         torch.manual_seed(0)
-        logits_loftq = loftq_model(**inputs).logits
+        logits_loftq = self.get_logits(loftq_model, inputs)
         del loftq_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -1087,6 +1154,38 @@ class LoftQTests(unittest.TestCase):
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
         self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
         self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
+
+    @parameterized.expand(["cuda", "cpu"])
+    def test_t5_loftq_4bit(self, device):
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
+            bits=4, device=device, model_id="t5-small"
+        )
+        # first, sanity check that all errors are > 0.0
+        self.assertTrue(mae_quantized > 0.0)
+        self.assertTrue(mse_quantized > 0.0)
+        self.assertTrue(mae_loftq > 0.0)
+        self.assertTrue(mse_loftq > 0.0)
+
+        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
+        factor = 3
+        self.assertTrue(mae_loftq < mae_quantized / factor)
+        self.assertTrue(mse_loftq < mse_quantized / factor)
+
+    @parameterized.expand(["cuda", "cpu"])
+    def test_t5_loftq_8bit(self, device):
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
+            bits=8, device=device, model_id="t5-small"
+        )
+        # first, sanity check that all errors are > 0.0
+        self.assertTrue(mae_quantized > 0.0)
+        self.assertTrue(mse_quantized > 0.0)
+        self.assertTrue(mae_loftq > 0.0)
+        self.assertTrue(mse_loftq > 0.0)
+
+        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
+        factor = 3
+        self.assertTrue(mae_loftq < mae_quantized / factor)
+        self.assertTrue(mse_loftq < mse_quantized / factor)
 
 
 @require_bitsandbytes
