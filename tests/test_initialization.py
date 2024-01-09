@@ -89,10 +89,6 @@ class InitializationTest(unittest.TestCase):
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
 
-        # import matplotlib.pyplot as plt
-        # x = weight_A.detach().flatten().cpu().numpy()
-        # breakpoint()
-
         self.assertGreater(p_value, 0.5)
 
         # check that weight A is *not* from a uniform distribution
