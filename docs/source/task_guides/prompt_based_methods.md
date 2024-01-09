@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Prompt-based methods
 
-A prompt usually describes a task or provides an example of the task you want the model to learn. Instead of manually creating these prompts, soft prompting methods add learnable parameters to the input embeddings that can be optimized for a specific task while keeping the pretrained model's parameters frozen. This makes it both faster and easier to finetune large language models (LLMs) for new downstream tasks.
+A prompt can describe a task or provide an example of the task you want the model to learn. Instead of manually creating these prompts, soft prompting methods add learnable parameters to the input embeddings that can be optimized for a specific task while keeping the pretrained model's parameters frozen. This makes it both faster and easier to finetune large language models (LLMs) for new downstream tasks.
 
 The PEFT library supports several types of prompting methods (p-tuning, prefix tuning, prompt tuning, multitask prompt tuning) and you can learn more about how these methods work conceptually in the [Soft prompts](../conceptual_guides/prompting) guide. If you're interested in applying these methods to other tasks, take a look at our collection of [notebooks](https://huggingface.co/spaces/PEFT/soft-prompting)!
 
@@ -38,7 +38,7 @@ pip install -q peft transformers datasets
 
 For this guide, you'll use the `twitter_complaints` subset of the [RAFT](https://huggingface.co/datasets/ought/raft) dataset. The `twitter_complaints` subset contains tweets labeled as `complaint` and `no complaint`, and you can check out the [dataset viewer](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints) for a better idea of what the data looks like.
 
-Use the [`~datasets.load_dataset`] function to load the dataset and create a new `text_label` column so it is easier to understand what the `Label` values `1` and `2` mean.
+Use the [`~datasets.load_dataset`] function to load the dataset and create a new `text_label` column so it is easier to understand what the `Label` values, `1` and `2` mean.
 
 ```py
 from datasets import load_dataset
@@ -118,7 +118,7 @@ processed_ds = ds.map(
 )
 ```
 
-Finally, create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader). Set `pin_memory=True` to speed up the data transfer to the GPU during training if the samples in your dataset are on a CPU.
+Finally, create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader). You can set `pin_memory=True` to speed up the data transfer to the GPU during training if the samples in your dataset are on a CPU.
 
 ```py
 from torch.utils.data import DataLoader
@@ -170,7 +170,7 @@ model.print_trainable_parameters()
 </hfoption>
 <hfoption id="prefix tuning">
 
-[Prefix tuning](../conceptual_guides/prompting#prefix-tuning) adds task-specific parameters in all of the model layers which are optimized by a separate feedforward network. Create a [`PrefixTuningConfig`] with the task type and number of virtual tokens to add and learn.
+[Prefix tuning](../conceptual_guides/prompting#prefix-tuning) adds task-specific parameters in all of the model layers which are optimized by a separate feed-forward network. Create a [`PrefixTuningConfig`] with the task type and number of virtual tokens to add and learn.
 
 ```py
 from peft import PrefixTuningConfig
