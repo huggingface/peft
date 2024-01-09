@@ -74,20 +74,13 @@ import torch
 
 max_length = 64
 
-def preprocess_function(examples):
+def preprocess_function(examples, text_column="Tweet text", label_column="text_label"):
     batch_size = len(examples[text_column])
     inputs = [f"{text_column} : {x} Label : " for x in examples[text_column]]
     targets = [str(x) for x in examples[label_column]]
     model_inputs = tokenizer(inputs)
     labels = tokenizer(targets)
-    for i in range(batch_size):
-        sample_input_ids = model_inputs["input_ids"][i]
-        label_input_ids = labels["input_ids"][i] + [tokenizer.pad_token_id]
-        # print(i, sample_input_ids, label_input_ids)
-        model_inputs["input_ids"][i] = sample_input_ids + label_input_ids
-        labels["input_ids"][i] = [-100] * len(sample_input_ids) + label_input_ids
-        model_inputs["attention_mask"][i] = [1] * len(model_inputs["input_ids"][i])
-    # print(model_inputs)
+    classes = [k.replace("_", " ") for k in ds["train"].features["Label"].names]
     for i in range(batch_size):
         sample_input_ids = model_inputs["input_ids"][i]
         label_input_ids = labels["input_ids"][i]
@@ -159,7 +152,7 @@ Call the [`~PeftModel.print_trainable_parameters`] method to compare the number 
 [P-tuning](../conceptual_guides/prompting#p-tuning) adds a trainable embedding tensor where the prompt tokens can be added anywhere in the input sequence. Create a [`PromptEncoderConfig`] with the task type, the number of virtual tokens to add and learn, and the hidden size of the encoder for learning the prompt parameters.
 
 ```py
-from peft import PromptEncoderConfig
+from peft import PromptEncoderConfig, get_peft_model
 
 peft_config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
 model = get_peft_model(model, peft_config)
@@ -170,10 +163,10 @@ model.print_trainable_parameters()
 </hfoption>
 <hfoption id="prefix tuning">
 
-[Prefix tuning](../conceptual_guides/prompting#prefix-tuning) adds task-specific parameters in all of the model layers which are optimized by a separate feed-forward network. Create a [`PrefixTuningConfig`] with the task type and number of virtual tokens to add and learn.
+[Prefix tuning](../conceptual_guides/prompting#prefix-tuning) adds task-specific parameters in all of the model layers, which are optimized by a separate feed-forward network. Create a [`PrefixTuningConfig`] with the task type and number of virtual tokens to add and learn.
 
 ```py
-from peft import PrefixTuningConfig
+from peft import PrefixTuningConfig, get_peft_model
 
 peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
 model = get_peft_model(model, peft_config)
@@ -187,7 +180,7 @@ model.print_trainable_parameters()
 [Prompt tuning](../conceptual_guides/prompting#prompt-tuning) formulates all tasks as a *generation* task, and it adds a task-specific prompt to the input which is updated independently. Create a [`PromptTuningConfig`] with the task type, the initial prompt tuning text to train the model with (in this case, it is classifying whether tweets are complaints or not), the number of virtual tokens to add and learn, and a tokenizer.
 
 ```py
-from peft import PromptTuningConfig, PromptTuningInit
+from peft import PromptTuningConfig, PromptTuningInit, get_peft_model
 
 peft_config = PromptTuningConfig(
     task_type="CAUSAL_LM",
@@ -227,7 +220,8 @@ Move the model to the GPU and create a training loop that reports the loss and p
 ```py
 from tqdm import tqdm
 
-model = model.to("cuda")
+device = "cuda"
+model = model.to(device)
 
 for epoch in range(num_epochs):
     model.train()
@@ -269,9 +263,9 @@ Once training is complete, you can upload your model to the Hub with the [`~tran
 ```py
 from huggingface_hub import notebook_login
 
-notebook_login()
-peft_model_id = "your-name/bloomz-560-m-peft-method"
-model.push_to_hub("your-name/bloomz-560-m-peft-method")
+account = <your-hf-account-name>
+peft_model_id = f"{account}/bloomz-560-m-peft-method"
+model.push_to_hub(peft_model_id)
 ```
 
 If you check the model file size in the repository, you’ll see that it is only a few hundred bytes!
@@ -283,12 +277,12 @@ Load the model from the Hub for inference and let's test it out on a tweet.
 ```py
 from peft import AutoPeftModelForCausalLM
 
-model = AutoPeftModelForCausalLM.from_pretrained("stevhliu/bloomz-560m-p-tuning").to("cuda")
+model = AutoPeftModelForCausalLM.from_pretrained("peft_model_id").to("cuda")
 tokenizer = AutoTokenizer.from_pretrained("bigscience/bloomz-560m")
 
 i = 15
-inputs = tokenizer(f'{text_column} : {dataset["test"][i]["Tweet text"]} Label : ', return_tensors="pt")
-print(dataset["test"][i]["Tweet text"])
+inputs = tokenizer(f'{text_column} : {ds["test"][i]["Tweet text"]} Label : ', return_tensors="pt")
+print(ds["test"][i]["Tweet text"])
 "@NYTsupport i have complained a dozen times &amp; yet my papers are still thrown FAR from my door. Why is this so hard to resolve?"
 ```
 
