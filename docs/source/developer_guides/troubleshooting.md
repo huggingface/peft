@@ -39,6 +39,25 @@ Installing PEFT from source is useful for keeping up with the latest development
 python -m pip install git+https://github.com/huggingface/peft
 ```
 
+## Training errors
+
+### Getting: ValueError: Attempting to unscale FP16 gradients
+
+This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the `Trainer` class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without having to load the whole model in FP32, add the following snippet to your code:
+
+```python
+peft_model = get_peft_model(...)
+
+# add this:
+for param in model.parameters():
+    if param.requires_grad:
+        param.data = param.data.float()
+
+# proceed as usual
+trainer = Trainer(model=peft_model, fp16=True, ...)
+trainer.train()
+```
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model, which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.

@@ -20,7 +20,7 @@ Some fine-tuning techniques, such as prompt tuning, are specific to language mod
 assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like
 [LoRA](../conceptual_guides/lora) - are not restricted to specific model types.
 
-In this guide, we will see how LoRA can be applied to a multilayer perceptron and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
+In this guide, we will see how LoRA can be applied to a multilayer perceptron, a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library, or a new 🤗 Transformers architectures.
 
 ## Multilayer perceptron
 
@@ -222,3 +222,21 @@ If that doesn't help, check the existing modules in your model architecture with
 Additionally, linear layers are common targets to be adapted (e.g. in [QLoRA paper](https://arxiv.org/abs/2305.14314), authors suggest to adapt them as well). Their names will often contain the strings `fc` or `dense`.
 
 If you want to add a new model to PEFT, please create an entry in [constants.py](https://github.com/huggingface/peft/blob/main/src/peft/utils/constants.py) and open a pull request on the [repository](https://github.com/huggingface/peft/pulls). Don't forget to update the [README](https://github.com/huggingface/peft#models-support-matrix) as well.
+
+## Checking the result
+
+When you think that you have correctly specified the `target_modules` and called `get_peft_model`, you can check the fraction of parameters that will be trainable like this:
+
+```python
+peft_model.print_trainable_parameters()
+```
+
+If this number is too low or high, check the model `repr` by printing the model. This will show you the names and type of all of all the layers in the model. Ensure that the intended layers, and only those, are replaced by adapter layers. For instance, for LoRA applied to `nn.Linear` layers, you should see that `lora.Linear` layers are being used.
+
+To get a quick overview of all layers that were adapted, you can also use the the `targeted_module_names` attribute:
+
+```python
+print(peft_model.targeted_module_names)
+```
+
+This lists the names of each module that was actually adapted.

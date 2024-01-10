@@ -33,7 +33,7 @@ def has_valid_embedding_base_layer(layer):
 def get_embedding_layer_name(model, layer, is_prompt_learning):
     """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
-        if (is_prompt_learning and module == layer) or module == layer.base_layer:
+        if (is_prompt_learning and module == layer) or module == getattr(layer, "base_layer", None):
             return name
     return None
 
@@ -131,13 +131,23 @@ def get_peft_model_state_dict(
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
         save_embedding_layers = True
     elif save_embedding_layers == "auto":
-        save_embedding_layers = False
+        vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
+        model_id = getattr(config, "base_model_name_or_path", None)
+        # check if the vocab size of the base model is different from the vocab size of the finetuned model
+        if vocab_size and model_id and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size):
+            warnings.warn(
+                "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
+            )
+            save_embedding_layers = True
+        else:
+            save_embedding_layers = False
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
+        is_prompt_learning_method = config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
-            if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
+            if is_prompt_learning_method or has_valid_embedding_base_layer(layer):
                 # support from version >= 0.6.2
-                embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
+                embedding_module_name = get_embedding_layer_name(model, layer, is_prompt_learning_method)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
