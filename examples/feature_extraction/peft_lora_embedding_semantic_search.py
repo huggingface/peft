@@ -138,12 +138,12 @@ def parse_args():
     parser.add_argument(
         "--sanity_test",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to enable sanity test.",
     )
     parser.add_argument(
         "--use_peft",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to use PEFT.",
     )
     args = parser.parse_args()
 
