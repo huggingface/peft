@@ -28,7 +28,7 @@ from torch import nn
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
-from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -545,29 +545,40 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
+    elif key in config.target_modules:
+        # this module is specified directly in target_modules
+        target_module_found = True
     else:
-        target_module_found = key in config.target_modules or any(
-            key.endswith(f".{target_key}") for target_key in config.target_modules
+        target_module_found = any(key.endswith(f".{target_key}") for target_key in config.target_modules)
+
+        layer_indexes = getattr(config, "layers_to_transform", None)
+        layers_pattern = getattr(config, "layers_pattern", None)
+
+        is_using_layer_indexes = layer_indexes is not None and (
+            len(layer_indexes) != 0 if isinstance(layer_indexes, list) else True
         )
-        is_using_layer_indexes = getattr(config, "layers_to_transform", None) is not None
-        layer_indexing_pattern = getattr(config, "layers_pattern", None)
-
         if is_using_layer_indexes and target_module_found:
-            layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-            layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+            layer_index = None
+            # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
+            # For now, empty layers_pattern means any layer pattern is ok
+            if layers_pattern is None or len(layers_pattern) == 0:
+                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+            else:
+                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+                for pattern in layers_pattern:
+                    layer_index = re.match(r".*\.{layer}\.(\d+)\.".format(layer=pattern), key)
+                    if layer_index is not None:
+                        break
 
-            for pattern in layers_pattern:
-                layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                if layer_index is not None:
-                    layer_index = int(layer_index.group(1))
-                    if isinstance(config.layers_to_transform, int):
-                        target_module_found = layer_index == config.layers_to_transform
-                    else:
-                        target_module_found = layer_index in config.layers_to_transform
-
-                    break
+            if layer_index is None:
+                target_module_found = False
+            else:
+                layer_index = int(layer_index.group(1))
+                if isinstance(layer_indexes, int):
+                    target_module_found = layer_index == layer_indexes
                 else:
-                    target_module_found = False
+                    target_module_found = layer_index in layer_indexes
+
     return target_module_found
 
 
