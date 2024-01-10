@@ -52,8 +52,8 @@ class LoraConfig(PeftConfig):
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
-            strings, either an exact match will be performed or it is checked if the name of the module ends with any of
-            the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
@@ -92,16 +92,16 @@ class LoraConfig(PeftConfig):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `lora_alpha`.
         megatron_config (`Optional[dict]`):
-            The TransformerConfig arguments for Megatron. It is used to create LoRA's parallel linear layer. You can get
-            it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron. The
-            arguments will be used to initialize the TransformerConfig of Megatron. You need to specify this parameter
-            when you want to apply LoRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
+            The TransformerConfig arguments for Megatron. It is used to create LoRA's parallel linear layer. You can
+            get it like this, `core_transformer_config_from_args(get_args())`, these two functions being from Megatron.
+            The arguments will be used to initialize the TransformerConfig of Megatron. You need to specify this
+            parameter when you want to apply LoRA to the ColumnParallelLinear and RowParallelLinear layers of megatron.
         megatron_core (`Optional[str]`):
             The core module from Megatron to use, defaults to `"megatron.core"`.
         loftq_config (`Optional[LoftQConfig]`):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
-            and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a quantized
-            model in this case, as LoftQ will quantize the model itself.
+            and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
+            quantized model in this case, as LoftQ will quantize the model itself.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})

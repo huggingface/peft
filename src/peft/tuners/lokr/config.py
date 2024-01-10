@@ -43,8 +43,8 @@ class LoKrConfig(LycorisConfig):
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
-            strings, either an exact match will be performed or it is checked if the name of the module ends with any of
-            the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
