@@ -52,6 +52,7 @@ different bits(`--bits`), ranks(`--rank`), and alternating steps (`--iter`, a hy
 Below is an example of obtaining 4bit LLAMA-2-7b with 16-rank LoRA adapters by 5 alternating steps.
 ```sh
 SAVE_DIR="model_zoo/loftq/"
+export HF_TOKEN=YOUR_HF_TOKEN
 python quantize_save_load.py \
     --model_name_or_path meta-llama/Llama-2-7b-hf \  # high-precision model id in HF
     --token HF_TOKEN \  # your HF token if the model is private, e.g., llama-2

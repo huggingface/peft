@@ -14,10 +14,12 @@
 # limitations under the License.
 
 import argparse
+import json
 import os
 
 import torch
 import torch.nn as nn
+from safetensors import safe_open
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -190,8 +192,8 @@ def quantize_and_save():
     # change adapter_config.json
     with open(os.path.join(lora_model_dir, "adapter_config.json"), "r") as fp:
         adapter_config = json.load(fp)
-        adapter_config['base_model_name_or_path'] = base_model_dir  # This can be a local path or Hub model id
-        adapter_config['init_lora_weights'] = True  # Don't apply LoftQ when loading again
+        adapter_config["base_model_name_or_path"] = base_model_dir  # This can be a local path or Hub model id
+        adapter_config["init_lora_weights"] = True  # Don't apply LoftQ when loading again
         fp.close()
     with open(os.path.join(lora_model_dir, "adapter_config.json"), "w") as fp:
         json.dump(adapter_config, fp, indent=2)
