@@ -66,14 +66,16 @@ REGEX_TEST_CASES = [
     ("foo.bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [1], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [0, 1, 2], ["bar"], True),
-    # TODO: Unclear what expected behaviour is when layers_pattern is an empty list.
-    # Currently, an empty layers_pattern leads to all layer indexes being matched,
-    # which means layers_to_transform is ignored.
-    ("foo.bar.1.baz", ["baz"], [1], [], True),
-    # TODO: Below test currently fails, again because of empty layers_pattern
-    # layers_to_transform is 0, but layers_pattern is empty, so all layer indexes are matched
-    # ("foo.bar.1.baz", ["baz"], [0], [], False),
-    ("foo.bar.1.baz", ["baz"], [1], ["ar"], True),
+    # empty layers_to_transform
+    ("foo.bar.7.baz", ["baz"], [], ["bar"], True),
+    ("foo.bar.7.baz", ["baz"], None, ["bar"], True),
+    # empty layers_pattern
+    ("foo.whatever.1.baz", ["baz"], [1], [], True),
+    ("foo.whatever.1.baz", ["baz"], [0], [], False),
+    ("foo.whatever.1.baz", ["baz"], [1], "", True),
+    ("foo.whatever.1.baz", ["baz"], [0], "", False),
+    ("foo.whatever.1.baz", ["baz"], [1], None, True),
+    ("foo.whatever.1.baz", ["baz"], [0], None, False),
     # some realistic examples: transformers model
     ("transformer.h.1.attn.attention.q_proj.foo", ["q_proj"], None, [], False),
     ("transformer.h.1.attn.attention.q_proj", [], None, [], False),
