@@ -28,7 +28,8 @@ class OFTConfig(LycorisConfig):
     Args:
         r (`int`): OFT rank.
         module_dropout (`int`): The dropout probability for disabling OFT modules during training.
-        target_modules (`Union[List[str],str]`): The names of the modules to apply OFT to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply OFT to. If this is specified as
+            'all-linear', then all linear/Conv1D modules are chosen, excluding the output layer.
         init_weights (`bool`): Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int],int]`):
             The layer indexes to transform, if this argument is specified, it will apply the OFT transformations on the
@@ -56,6 +57,7 @@ class OFTConfig(LycorisConfig):
         metadata={
             "help": "List of module names or regex expression of the module names to replace with OFT."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
     init_weights: bool = field(

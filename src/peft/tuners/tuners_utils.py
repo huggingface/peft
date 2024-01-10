@@ -25,8 +25,10 @@ import torch
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
+from transformers import PreTrainedModel
+from transformers.pytorch_utils import Conv1D
 
-from peft.utils import COMMON_LAYERS_PATTERN
+from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -194,7 +196,7 @@ class BaseTuner(nn.Module, ABC):
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
-        **optional_kwargs: Any,
+        current_key: str,
     ) -> None:
         r"""
         Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
@@ -213,8 +215,8 @@ class BaseTuner(nn.Module, ABC):
                 The target module's name.
             parent (`nn.Module`):
                 The parent module.
-            **optional_kwargs (`dict`):
-                The optional keyword arguments to pass to deal with particular cases (e.g. 8bit, 4bit quantization)
+            current_key (`str`):
+                The key of the current target being adapted.
         """
         ...
 
@@ -268,6 +270,9 @@ class BaseTuner(nn.Module, ABC):
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
+        # update peft_config.target_modules if required
+        peft_config = _maybe_include_all_linear_layers(peft_config, model)
+
         for key in key_list:
             # Check for modules_to_save in case
             if _check_for_modules_to_save and any(
@@ -290,13 +295,7 @@ class BaseTuner(nn.Module, ABC):
 
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
-
-            optional_kwargs = {
-                "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
-                "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
-                "current_key": key,
-            }
-            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optional_kwargs)
+            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         if not is_target_modules_in_base_model:
             raise ValueError(
@@ -580,3 +579,39 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
         else:
             module_dict["unmatched"].append(key)
     return module_dict
+
+
+def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
+    """
+    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
+    the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
+    """
+
+    # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
+    if not (
+        isinstance(peft_config.target_modules, str)
+        and peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
+    ):
+        return peft_config
+
+    if not isinstance(model, PreTrainedModel):
+        raise ValueError(
+            f"Only instances of PreTrainedModel support `target_modules={INCLUDE_LINEAR_LAYERS_SHORTHAND!r}`"
+        )
+
+    linear_classes = (torch.nn.Linear, Conv1D)
+
+    linear_module_names = set()
+    for name, module in model.named_modules():
+        # match with all linear classes.
+        if isinstance(module, linear_classes):
+            names = name.rsplit(".", 1)[-1]  # get the base name
+            linear_module_names.add(names)
+
+    # ignore the last classification head for text generation models
+    output_emb = model.get_output_embeddings()
+    if output_emb is not None:
+        last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
+        linear_module_names -= {last_module_name}
+    peft_config.target_modules = linear_module_names
+    return peft_config

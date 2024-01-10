@@ -110,24 +110,22 @@ class AdaLoraModel(LoraModel):
         target,
         target_name,
         parent,
-        **optional_kwargs,
+        current_key,
     ):
-        loaded_in_8bit = optional_kwargs.get("loaded_in_8bit", False)
-        loaded_in_4bit = optional_kwargs.get("loaded_in_4bit", False)
-        if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
-            raise ImportError(
-                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
-                "You can install it with `pip install bitsandbytes`."
-            )
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
-            "loaded_in_8bit": loaded_in_8bit,
-            "loaded_in_4bit": loaded_in_4bit,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
+        if (kwargs["loaded_in_8bit"] or kwargs["loaded_in_4bit"]) and not is_bnb_available():
+            raise ImportError(
+                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
+                "You can install it with `pip install bitsandbytes`."
+            )
 
         quantization_config = get_quantization_config(self.model, method="gptq")
         if quantization_config is not None:
