@@ -89,3 +89,5 @@ class TestPeft(unittest.TestCase):
         state_dict = get_peft_model_state_dict(self.model)
 
         self.assertTrue("embedding.weight" in state_dict.keys())
+
+        self.assertTrue(hasattr(self.model.embedding, "weight"))

@@ -27,12 +27,9 @@ from peft.utils import transpose
 class IA3Layer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("ia3_l",)
-    # All names of other parameters that may contain adapter-related parameters
-    other_layer_names = ("scaling",)
 
     def __init__(self, base_layer: nn.Module, is_feedforward: bool, **kwargs) -> None:
         self.base_layer = base_layer
-        self.scaling = {}
         self.ia3_l = nn.ParameterDict({})
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -56,6 +53,7 @@ class IA3Layer(BaseTunerLayer):
         self.out_features = out_features
 
     def update_layer(self, adapter_name, init_ia3_weights):
+        # This code works for linear layers, override for other layer types
         # Actual trainable parameters
         if self.is_feedforward:
             weight = torch.randn((1, self.in_features))
@@ -91,18 +89,6 @@ class Linear(nn.Module, IA3Layer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, init_ia3_weights)
-
-    def update_layer(self, adapter_name, init_ia3_weights):
-        # Actual trainable parameters
-        if self.is_feedforward:
-            weight = torch.randn((1, self.in_features))
-        else:
-            weight = torch.randn((self.out_features, 1))
-        self.ia3_l[adapter_name] = nn.Parameter(weight)
-        if init_ia3_weights:
-            self.reset_ia3_parameters(adapter_name)
-        self.to(self.get_base_layer().weight.device)
-        self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
@@ -149,6 +135,9 @@ class Linear(nn.Module, IA3Layer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -274,6 +263,9 @@ class Conv2d(nn.Module, IA3Layer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -294,7 +286,7 @@ class Conv2d(nn.Module, IA3Layer):
                     base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        previous_dtype = x.dtype
+        dtype = previous_dtype = x.dtype
 
         if self.disable_adapters:
             if self.merged:

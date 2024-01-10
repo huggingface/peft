@@ -15,21 +15,24 @@
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
-from .config import LoraConfig
+from .config import LoftQConfig, LoraConfig
 from .gptq import QuantLinear
 from .layer import Conv2d, Embedding, Linear, LoraLayer
 from .model import LoraModel
 
 
-__all__ = ["LoraConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
+__all__ = ["LoraConfig", "LoftQConfig", "Conv2d", "Embedding", "LoraLayer", "Linear", "LoraModel", "QuantLinear"]
 
 
-if is_bnb_available():
-    from .bnb import Linear8bitLt
+def __getattr__(name):
+    if (name == "Linear8bitLt") and is_bnb_available():
+        from .bnb import Linear8bitLt
 
-    __all__ += ["Linear8bitLt"]
+        return Linear8bitLt
 
-if is_bnb_4bit_available():
-    from .bnb import Linear4bit
+    if (name == "Linear4bit") and is_bnb_4bit_available():
+        from .bnb import Linear4bit
 
-    __all__ += ["Linear4bit"]
+        return Linear4bit
+
+    raise AttributeError(f"module {__name__} has no attribute {name}")

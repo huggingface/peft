@@ -15,7 +15,7 @@
 
 import math
 import warnings
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -24,6 +24,8 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
+
+from .config import LoraConfig
 
 
 class LoraLayer(BaseTunerLayer):
@@ -46,6 +48,7 @@ class LoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -61,15 +64,20 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "infeatures") and hasattr(base_layer, "outfeatures"):
             # QuantLinear
             in_features, out_features = base_layer.infeatures, base_layer.outfeatures
+        elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
+            # Megatron ColumnParallelLinear,RowParallelLinear
+            in_features, out_features = base_layer.input_size, base_layer.output_size
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+        # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
         if lora_dropout > 0.0:
@@ -79,88 +87,69 @@ class LoraLayer(BaseTunerLayer):
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
-        if r > 0:
-            self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-            self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
-            self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-
-        weight = getattr(self.get_base_layer(), "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
-        self.set_adapter(self.active_adapters)
-
-    def update_layer_conv2d(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
-            lora_dropout_layer = nn.Identity()
-
-        self.lora_dropout[adapter_name] = lora_dropout_layer
-        # Actual trainable parameters
-        base_layer = self.get_base_layer()
-        if r > 0:
-            kernel_size = base_layer.kernel_size
-            stride = base_layer.stride
-            padding = base_layer.padding
-            self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
-            self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
             self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
 
-        weight = getattr(base_layer, "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            self.to(base_layer.weight.device, dtype=weight.dtype)
+        if init_lora_weights == "loftq":
+            self.loftq_init(adapter_name)
+        elif init_lora_weights:
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        # check weight and qweight (for GPTQ)
+        for weight_name in ("weight", "qweight"):
+            weight = getattr(self.get_base_layer(), weight_name, None)
+            if weight is not None:
+                # the layer is already completely initialized, this is an update
+                if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                    self.to(weight.device, dtype=weight.dtype)
+                else:
+                    self.to(weight.device)
+                break
         self.set_adapter(self.active_adapters)
 
-    def update_layer_embedding(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        self.r[adapter_name] = r
-        self.lora_alpha[adapter_name] = lora_alpha
-        if lora_dropout > 0.0:
-            lora_dropout_layer = nn.Dropout(p=lora_dropout)
-        else:
-            lora_dropout_layer = nn.Identity()
+    def reset_lora_parameters(self, adapter_name, init_lora_weights):
+        if init_lora_weights is False:
+            return
 
-        self.lora_dropout[adapter_name] = lora_dropout_layer
-        # Actual trainable parameters
-        if r > 0:
-            weight_A = torch.randn((r, self.in_features))
-            weight_B = torch.randn((self.out_features, r))
-            self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
-            self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
-            self.scaling[adapter_name] = lora_alpha / r
-        if init_lora_weights:
-            self.reset_lora_parameters(adapter_name)
-
-        base_layer = self.get_base_layer()
-        weight = getattr(base_layer, "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            self.to(base_layer.weight.device, dtype=weight.dtype)
-        self.set_adapter(self.active_adapters)
-
-    def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
-            # initialize A the same way as the default for nn.Linear and B to zero
-            nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
+            if init_lora_weights is True:
+                # initialize A the same way as the default for nn.Linear and B to zero
+                # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+                nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
+            elif init_lora_weights.lower() == "gaussian":
+                nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
+            else:
+                raise ValueError(f"Unknown initialization {init_lora_weights=}")
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         if adapter_name in self.lora_embedding_A.keys():
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+
+    def loftq_init(self, adapter_name):
+        from peft.utils.loftq_utils import loftq_init
+
+        weight = self.get_base_layer().weight
+        kwargs = {
+            "num_bits": self.kwargs.get("loftq_bits", 4),
+            "reduced_rank": self.r[adapter_name],
+            "num_iter": self.kwargs.get("loftq_iter", 1),
+        }
+
+        qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
+        if adapter_name in self.lora_A.keys():
+            # initialize A the same way as the default for nn.Linear and B to zero
+            self.lora_A[adapter_name].weight.data = lora_A
+            self.lora_B[adapter_name].weight.data = lora_B
+        if adapter_name in self.lora_embedding_A.keys():
+            # initialize a the same way as the default for nn.linear and b to zero
+            self.lora_embedding_A[adapter_name].weight.data = lora_A
+            self.lora_embedding_B[adapter_name].weight.data = lora_B
+        self.get_base_layer().weight.data = qweight
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
@@ -210,15 +199,16 @@ class Linear(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_lora_weights: bool = True,
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
-        LoraLayer.__init__(self, base_layer)
+        LoraLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -263,6 +253,9 @@ class Linear(nn.Module, LoraLayer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -343,14 +336,49 @@ class Embedding(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer_embedding(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout[adapter_name] = lora_dropout_layer
+        # Actual trainable parameters
+        weight_A = torch.randn((r, self.in_features))
+        weight_B = torch.randn((self.out_features, r))
+        self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
+        self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
+
+        if init_lora_weights == "loftq":
+            self.loftq_init(adapter_name)
+        elif init_lora_weights:
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        base_layer = self.get_base_layer()
+        weight = getattr(base_layer, "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            self.to(base_layer.weight.device, dtype=weight.dtype)
+        self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
@@ -394,6 +422,9 @@ class Embedding(nn.Module, LoraLayer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -483,14 +514,50 @@ class Conv2d(nn.Module, LoraLayer):
         r: int = 0,
         lora_alpha: int = 1,
         lora_dropout: float = 0.0,
-        init_lora_weights: bool = True,
+        init_lora_weights: Union[bool, str] = True,
+        use_rslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
-        self.update_layer_conv2d(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
+        else:
+            lora_dropout_layer = nn.Identity()
+
+        self.lora_dropout[adapter_name] = lora_dropout_layer
+        # Actual trainable parameters
+        base_layer = self.get_base_layer()
+        kernel_size = base_layer.kernel_size
+        stride = base_layer.stride
+        padding = base_layer.padding
+        self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
+        self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
+        if use_rslora:
+            self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+        else:
+            self.scaling[adapter_name] = lora_alpha / r
+
+        if init_lora_weights == "loftq":
+            self.loftq_init(adapter_name)
+        elif init_lora_weights:
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        weight = getattr(base_layer, "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            self.to(base_layer.weight.device, dtype=weight.dtype)
+        self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
@@ -533,6 +600,9 @@ class Conv2d(nn.Module, LoraLayer):
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
@@ -616,3 +686,45 @@ class Conv2d(nn.Module, LoraLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "lora." + rep
+
+
+def dispatch_default(
+    target: torch.nn.Module,
+    adapter_name: str,
+    lora_config: LoraConfig,
+    **kwargs,
+) -> Optional[torch.nn.Module]:
+    new_module = None
+
+    if isinstance(target, BaseTunerLayer):
+        target_base_layer = target.get_base_layer()
+    else:
+        target_base_layer = target
+
+    if isinstance(target_base_layer, torch.nn.Embedding):
+        embedding_kwargs = kwargs.copy()
+        embedding_kwargs.pop("fan_in_fan_out", None)
+        embedding_kwargs.update(lora_config.loftq_config)
+        new_module = Embedding(target, adapter_name, **embedding_kwargs)
+    elif isinstance(target_base_layer, torch.nn.Conv2d):
+        kwargs.update(lora_config.loftq_config)
+        new_module = Conv2d(target, adapter_name, **kwargs)
+    elif isinstance(target_base_layer, torch.nn.Linear):
+        if kwargs["fan_in_fan_out"]:
+            warnings.warn(
+                "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                "Setting fan_in_fan_out to False."
+            )
+            kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = False
+        kwargs.update(lora_config.loftq_config)
+        new_module = Linear(target, adapter_name, **kwargs)
+    elif isinstance(target_base_layer, Conv1D):
+        if not kwargs["fan_in_fan_out"]:
+            warnings.warn(
+                "fan_in_fan_out is set to False but the target module is `Conv1D`. " "Setting fan_in_fan_out to True."
+            )
+            kwargs["fan_in_fan_out"] = lora_config.fan_in_fan_out = True
+        kwargs.update(lora_config.loftq_config)
+        new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
+
+    return new_module

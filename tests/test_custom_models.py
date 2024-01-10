@@ -24,7 +24,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, PeftModel, get_peft_model
+from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 from .testing_common import PeftCommonTester
@@ -191,6 +191,28 @@ TEST_CASES = [
             "decompose_factor": 4,
         },
     ),
+    ########
+    # OFT #
+    ########
+    ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 OFT",
+        "MLP",
+        OFTConfig,
+        {
+            "target_modules": ["lin0"],
+            "module_dropout": 0.1,
+        },
+    ),
+    ("Vanilla MLP 7 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "coft": True}),
+    ("Vanilla MLP 8 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "block_share": True}),
+    ("Vanilla MLP 9 OFT", "MLP", OFTConfig, {"target_modules": ["lin0"], "coft": True, "block_share": True}),
+    ("Conv2d 1 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
+    ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
+    ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -258,6 +280,7 @@ PREFIXES = {
     LoraConfig: "lora_",
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
+    OFTConfig: "oft_",
 }
 
 
@@ -331,6 +354,33 @@ class ModelEmbConv1D(nn.Module):
         X = self.lin0(X)
         X = self.sm(X)
         return X
+
+
+class ModelEmbWithEmbeddingUtils(nn.Module):
+    # Adds `get_input_embeddings` and `get_output_embeddings` methods to mimic 🤗 transformers models
+    def __init__(self):
+        super().__init__()
+        self.embed_tokens = nn.Embedding(100, 5)
+        self.conv1d = Conv1D(1, 5)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = self.embed_tokens(X)
+        X = self.conv1d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+    def get_input_embeddings(self):
+        return self.embed_tokens
+
+    def get_output_embeddings(self):
+        return None
 
 
 class ModelConv2D(nn.Module):
@@ -750,6 +800,55 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # rough check that the model card is pre-filled
         self.assertGreater(len(model_card), 1000)
 
+    @parameterized.expand(["auto", True, False])
+    def test_targeting_lora_to_embedding_layer(self, save_embedding_layers):
+        model = ModelEmbWithEmbeddingUtils()
+        config = LoraConfig(target_modules=["embed_tokens", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            if save_embedding_layers == "auto":
+                # assert warning
+                msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
+                with self.assertWarns(UserWarning, msg=msg_start):
+                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            else:
+                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            from safetensors.torch import load_file as safe_load_file
+
+            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            if save_embedding_layers in ["auto", True]:
+                self.assertTrue("base_model.model.embed_tokens.base_layer.weight" in state_dict)
+                self.assertTrue(
+                    torch.allclose(
+                        model.base_model.model.embed_tokens.base_layer.weight,
+                        state_dict["base_model.model.embed_tokens.base_layer.weight"],
+                    )
+                )
+            else:
+                self.assertFalse("base_model.model.embed_tokens.base_layer.weight" in state_dict)
+            del state_dict
+
+    @parameterized.expand(["auto", True, False])
+    def test_targeting_lora_to_embedding_layer_non_transformers(self, save_embedding_layers):
+        model = ModelEmbConv1D()
+        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            if save_embedding_layers is True:
+                # assert warning
+                msg_start = "Could not identify embedding layer(s) because the model is not a 🤗 transformers model."
+                with self.assertWarns(UserWarning, msg=msg_start):
+                    model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            else:
+                model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
+            from safetensors.torch import load_file as safe_load_file
+
+            state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            self.assertFalse("base_model.model.emb.base_layer.weight" in state_dict)
+            del state_dict
+
     @parameterized.expand(
         [
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
@@ -757,6 +856,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             LoHaConfig(target_modules=["lin0"], init_weights=False),
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
+            OFTConfig(target_modules=["lin0"], init_weights=False),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -949,6 +1049,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     def test_multiple_active_adapters_forward(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        torch.manual_seed(0)
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
@@ -989,6 +1090,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
     def test_multiple_active_adapters_merge_and_unmerge(
         self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2
     ):
+        torch.manual_seed(0)
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
         X = self.prepare_inputs_for_testing()
@@ -1017,6 +1119,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
+        torch.manual_seed(0)
         model = MLP(bias=tuner_method != "ia3")
         model.eval()
 
@@ -1775,4 +1878,81 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin0.lokr_w1.adapter1",
             "base_model.model.lin0.lokr_w2.adapter1",
+        )
+
+    def test_requires_grad_oft_different_targets(self):
+        # test two different OFT adapters that target different modules
+        config0 = OFTConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = OFTConfig(target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active pter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.oft_r.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.oft_r.adapter1",
+        )
+
+    def test_requires_grad_oft_same_targets(self):
+        # same as previous test, except that OFT adapters target the same layer
+        config0 = OFTConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = OFTConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.oft_r.adapter1",
         )

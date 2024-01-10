@@ -20,6 +20,7 @@ import bitsandbytes as bnb
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils.other import transpose
 
 from .layer import LoraLayer
@@ -37,12 +38,14 @@ if is_bnb_available():
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
+            use_rslora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
 
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self._active_adapter = adapter_name
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
@@ -101,7 +104,10 @@ if is_bnb_available():
                 state.reset_grads()
                 self.merged_adapters.append(active_adapter)
 
-        def unmerge(self):
+        def unmerge(self) -> None:
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
@@ -178,6 +184,29 @@ if is_bnb_available():
             rep = super().__repr__()
             return "lora." + rep
 
+    def dispatch_bnb_8bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+        new_module = None
+
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        loaded_in_8bit = kwargs.get("loaded_in_8bit", False)
+        if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
+            eightbit_kwargs = kwargs.copy()
+            eightbit_kwargs.update(
+                {
+                    "has_fp16_weights": target.state.has_fp16_weights,
+                    "memory_efficient_backward": target.state.memory_efficient_backward,
+                    "threshold": target.state.threshold,
+                    "index": target.index,
+                }
+            )
+            new_module = Linear8bitLt(target, adapter_name, **eightbit_kwargs)
+
+        return new_module
+
 
 if is_bnb_4bit_available():
 
@@ -191,12 +220,14 @@ if is_bnb_4bit_available():
             lora_alpha: int = 1,
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
+            use_rslora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
 
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
+            self._active_adapter = adapter_name
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
@@ -242,7 +273,10 @@ if is_bnb_4bit_available():
                 )
                 self.merged_adapters.append(active_adapter)
 
-        def unmerge(self):
+        def unmerge(self) -> None:
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             if not self.merged:
                 warnings.warn("Already unmerged. Nothing to do.")
                 return
@@ -311,3 +345,25 @@ if is_bnb_4bit_available():
         def __repr__(self) -> str:
             rep = super().__repr__()
             return "lora." + rep
+
+    def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+        new_module = None
+
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+
+        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
+        if loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(
+                {
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
+                }
+            )
+            new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
+
+        return new_module

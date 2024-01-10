@@ -18,18 +18,75 @@ import logging
 import re
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Union
+from contextlib import contextmanager
+from typing import Any, List, Optional, Union
 
 import torch
+from accelerate.hooks import AlignDevicesHook
+from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
+from transformers import PreTrainedModel
+from transformers.pytorch_utils import Conv1D
 
-from peft.utils import COMMON_LAYERS_PATTERN
+from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
 
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def onload_layer(layer):
+    r"""
+    A utility for modifying a module containing one or more tuners and a base layer, any of which are offloaded to the
+    CPU or disk. Moves a module's sub-modules to the execution device before some action is performed, after that the
+    base layer state dictionary is re-assigned (if that layer was offloaded to the disk) and finally the parameters are
+    offloaded.
+
+    If the module has no offloaded sub-modules, this function does nothing.
+
+    Args:
+        layer ('torch.nn.Module'):
+            layer with tuners to be merged
+    """
+
+    offloaded_modules = []
+    for name, module in layer.named_modules():
+        if name in ["", "base_layer"]:
+            continue
+        if hasattr(module, "_hf_hook") and isinstance(module._hf_hook, AlignDevicesHook) and module._hf_hook.offload:
+            module._hf_hook.pre_forward(module)
+            offloaded_modules.append(module)
+
+    base_layer_offload = False
+    if hasattr(layer, "base_layer") and (
+        hasattr(layer.base_layer, "_hf_hook")
+        and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
+        and layer.base_layer._hf_hook.offload
+    ):
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+            # retrieve the name of the original disk-offload directory
+            offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
+        layer.base_layer._hf_hook.pre_forward(layer.base_layer)
+        base_layer_offload = True
+
+    yield
+
+    for module in offloaded_modules:
+        module._hf_hook.post_forward(module, torch.tensor([]))
+
+    if base_layer_offload:
+        # re-make weights map (must be on cpu to send params to the disk via memmap if disk offload)
+        layer.base_layer._hf_hook.weights_map = {
+            name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
+        }
+        # offload weights map to disk if original device is the disk
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+            # rewrite directory with merged weights
+            offload_state_dict(offload_folder, layer.base_layer._hf_hook.weights_map)
+        layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
 
 class BaseTuner(nn.Module, ABC):
@@ -42,9 +99,6 @@ class BaseTuner(nn.Module, ABC):
     - **_prepare_adapter_config**:
         A private method to eventually prepare the adapter config, for example in case the field `target_modules` is
         missing.
-    - **_check_target_module_exists**:
-        A helper private method to check if the passed module's key name matches any of the target modules in the
-        adatper_config.
     - **_create_and_replace**:
         A private method to create and replace the target module with the adapter module.
     - **_check_target_module_exists**:
@@ -64,12 +118,16 @@ class BaseTuner(nn.Module, ABC):
             dictionary with a key `adapter_name` and a value of that peft config.
         config (`dict[str, Any]`):
             The model configuration object, it should be a dictionary of `str` to `Any` objects.
+        targeted_module_names (`list[str]`):
+            The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
+            double-check that the `config.target_modules` where specified correctly.
     """
 
     def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
         super().__init__()
 
         self.model = model
+        self.targeted_module_names: list[str] = []
 
         # For advanced developpers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
@@ -87,11 +145,6 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-
-        # transformers models have a .config attribute, whose presence is assumed later on
-        if not hasattr(self, "config"):
-            self.config = {"model_type": "custom"}
-
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
@@ -147,7 +200,7 @@ class BaseTuner(nn.Module, ABC):
         target: nn.Module,
         target_name: str,
         parent: nn.Module,
-        **optional_kwargs: Any,
+        current_key: str,
     ) -> None:
         r"""
         Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
@@ -166,13 +219,13 @@ class BaseTuner(nn.Module, ABC):
                 The target module's name.
             parent (`nn.Module`):
                 The parent module.
-            **optional_kwargs (`dict`):
-                The optional keyword arguments to pass to deal with particular cases (e.g. 8bit, 4bit quantization)
+            current_key (`str`):
+                The key of the current target being adapted.
         """
         ...
 
     @abstractmethod
-    def _mark_only_adapters_as_trainable(self):
+    def _mark_only_adapters_as_trainable(self, model: nn.Module):
         r"""
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
         be overriden for all tuner classes to match the correct key names.
@@ -221,6 +274,9 @@ class BaseTuner(nn.Module, ABC):
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
+        # update peft_config.target_modules if required
+        peft_config = _maybe_include_all_linear_layers(peft_config, model)
+
         for key in key_list:
             # Check for modules_to_save in case
             if _check_for_modules_to_save and any(
@@ -241,15 +297,10 @@ class BaseTuner(nn.Module, ABC):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
+            self.targeted_module_names.append(key)
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
-
-            optional_kwargs = {
-                "loaded_in_8bit": getattr(model, "is_loaded_in_8bit", False),
-                "loaded_in_4bit": getattr(model, "is_loaded_in_4bit", False),
-                "current_key": key,
-            }
-            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, **optional_kwargs)
+            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         if not is_target_modules_in_base_model:
             raise ValueError(
@@ -257,10 +308,10 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
-        self._mark_only_adapters_as_trainable()
+        self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
-            for n, p in self.model.named_parameters():
+            for n, p in model.named_parameters():
                 if adapter_name in n:
                     p.requires_grad = False
 
@@ -270,21 +321,44 @@ class BaseTuner(nn.Module, ABC):
             else:
                 model.modules_to_save.update(set(peft_config.modules_to_save))
 
-    def merge_adapter(self):
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
         """
-        This method merges the LoRa layers into the base model.
+        This method merges the adapter layers into the base model.
+
+        Merging adapters can lead to a speed up of the forward pass. A copy of the adapter weights is still kept in
+        memory, which is required to unmerge the adapters. In order to merge the adapter weights without keeping them
+        in memory, please call `merge_and_unload`.
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`list[str]`, *optional*):
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.merge()
+                with onload_layer(module):
+                    module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
         """
-        This method unmerges the LoRa layers from the base model.
+        This method unmerges all merged adapter layers from the base model.
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                module.unmerge()
+                with onload_layer(module):
+                    module.unmerge()
+
+    def _unloading_checks(self, adapter_names: Optional[List[str]]):
+        adapters_to_consider = adapter_names or self.active_adapters
+        is_modules_to_save_available = any(
+            self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
+        )
+        if is_modules_to_save_available and len(adapters_to_consider) > 1:
+            raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
 
 class BaseTunerLayer(ABC):
@@ -297,6 +371,7 @@ class BaseTunerLayer(ABC):
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
     """
+
     active_adapter = None
 
     # All names of layers that may contain adapter (trainable) weights
@@ -341,10 +416,10 @@ class BaseTunerLayer(ABC):
             weight = base_layer.weight
         return weight
 
-    def merge(self, *args) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         raise NotImplementedError
 
-    def unmerge(self, *args) -> None:
+    def unmerge(self) -> None:
         raise NotImplementedError
 
     @property
@@ -368,7 +443,7 @@ class BaseTunerLayer(ABC):
         # is already a list of str
         return self.active_adapter
 
-    def enable_adapters(self, enabled: bool):
+    def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
 
         Takes care of setting the requires_grad flag for the adapter weights.
@@ -386,11 +461,11 @@ class BaseTunerLayer(ABC):
                 layer.requires_grad_(False)
             self._disable_adapters = True
 
-    def set_adapter(self, adapter_names: str | list[str]):
-        """Set the active adapter
+    def set_adapter(self, adapter_names: str | list[str]) -> None:
+        """Set the active adapter(s).
 
         Args:
-            adapter_name (str): The name of the adapter to set as active
+            adapter_name (`str` or `List[str]`): Name of the adapter(s) to be activated.
         """
         if isinstance(adapter_names, str):
             adapter_names = [adapter_names]
@@ -509,3 +584,39 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
         else:
             module_dict["unmatched"].append(key)
     return module_dict
+
+
+def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
+    """
+    Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
+    the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
+    """
+
+    # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
+    if not (
+        isinstance(peft_config.target_modules, str)
+        and peft_config.target_modules.lower() == INCLUDE_LINEAR_LAYERS_SHORTHAND
+    ):
+        return peft_config
+
+    if not isinstance(model, PreTrainedModel):
+        raise ValueError(
+            f"Only instances of PreTrainedModel support `target_modules={INCLUDE_LINEAR_LAYERS_SHORTHAND!r}`"
+        )
+
+    linear_classes = (torch.nn.Linear, Conv1D)
+
+    linear_module_names = set()
+    for name, module in model.named_modules():
+        # match with all linear classes.
+        if isinstance(module, linear_classes):
+            names = name.rsplit(".", 1)[-1]  # get the base name
+            linear_module_names.add(names)
+
+    # ignore the last classification head for text generation models
+    output_emb = model.get_output_embeddings()
+    if output_emb is not None:
+        last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
+        linear_module_names -= {last_module_name}
+    peft_config.target_modules = linear_module_names
+    return peft_config

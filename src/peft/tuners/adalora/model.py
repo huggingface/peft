@@ -33,14 +33,6 @@ from .gptq import SVDQuantLinear
 from .layer import AdaLoraLayer, RankAllocator, SVDLinear
 
 
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-    from .bnb import SVDLinear8bitLt
-if is_bnb_4bit_available():
-    from .bnb import SVDLinear4bit
-
-
 class AdaLoraModel(LoraModel):
     """
     Creates AdaLoRA (Adaptive LoRA) model from a pretrained transformers model. Paper:
@@ -118,24 +110,22 @@ class AdaLoraModel(LoraModel):
         target,
         target_name,
         parent,
-        **optional_kwargs,
+        current_key,
     ):
-        loaded_in_8bit = optional_kwargs.get("loaded_in_8bit", False)
-        loaded_in_4bit = optional_kwargs.get("loaded_in_4bit", False)
-        if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
-            raise ImportError(
-                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
-                "You can install it with `pip install bitsandbytes`."
-            )
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
-            "loaded_in_8bit": loaded_in_8bit,
-            "loaded_in_4bit": loaded_in_4bit,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
+        if (kwargs["loaded_in_8bit"] or kwargs["loaded_in_4bit"]) and not is_bnb_available():
+            raise ImportError(
+                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
+                "You can install it with `pip install bitsandbytes`."
+            )
 
         quantization_config = get_quantization_config(self.model, method="gptq")
         if quantization_config is not None:
@@ -159,6 +149,14 @@ class AdaLoraModel(LoraModel):
 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        # avoid eager bnb import
+        if is_bnb_available():
+            import bitsandbytes as bnb
+
+            from .bnb import SVDLinear8bitLt
+        if is_bnb_4bit_available():
+            from .bnb import SVDLinear4bit
+
         gptq_quantization_config = kwargs.get("gptq_quantization_config", None)
         AutoGPTQQuantLinear = get_auto_gptq_quant_linear(gptq_quantization_config)
 
@@ -173,10 +171,10 @@ class AdaLoraModel(LoraModel):
         if loaded_in_8bit and isinstance(target_base_layer, bnb.nn.Linear8bitLt):
             kwargs.update(
                 {
-                    "has_fp16_weights": target.state.has_fp16_weights,
-                    "memory_efficient_backward": target.state.memory_efficient_backward,
-                    "threshold": target.state.threshold,
-                    "index": target.index,
+                    "has_fp16_weights": target_base_layer.state.has_fp16_weights,
+                    "memory_efficient_backward": target_base_layer.state.memory_efficient_backward,
+                    "threshold": target_base_layer.state.threshold,
+                    "index": target_base_layer.index,
                 }
             )
             new_module = SVDLinear8bitLt(target, adapter_name, **kwargs)
@@ -184,9 +182,9 @@ class AdaLoraModel(LoraModel):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
-                    "compute_dtype": target.compute_dtype,
-                    "compress_statistics": target.weight.compress_statistics,
-                    "quant_type": target.weight.quant_type,
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
                 }
             )
             new_module = SVDLinear4bit(target, adapter_name, **fourbit_kwargs)
@@ -236,7 +234,7 @@ class AdaLoraModel(LoraModel):
     def forward(self, *args, **kwargs):
         outputs = self.model.forward(*args, **kwargs)
 
-        if getattr(outputs, "loss", None) is not None:
+        if (getattr(outputs, "loss", None) is not None) and isinstance(outputs.loss, torch.Tensor):
             # Calculate the orthogonal regularization
             orth_reg_weight = self.peft_config[self.trainable_adapter_name].orth_reg_weight
 

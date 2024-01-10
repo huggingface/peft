@@ -24,12 +24,15 @@ from .model import AdaLoraModel
 __all__ = ["AdaLoraConfig", "AdaLoraLayer", "AdaLoraModel", "SVDLinear", "RankAllocator", "SVDQuantLinear"]
 
 
-if is_bnb_available():
-    from .bnb import SVDLinear8bitLt
+def __getattr__(name):
+    if (name == "SVDLinear8bitLt") and is_bnb_available():
+        from .bnb import SVDLinear8bitLt
 
-    __all__ += ["SVDLinear8bitLt"]
+        return SVDLinear8bitLt
 
-if is_bnb_4bit_available():
-    from .bnb import SVDLinear4bit
+    if (name == "SVDLinear4bit") and is_bnb_4bit_available():
+        from .bnb import SVDLinear4bit
 
-    __all__ += ["SVDLinear4bit"]
+        return SVDLinear4bit
+
+    raise AttributeError(f"module {__name__} has no attribute {name}")

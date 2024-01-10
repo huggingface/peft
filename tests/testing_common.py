@@ -163,6 +163,7 @@ class PeftCommonTester:
         transformers_class (`transformers.PreTrainedModel`):
             The transformers class that is being tested.
     """
+
     torch_device = infer_device()
     transformers_class = None
 
@@ -179,10 +180,9 @@ class PeftCommonTester:
         dct = yaml.safe_load(metainfo)
         self.assertEqual(dct["library_name"], "peft")
 
-        model_config = model.config if isinstance(model.config, dict) else model.config.to_dict()
-        if model_config["model_type"] != "custom":
-            self.assertEqual(dct["base_model"], model_config["_name_or_path"])
-        else:
+        if hasattr(model, "config"):
+            self.assertEqual(dct["base_model"], model.config.to_dict()["_name_or_path"])
+        else:  # a custom model
             self.assertTrue("base_model" not in dct)
 
     def check_config_json(self, tmp_dirname, model):
@@ -192,9 +192,8 @@ class PeftCommonTester:
         with open(filename, "r", encoding="utf-8") as f:
             config = json.load(f)
 
-        model_config = model.config if isinstance(model.config, dict) else model.config.to_dict()
-        if model_config["model_type"] != "custom":
-            self.assertEqual(config["base_model_name_or_path"], model_config["_name_or_path"])
+        if hasattr(model, "config"):  # custom models don't have a config attribute
+            self.assertEqual(config["base_model_name_or_path"], model.config.to_dict()["_name_or_path"])
 
     def _test_model_attr(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -573,7 +572,7 @@ class PeftCommonTester:
         self.assertTrue(torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol))
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -885,7 +884,7 @@ class PeftCommonTester:
             self.assertIsNotNone(param.grad)
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -905,7 +904,7 @@ class PeftCommonTester:
         self.assertFalse(adapter_to_delete in model.peft_config)
         self.assertEqual(model.active_adapters, ["default"])
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
@@ -923,7 +922,7 @@ class PeftCommonTester:
 
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         # same as test_delete_adapter, but this time an inactive adapter is deleted
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -943,7 +942,7 @@ class PeftCommonTester:
         self.assertFalse(adapter_to_delete in model.peft_config)
         self.assertEqual(model.active_adapters, ["default"])
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             attributes_to_check = getattr(target, "adapter_layer_names", []) + getattr(target, "other_param_names", [])
@@ -1021,6 +1020,14 @@ class PeftCommonTester:
             adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
         )
 
+        # test linear re-weighting with multiple adapters with only first adapter having non zero weight
+        model.add_weighted_adapter(
+            adapter_list[:2],
+            [weight_list[0], 0],
+            "multi_adapter_linear_reweighting_single_enabled",
+            combination_type="linear",
+        )
+
         with self.assertRaises(ValueError):
             model.add_weighted_adapter(
                 adapter_list[1:],
@@ -1034,11 +1041,12 @@ class PeftCommonTester:
             "multi_adapter_svd_reweighting",
             "multi_adapter_cat_reweighting",
             "multi_adapter_linear_reweighting",
+            "multi_adapter_linear_reweighting_single_enabled",
         ]
         for new_adapter in new_adapters:
             self.assertTrue(new_adapter in model.peft_config)
 
-        key_list = [key for key, _ in model.named_modules() if "lora" not in key]
+        key_list = [key for key, _ in model.named_modules()]
         for key in key_list:
             _, target, _ = _get_submodules(model, key)
             if isinstance(target, LoraLayer):

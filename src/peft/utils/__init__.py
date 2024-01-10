@@ -29,6 +29,7 @@ from .other import (
     CONFIG_NAME,
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
+    INCLUDE_LINEAR_LAYERS_SHORTHAND,
     _set_trainable,
     bloom_model_postprocess_past_key_value,
     prepare_model_for_int8_training,
@@ -47,5 +48,4 @@ from .other import (
     get_quantization_config,
     id_tensor_storage,
 )
-from .hub_utils import hub_file_exists
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights
