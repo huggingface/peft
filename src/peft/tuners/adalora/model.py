@@ -305,18 +305,19 @@ class AdaLoraModel(LoraModel):
         return state_dict
 
     def update_and_allocate(self, global_step):
-        r"""
+        """
         This method updates Adalora budget and mask.
-        This should be called in every training step after `optimizer.step()` and before `zero_grad()`.
+
+        This should be called in every training step after `loss.backward()` and before `zero_grad()`.
+
         `tinit`, `tfinal` and `deltaT` are handled with in the method.
 
         Args:
-            global_step (`int`):
-                The current training step, it is used to calculate adalora budget.
+            global_step (`int`): The current training step, it is used to calculate adalora budget.
 
         Example:
 
-        ```py
+        ```python
         >>> loss = model(**input).loss
         >>> loss.backward()
         >>> optimizer.step()
