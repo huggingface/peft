@@ -118,12 +118,16 @@ class BaseTuner(nn.Module, ABC):
             dictionary with a key `adapter_name` and a value of that peft config.
         config (`dict[str, Any]`):
             The model configuration object, it should be a dictionary of `str` to `Any` objects.
+        targeted_module_names (`list[str]`):
+            The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
+            double-check that the `config.target_modules` where specified correctly.
     """
 
     def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
         super().__init__()
 
         self.model = model
+        self.targeted_module_names: list[str] = []
 
         # For advanced developpers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
@@ -293,6 +297,7 @@ class BaseTuner(nn.Module, ABC):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
+            self.targeted_module_names.append(key)
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)

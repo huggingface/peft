@@ -19,6 +19,7 @@ from copy import deepcopy
 
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
+from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
 from peft import IA3Config, LoHaConfig, LoraConfig, get_peft_model
@@ -312,3 +313,59 @@ class PeftCustomKwargsTester(unittest.TestCase):
             "Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
+
+
+class MLP(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+
+class TestTargetedModuleNames(unittest.TestCase):
+    """Check that the attribute targeted_module_names is correctly set.
+
+    This checks LoRA and IA³, but this should be sufficient, testing all other tuners is not necessary.
+    """
+
+    def test_one_targeted_module_regex(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules="lin0"))
+        self.assertEqual(model.targeted_module_names, ["lin0"])
+
+    def test_two_targeted_module_regex(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules="lin.*"))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_one_targeted_module_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        self.assertEqual(model.targeted_module_names, ["lin0"])
+
+    def test_two_targeted_module_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"]))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_ia3_targeted_module_regex(self):
+        model = MLP()
+        model = get_peft_model(model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*"))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_ia3_targeted_module_list(self):
+        model = MLP()
+        model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=["lin0", "lin1"]))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_realistic_example(self):
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
+        config = LoraConfig(task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        expected = [
+            f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
+        ]
+        self.assertEqual(model.targeted_module_names, expected)
