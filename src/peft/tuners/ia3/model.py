@@ -160,21 +160,17 @@ class IA3Model(BaseTuner):
         target,
         target_name,
         parent,
-        **optional_kwargs,
+        current_key,
     ):
-        loaded_in_8bit = optional_kwargs["loaded_in_8bit"]
-        loaded_in_4bit = optional_kwargs["loaded_in_4bit"]
-        current_key = optional_kwargs["current_key"]
-
         # check if target module is in feedforward_modules
         is_feedforward = self._check_target_module_feedforward(ia3_config, current_key)
 
         kwargs = {
             "fan_in_fan_out": ia3_config.fan_in_fan_out,
             "init_ia3_weights": ia3_config.init_ia3_weights,
-            "loaded_in_8bit": loaded_in_8bit,
-            "loaded_in_4bit": loaded_in_4bit,
             "is_feedforward": is_feedforward,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
         if isinstance(target, IA3Layer):

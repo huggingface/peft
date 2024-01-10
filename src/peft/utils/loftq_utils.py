@@ -155,7 +155,7 @@ class NFQuantizer:
         weight = torch.zeros((qweight.shape[0], 8 // self.num_bits), dtype=torch.float32, device=device)
         for i in range(8 // self.num_bits):
             lookup_table_idx = qweight.to(torch.long) % 2**self.num_bits  # get the most right 2 bits
-            lookup_table_idx = lookup_table_idx.to(torch.int)
+            lookup_table_idx = lookup_table_idx.to(torch.long)
             weight[:, i] = self.norm_lookup_table[lookup_table_idx].squeeze()
             qweight = qweight >> self.num_bits  # right shift 2 bits of the original data
 
