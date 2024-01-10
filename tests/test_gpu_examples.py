@@ -1196,3 +1196,82 @@ class MultiprocessTester(unittest.TestCase):
         cmd = ["python", script_path]
         with patch_environment(omp_num_threads=1):
             run_command(cmd, env=os.environ.copy())
+
+
+@require_torch_gpu
+class MixedPrecisionTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "facebook/opt-350m"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        self.config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            task_type="CAUSAL_LM",
+        )
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        self.data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    @pytest.mark.single_gpu_tests
+    def test_model_loaded_in_float16_raises(self):
+        # This test shows the issue with loading the model in fp16 and then trying to use it with mixed precision
+        # training, which should not use fp16. If this is ever automated in PEFT, this test should fail. In that case,
+        # remove this test, adjust the next one, and remove the entry about FP16 usage from troubleshooting.md.
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            msg = "Attempting to unscale FP16 gradients."
+            with self.assertRaisesRegex(ValueError, msg):
+                trainer.train()
+
+    @pytest.mark.single_gpu_tests
+    def test_model_loaded_in_float16_working(self):
+        # Same test as before but containing the fix to make it work
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config)
+
+        # for now, this is unfortunately necessary to avoid the error:
+        # ValueError: Attempting to unscale FP16 gradients.
+        for param in model.parameters():
+            if param.requires_grad:
+                param.data = param.data.float()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,
+                    max_steps=3,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.train()
