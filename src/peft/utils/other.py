@@ -498,30 +498,11 @@ def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
     return tensor.device, unique_id, storage_size(tensor)
 
 
-# adapted from https://github.com/Bavest/fin-llama/blob/8ba68f4b49753358ffbe693d38f2461c031625e3/qlora.py#L229
-def get_linear_layer_names(model):
-    """
-    Returns a list of linear layers in the model.
-
-    Args:
-        model (`torch.nn.Module`):
-            The model for which to get the layer names.
-    """
-    lora_module_names = set()
-    for name, module in model.named_modules():
-        if isinstance(module, torch.nn.Linear):
-            names = name.split(".")
-            lora_module_names.add(names[0] if len(names) == 1 else names[-1])
-
-    if "lm_head" in lora_module_names:  # needed for 16-bit
-        lora_module_names.remove("lm_head")
-    return list(lora_module_names)
-
-
 def cast_non_trainable_to_dtype(model, dtype):
     """
-    Cast all non-trainable parameters of the model to the given `dtype`. This is meant to reduce the GPU memory usage
-    when using PEFT methods by using half-precision dtype for non-trainable parameters.
+    Cast all non-trainable parameters of the model to the given `dtype`. The trainable parameters are casted to full precision.
+    This is meant to reduce the GPU memory usage when using PEFT methods by using half-precision dtype for non-trainable parameters.
+    Having the trainable parameters in full-precision preserves training stability when using automatic mixed precision training.
 
     Args:
         model (`torch.nn.Module`):
@@ -532,3 +513,5 @@ def cast_non_trainable_to_dtype(model, dtype):
     for p in model.parameters():
         if not p.requires_grad:
             p.data = p.to(dtype)
+        else:
+            p.data = p.to(torch.float32)

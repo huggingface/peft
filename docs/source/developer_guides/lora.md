@@ -136,16 +136,3 @@ model.unload()
 # delete adapter
 model.delete_adapter("dpo")
 ```
-
-## Utilities
-
-Q-LoRA paper outlines that best performance is achieved by targetting all the Linear layers of the model instead of only targetting the query and value layers. To find all the linear layers to target, we provide a utility function `get_linear_layer_names`. Below is the sample usage of it:
-
-```py
-from peft import get_linear_layer_names
-from transformers import AutoModelForCausalLM
-
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
-print(get_linear_layer_names(model))
-# ['v_proj', 'o_proj', 'k_proj', 'down_proj', 'up_proj', 'q_proj', 'gate_proj']
-```
