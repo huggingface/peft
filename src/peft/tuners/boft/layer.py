@@ -32,16 +32,6 @@ os.environ["CC"] = "gcc"
 os.environ["CXX"] = "gcc"
 curr_dir = os.path.dirname(__file__)
 
-fbd_cuda = load(
-    name="fbd_cuda",
-    sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
-    verbose=True,
-    # build_directory='/tmp/'  # for debugging
-)
-# extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
-
-import fbd_cuda
-
 
 class FastBlockDiag(Function):
     """
@@ -49,8 +39,7 @@ class FastBlockDiag(Function):
 
     This function is optimized for 4D tensors where the last two dimensions are equal,
     representing block diagonal matrices for efficient computation on CUDA devices.
-    """
-
+    """        
     @staticmethod
     def forward(ctx, input):
         """
@@ -85,8 +74,7 @@ class FastBlockDiag(Function):
 class MultiplicativeDropoutLayer(nn.Module):
     """
     Implements the multiplicative dropout layer for BOFT.
-    """
-
+    """            
     def __init__(self, p=0.0):
         """
         Initializes the multiplicative dropout layer.
@@ -140,7 +128,6 @@ class BOFTLayer(BaseTunerLayer):
     """
     Implements the BOFT layer.
     """
-
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ("boft_R", "boft_s")
     # All names of other parameters that may contain adapter-related parameters
@@ -177,6 +164,15 @@ class BOFTLayer(BaseTunerLayer):
 
         self.in_features = in_features
         self.out_features = out_features
+        
+        fbd_cuda = load(
+            name="fbd_cuda",
+            sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
+            verbose=True,
+            # build_directory='/tmp/'  # for debugging
+            )
+        # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
+        import fbd_cuda
 
     def update_layer(
         self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
@@ -632,7 +628,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
         # layer information from the base layer
         base_layer = self.get_base_layer()
-        conv_filter_dim = self.in_features * base_layer.kernel_size * base_layer.kernel_size
+        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         # Initialize the BOFT parameters.
         if not (boft_block_size != 0) ^ (boft_block_num != 0):
@@ -886,10 +882,6 @@ class Conv2d(nn.Module, BOFTLayer):
                 boft_s = self.boft_s[active_adapter]
                 dropout = self.boft_dropout[active_adapter]
 
-                kernel_size = self.kernel_size[adapter_name]
-                stride = self.stride[adapter_name]
-                padding = self.padding[adapter_name]
-
                 N, D, H, _ = boft_R.shape
                 boft_R = boft_R.view(N * D, H, H)
                 orth_rotate_butterfly = self.cayley_batch(boft_R)
@@ -913,7 +905,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
                 scaled_rotated_weight = rotated_weight * boft_s
                 
-                scaled_rotated_weight = scaled_rotated_weight.view(self.out_features, self.in_features, self.base_layer.kernel_size, self.base_layer.kernel_size)
+                scaled_rotated_weight = scaled_rotated_weight.view(self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0])
                 result = F.conv2d(input=x, filters=scaled_rotated_weight, bias=self.base_layer.bias, padding=self.base_layer.padding, stride=self.base_layer.stride)
                 result_initialized = True
 

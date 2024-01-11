@@ -110,10 +110,8 @@ print_trainable_parameters(lora_model)
 for name, param in lora_model.named_parameters():
     if param.requires_grad:
         print(name, param.shape)
-sys.exit()
 
 from transformers import TrainingArguments, Trainer
-
 
 model_name = model_checkpoint.split("/")[-1]
 batch_size = 128
