@@ -49,7 +49,7 @@ class BOFTConfig(PeftConfig):
     """
 
     boft_block_size: int = field(
-        default=2,
+        default=0,
         metadata={
             "help": "BOFT block size across different layers.",
             "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension.",

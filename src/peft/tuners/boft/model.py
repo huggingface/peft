@@ -39,7 +39,7 @@ from peft.utils import (
 )
 
 from .config import BOFTConfig
-from .layer import Linear, BOFTLayer
+from .layer import Linear, Conv2d, BOFTLayer
 
 
 class BOFTModel(BaseTuner):
@@ -204,7 +204,6 @@ class BOFTModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            in_features, out_features = target.in_features, target.out_features
             if kwargs["fan_in_fan_out"]:
                 warnings.warn(
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
@@ -212,9 +211,11 @@ class BOFTModel(BaseTuner):
                 )
                 kwargs["fan_in_fan_out"] = boft_config.fan_in_fan_out = False
             new_module = Linear(target, adapter_name, **kwargs)
+        elif isinstance(target_base_layer, torch.nn.Conv2d):
+            new_module = Conv2d(target, adapter_name, **kwargs)
         else:
             raise ValueError(
-                f"Target module {target} is not supported. " f"Currently, only `torch.nn.Linear` is supported."
+                f"Target module {target} is not supported. " f"Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` is supported."
             )
 
         return new_module

@@ -170,6 +170,8 @@ class BOFTLayer(BaseTunerLayer):
 
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, nn.Conv2d):
+            in_features, out_features = base_layer.in_channels, base_layer.out_channels
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
@@ -180,7 +182,7 @@ class BOFTLayer(BaseTunerLayer):
         self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
     ):
         """
-        Update the linear layer with trainable BOFT weights.
+        Update the linear layer with trainable BOFT weights. Override for other layer types.
         """
         # to be consistent with the paper notation 
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
@@ -199,23 +201,23 @@ class BOFTLayer(BaseTunerLayer):
         # Initialize the BOFT parameters.
         if not (boft_block_size != 0) ^ (boft_block_num != 0):
             raise ValueError(
-                f"You can only specify either boft_block_size {boft_block_size} or boft_block_num {boft_block_num}, but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num != in_features."
             )
 
         if boft_block_size == 0 and boft_block_num != 0:
             if self.in_features % boft_block_num != 0:
                 raise ValueError(
-                    f"in_features {self.in_features} must be divisible by boft_block_num {boft_block_num}!"
+                    f"in_features ({self.in_features}) must be divisible by boft_block_num ({boft_block_num})!"
                 )
 
             if boft_n_butterfly_factor != 0:
                 if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
                     raise ValueError(
-                        f"Invalid combination of boft_n_butterfly_factor {boft_n_butterfly_factor} and boft_block_num {boft_block_num}!"
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_num ({boft_block_num})!"
                     )
                 if boft_block_num % (2**boft_n_butterfly_factor) != 0:
                     raise ValueError(
-                        f"boft_block_num {boft_block_num} must be a multiple of 2 raised to the power of boft_n_butterfly_factor {boft_n_butterfly_factor}!"
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor})!"
                     )
 
             boft_block_size = int(self.in_features // boft_block_num)
@@ -223,17 +225,17 @@ class BOFTLayer(BaseTunerLayer):
         elif boft_block_size != 0 and boft_block_num == 0:
             if self.in_features % boft_block_size != 0:
                 raise ValueError(
-                    f"in_features {self.in_features} must be divisible by boft_block_size {boft_block_size}!"
+                    f"in_features ({self.in_features}) must be divisible by boft_block_size ({boft_block_size})!"
                 )
 
             if boft_n_butterfly_factor != 0:
                 if self.in_features < (boft_block_size * (2**boft_n_butterfly_factor)):
                     raise ValueError(
-                        f"Invalid combination of in_features {self.in_features}, boft_n_butterfly_factor {boft_n_butterfly_factor} and boft_block_size {boft_block_size}!"
+                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
                     )
                 if self.in_features % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
                     raise ValueError(
-                        f"Invalid combination of in_features {self.in_features}, boft_n_butterfly_factor {boft_n_butterfly_factor} and boft_block_size {boft_block_size}!"
+                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
                     )
 
             boft_block_num = int(self.in_features // boft_block_size)
@@ -241,17 +243,19 @@ class BOFTLayer(BaseTunerLayer):
         else:
             raise ValueError("Unknown error!")
 
-        if boft_block_num % 2 != 0:
-            raise ValueError(f"boft_block_num {boft_block_num} must be an even number!")
+        # In OFT you can specify the number of blocks to be 1
+        if boft_n_butterfly_factor != 0:
+            if boft_block_num % 2 != 0:
+                raise ValueError(f"boft_block_num ({boft_block_num}) must be an even number!")
 
-        if boft_block_size % 2 != 0:
-            raise ValueError(f"boft_block_size {boft_block_size} must be an even number!")
+            if boft_block_size % 2 != 0:
+                raise ValueError(f"boft_block_size ({boft_block_size}) must be an even number!")
 
         # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
         P = torch.empty((boft_n_butterfly_factor + 1, self.in_features, self.in_features))
         for i in range((boft_n_butterfly_factor + 1)):
             perm = self.block_butterfly_perm(
-                self.in_features, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2)
+                self.in_features, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2), boft_n_butterfly_factor
             )
             perm_mat = self.perm2mat(perm)
             P[i] = perm_mat
@@ -275,6 +279,7 @@ class BOFTLayer(BaseTunerLayer):
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
 
+        # set the boft block size and number
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
 
@@ -309,7 +314,7 @@ class BOFTLayer(BaseTunerLayer):
 
         return perm_mat
 
-    def block_butterfly_perm(self, n, b, r=3):
+    def block_butterfly_perm(self, n, b, r=3, n_butterfly_factor=1):
         """
         Define the permutation matrix for the block butterfly permutation.
 
@@ -318,6 +323,9 @@ class BOFTLayer(BaseTunerLayer):
         b: desired number of blocks after multiplying with the permutation matrix
         r: base block size of the block diagonal matrix, e.g. 2x2, 3x3, 5x5 etc.
         """
+
+        if n_butterfly_factor == 0:
+            return torch.arange(n)
 
         if b * r * 2 > n:
             raise ValueError("Invalid number of blocks!")
@@ -532,7 +540,7 @@ class Linear(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            result_initilized = False  # Initialize the flag
+            result_initialized = False  # Initialize the flag
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
                     continue
@@ -564,10 +572,353 @@ class Linear(nn.Module, BOFTLayer):
                 scaled_rotated_weight = rotated_weight * boft_s
 
                 result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.base_layer.bias)
-                result_initilized = True
+                result_initialized = True
 
             # handle the case when there are no activate adapter in BOFT
-            if not result_initilized:
+            if not result_initialized:
+                result = self.base_layer(x, *args, **kwargs)
+
+        result = result.to(previous_dtype)
+        return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "boft." + rep
+
+
+
+class Conv2d(nn.Module, BOFTLayer):
+    """
+    BOFT implemented in a Conv2d layer.
+    """
+    def __init__(
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        boft_block_size: int = 8,
+        boft_block_num: int = 0,
+        boft_n_butterfly_factor: int = 0,
+        boft_dropout: float = 0.1,
+        init_boft_weights: Union[bool, str] = True,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        BOFTLayer.__init__(self, base_layer)
+
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
+        )
+
+    def update_layer(
+        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
+    ):
+        """
+        Update the linear layer with trainable BOFT weights.
+        """
+        # to be consistent with the paper notation 
+        boft_n_butterfly_factor = boft_n_butterfly_factor - 1
+        if boft_n_butterfly_factor < 0:
+            raise ValueError(
+                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor} to be a positive integer number."
+            )
+
+        # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
+        if boft_dropout > 0.0:
+            boft_dropout_layer = MultiplicativeDropoutLayer(p=boft_dropout)
+        else:
+            boft_dropout_layer = nn.Identity()
+        self.boft_dropout.update(nn.ModuleDict({adapter_name: boft_dropout_layer}))
+
+        # layer information from the base layer
+        base_layer = self.get_base_layer()
+        conv_filter_dim = self.in_features * base_layer.kernel_size * base_layer.kernel_size
+
+        # Initialize the BOFT parameters.
+        if not (boft_block_size != 0) ^ (boft_block_num != 0):
+            raise ValueError(
+                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+            )
+
+        if boft_block_size == 0 and boft_block_num != 0:
+            if conv_filter_dim % boft_block_num != 0:
+                raise ValueError(
+                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by boft_block_num ({boft_block_num})!"
+                )
+
+            if boft_n_butterfly_factor != 0:
+                if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
+                    raise ValueError(
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_num ({boft_block_num})!"
+                    )
+                if boft_block_num % (2**boft_n_butterfly_factor) != 0:
+                    raise ValueError(
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor})!"
+                    )
+
+            boft_block_size = int(conv_filter_dim // boft_block_num)
+
+        elif boft_block_size != 0 and boft_block_num == 0:
+            if conv_filter_dim % boft_block_size != 0:
+                raise ValueError(
+                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by boft_block_size ({boft_block_size})!"
+                )
+
+            if boft_n_butterfly_factor != 0:
+                if conv_filter_dim < (boft_block_size * (2**boft_n_butterfly_factor)):
+                    raise ValueError(
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
+                    )
+                if conv_filter_dim % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
+                    raise ValueError(
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
+                    )
+
+            boft_block_num = int(conv_filter_dim // boft_block_size)
+
+        else:
+            raise ValueError("Unknown error!")
+
+        # In OFT you can specify the number of blocks to be 1
+        if boft_n_butterfly_factor != 0:
+            if boft_block_num % 2 != 0:
+                raise ValueError(f"boft_block_num ({boft_block_num}) must be an even number!")
+
+            if boft_block_size % 2 != 0:
+                raise ValueError(f"boft_block_size ({boft_block_size}) must be an even number!")
+
+        # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
+        P = torch.empty((boft_n_butterfly_factor + 1, conv_filter_dim, conv_filter_dim))
+        for i in range((boft_n_butterfly_factor + 1)):
+            perm = self.block_butterfly_perm(
+                conv_filter_dim, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2), boft_n_butterfly_factor
+            )
+            perm_mat = self.perm2mat(perm)
+            P[i] = perm_mat
+
+        self.register_buffer("boft_P", P)
+
+        self.boft_R[adapter_name] = nn.Parameter(
+            torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
+        )
+        self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
+
+        if init_boft_weights:
+            self.reset_boft_parameters(adapter_name, init_boft_weights)
+
+        weight = getattr(self, "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                self.to(weight.device, dtype=weight.dtype)
+            else:
+                self.to(weight.device)
+        self.set_adapter(self.active_adapters)
+
+        # set the boft block size and number
+        self.boft_block_size[adapter_name] = boft_block_size
+        self.boft_block_num[adapter_name] = boft_block_num
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        if self.merged:
+            warnings.warn(
+                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+                f"You are now additionally merging {','.join(self.active_adapters)}."
+            )
+
+        if adapter_names is None:
+            adapter_names = self.active_adapters
+
+        for active_adapter in self.active_adapters:
+            if active_adapter in self.boft_R.keys():
+                base_layer = self.get_base_layer()
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weights = base_layer.weight.data.clone()
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = torch.mm(butterfly_oft_mat, orig_weights)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = orig_weights * boft_s
+
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    self.base_layer.weight.data = orig_weights
+                else:
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+                    orig_weights = base_layer.weight.data.clone()
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = torch.mm(butterfly_oft_mat, orig_weights)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    self.base_layer.weight.data = orig_weights * boft_s
+
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.boft_R.keys():
+                butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
+                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                rotated_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                rotated_weight = torch.transpose(rotated_weight, 0, 1)
+
+                self.get_base_layer().weight.data = rotated_weight * (1 / boft_s)
+
+
+    def get_delta_weight(self, adapter) -> torch.Tensor:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        # device = self.boft_R[adapter].device
+        # dtype = self.boft_R[adapter].dtype
+
+        boft_R = self.boft_R[adapter]
+        boft_s = self.boft_s[adapter]
+
+        N, D, H, _ = boft_R.shape
+        boft_R = boft_R.view(N * D, H, H)
+        orth_rotate_butterfly = self.cayley_batch(boft_R)
+        orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
+        block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+        butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+        for i in range(1, butterfly_oft_mat_batch.shape[0]):
+            butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+        return butterfly_oft_mat, boft_s
+
+
+    def cayley_batch(self, data):
+        """
+        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
+        Args:
+            data: A batch of skew-symmetric matrices of shape (b, r, c).
+        """
+        b, r, c = data.shape
+        # Ensure the input matrix is skew-symmetric
+        skew = 0.5 * (data - data.transpose(1, 2))
+        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
+
+        # Perform the Cayley parametrization
+        Q = torch.bmm(I - skew, torch.inverse(I + skew))
+        # Q = torch.linalg.solve(I + skew, I - skew, left=False)
+
+        return Q
+
+    def angle2rot(self, alphas):
+        """
+        Convert the angle to rotation matrix.
+        Only applicable for BOFT block size 2.
+        """
+        c = torch.cos(alphas)
+        s = torch.sin(alphas)
+        rot_mats = torch.cat([c, -s, s, c], dim=-1).view(alphas.shape[0], alphas.shape[1], 2, 2)
+        return rot_mats
+
+    def is_orthogonal(self, R, eps=1e-3):
+        """
+        Check if the matrix is orthogonal.
+        """
+        R = R.float()
+        with torch.no_grad():
+            RtR = torch.matmul(R.t(), R)
+            diff = torch.abs(RtR - torch.eye(R.shape[1], dtype=R.dtype, device=R.device))
+            return torch.all(diff < eps)
+
+    def is_identity_matrix(self, tensor):
+        """
+        Check if the matrix is identity.
+        """
+        if not torch.is_tensor(tensor):
+            raise TypeError("Input must be a PyTorch tensor.")
+        if tensor.ndim != 2 or tensor.shape[0] != tensor.shape[1]:
+            return False
+        identity = torch.eye(tensor.shape[0], device=tensor.device)
+        return torch.all(torch.eq(tensor, identity))
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = x.dtype
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            result_initialized = False  # Initialize the flag
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.boft_R.keys():
+                    continue
+                boft_R = self.boft_R[active_adapter]
+                boft_s = self.boft_s[active_adapter]
+                dropout = self.boft_dropout[active_adapter]
+
+                kernel_size = self.kernel_size[adapter_name]
+                stride = self.stride[adapter_name]
+                padding = self.padding[adapter_name]
+
+                N, D, H, _ = boft_R.shape
+                boft_R = boft_R.view(N * D, H, H)
+                orth_rotate_butterfly = self.cayley_batch(boft_R)
+                orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
+                orth_rotate_butterfly = dropout(orth_rotate_butterfly)
+                block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+                butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+                for i in range(1, butterfly_oft_mat_batch.shape[0]):
+                    butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+                x = x.to(boft_R.data.dtype)
+
+                orig_weight = self.base_layer.weight.data
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                rotated_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                rotated_weight = torch.transpose(rotated_weight, 0, 1)
+
+                scaled_rotated_weight = rotated_weight * boft_s
+                
+                scaled_rotated_weight = scaled_rotated_weight.view(self.out_features, self.in_features, self.base_layer.kernel_size, self.base_layer.kernel_size)
+                result = F.conv2d(input=x, filters=scaled_rotated_weight, bias=self.base_layer.bias, padding=self.base_layer.padding, stride=self.base_layer.stride)
+                result_initialized = True
+
+            # handle the case when there are no activate adapter in BOFT
+            if not result_initialized:
                 result = self.base_layer(x, *args, **kwargs)
 
         result = result.to(previous_dtype)

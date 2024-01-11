@@ -226,14 +226,15 @@ TEST_CASES = [
     ########
     # BOFT #
     ########
-    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 2 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "modules_to_save": ["lin0"]}),
+    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "boft_block_size": 2}),
+    ("Vanilla MLP 2 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "modules_to_save": ["lin0"], "boft_block_size": 2}),
     (
         "Vanilla MLP 3 BOFT",
         "MLP",
         BOFTConfig,
         {
             "target_modules": ["lin1"],
+            "boft_block_size": 2,
             "boft_dropout": 0.1,
         },
     ),
@@ -241,19 +242,19 @@ TEST_CASES = [
         "Vanilla MLP 4 BOFT",
         "MLP",
         BOFTConfig,
-        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 0},
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
     ),
     (
         "Vanilla MLP 5 BOFT",
         "MLP",
         BOFTConfig,
-        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 2, "boft_n_butterfly_factor": 0},
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 2, "boft_n_butterfly_factor": 1},
     ),
     (
         "Vanilla MLP 6 BOFT",
         "MLP",
         BOFTConfig,
-        {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+        {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
     ),
 ]
 
@@ -2002,10 +2003,10 @@ class RequiresGradTester(unittest.TestCase):
 
     def test_requires_grad_boft_same_targets(self):
         # same as previous test, except that BOFT adapters target the same layer
-        config0 = BOFTConfig(target_modules=["lin1"])
+        config0 = BOFTConfig(target_modules=["lin1"], boft_block_size=2)
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = BOFTConfig(target_modules=["lin1"], inference_mode=True)
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
