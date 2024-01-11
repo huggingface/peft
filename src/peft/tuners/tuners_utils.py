@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import warnings
@@ -170,12 +171,26 @@ class BaseTuner(nn.Module, ABC):
         Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
 
         Args:
-            peft_config (`str`):
+            peft_config (`PeftConfig`):
                 The adapter config.
-            model_config (`str`):
+            model_config (`dict`):
                 The transformers model config, that config should contain the `model_type` key.
         """
         ...
+
+    def _prepare_model(self, peft_config: PeftConfig, model: nn.Module):
+        r"""
+        A private method to modify the model structure before adapter is applied.
+
+        Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The prepared adapter config.
+            model_config (`nn.Module`):
+                The model that is going to be adapted.
+        """
+        pass
 
     @abstractmethod
     def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool:
@@ -261,9 +276,6 @@ class BaseTuner(nn.Module, ABC):
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
 
-        is_target_modules_in_base_model = False
-        key_list = [key for key, _ in model.named_modules()]
-
         _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
         _has_modules_to_save = False
 
@@ -272,6 +284,10 @@ class BaseTuner(nn.Module, ABC):
             model_config = model_config.to_dict()
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
+
+        self._prepare_model(peft_config, model)
+        is_target_modules_in_base_model = False
+        key_list = [key for key, _ in model.named_modules()]
 
         # update peft_config.target_modules if required
         peft_config = _maybe_include_all_linear_layers(peft_config, model)
@@ -665,3 +681,17 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
             warnings.warn("All adapters are already merged, nothing to do.")
 
     return adapter_names
+
+
+def clone_module(module: nn.Module, share_weights=False):
+    clone = copy.deepcopy(module)
+
+    def _share_weights(src: nn.Module, dst: nn.Module):
+        for name, param in src.named_parameters(recurse=False):
+            dst.register_parameter(name, param)
+
+    if share_weights:
+        for name, submodule in module.named_modules():
+            _share_weights(submodule, clone.get_submodule(name))
+
+    return clone

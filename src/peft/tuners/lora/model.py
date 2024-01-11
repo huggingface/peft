@@ -28,7 +28,7 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, clone_module, onload_layer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -128,6 +128,32 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _check_target_module_exists(lora_config, key):
         return check_target_module_exists(lora_config, key)
+
+    def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
+        r"""
+        A private method to modify the model structure before adapter is applied.
+
+        Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The prepared adapter config.
+            model_config (`nn.Module`):
+                The model that is going to be adapted.
+        """
+        if peft_config.layer_replication:
+            new_layers = []
+            for start, end in peft_config.layer_replication:
+                for i in range(start, end):
+                    current_idx = len(new_layers)
+                    new_layers.append(clone_module(model.base_model.layers[i], share_weights=True))
+                    # This is a hack needed to work around the layer_idx introduced in HF transformers.
+                    for submodule in new_layers[-1].modules():
+                        if hasattr(submodule, 'layer_idx'):
+                            submodule.layer_idx = current_idx
+            model.base_model.layers = nn.ModuleList(new_layers)
+            if hasattr(model.config, 'num_hidden_layers'):
+                model.config.num_hidden_layers = len(new_layers)
 
     def _create_and_replace(
         self,
@@ -333,6 +359,16 @@ class LoraModel(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
+    def _check_merge_allowed(self):
+        if getattr(self.model, "quantization_method", None) == "gptq":
+            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+        if self.peft_config.get('layer_replication'):
+            raise ValueError("Cannot merge LORA layers when base model layers are replicated")
+
+    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
+        self._check_merge_allowed()
+        super().merge_adapter(adapter_names=adapter_names)
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
@@ -351,8 +387,7 @@ class LoraModel(BaseTuner):
         adapter_names: Optional[list[str]] = None,
     ):
         if merge:
-            if getattr(self.model, "quantization_method", None) == "gptq":
-                raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+            self._check_merge_allowed()
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"

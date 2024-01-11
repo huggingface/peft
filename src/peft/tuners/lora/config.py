@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -243,6 +243,17 @@ class LoraConfig(PeftConfig):
                 "information, see  https://arxiv.org/abs/2402.09353."
             )
         },
+    )
+    # Enables replicating layers in a model to expand it to a larger model.
+    layer_replication: Optional[List[Tuple[int, int]]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "This enable using LoRA to effectively expand a model to a larger size by repeating some layers. "
+                "Base weights are shared so the memory usage is close to the original model."
+                "The format is a list of (start, end) pairs which specify the layer ranges to stack."
+            )
+        }
     )
 
     def __post_init__(self):
