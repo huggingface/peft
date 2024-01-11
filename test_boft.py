@@ -110,10 +110,8 @@ print_trainable_parameters(lora_model)
 for name, param in lora_model.named_parameters():
     if param.requires_grad:
         print(name, param.shape)
-sys.exit()
 
 from transformers import TrainingArguments, Trainer
-
 
 model_name = model_checkpoint.split("/")[-1]
 batch_size = 128
@@ -168,8 +166,7 @@ trainer = Trainer(
 )
 train_results = trainer.train()
 
-
-
+'''
 sys.exit()
 
 trainer.evaluate(val_ds)
@@ -204,3 +201,4 @@ import requests
 
 url = "https://huggingface.co/datasets/sayakpaul/sample-datasets/resolve/main/beignets.jpeg"
 image = Image.open(requests.get(url, stream=True).raw)
+'''
