@@ -727,6 +727,74 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
+    @pytest.mark.single_gpu_tests
+    def test_4bit_non_default_adapter_name(self):
+        # See PR 1294
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_4bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_4bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
+    @pytest.mark.single_gpu_tests
+    def test_8bit_non_default_adapter_name(self):
+        # See PR 1294
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_8bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_8bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
 
 @require_torch_gpu
 @require_auto_gptq
@@ -941,6 +1009,41 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    def test_non_default_adapter_name(self):
+        # See issue 1346
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
 
 
 @require_torch_gpu
