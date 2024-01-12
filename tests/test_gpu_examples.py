@@ -754,7 +754,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             load_in_4bit=True,
         )
         model = prepare_model_for_kbit_training(model)
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, config, adapter_name="other")
         n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
 
         self.assertGreater(n_trainable_other, 0)  # sanity check
@@ -788,7 +788,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             load_in_8bit=True,
         )
         model = prepare_model_for_kbit_training(model)
-        model = get_peft_model(model, config)
+        model = get_peft_model(model, config, adapter_name="other")
         n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
 
         self.assertGreater(n_trainable_other, 0)  # sanity check
