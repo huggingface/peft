@@ -58,6 +58,19 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
+Alternatively, you can use the utility function `cast_mixed_precision_params` from peft as shown below:
+```python
+from peft import cast_mixed_precision_params
+
+peft_model = get_peft_model(...)
+cast_mixed_precision_params(peft_model, dtype=torch.float16)
+
+# proceed as usual
+trainer = Trainer(model=peft_model, fp16=True, ...)
+trainer.train()
+```
+
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model, which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
