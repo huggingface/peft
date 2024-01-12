@@ -1150,13 +1150,15 @@ class PeftModelForCausalLM(PeftModel):
         )
 
         if peft_config.is_prompt_learning:
-            if model_kwargs.get("attention_mask", None) is not None:
-                if uses_cache and (model_kwargs["past_key_values"] is not None):
-                    # TODO figure out why this workaround is necessary, see #1252 for context
-                    size = model_kwargs["input_ids"].shape[0], model_kwargs["past_key_values"][0][0].shape[-2]
-                else:
-                    size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
+            if uses_cache and (model_kwargs["past_key_values"] is not None):
+                # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
+                # In prompt learning methods, past key values are longer when compared to the `input_ids`.
+                # As such only consider the last input ids in the autogressive generation phase.
+                if model_kwargs["past_key_values"][0][0].shape[-2] >= model_kwargs["input_ids"].shape[1]:
+                    model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
+            if model_kwargs.get("attention_mask", None) is not None:
+                size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
                 prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 model_kwargs["attention_mask"] = torch.cat(
                     (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
