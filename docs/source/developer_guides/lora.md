@@ -183,7 +183,7 @@ model.delete_adapter("dpo")
 
 ## QLoRA-style training
 
-The default LoRA settings in PEFT follow the [original paper](https://hf.co/papers/2106.09685) and add trainable weights to the query and value layers. However, in [QLoRa](https://hf.co/papers/2305.14314), it was found that adding trainable weights to all the linear layers of a transformer model is beneficial to match full-finetuning performance. Since the list of modules to add will vary depending on the architecture, we provided a convenient shorthand : simple specify `target_modules='all-linear'` and let PEFT handle the rest: 
+The default LoRA settings in PEFT follow the [original paper](https://hf.co/papers/2106.09685) and add trainable weights to the query and value layers of each attention block. However, in [QLoRA](https://hf.co/papers/2305.14314), it was found that adding trainable weights to all the linear layers of a transformer model is beneficial to match full-finetuning performance. Since the list of modules to add will vary depending on the architecture, we provided a convenient shorthand : simple specify `target_modules='all-linear'` and let PEFT handle the rest: 
 
 ```py
 config = LoraConfig(target_modules="all-linear", ...) # adds LoRA to all linear layers like in QLoRA
