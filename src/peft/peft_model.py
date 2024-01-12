@@ -47,6 +47,7 @@ from .tuners import (
     LoraModel,
     MultitaskPromptEmbedding,
     OFTModel,
+    PolyModel,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
@@ -81,6 +82,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
+    PeftType.POLY: PolyModel,
 }
 
 
@@ -577,7 +579,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Returns the base model.
         """
-        return self.base_model if self.active_peft_config.is_prompt_learning else self.base_model.model
+        return (
+            self.base_model
+            if (self.active_peft_config.is_prompt_learning or self.peft_type == PeftType.POLY)
+            else self.base_model.model
+        )
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
         """
@@ -883,6 +889,8 @@ class PeftModelForSequenceClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1070,6 +1078,8 @@ class PeftModelForCausalLM(PeftModel):
                     **kwargs,
                 )
 
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1149,6 +1159,8 @@ class PeftModelForCausalLM(PeftModel):
             uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
         )
 
+        if peft_config.peft_type == PeftType.POLY:
+            model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
             if uses_cache and (model_kwargs["past_key_values"] is not None):
                 # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
@@ -1248,6 +1260,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
     ):
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1422,9 +1436,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
             )
             return outputs
 
-    def prepare_inputs_for_generation(self, *args, **kwargs):
+    def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+        if peft_config.peft_type == PeftType.POLY:
+            model_kwargs["task_ids"] = task_ids
         if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
             batch_size = model_kwargs["decoder_input_ids"].shape[0]
             past_key_values = self.get_prompt(batch_size)
@@ -1504,6 +1520,8 @@ class PeftModelForTokenClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1671,12 +1689,15 @@ class PeftModelForQuestionAnswering(PeftModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1844,10 +1865,13 @@ class PeftModelForFeatureExtraction(PeftModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
