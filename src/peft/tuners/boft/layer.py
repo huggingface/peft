@@ -165,6 +165,7 @@ class BOFTLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         
+        global fbd_cuda
         fbd_cuda = load(
             name="fbd_cuda",
             sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
