@@ -59,7 +59,7 @@ TEST_CASES = [
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
-    ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
+    ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
     # IA³ #
     #######
@@ -552,7 +552,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
-        # An explicit test that when using LoRA on a custom model, only the LoRA parameters are updated during training
+        # An explicit test that when using an adapter on a custom model, only the LoRA parameters are updated during
+        # training
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(

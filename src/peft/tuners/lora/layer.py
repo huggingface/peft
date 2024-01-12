@@ -698,6 +698,10 @@ class MultiheadAttention(nn.Module, LoraLayer):
     This is currently only implemented for the case of `_qkv_same_embed_dim = True`, i.e. query, key, and value having
     the same dimension.
 
+    Note: LoRA is applied to both the in_proj (query/key/value) and out_proj. There is currently no way to specify only
+    one of them. Don't try to apply LoRA to the out_proj of MultiheadAttention by targeting that layer specifically,
+    since the forward method of that layer is not being used, hence the LoRA adapter would be ignored.
+
     This is a little bit hacky because of the way that MultiheadAttention is implemented in PyTorch. It works by
     merging the weights before the forward call and unmerging them after the forward call.
     """
@@ -722,6 +726,23 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+
+        # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
+        if isinstance(base_layer.out_proj, nn.Linear):
+            self.base_layer.out_proj = Linear(
+                base_layer.out_proj,
+                adapter_name,
+                r=r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                **kwargs,
+            )
+            # bias is accessed directly by nn.MultiheadAttention
+            self.base_layer.out_proj.bias = self.base_layer.out_proj.get_base_layer().bias
+        else:
+            raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
@@ -753,6 +774,8 @@ class MultiheadAttention(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:
+                    # merging in_proj
+                    # TODO: work with separate weights
                     orig_weights = base_layer.in_proj_weight.data.detach().clone()
                     orig_weights += self.get_delta_weight(active_adapter)
 
@@ -760,14 +783,32 @@ class MultiheadAttention(nn.Module, LoraLayer):
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = orig_weights
+
+                    # merging out_proj
+                    orig_weights = base_layer.out_proj.weight.data.detach().clone()
+                    orig_weights += base_layer.out_proj.get_delta_weight(active_adapter)
+                    if not torch.isfinite(orig_weights).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+                    del base_layer.out_proj.get_base_layer().weight
+                    base_layer.out_proj.get_base_layer().weight = orig_weights
                 else:
+                    # merging in_proj
                     # TODO: work with separate weights
                     weight_merged = base_layer.in_proj_weight.data.detach() + self.get_delta_weight(active_adapter)
                     del base_layer.in_proj_weight
                     base_layer.in_proj_weight = weight_merged
+
+                    # merging out_proj
+                    weight_merged = base_layer.out_proj.weight.data.detach() + base_layer.out_proj.get_delta_weight(
+                        active_adapter
+                    )
+                    del base_layer.out_proj.get_base_layer().weight
+                    base_layer.out_proj.get_base_layer().weight = weight_merged
+                    # self.get_base_layer().out_proj.merge(adapter_names=[active_adapter])
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -782,7 +823,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
+                # in_proj
                 self.get_base_layer().in_proj_weight.data -= self.get_delta_weight(active_adapter)
+                # out_proj
+                self.get_base_layer().out_proj.weight.data -= self.get_base_layer().out_proj.get_delta_weight(
+                    active_adapter
+                )
+
+        self.get_base_layer().out_proj.unmerge()
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -828,15 +876,34 @@ class MultiheadAttention(nn.Module, LoraLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            # merge all adapters that are active for this module
+            out_proj = self.get_base_layer().out_proj
+            if out_proj.active_adapters != self.active_adapters:
+                # We have a case that in_proj and out_proj have diverging merged adapters. We cannot
+                # really deal with this correctly, thus it's better to raise than possibly create a hard to debug mess
+                cls_name = self.get_base_layer().__class__.__name__
+                raise ValueError(
+                    f"The out_proj layer of {cls_name} has merged layers but {cls_name} itself doesn't; please ensure "
+                    "that either both or none have merged layers"
+                )
+
+            # Merge all adapters that are active for this module, i.e. the LoRA weights for in_proj and out_proj.
+            # in_proj uses nn.Parameters, therefore, there is no forward method to be used and we have to explicitly
+            # merge for the LoRA weights to have an effect:
+            # https://github.com/pytorch/pytorch/blob/6ebb26d572d5fcdc6ac0d1297bdf8d1eb5d20722/torch/nn/modules/activation.py#L1020
+            # For out_proj, we have an nn.Linear (or rather: NonDynamicallyQuantizableLinear), but its forward method
+            # is not used:
+            # https://github.com/pytorch/pytorch/blob/6ebb26d572d5fcdc6ac0d1297bdf8d1eb5d20722/torch/nn/modules/activation.py#L1267-L1271
+            # Therefore, its LoRA weights also need to be merged to have an effect.
             active_adapters = [a for a in self.active_adapters if a in self.lora_A]
             try:
                 self.merge(adapter_names=active_adapters)
+                out_proj.merge(adapter_names=active_adapters)
                 result = self.base_layer(x, *args, **kwargs)
             finally:
                 # it's safe to call unmerge(), which unmerges all adapters, because we checked that not self.merged,
                 # i.e. there is was no merged layer before
                 self.unmerge()
+                out_proj.unmerge()
 
         result = (result[0].to(previous_dtype), result[1].to(previous_dtype) if result[1] is not None else result[1])
         return result
@@ -848,11 +915,18 @@ class MultiheadAttention(nn.Module, LoraLayer):
         # We cannot call register_parameter for merging/unmerging because that cuts them off from the autograd graph.
         # Note that this is hacky, since we need to ensure that _restore_weights is called by each method that needs it.
 
+        # in_proj
         # TODO work with separate weights
         base_layer = self.get_base_layer()
         weight = base_layer.in_proj_weight.data
         del base_layer.in_proj_weight
         base_layer.register_parameter("in_proj_weight", nn.Parameter(weight))
+
+        # out_proj
+        base_layer = base_layer.out_proj.get_base_layer()
+        weight = base_layer.weight.data
+        del base_layer.weight
+        base_layer.register_parameter("weight", nn.Parameter(weight))
 
     def state_dict(self, *args, **kwargs):
         self._restore_weights()
