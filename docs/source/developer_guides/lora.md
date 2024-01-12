@@ -83,7 +83,7 @@ model = PeftModel.from_pretrained(base_model, peft_model_id)
 model.merge_and_unload()
 ```
 
-If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~tuners.tuner_utils.BaseTuner.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
+If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~LoraModel.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
 
 ```py
 from transformers import AutoModelForCausalLM
