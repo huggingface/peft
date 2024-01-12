@@ -503,10 +503,10 @@ def id_tensor_storage(tensor: torch.Tensor) -> Tuple[torch.device, int, int]:
 def cast_mixed_precision_params(model, dtype):
     """
     Cast all non-trainable parameters of the model to the given `dtype`. The `dtype` can be `torch.float16` or
-    `torch.bfloat16` as per the mixed-precision training you are performing. The trainable parameters are cast to
-    full precision. This is meant to reduce the GPU memory usage when using PEFT methods by using half-precision dtype
-    for non-trainable parameters. Having the trainable parameters in full-precision preserves training stability when
-    using automatic mixed-precision training.
+    `torch.bfloat16` as per the mixed-precision training you are performing. The trainable parameters are cast to full
+    precision. This is meant to reduce the GPU memory usage when using PEFT methods by using half-precision dtype for
+    non-trainable parameters. Having the trainable parameters in full-precision preserves training stability when using
+    automatic mixed-precision training.
 
     Args:
         model (`torch.nn.Module`):
