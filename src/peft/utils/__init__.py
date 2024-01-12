@@ -47,6 +47,6 @@ from .other import (
     get_auto_gptq_quant_linear,
     get_quantization_config,
     id_tensor_storage,
-    cast_non_trainable_to_dtype,
+    cast_mixed_precision_params,
 )
 from .save_and_load import get_peft_model_state_dict, set_peft_model_state_dict, load_peft_weights
