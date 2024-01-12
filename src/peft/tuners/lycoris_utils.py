@@ -29,7 +29,7 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, check_adapters_to_merge
+from .tuners_utils import BaseTuner, BaseTunerLayer, check_adapters_to_merge, check_target_module_exists
 
 
 @dataclass
