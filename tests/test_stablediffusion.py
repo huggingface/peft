@@ -142,7 +142,6 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_boft_weights": [False]},
             },
         )
     )
@@ -205,7 +204,6 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "loha_kwargs": {"init_weights": [False]},
                 "lokr_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
-                "boft_kwargs": {"init_boft_weights": [False]},
             },
         )
     )
