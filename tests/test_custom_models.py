@@ -901,6 +901,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
+            BOFTConfig(target_modules=["lin0"], init_boft_weights=False, boft_block_size=2),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):

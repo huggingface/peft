@@ -75,12 +75,12 @@ CONFIG_TESTING_KWARGS = (
     {
         "text_encoder": {
             "boft_block_num": 1,
-            "target_modules": ["q_proj", "v_proj"],
+            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
             "boft_dropout": 0.0,
         },
         "unet": {
             "boft_block_num": 1,
-            "target_modules": ["to_q", "to_v"],
+            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
             "boft_dropout": 0.0,
         },
     },
@@ -156,7 +156,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             peft_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Merge adapter and model
-        if config_cls not in [LoHaConfig, OFTConfig, BOFTConfig]:
+        if config_cls not in [LoHaConfig, OFTConfig]:
             # TODO: Merging the text_encoder is leading to issues on CPU with PyTorch 2.1
             model.text_encoder = model.text_encoder.merge_and_unload()
         model.unet = model.unet.merge_and_unload()
@@ -174,9 +174,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [
-                x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "boft"])
-            ],
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft"])],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
