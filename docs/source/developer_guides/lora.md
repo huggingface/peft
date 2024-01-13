@@ -83,7 +83,7 @@ model = PeftModel.from_pretrained(base_model, peft_model_id)
 model.merge_and_unload()
 ```
 
-If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~tuners.tuner_utils.BaseTuner.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
+If you need to keep a copy of the weights so you can unmerge the adapter later or delete and load different ones, you should use the [`~LoraModel.merge_adapter`] function instead. Now you have the option to use [`~LoraModel.unmerge_adapter`] to return the base model.
 
 ```py
 from transformers import AutoModelForCausalLM
@@ -98,14 +98,58 @@ model.merge_adapter()
 model.unmerge_adapter()
 ```
 
-The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme in the `weights` parameter.
+The [`~LoraModel.add_weighted_adapter`] function is useful for merging multiple LoRAs into a new adapter based on a user provided weighting scheme in the `weights` parameter. Below is an end-to-end example.
 
-```py
-model.add_weighted_adapter(
-    adapters=["adapter_1", "adapter_2"],
-    weights=[0.7, 0.3],
-    adapter_name="new-weighted-adapter"
+First load the base model:
+
+```python
+from transformers import AutoModelForCausalLM
+from peft import PeftModel
+import torch
+
+base_model = AutoModelForCausalLM.from_pretrained(
+    "mistralai/Mistral-7B-v0.1", torch_dtype=torch.float16, device_map="auto"
 )
+```
+
+Then we load the first adapter: 
+
+```python
+peft_model_id = "alignment-handbook/zephyr-7b-sft-lora"
+model = PeftModel.from_pretrained(base_model, peft_model_id, adapter_name="sft")
+```
+
+Then load a different adapter and merge it with the first one:
+
+```python
+model.load_adapter("alignment-handbook/zephyr-7b-dpo-lora", adapter_name="dpo")
+model.add_weighted_adapter(
+    adapters=["sft", "dpo"],
+    weights=[0.7, 0.3],
+    adapter_name="sft-dpo",
+    combination_type="linear"
+)
+```
+
+<Tip>
+
+There are several supported methods for `combination_type`. Refer to the [documentation](../package_reference/lora#peft.LoraModel.add_weighted_adapter) for more details. Note that "svd" as the `combination_type` is not supported when using `torch.float16` or `torch.bfloat16` as the datatype.
+
+</Tip>
+
+Now, perform inference:
+
+```python
+tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+
+prompt = "Hey, are you conscious? Can you talk to me?"
+inputs = tokenizer(prompt, return_tensors="pt")
+inputs = {k: v.to("cuda") for k, v in inputs.items()}
+
+with torch.no_grad():
+    generate_ids = model.generate(**inputs, max_length=30)
+outputs = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+print(outputs)
 ```
 
 ## Load adapters

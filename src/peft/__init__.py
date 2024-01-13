@@ -73,6 +73,8 @@ from .tuners import (
     MultitaskPromptTuningInit,
     OFTConfig,
     OFTModel,
+    PolyConfig,
+    PolyModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -85,5 +87,6 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
     load_peft_weights,
+    cast_mixed_precision_params,
 )
 from .config import PeftConfig, PromptLearningConfig

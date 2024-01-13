@@ -110,24 +110,22 @@ class AdaLoraModel(LoraModel):
         target,
         target_name,
         parent,
-        **optional_kwargs,
+        current_key,
     ):
-        loaded_in_8bit = optional_kwargs.get("loaded_in_8bit", False)
-        loaded_in_4bit = optional_kwargs.get("loaded_in_4bit", False)
-        if (loaded_in_8bit or loaded_in_4bit) and not is_bnb_available():
-            raise ImportError(
-                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
-                "You can install it with `pip install bitsandbytes`."
-            )
         kwargs = {
             "r": lora_config.init_r,
             "lora_alpha": lora_config.lora_alpha,
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
-            "loaded_in_8bit": loaded_in_8bit,
-            "loaded_in_4bit": loaded_in_4bit,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
+        if (kwargs["loaded_in_8bit"] or kwargs["loaded_in_4bit"]) and not is_bnb_available():
+            raise ImportError(
+                "To use AdaLora with 8-bit quantization, please install the `bitsandbytes` package. "
+                "You can install it with `pip install bitsandbytes`."
+            )
 
         quantization_config = get_quantization_config(self.model, method="gptq")
         if quantization_config is not None:
@@ -307,6 +305,26 @@ class AdaLoraModel(LoraModel):
         return state_dict
 
     def update_and_allocate(self, global_step):
+        """
+        This method updates Adalora budget and mask.
+
+        This should be called in every training step after `loss.backward()` and before `zero_grad()`.
+
+        `tinit`, `tfinal` and `deltaT` are handled with in the method.
+
+        Args:
+            global_step (`int`): The current training step, it is used to calculate adalora budget.
+
+        Example:
+
+        ```python
+        >>> loss = model(**input).loss
+        >>> loss.backward()
+        >>> optimizer.step()
+        >>> model.base_model.update_and_allocate(i_step)
+        >>> optimizer.zero_grad()
+        ```
+        """
         lora_config = self.peft_config[self.trainable_adapter_name]
         # Update the importance score and allocate the budget
         if global_step < lora_config.total_step - lora_config.tfinal:

@@ -26,28 +26,41 @@ class LoHaConfig(LycorisConfig):
     This is the configuration class to store the configuration of a [`LoHaModel`].
 
     Args:
-        r (`int`): LoHa rank.
-        alpha (`int`): The alpha parameter for LoHa scaling.
-        rank_dropout (`int`): The dropout probability for rank dimension during training.
-        module_dropout (`int`): The dropout probability for disabling LoHa modules during training.
+        r (`int`):
+            LoHa rank.
+        alpha (`int`):
+            The alpha parameter for LoHa scaling.
+        rank_dropout (`float`):
+            The dropout probability for rank dimension during training.
+        module_dropout (`float`):
+            The dropout probability for disabling LoHa modules during training.
         use_effective_conv2d (`bool`):
             Use parameter effective decomposition for Conv2d with ksize > 1 ("Proposition 3" from FedPara paper).
-        target_modules (`Union[List[str],str]`): The names of the modules to apply LoHa to.
-        init_weights (`bool`): Whether to perform initialization of LoHa weights.
-        layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the LoHa transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the LoHa
-            transformations on the layer at this index.
+        target_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
+            names will be replaced. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
+            excluding the output layer. If this is not specified, modules will be chosen according to the model
+            architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
+            the target modules manually.
+        init_weights (`bool`):
+            Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
+            discouraged.
+        layers_to_transform (`Union[List[int], int]`):
+            The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
+            that are specified in this list. If a single integer is passed, it will apply the transformations on the
+            layer at this index.
         layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
-            pattern is not in the common layers pattern.
+            The layer pattern name, used only if `layers_to_transform` is different from `None`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
         alpha_pattern (`dict`):
             The mapping from layer names or regexp expression to alphas which are different from the default alpha
             specified by `alpha`.
-        modules_to_save (`List[str]`): The names of modules to be set as trainable except LoHa parameters.
+        modules_to_save (`Optional[List[str]]`):
+            List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
     """
 
     r: int = field(default=8, metadata={"help": "LoHa rank"})
@@ -69,6 +82,7 @@ class LoHaConfig(LycorisConfig):
         metadata={
             "help": "List of module names or regex expression of the module names to replace with LoHa."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
     init_weights: bool = field(

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Union
 
 import pytest
 import torch
+from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
@@ -44,6 +45,7 @@ from peft import (
     AdaLoraConfig,
     LoftQConfig,
     LoraConfig,
+    PeftModel,
     TaskType,
     get_peft_model,
     prepare_model_for_int8_training,
@@ -725,6 +727,74 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
+    @pytest.mark.single_gpu_tests
+    def test_4bit_non_default_adapter_name(self):
+        # See PR 1294
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_4bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_4bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
+    @pytest.mark.single_gpu_tests
+    def test_8bit_non_default_adapter_name(self):
+        # See PR 1294
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_8bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_8bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
 
 @require_torch_gpu
 @require_auto_gptq
@@ -940,6 +1010,100 @@ class PeftGPTQGPUTests(unittest.TestCase):
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
+    @pytest.mark.single_gpu_tests
+    def test_non_default_adapter_name(self):
+        # See issue 1346
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
+
+@require_torch_gpu
+class OffloadSaveTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "gpt2"
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_offload_merge(self):
+        r"""
+        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
+        """
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        # TODO: add disk offload once PeftModel.from_pretrained supports
+        memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
+        # offloads around half of all transformer modules
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        self.assertTrue(0 in device_map.values())
+        self.assertTrue("cpu" in device_map.values())
+
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+
+        model = get_peft_model(model, config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            # load the model with device_map
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
+            self.assertTrue(len({p.device for p in model.parameters()}) == 2)
+            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
+
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        model.eval()
+
+        # test peft model adapter merge
+        pre_merge_olayer = model(input_tokens)[0]
+        model.merge_adapter()
+        post_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
+
+        # test peft model adapter unmerge
+        model.unmerge_adapter()
+        post_unmerge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unmerge_olayer, pre_merge_olayer))
+
+        # test LoRA merge and unload
+        model = model.merge_and_unload()
+        post_unload_merge_olayer = model(input_tokens)[0]
+        self.assertTrue(torch.allclose(post_unload_merge_olayer, pre_merge_olayer))
+
 
 @require_torch_gpu
 class LoftQTests(unittest.TestCase):
@@ -1135,3 +1299,82 @@ class MultiprocessTester(unittest.TestCase):
         cmd = ["python", script_path]
         with patch_environment(omp_num_threads=1):
             run_command(cmd, env=os.environ.copy())
+
+
+@require_torch_gpu
+class MixedPrecisionTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "facebook/opt-350m"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        self.config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            task_type="CAUSAL_LM",
+        )
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        self.data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    @pytest.mark.single_gpu_tests
+    def test_model_loaded_in_float16_raises(self):
+        # This test shows the issue with loading the model in fp16 and then trying to use it with mixed precision
+        # training, which should not use fp16. If this is ever automated in PEFT, this test should fail. In that case,
+        # remove this test, adjust the next one, and remove the entry about FP16 usage from troubleshooting.md.
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            msg = "Attempting to unscale FP16 gradients."
+            with self.assertRaisesRegex(ValueError, msg):
+                trainer.train()
+
+    @pytest.mark.single_gpu_tests
+    def test_model_loaded_in_float16_working(self):
+        # Same test as before but containing the fix to make it work
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config)
+
+        # for now, this is unfortunately necessary to avoid the error:
+        # ValueError: Attempting to unscale FP16 gradients.
+        for param in model.parameters():
+            if param.requires_grad:
+                param.data = param.data.float()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,
+                    max_steps=3,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.train()
