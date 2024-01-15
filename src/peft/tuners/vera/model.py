@@ -17,6 +17,9 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from functools import partial
+
+from ...config import PeftConfig
+
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -37,10 +40,10 @@ from .config import VeraConfig
 from .layer import Embedding, Linear, VeraLayer
 
 
-def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
-    kwargs["vera_A"] = vera_A
-    kwargs["vera_B"] = vera_B
-    return args, kwargs
+# def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
+#     kwargs["vera_A"] = vera_A
+#     kwargs["vera_B"] = vera_B
+#     return args, kwargs
 
 
 def _kaiming_init(
@@ -167,12 +170,38 @@ class VeraModel(BaseTuner):
 
         return first_linear, first_embedding
 
+    def __tuner_init__(self, model, peft_config, adapter_name: str) -> None:
+        self.targeted_module_names: list[str] = []
+
+        # For advanced developpers, if you want to attach multiple adapters to your
+        # model, just add a `peft_config` dict attribute to your model.
+        if not hasattr(self, "peft_config"):
+            self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
+        else:
+            if isinstance(peft_config, PeftConfig):
+                self.peft_config[adapter_name] = peft_config
+            else:
+                # user is adding a dict of PeftConfigs
+                self.peft_config.update(peft_config)
+
+        self.active_adapter = adapter_name
+
+        # TODO: override this function with behaviour to set vera_A / vera_B?
+        self.inject_adapter(self.model, adapter_name)
+
+        # Copy the peft_config in the injected model.
+        self.model.peft_config = self.peft_config
+
+
     def __init__(self, model, config, adapter_name) -> None:
+        # super().__init__(model, config, adapter_name)
+        # super(nn.Module, self).__init__()
+        nn.Module.__init__(self)
+        self.model = model
+
         if config[adapter_name].projection_prng_key is None:
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
-        super().__init__(model, config, adapter_name)
-        config = config[adapter_name]
 
         first_linear, first_embedding = self._find_first_dim()
 
@@ -212,6 +241,9 @@ class VeraModel(BaseTuner):
                 " using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection`"
                 " to `True` to guarantee restoring the checkpoint correctly on all system configurations."
             )
+
+        # super(BaseTuner, self).__init__(model, config, adapter_name)
+        self.__tuner_init__(model, config, adapter_name)
 
         self.to(self.dtype)
 
@@ -273,7 +305,7 @@ class VeraModel(BaseTuner):
         # TODO: better deal with that
         if isinstance(target, Embedding):
             target.update_layer_embedding(
-                adapter_name,
+                adapter_name, self.vera_A, self.vera_B,
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
@@ -281,14 +313,14 @@ class VeraModel(BaseTuner):
             )
         elif isinstance(target, Linear):
             target.update_layer(
-                adapter_name,
+                adapter_name, self.vera_A, self.vera_B,
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
                 d_initial=vera_config.d_initial,
             )
         else:
-            new_module = self._create_new_module(vera_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -345,7 +377,7 @@ class VeraModel(BaseTuner):
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(vera_config, adapter_name, target, **kwargs):
+    def _create_new_module(vera_config, vera_A, vera_B, adapter_name, target, **kwargs):
         bias = kwargs.pop("bias", False)
 
         if isinstance(target, BaseTunerLayer):
@@ -357,7 +389,7 @@ class VeraModel(BaseTuner):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
             new_module = Embedding(
-                target,
+                target, vera_A, vera_B,
                 adapter_name,
                 d_initial=vera_config.d_initial,
                 **embedding_kwargs,
@@ -384,7 +416,7 @@ class VeraModel(BaseTuner):
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(
-                target,
+                target, vera_A, vera_B,
                 adapter_name,
                 bias=bias,
                 d_initial=vera_config.d_initial,
@@ -433,10 +465,7 @@ class VeraModel(BaseTuner):
             if isinstance(module, VeraLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
-                    if isinstance(module, Linear):
-                        module.unmerge(self.vera_A, self.vera_B)
-                    elif isinstance(module, Embedding):
-                        module.unmerge(self.vera_embedding_A, self.vera_embedding_B)
+                    module.unmerge()
                 module.set_adapter(adapter_name)
 
     @staticmethod
@@ -467,7 +496,7 @@ class VeraModel(BaseTuner):
 
             if hasattr(target, "base_layer"):
                 if merge:
-                    target.merge(self.vera_A, self.vera_B, safe_merge=safe_merge, adapter_names=adapter_names)
+                    target.merge(safe_merge=safe_merge, adapter_names=adapter_names)
 
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
@@ -539,46 +568,49 @@ class VeraModel(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def _add_forward_hooks(self):
-        """
-        Adds pre-forward hooks to all Vera modules in order to inject the shared vera_A and vera_B without adding them
-        to each module's state dictionary.
-        """
-        hook_handles = []
-        for module in self.modules():
-            if isinstance(module, Linear):
-                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
-                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                hook_handles.append(handle)
+    # def _add_forward_hooks(self):
+    #     """
+    #     Adds pre-forward hooks to all Vera modules in order to inject the shared vera_A and vera_B without adding them
+    #     to each module's state dictionary.
+    #     """
+    #     hook_handles = []
+    #     for module in self.modules():
+    #         if isinstance(module, Linear):
+    #             pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
+    #             handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+    #             hook_handles.append(handle)
 
-            elif isinstance(module, Embedding):
-                pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A, vera_B=self.vera_embedding_B)
-                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-                hook_handles.append(handle)
+    #         elif isinstance(module, Embedding):
+    #             pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A, vera_B=self.vera_embedding_B)
+    #             handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+    #             hook_handles.append(handle)
 
-        return hook_handles
+    #     return hook_handles
 
     def forward(self, *args, **kwargs):
-        hook_handles = self._add_forward_hooks()
-        try:
-            outputs = super().forward(*args, **kwargs)
-        finally:
-            # regardless of success or failure of forward pass, we should remove
-            # handles to restore the original model.
-            for handle in hook_handles:
-                handle.remove()
+        # hook_handles = self._add_forward_hooks()
+        # try:
+        #     outputs = super().forward(*args, **kwargs)
+        # finally:
+        #     # regardless of success or failure of forward pass, we should remove
+        #     # handles to restore the original model.
+        #     for handle in hook_handles:
+        #         handle.remove()
 
+        outputs = super().forward(*args, **kwargs)
         return outputs
 
     def generate(self, *args, **kwargs):
-        hook_handles = self._add_forward_hooks()
+        # hook_handles = self._add_forward_hooks()
 
-        try:
-            outputs = self.model.generate(*args, **kwargs)
-        finally:
+        # try:
+        #     outputs = self.model.generate(*args, **kwargs)
+        # finally:
             # regardless of success or failure of generate call, we should remove
             # handles to restore the original model.
-            for handle in hook_handles:
-                handle.remove()
+            # for handle in hook_handles:
+            #     handle.remove()
+
+        outputs = self.model.generate(*args, **kwargs) 
 
         return outputs
