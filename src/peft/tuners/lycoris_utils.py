@@ -37,6 +37,7 @@ class LycorisConfig(PeftConfig):
     r"""
     A base config for LyCORIS like adapters
     """
+
     rank_pattern: Optional[dict] = field(
         default_factory=dict,
         metadata={
@@ -61,6 +62,7 @@ class LycorisLayer(BaseTunerLayer):
     r"""
     A base layer for LyCORIS like adapters
     """
+
     # adapter_layer_names needs to be defined on the child class
     other_param_names = ("r", "alpha", "scaling", "rank_dropout", "module_dropout")
 
@@ -223,7 +225,6 @@ class LycorisTuner(BaseTuner):
         target_name,
         parent,
         current_key,
-        **optional_kwargs,
     ):
         ...
 
@@ -270,8 +271,8 @@ class LycorisTuner(BaseTuner):
 
         return new_module
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
@@ -319,6 +320,7 @@ class LycorisTuner(BaseTuner):
             if getattr(self.model, "quantization_method", None) == "gptq":
                 raise ValueError("Cannot merge LOHA layers when the model is gptq quantized")
 
+        self._unloading_checks(adapter_names)
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):

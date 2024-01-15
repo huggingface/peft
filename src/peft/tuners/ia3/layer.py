@@ -53,6 +53,7 @@ class IA3Layer(BaseTunerLayer):
         self.out_features = out_features
 
     def update_layer(self, adapter_name, init_ia3_weights):
+        # This code works for linear layers, override for other layer types
         # Actual trainable parameters
         if self.is_feedforward:
             weight = torch.randn((1, self.in_features))
@@ -88,18 +89,6 @@ class Linear(nn.Module, IA3Layer):
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, init_ia3_weights)
-
-    def update_layer(self, adapter_name, init_ia3_weights):
-        # Actual trainable parameters
-        if self.is_feedforward:
-            weight = torch.randn((1, self.in_features))
-        else:
-            weight = torch.randn((self.out_features, 1))
-        self.ia3_l[adapter_name] = nn.Parameter(weight)
-        if init_ia3_weights:
-            self.reset_ia3_parameters(adapter_name)
-        self.to(self.get_base_layer().weight.device)
-        self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """

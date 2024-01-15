@@ -1,0 +1,131 @@
+name: BNB from source self-hosted runner with slow tests (scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+
+env:
+  RUN_SLOW: "yes"
+  IS_GITHUB_CI: "1"
+  # To be able to run tests on CUDA 12.2
+  NVIDIA_DISABLE_REQUIRE: "1"
+  SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
+
+
+jobs:
+  run_all_tests_single_gpu:
+    strategy:
+      fail-fast: false
+      matrix:
+          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
+    runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
+    env:
+      CUDA_VISIBLE_DEVICES: "0"
+      TEST_TYPE: "single_gpu_${{ matrix.docker-image-name }}"
+    container:
+      image: ${{ matrix.docker-image-name }}
+      options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v3
+      - name: Pip install
+        run: |
+          source activate peft
+          pip install -e . --no-deps
+          pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
+          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone # rename to transformers clone to avoid modules conflict
+          if [ "${{ matrix.docker-image-name }}" == "huggingface/peft-gpu-bnb-latest:latest" ]; then
+            cd transformers-clone
+            transformers_version=$(pip show transformers | grep '^Version:' | cut -d ' ' -f2 | sed 's/\.dev0//')
+            echo "Checking out tag for Transformers version: v$transformers_version"
+            git fetch --tags
+            git checkout tags/v$transformers_version
+            cd .. 
+          fi
+      - name: Run examples on single GPU
+        if: always()
+        run: |
+          source activate peft
+          make tests_examples_single_gpu_bnb
+      
+      - name: Run core tests on single GPU
+        if: always()
+        run: |
+          source activate peft
+          make tests_core_single_gpu_bnb
+
+      - name: Run transformers tests on single GPU
+        if: always()
+        run: |
+          source activate peft
+          make transformers_tests
+          
+      - name: Generate Report
+        if: always()
+        run: |
+          pip install slack_sdk tabulate
+          python scripts/log_reports.py --slack_channel_name bnb-daily-ci >> $GITHUB_STEP_SUMMARY
+
+  run_all_tests_multi_gpu:
+    strategy:
+      fail-fast: false
+      matrix:
+        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
+    runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
+    env:
+      CUDA_VISIBLE_DEVICES: "0,1"
+      TEST_TYPE: "multi_gpu_${{ matrix.docker-image-name }}"
+    container:
+      image: ${{ matrix.docker-image-name }}
+      options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v3
+      - name: Pip install
+        run: |
+          source activate peft
+          pip install -e . --no-deps
+          pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
+          mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone
+          if [ "${{ matrix.docker-image-name }}" == "huggingface/peft-gpu-bnb-latest:latest" ]; then
+            cd transformers-clone
+            transformers_version=$(pip show transformers | grep '^Version:' | cut -d ' ' -f2 | sed 's/\.dev0//')
+            echo "Checking out tag for Transformers version: v$transformers_version"
+            git fetch --tags
+            git checkout tags/v$transformers_version
+            cd ..
+          fi 
+
+      - name: Run core GPU tests on multi-gpu
+        if: always()
+        run: |
+          source activate peft
+        
+      - name: Run examples on multi GPU
+        if: always()
+        run: |
+          source activate peft
+          make tests_examples_multi_gpu_bnb
+      
+      - name: Run core tests on multi GPU
+        if: always()
+        run: |
+          source activate peft
+          make tests_core_multi_gpu_bnb
+
+      - name: Run transformers tests on multi GPU
+        if: always()
+        run: |
+          source activate peft
+          make transformers_tests
+          
+      - name: Generate Report
+        if: always()
+        run: |
+          pip install slack_sdk tabulate
+          python scripts/log_reports.py --slack_channel_name bnb-daily-ci >> $GITHUB_STEP_SUMMARY

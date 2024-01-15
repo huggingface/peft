@@ -41,6 +41,9 @@ class PeftConfigMixin(PushToHubMixin):
     )
 
     def to_dict(self) -> Dict:
+        r"""
+        Returns the configuration for your adapter model as a dictionary.
+        """
         return asdict(self)
 
     def save_pretrained(self, save_directory: str, **kwargs) -> None:

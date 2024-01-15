@@ -77,6 +77,8 @@ class OFTLayer(nn.Module, LycorisLayer):
                 The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
             block_share (`bool`): Whether to share the OFT parameters between blocks or not.
         """
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
         self.module_dropout[adapter_name] = module_dropout

@@ -23,7 +23,9 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union
 
+import packaging.version
 import torch
+import transformers
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory
@@ -45,6 +47,7 @@ from .tuners import (
     LoraModel,
     MultitaskPromptEmbedding,
     OFTModel,
+    PolyModel,
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
@@ -81,6 +84,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.ADAPTION_PROMPT: AdaptionPromptModel,
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
+    PeftType.POLY: PolyModel,
 }
 
 
@@ -125,7 +129,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
-        self.config = getattr(self.base_model, "config", {"model_type": "custom"})
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
 
@@ -578,7 +581,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Returns the base model.
         """
-        return self.base_model if self.active_peft_config.is_prompt_learning else self.base_model.model
+        return (
+            self.base_model
+            if (self.active_peft_config.is_prompt_learning or self.peft_type == PeftType.POLY)
+            else self.base_model.model
+        )
 
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
         """
@@ -775,16 +782,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         card = ModelCard.load(filename) if os.path.exists(filename) else ModelCard.from_template(ModelCardData())
 
         card.data["library_name"] = "peft"
-        model_config = self.config
+
+        model_config = getattr(self, "config", None)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config.get("model_type", "custom") != "custom":
+        if model_config is not None:
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
 
         quantization_config = None
-        if hasattr(self.config, "quantization_config"):
+        if hasattr(model_config, "quantization_config"):
             quantization_config = self.config.quantization_config.to_dict()
         training_config_text = ""
         quantization_prefix = "The following `bitsandbytes` quantization config was used during training:"
@@ -883,6 +891,8 @@ class PeftModelForSequenceClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1070,6 +1080,8 @@ class PeftModelForCausalLM(PeftModel):
                     **kwargs,
                 )
 
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1138,11 +1150,30 @@ class PeftModelForCausalLM(PeftModel):
     def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+
+        # https://github.com/huggingface/transformers/pull/26681/ introduced new cache format
+        # for some architectures which requires a special fix for prompt tuning etc.
+        # TODO: starting with transformers 4.38, all architectures should support caching.
+        uses_transformers_4_38 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.38.0")
+        uses_transformers_4_36 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.36.0")
+        transformers_new_cache_archs = ["llama", "mistral", "persimmon", "phi"]
+        uses_cache = uses_transformers_4_38 or (
+            uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
+        )
+
+        if peft_config.peft_type == PeftType.POLY:
+            model_kwargs["task_ids"] = task_ids
         if peft_config.is_prompt_learning:
+            if uses_cache and (model_kwargs["past_key_values"] is not None):
+                # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
+                # In prompt learning methods, past key values are longer when compared to the `input_ids`.
+                # As such only consider the last input ids in the autogressive generation phase.
+                if model_kwargs["past_key_values"][0][0].shape[-2] >= model_kwargs["input_ids"].shape[1]:
+                    model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
+
             if model_kwargs.get("attention_mask", None) is not None:
-                prefix_attention_mask = torch.ones(
-                    model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
-                ).to(model_kwargs["input_ids"].device)
+                size = model_kwargs["input_ids"].shape[0], peft_config.num_virtual_tokens
+                prefix_attention_mask = torch.ones(size).to(model_kwargs["input_ids"].device)
                 model_kwargs["attention_mask"] = torch.cat(
                     (prefix_attention_mask, model_kwargs["attention_mask"]), dim=1
                 )
@@ -1231,6 +1262,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
     ):
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1405,9 +1438,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
             )
             return outputs
 
-    def prepare_inputs_for_generation(self, *args, **kwargs):
+    def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
+        if peft_config.peft_type == PeftType.POLY:
+            model_kwargs["task_ids"] = task_ids
         if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
             batch_size = model_kwargs["decoder_input_ids"].shape[0]
             past_key_values = self.get_prompt(batch_size)
@@ -1487,6 +1522,8 @@ class PeftModelForTokenClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1654,12 +1691,15 @@ class PeftModelForQuestionAnswering(PeftModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -1827,10 +1867,13 @@ class PeftModelForFeatureExtraction(PeftModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        task_ids=None,
         **kwargs,
     ):
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
+            if peft_config.peft_type == PeftType.POLY:
+                kwargs["task_ids"] = task_ids
             return self.base_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
