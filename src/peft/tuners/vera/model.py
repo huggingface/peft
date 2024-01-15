@@ -20,6 +20,7 @@ from functools import partial
 from typing import List, Optional, Union, Tuple
 
 import torch
+import torch.nn as nn
 from torch.nn.init import _calculate_correct_fan
 from tqdm import tqdm
 from transformers.pytorch_utils import Conv1D
@@ -325,8 +326,8 @@ class VeraModel(BaseTuner):
             if "vera_" in name:
                 module.to(child.weight.device)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
@@ -336,11 +337,11 @@ class VeraModel(BaseTuner):
                 continue
 
             if bias == "all":
-                for n, p in self.model.named_parameters():
+                for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
             elif bias == "vera_only":
-                for m in self.model.modules():
+                for m in model.modules():
                     if isinstance(m, VeraLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
