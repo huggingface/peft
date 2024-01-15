@@ -17,7 +17,7 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from functools import partial
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -32,9 +32,9 @@ from peft.utils import (
     _get_submodules,
 )
 
+from .buffer_dict import BufferDict
 from .config import VeraConfig
 from .layer import Embedding, Linear, VeraLayer
-from .buffer_dict import BufferDict
 
 
 def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
@@ -48,17 +48,16 @@ def _kaiming_init(
     generator: torch.Generator,
 ) -> torch.Tensor:
     """
-        Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object
-        for PRNG.
-        
-        Args:
-            tensor_or_shape (`Union[torch.Tensor, Tuple[int, ...]]`): 
-                Tensor to initialise, or shape of new tensor to create and then initialise.
-            generator: (`torch.Generator`): 
-                Generator object that manages the state of the PRNG algorithm in use.
+    Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object for PRNG.
 
-        Returns:
-            `torch.Tensor`: The initialised tensor.
+    Args:
+        tensor_or_shape (`Union[torch.Tensor, Tuple[int, ...]]`):
+            Tensor to initialise, or shape of new tensor to create and then initialise.
+        generator: (`torch.Generator`):
+            Generator object that manages the state of the PRNG algorithm in use.
+
+    Returns:
+        `torch.Tensor`: The initialised tensor.
     """
     if isinstance(tensor_or_shape, tuple):
         tensor = torch.empty(tensor_or_shape)
@@ -99,9 +98,7 @@ class VeraModel(BaseTuner):
         ... )
 
         >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> vera_model = VeraModel(model, config        if config.projection_prng_key is None:
-            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
-            raise ValueError(msg), "default")
+        >>> vera_model = VeraModel(model, config)
         ```
 
         ```py
@@ -186,11 +183,11 @@ class VeraModel(BaseTuner):
 
         # use of persistent to exclude vera_A and vera_B from the state dict
         # if we choose not to save them.
-        self.vera_A = BufferDict({}, persistent = config.save_projection)
-        self.vera_B = BufferDict({}, persistent = config.save_projection)
+        self.vera_A = BufferDict({}, persistent=config.save_projection)
+        self.vera_B = BufferDict({}, persistent=config.save_projection)
 
-        self.vera_embedding_A = BufferDict({}, persistent = config.save_projection)
-        self.vera_embedding_B = BufferDict({}, persistent = config.save_projection)
+        self.vera_embedding_A = BufferDict({}, persistent=config.save_projection)
+        self.vera_embedding_B = BufferDict({}, persistent=config.save_projection)
 
         # deterministic init of vera_A and vera_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
