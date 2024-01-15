@@ -217,7 +217,6 @@ class Linear(nn.Linear, LoraLayer):
 
     def multi_batched_forward(self, x: torch.Tensor, adapter_names) -> torch.Tensor:
         unique_adapters = set(adapter_names)
-        len(unique_adapters)
         sub_batch_indices_list = []
         for adapter in unique_adapters:
             sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
