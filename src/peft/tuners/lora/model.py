@@ -539,7 +539,7 @@ class LoraModel(BaseTuner):
         for adapter, weight in zip(adapters, weights):
             if adapter in target.lora_A or adapter in target.lora_embedding_A:
                 valid_adapters.append(adapter)
-                valid_weights.append(weight)
+                valid_weights.append(weight * target.scaling[adapter])
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
@@ -606,7 +606,7 @@ class LoraModel(BaseTuner):
                 current_adapter_lora_B = target.lora_embedding_B[adapter]
             else:
                 continue
-            valid_weights.append(math.sqrt(weight))
+            valid_weights.append(math.sqrt(weight * target.scaling[adapter]))
             lora_A_deltas.append(current_adapter_lora_A.data)
             lora_B_deltas.append(current_adapter_lora_B.data)
         valid_weights = torch.tensor(valid_weights).to(lora_A_deltas[0].device)
