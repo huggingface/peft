@@ -223,6 +223,10 @@ class VeraModel(BaseTuner):
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
 
+        if config.projection_prng_key is None:
+            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
+            raise ValueError(msg)
+
         first_linear, first_embedding = self._find_first_dim(config)
 
         if first_embedding is not None:

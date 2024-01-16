@@ -77,6 +77,7 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # VeRA
     {
         "r": 8,
         "target_modules": None,
