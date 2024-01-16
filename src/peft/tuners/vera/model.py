@@ -34,6 +34,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _get_submodules,
 )
+from ..tuners_utils import _maybe_include_all_linear_layers
 
 from .buffer_dict import BufferDict
 from .config import VeraConfig
@@ -133,7 +134,7 @@ class VeraModel(BaseTuner):
 
     prefix: str = "vera_lambda"
 
-    def _find_first_dim(self) -> int:
+    def _find_first_dim(self, config) -> int:
         """
         Finds the first linear and embedding that has been wrapped with Vera, and extract the input and output
         dimension.
@@ -142,27 +143,45 @@ class VeraModel(BaseTuner):
 
         This will throw an error if there are multiple layers of the same type with different shapes.
         """
+
+        # TODO: replace with searching key list as in BaseTuner.inject_adapter
+        # key_modu_list = [key for key, _ in module.named_modules()]
+
+        _check_for_modules_to_save = getattr(config, "modules_to_save", None) is not None
+
+        model_config = getattr(self.model, "config", {"model_type": "custom"})
+        if hasattr(model_config, "to_dict"):
+            model_config = model_config.to_dict()
+
+        # import ipdb; ipdb.set_trace()
+        peft_config = self._prepare_adapter_config(config, model_config)
+        peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
+
         first_linear, first_embedding = None, None
-        for module in self.model.modules():
-            if isinstance(module, Linear):
-                module_shape = tuple(module.weight.shape)
-                if module.fan_in_fan_out:
-                    module_shape = module_shape[::-1]
+        for key, module in self.model.named_modules():
+            # TODO: should this not include modules to save?
+            if (_check_for_modules_to_save and any(
+                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
+            )) or self._check_target_module_exists(peft_config, key):
+                if isinstance(module, (nn.Linear, Conv1D)) :
+                    module_shape = tuple(module.weight.shape)
+                    if isinstance(module, Conv1D): # TODO: feels fragile
+                        module_shape = module_shape[::-1]
 
-                if first_linear is not None and module_shape != first_linear:
-                    raise ValueError(
-                        "Multiple target linear layers with different dimensions were specified! Vera only supports a"
-                        f" single dimension size. Got '{module_shape}' expected '{first_linear}"
-                    )
-                first_linear = module_shape
+                    if first_linear is not None and module_shape != first_linear:
+                        raise ValueError(
+                            "Multiple target linear layers with different dimensions were specified! Vera only supports a"
+                            f" single dimension size. Got '{module_shape}' expected '{first_linear}"
+                        )
+                    first_linear = module_shape
 
-            elif isinstance(module, Embedding):
-                if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
-                    raise ValueError(
-                        "Multiple target embedding layers with different dimensions or vocabulary sizes were"
-                        " specified! Vera only supports a single size."
-                    )
-                first_embedding = tuple(module.weight.shape)
+                elif isinstance(module, nn.Embedding):
+                    if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
+                        raise ValueError(
+                            "Multiple target embedding layers with different dimensions or vocabulary sizes were"
+                            " specified! Vera only supports a single size."
+                        )
+                    first_embedding = tuple(module.weight.shape)
 
         if first_linear is None and first_embedding is None:
             msg = "No `VeraLayer`s were found in `self.model`, so cannot determine rank of projection matrices!"
@@ -198,12 +217,13 @@ class VeraModel(BaseTuner):
         # super(nn.Module, self).__init__()
         nn.Module.__init__(self)
         self.model = model
+        config = config[adapter_name]
 
-        if config[adapter_name].projection_prng_key is None:
+        if config.projection_prng_key is None:
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
 
-        first_linear, first_embedding = self._find_first_dim()
+        first_linear, first_embedding = self._find_first_dim(config)
 
         if first_embedding is not None:
             first_embedding_vocab_size, first_embedding_dim = first_embedding
@@ -212,6 +232,7 @@ class VeraModel(BaseTuner):
 
         # use of persistent to exclude vera_A and vera_B from the state dict
         # if we choose not to save them.
+        # import ipdb; ipdb.set_trace()
         self.vera_A = BufferDict({}, persistent=config.save_projection)
         self.vera_B = BufferDict({}, persistent=config.save_projection)
 

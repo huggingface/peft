@@ -340,11 +340,11 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                if hasattr(self, "vera_A"):
-                    module.merge(self.vera_A, self.vera_B, adapter_names=adapter_names)
-                else:
-                    with onload_layer(module):
-                        module.merge(adapter_names=adapter_names)
+                # if hasattr(self, "vera_A"):
+                #     module.merge(self.vera_A, self.vera_B, adapter_names=adapter_names)
+                # else:
+                with onload_layer(module):
+                    module.merge(adapter_names=adapter_names)
 
     def unmerge_adapter(self):
         """
@@ -352,11 +352,11 @@ class BaseTuner(nn.Module, ABC):
         """
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
-                if hasattr(self, "vera_A"):
-                    module.unmerge(self.vera_A, self.vera_B)
-                else:
-                    with onload_layer(module):
-                        module.unmerge()
+                # if hasattr(self, "vera_A"):
+                #     module.unmerge(self.vera_A, self.vera_B)
+                # else:
+                with onload_layer(module):
+                    module.unmerge()
 
     def _unloading_checks(self, adapter_names: Optional[List[str]]):
         adapters_to_consider = adapter_names or self.active_adapters
