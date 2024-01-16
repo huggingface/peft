@@ -14,7 +14,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import math
 import operator
 import re
 import warnings
@@ -22,7 +21,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 import torch
 from torch import nn
@@ -386,10 +385,10 @@ class LoraModel(BaseTuner):
             adapter_name (`str`):
                 Name of the new adapter.
             combination_type (`str`):
-                Type of merging. Can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`, `dare_ties_svd`, `dare_linear_svd`].
-                When using the `cat` combination_type
-                you should be aware that rank of the resulting adapter will be equal to the sum of all adapters ranks.
-                So it's possible that the mixed adapter may become too big and result in OOM errors.
+                Type of merging. Can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
+                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type you should be aware that
+                rank of the resulting adapter will be equal to the sum of all adapters ranks. So it's possible that the
+                mixed adapter may become too big and result in OOM errors.
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
@@ -404,7 +403,8 @@ class LoraModel(BaseTuner):
                 documentation. Defaults to None.
             ties_density (`float`, *optional*):
                 Value between 0 and 1. 0 represents all values are pruned and 1 represents no values are pruned.
-            majority_sign_method (`str`):The method to use to get the magnitude of the sign vlaues. Should be one of ["total", "frequency"].
+            majority_sign_method (`str`):
+                The method to use to get the magnitude of the sign vlaues. Should be one of ["total", "frequency"].
         """
 
         if adapter_name in list(self.peft_config.keys()):

@@ -20,7 +20,8 @@ import torch
 
 def magnitude_based_pruning(tensor: torch.Tensor, density: float) -> torch.Tensor:
     """
-    Prune the smallest values of the task tensors and retain the top-k values based on the specified fraction `density`.
+    Prune the smallest values of the task tensors and retain the top-k values based on the specified fraction
+    `density`.
 
     Args:
     tensor (`torch.Tensor`):The tensor to prune.
@@ -35,7 +36,8 @@ def magnitude_based_pruning(tensor: torch.Tensor, density: float) -> torch.Tenso
 
 def random_pruning(tensor: torch.Tensor, density: float, rescale: bool) -> torch.Tensor:
     """
-    Prune the smallest values of the task tensors and retain the top-k values based on the specified fraction `density`.
+    Prune the smallest values of the task tensors and retain the top-k values based on the specified fraction
+    `density`.
 
     Args:
     tensor (`torch.Tensor`):The tensor to prune.
