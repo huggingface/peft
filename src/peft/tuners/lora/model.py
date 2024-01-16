@@ -403,8 +403,7 @@ class LoraModel(BaseTuner):
                 one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
                 documentation. Defaults to None.
             ties_density (`float`, *optional*):
-                Value between 0 and 1. 0 represents all values are trimmed and 1 represents no values are trimmed. TIES
-                paper uses 0.2 as the density value, i.e., 20% of top magnitude features are preserved.
+                Value between 0 and 1. 0 represents all values are pruned and 1 represents no values are pruned.
             majority_sign_method (`str`):The method to use to get the magnitude of the sign vlaues. Should be one of ["total", "frequency"].
         """
 
