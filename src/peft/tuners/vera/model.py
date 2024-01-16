@@ -16,10 +16,6 @@ import math
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from functools import partial
-
-from ...config import PeftConfig
-
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -34,8 +30,9 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _get_submodules,
 )
-from ..tuners_utils import _maybe_include_all_linear_layers
 
+from ...config import PeftConfig
+from ..tuners_utils import _maybe_include_all_linear_layers
 from .buffer_dict import BufferDict
 from .config import VeraConfig
 from .layer import Embedding, Linear, VeraLayer
@@ -160,12 +157,13 @@ class VeraModel(BaseTuner):
         first_linear, first_embedding = None, None
         for key, module in self.model.named_modules():
             # TODO: should this not include modules to save?
-            if (_check_for_modules_to_save and any(
-                key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save
-            )) or self._check_target_module_exists(peft_config, key):
-                if isinstance(module, (nn.Linear, Conv1D)) :
+            if (
+                _check_for_modules_to_save
+                and any(key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save)
+            ) or self._check_target_module_exists(peft_config, key):
+                if isinstance(module, (nn.Linear, Conv1D)):
                     module_shape = tuple(module.weight.shape)
-                    if isinstance(module, Conv1D): # TODO: feels fragile
+                    if isinstance(module, Conv1D):  # TODO: feels fragile
                         module_shape = module_shape[::-1]
 
                     if first_linear is not None and module_shape != first_linear:
@@ -210,7 +208,6 @@ class VeraModel(BaseTuner):
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
-
 
     def __init__(self, model, config, adapter_name) -> None:
         # super().__init__(model, config, adapter_name)
@@ -330,7 +327,9 @@ class VeraModel(BaseTuner):
         # TODO: better deal with that
         if isinstance(target, Embedding):
             target.update_layer_embedding(
-                adapter_name, self.vera_A, self.vera_B,
+                adapter_name,
+                self.vera_A,
+                self.vera_B,
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
@@ -338,7 +337,9 @@ class VeraModel(BaseTuner):
             )
         elif isinstance(target, Linear):
             target.update_layer(
-                adapter_name, self.vera_A, self.vera_B,
+                adapter_name,
+                self.vera_A,
+                self.vera_B,
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
@@ -414,7 +415,9 @@ class VeraModel(BaseTuner):
             embedding_kwargs = kwargs.copy()
             embedding_kwargs.pop("fan_in_fan_out", None)
             new_module = Embedding(
-                target, vera_A, vera_B,
+                target,
+                vera_A,
+                vera_B,
                 adapter_name,
                 d_initial=vera_config.d_initial,
                 **embedding_kwargs,
@@ -441,7 +444,9 @@ class VeraModel(BaseTuner):
                     "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
                 )
             new_module = Linear(
-                target, vera_A, vera_B,
+                target,
+                vera_A,
+                vera_B,
                 adapter_name,
                 bias=bias,
                 d_initial=vera_config.d_initial,
@@ -595,9 +600,8 @@ class VeraModel(BaseTuner):
 
     # def _add_forward_hooks(self):
     #     """
-    #     Adds pre-forward hooks to all Vera modules in order to inject the shared vera_A and vera_B without adding them
-    #     to each module's state dictionary.
-    #     """
+    # Adds pre-forward hooks to all Vera modules in order to inject the shared vera_A and vera_B without adding them #
+    # to each module's state dictionary. #"""
     #     hook_handles = []
     #     for module in self.modules():
     #         if isinstance(module, Linear):
@@ -631,11 +635,11 @@ class VeraModel(BaseTuner):
         # try:
         #     outputs = self.model.generate(*args, **kwargs)
         # finally:
-            # regardless of success or failure of generate call, we should remove
-            # handles to restore the original model.
-            # for handle in hook_handles:
-            #     handle.remove()
+        # regardless of success or failure of generate call, we should remove
+        # handles to restore the original model.
+        # for handle in hook_handles:
+        #     handle.remove()
 
-        outputs = self.model.generate(*args, **kwargs) 
+        outputs = self.model.generate(*args, **kwargs)
 
         return outputs

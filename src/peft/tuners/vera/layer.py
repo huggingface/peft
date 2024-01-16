@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -68,7 +68,16 @@ class VeraLayer(BaseTunerLayer):
     def merged(self) -> bool:
         return bool(self.merged_adapters)
 
-    def update_layer(self, adapter_name, vera_A: BufferDict, vera_B: BufferDict, r, vera_dropout, init_vera_weights, d_initial: float = 1.0):
+    def update_layer(
+        self,
+        adapter_name,
+        vera_A: BufferDict,
+        vera_B: BufferDict,
+        r,
+        vera_dropout,
+        init_vera_weights,
+        d_initial: float = 1.0,
+    ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -85,8 +94,8 @@ class VeraLayer(BaseTunerLayer):
         # non trainable references to vera_A/B buffers
         # self.vera_A[adapter_name] = vera_A[adapter_name]
         # self.vera_B[adapter_name] = vera_B[adapter_name]
-        setattr(self, 'vera_A', vera_A)
-        setattr(self, 'vera_B', vera_B)
+        setattr(self, "vera_A", vera_A)
+        setattr(self, "vera_B", vera_B)
 
         if init_vera_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
@@ -100,7 +109,16 @@ class VeraLayer(BaseTunerLayer):
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
 
-    def update_layer_embedding(self, adapter_name, vera_A: BufferDict, vera_B: BufferDict, r, vera_dropout, init_vera_weights, d_initial: float = 1.0):
+    def update_layer_embedding(
+        self,
+        adapter_name,
+        vera_A: BufferDict,
+        vera_B: BufferDict,
+        r,
+        vera_dropout,
+        init_vera_weights,
+        d_initial: float = 1.0,
+    ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         self.r[adapter_name] = r
@@ -118,8 +136,8 @@ class VeraLayer(BaseTunerLayer):
         self.vera_A[adapter_name] = vera_A[adapter_name]
         self.vera_B[adapter_name] = vera_B[adapter_name]
 
-        setattr(self, 'vera_A', vera_A)
-        setattr(self, 'vera_B', vera_B)
+        setattr(self, "vera_A", vera_A)
+        setattr(self, "vera_B", vera_B)
 
         if init_vera_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
@@ -312,7 +330,9 @@ class Embedding(nn.Embedding, VeraLayer):
     ) -> None:
         init_vera_weights = kwargs.pop("init_vera_weights", True)
         VeraLayer.__init__(self, base_layer, **kwargs)
-        self.update_layer_embedding(adapter_name, vera_A, vera_B, r, vera_dropout, init_vera_weights, d_initial=d_initial)
+        self.update_layer_embedding(
+            adapter_name, vera_A, vera_B, r, vera_dropout, init_vera_weights, d_initial=d_initial
+        )
 
     def merge(self, safe_merge: bool = False) -> None:
         """
