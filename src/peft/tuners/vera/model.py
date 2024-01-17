@@ -152,7 +152,7 @@ class VeraModel(BaseTuner):
             ) or self._check_target_module_exists(peft_config, key):
                 if isinstance(module, (nn.Linear, Conv1D)):
                     module_shape = tuple(module.weight.shape)
-                    if isinstance(module, Conv1D):  # TODO: feels fragile
+                    if isinstance(module, Conv1D):  # TODO: feels fragile, thoughts?
                         module_shape = module_shape[::-1]
 
                     if first_linear is not None and module_shape != first_linear:
@@ -186,6 +186,7 @@ class VeraModel(BaseTuner):
         TODO: we could remove this entirely if we add a flag that controls whether `super().__init__` is called in
         `BaseTuner.__init__`, then we simply call `nn.Module` first, then call `BaseTuner.__init__(no_super_init=True)`
         """
+        self.model = model
         self.targeted_module_names: list[str] = []
 
         # For advanced developpers, if you want to attach multiple adapters to your
@@ -319,8 +320,6 @@ class VeraModel(BaseTuner):
 
         kwargs["bias"] = bias
 
-        # the below todo is copied from LoRA
-        # TODO: better deal with that
         if isinstance(target, Embedding):
             target.update_layer_embedding(
                 adapter_name,
@@ -358,8 +357,6 @@ class VeraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        # the below todo is copied from LoRA
-        # TODO: layers with base_layer don't need the weight to be copied, as they have a reference already
         if not hasattr(new_module, "base_layer"):
             new_module.weight = child.weight
             if hasattr(child, "bias"):
