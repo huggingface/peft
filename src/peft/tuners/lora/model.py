@@ -41,7 +41,7 @@ from peft.utils.merge_utils import dare_linear, dare_ties, task_arthimetic, ties
 
 from .config import LoraConfig
 from .gptq import dispatch_gptq
-from .layer import Conv2d, LoraLayer, dispatch_default
+from .layer import Conv2d, Embedding, LoraLayer, dispatch_default
 from .tp_layer import dispatch_megatron
 
 
@@ -564,7 +564,7 @@ class LoraModel(BaseTuner):
                 delta_weight = delta_weight.flatten(start_dim=1)
             else:
                 delta_weight = delta_weight.squeeze()
-        if hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out:
+        if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or isinstance(target_lora_A, Embedding):
             delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
