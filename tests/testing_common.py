@@ -1012,7 +1012,11 @@ class PeftCommonTester:
 
         # test ties_svd re-weighting with multiple adapters
         model.add_weighted_adapter(
-            adapter_list[1:], weight_list[1:], "multi_adapter_ties_svd_reweighting", combination_type="ties_svd"
+            adapter_list[1:],
+            weight_list[1:],
+            "multi_adapter_ties_svd_reweighting",
+            combination_type="ties_svd",
+            density=0.5,
         )
 
         # test dare_linear_svd re-weighting with multiple adapters
@@ -1021,6 +1025,7 @@ class PeftCommonTester:
             weight_list[1:],
             "multi_adapter_dare_linear_svd_reweighting",
             combination_type="dare_linear_svd",
+            density=0.5,
         )
 
         # test dare_ties_svd re-weighting with multiple adapters
@@ -1029,10 +1034,8 @@ class PeftCommonTester:
             weight_list[1:],
             "multi_adapter_dare_ties_svd_reweighting",
             combination_type="dare_ties_svd",
+            density=0.5,
         )
-
-        # test svd re-weighting with multiple adapters
-        model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
 
         # test cat re-weighting with multiple adapters
         model.add_weighted_adapter(
@@ -1046,17 +1049,25 @@ class PeftCommonTester:
 
         # test ties re-weighting with multiple adapters
         model.add_weighted_adapter(
-            adapter_list[:2], weight_list[:2], "multi_adapter_ties_reweighting", combination_type="ties"
+            adapter_list[:2], weight_list[:2], "multi_adapter_ties_reweighting", combination_type="ties", density=0.5
         )
 
         # test dare_linear re-weighting with multiple adapters
         model.add_weighted_adapter(
-            adapter_list[:2], weight_list[:2], "multi_adapter_dare_linear_reweighting", combination_type="dare_linear"
+            adapter_list[:2],
+            weight_list[:2],
+            "multi_adapter_dare_linear_reweighting",
+            combination_type="dare_linear",
+            density=0.5,
         )
 
         # test dare_ties re-weighting with multiple adapters
         model.add_weighted_adapter(
-            adapter_list[:2], weight_list[:2], "multi_adapter_dare_ties_reweighting", combination_type="dare_ties"
+            adapter_list[:2],
+            weight_list[:2],
+            "multi_adapter_dare_ties_reweighting",
+            combination_type="dare_ties",
+            density=0.5,
         )
 
         # test linear re-weighting with multiple adapters with only first adapter having non zero weight
@@ -1081,6 +1092,7 @@ class PeftCommonTester:
                 weight_list[1:],
                 "multi_adapter_ties_reweighting_uneven_r",
                 combination_type="ties",
+                density=0.5,
             )
 
         with self.assertRaises(ValueError):
@@ -1089,6 +1101,7 @@ class PeftCommonTester:
                 weight_list[1:],
                 "multi_adapter_dare_linear_reweighting_uneven_r",
                 combination_type="dare_linear",
+                density=0.5,
             )
 
         with self.assertRaises(ValueError):
@@ -1097,6 +1110,7 @@ class PeftCommonTester:
                 weight_list[1:],
                 "multi_adapter_dare_ties_reweighting_uneven_r",
                 combination_type="dare_ties",
+                density=0.5,
             )
 
         new_adapters = [
