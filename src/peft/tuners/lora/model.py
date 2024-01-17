@@ -41,7 +41,7 @@ from peft.utils.merge_utils import dare_linear, dare_ties, task_arthimetic, ties
 
 from .config import LoraConfig
 from .gptq import dispatch_gptq
-from .layer import Conv2d, Embedding, LoraLayer, dispatch_default
+from .layer import Conv2d, LoraLayer, dispatch_default
 from .tp_layer import dispatch_megatron
 
 
