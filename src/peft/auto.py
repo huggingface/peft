@@ -41,7 +41,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
-from .utils.other import TOKENIZER_CONFIG_NAME
+from .utils.constants import TOKENIZER_CONFIG_NAME
 
 
 class _BaseAutoPeftModel:
