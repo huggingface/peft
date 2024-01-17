@@ -94,7 +94,7 @@ def get_peft_model_state_dict(
         to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
         if config.save_projection:
             # TODO: adding vera_A and vera_B to `self.get_base_layer` would
-            # makes name to match here difficult to predict.
+            # make name to match here difficult to predict.
             if f"base_model.vera_A.{adapter_name}" not in state_dict:
                 raise ValueError(
                     "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"

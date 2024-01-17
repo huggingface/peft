@@ -92,8 +92,8 @@ class VeraLayer(BaseTunerLayer):
         self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
 
         # non trainable references to vera_A/B buffers
-        # self.vera_A[adapter_name] = vera_A[adapter_name]
-        # self.vera_B[adapter_name] = vera_B[adapter_name]
+        # use setattr as this happens post `nn.Module.__init__`
+        # but should not be issue as these are just references to the normally initialised `vera_A/B`
         setattr(self, "vera_A", vera_A)
         setattr(self, "vera_B", vera_B)
 
@@ -133,9 +133,8 @@ class VeraLayer(BaseTunerLayer):
         self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
 
         # non trainable references to vera_A/B buffers
-        self.vera_A[adapter_name] = vera_A[adapter_name]
-        self.vera_B[adapter_name] = vera_B[adapter_name]
-
+        # use setattr as this happens post `nn.Module.__init__`
+        # but should not be issue as these are just references to the normally initialised `vera_A/B`
         setattr(self, "vera_A", vera_A)
         setattr(self, "vera_B", vera_B)
 
@@ -253,8 +252,12 @@ class Linear(nn.Linear, VeraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        if self.vera_A is None or self.vera_B is None:
+            msg = "Attempted to get reference to `vera_A` or `vera_B` but it was `None`! Ensure these are set using the `update_layer` methods"
+            raise ValueError(msg)
         vera_A = self.vera_A[adapter]
         vera_B = self.vera_B[adapter]
+
         device = vera_B.device
         dtype = vera_B.dtype
 
@@ -297,6 +300,11 @@ class Linear(nn.Linear, VeraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+
+            if self.vera_A is None or self.vera_B is None:
+                msg = "Attempted to get reference to `vera_A` or `vera_B` but it was `None`! Ensure these are set using the `update_layer` methods"
+                raise ValueError(msg)
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
@@ -385,6 +393,10 @@ class Embedding(nn.Embedding, VeraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
+        if self.vera_A is None or self.vera_B is None:
+            msg = "Attempted to get reference to `vera_A` or `vera_B` but it was `None`! Ensure these are set using the `update_layer` methods"
+            raise ValueError(msg)
+
         vera_A = self.vera_A[adapter]
         vera_B = self.vera_B[adapter]
 
@@ -439,6 +451,11 @@ class Embedding(nn.Embedding, VeraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+
+            if self.vera_A is None or self.vera_B is None:
+                msg = "Attempted to get reference to `vera_A` or `vera_B` but it was `None`! Ensure these are set using the `update_layer` methods"
+                raise ValueError(msg)
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d:
                     continue

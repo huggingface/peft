@@ -38,12 +38,6 @@ from .config import VeraConfig
 from .layer import Embedding, Linear, VeraLayer
 
 
-# def _vera_forward_hook(module, args, kwargs, vera_A, vera_B):
-#     kwargs["vera_A"] = vera_A
-#     kwargs["vera_B"] = vera_B
-#     return args, kwargs
-
-
 def _kaiming_init(
     tensor_or_shape: Union[torch.Tensor, Tuple[int, ...]],
     generator: torch.Generator,
@@ -141,22 +135,17 @@ class VeraModel(BaseTuner):
         This will throw an error if there are multiple layers of the same type with different shapes.
         """
 
-        # TODO: replace with searching key list as in BaseTuner.inject_adapter
-        # key_modu_list = [key for key, _ in module.named_modules()]
-
         _check_for_modules_to_save = getattr(config, "modules_to_save", None) is not None
 
         model_config = getattr(self.model, "config", {"model_type": "custom"})
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
 
-        # import ipdb; ipdb.set_trace()
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
         first_linear, first_embedding = None, None
         for key, module in self.model.named_modules():
-            # TODO: should this not include modules to save?
             if (
                 _check_for_modules_to_save
                 and any(key.endswith(f"{module_to_save}") for module_to_save in peft_config.modules_to_save)
@@ -188,6 +177,15 @@ class VeraModel(BaseTuner):
         return first_linear, first_embedding
 
     def __tuner_init__(self, model, peft_config, adapter_name: str) -> None:
+        r"""
+        Used for the separated init calls. This is used as a replacement for the `BaseTuner.__init__` call the only
+        difference is it does not call `nn.Module.__init__` (which would clear the already initialised vera_A/B
+        parameters) and it does not set `self.model = model` as this is already done (though, we could do this again
+        without issue)
+
+        TODO: we could remove this entirely if we add a flag that controls whether `super().__init__` is called in
+        `BaseTuner.__init__`, then we simply call `nn.Module` first, then call `BaseTuner.__init__(no_super_init=True)`
+        """
         self.targeted_module_names: list[str] = []
 
         # For advanced developpers, if you want to attach multiple adapters to your
@@ -203,15 +201,13 @@ class VeraModel(BaseTuner):
 
         self.active_adapter = adapter_name
 
-        # TODO: override this function with behaviour to set vera_A / vera_B?
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
 
     def __init__(self, model, config, adapter_name) -> None:
-        # super().__init__(model, config, adapter_name)
-        # super(nn.Module, self).__init__()
+        # Separate two parent class init for correct vera_A/B init.
         nn.Module.__init__(self)
         self.model = model
         config = config[adapter_name]
@@ -233,7 +229,6 @@ class VeraModel(BaseTuner):
 
         # use of persistent to exclude vera_A and vera_B from the state dict
         # if we choose not to save them.
-        # import ipdb; ipdb.set_trace()
         self.vera_A = BufferDict({}, persistent=config.save_projection)
         self.vera_B = BufferDict({}, persistent=config.save_projection)
 
@@ -264,6 +259,7 @@ class VeraModel(BaseTuner):
                 " to `True` to guarantee restoring the checkpoint correctly on all system configurations."
             )
 
+        # TODO: ideally replace `__tuner_init__` with a call to BaseTuner, but disabling the super call
         # super(BaseTuner, self).__init__(model, config, adapter_name)
         self.__tuner_init__(model, config, adapter_name)
 
@@ -328,8 +324,8 @@ class VeraModel(BaseTuner):
         if isinstance(target, Embedding):
             target.update_layer_embedding(
                 adapter_name,
-                self.vera_A,
-                self.vera_B,
+                self.vera_embedding_A,
+                self.vera_embedding_B,
                 r,
                 vera_config.vera_dropout,
                 vera_config.init_vera_weights,
@@ -597,49 +593,3 @@ class VeraModel(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
-
-    # def _add_forward_hooks(self):
-    #     """
-    # Adds pre-forward hooks to all Vera modules in order to inject the shared vera_A and vera_B without adding them #
-    # to each module's state dictionary. #"""
-    #     hook_handles = []
-    #     for module in self.modules():
-    #         if isinstance(module, Linear):
-    #             pre_forward = partial(_vera_forward_hook, vera_A=self.vera_A, vera_B=self.vera_B)
-    #             handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-    #             hook_handles.append(handle)
-
-    #         elif isinstance(module, Embedding):
-    #             pre_forward = partial(_vera_forward_hook, vera_A=self.vera_embedding_A, vera_B=self.vera_embedding_B)
-    #             handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
-    #             hook_handles.append(handle)
-
-    #     return hook_handles
-
-    def forward(self, *args, **kwargs):
-        # hook_handles = self._add_forward_hooks()
-        # try:
-        #     outputs = super().forward(*args, **kwargs)
-        # finally:
-        #     # regardless of success or failure of forward pass, we should remove
-        #     # handles to restore the original model.
-        #     for handle in hook_handles:
-        #         handle.remove()
-
-        outputs = super().forward(*args, **kwargs)
-        return outputs
-
-    def generate(self, *args, **kwargs):
-        # hook_handles = self._add_forward_hooks()
-
-        # try:
-        #     outputs = self.model.generate(*args, **kwargs)
-        # finally:
-        # regardless of success or failure of generate call, we should remove
-        # handles to restore the original model.
-        # for handle in hook_handles:
-        #     handle.remove()
-
-        outputs = self.model.generate(*args, **kwargs)
-
-        return outputs
