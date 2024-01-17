@@ -27,7 +27,7 @@ def magnitude_based_pruning(tensor: torch.Tensor, density: float) -> torch.Tenso
     tensor (`torch.Tensor`):The tensor to prune.
     density (`float`):The fraction of values to preserve. Should be in [0,1].
     """
-    mask = torch.zeros_like(tensor).view(-1)
+    mask = torch.zeros_like(tensor).reshape(-1)
     k = int(density * tensor.view(-1).shape[0])
     top_k = torch.topk(tensor.abs().view(-1), k=k, largest=True)
     mask[top_k[1]] = 1

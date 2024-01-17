@@ -536,6 +536,7 @@ class LoraModel(BaseTuner):
     ):
         valid_adapters = []
         valid_weights = []
+        is_embedding = any(adapter in target.lora_embedding_A for adapter in adapters)
         for adapter, weight in zip(adapters, weights):
             if adapter in target.lora_A or adapter in target.lora_embedding_A:
                 valid_adapters.append(adapter)
@@ -564,7 +565,7 @@ class LoraModel(BaseTuner):
                 delta_weight = delta_weight.flatten(start_dim=1)
             else:
                 delta_weight = delta_weight.squeeze()
-        if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or isinstance(target_lora_A, Embedding):
+        if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or is_embedding:
             delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
