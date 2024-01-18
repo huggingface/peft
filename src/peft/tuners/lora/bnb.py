@@ -267,7 +267,8 @@ if is_bnb_4bit_available():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
-
+                if "bnb_quantized" in kwargs:
+                    kwargs["bnb_quantized"] = False
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                     weight.device
                 )
@@ -292,6 +293,8 @@ if is_bnb_4bit_available():
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
                 w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                if "bnb_quantized" in kwargs:
+                    kwargs["bnb_quantized"] = False
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
                     weight.device
                 )
