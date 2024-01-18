@@ -16,19 +16,15 @@ rendered properly in your Markdown viewer.
 
 # LoRA methods
 
-A popular way to efficiently train large models is to insert (typically in the attention blocks) and represent a weight matrix as a low-rank decomposition of smaller trainable matrices. The pretrained model's original weight matrix is frozen and only the smaller matrices are updated during training. This reduces the number of trainable parameters, reducing memory usage and training time, which can be very expensive for large models.
+A popular way to efficiently train large models is to insert (typically in the attention blocks) smaller trainable matrices that are a low-rank decomposition of the original weight matrix. The pretrained model's original weight matrix is frozen and only the smaller matrices are updated during training. This reduces the number of trainable parameters, reducing memory usage and training time which can be very expensive for large models.
 
-There are several different ways to decompose the weight matrix, but [Low-Rank Adaptation (LoRA)](../conceptual_guides/adapter#low-rank-adaptation-lora) is the most common method. The PEFT library supports other LoRA variants, such as [Low-Rank Hadamard Product (LoHa)](../conceptual_guides/adapter#low-rank-hadamard-product-loha), [Low-Rank Kronecker Product (LoKr)](../conceptual_guides/adapter#low-rank-kronecker-product-lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora).
+There are several different ways to express the weight matrix as a low-rank decomposition, but [Low-Rank Adaptation (LoRA)](../conceptual_guides/adapter#low-rank-adaptation-lora) is the most common method. The PEFT library supports several other LoRA variants, such as [Low-Rank Hadamard Product (LoHa)](../conceptual_guides/adapter#low-rank-hadamard-product-loha), [Low-Rank Kronecker Product (LoKr)](../conceptual_guides/adapter#low-rank-kronecker-product-lokr), and [Adaptive Low-Rank Adaptation (AdaLoRA)](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora). You can learn more about how these methods work conceptually in the [Adapters](../conceptual_guides/adapter) guide. If you're interested in applying these methods to other tasks and use cases like semantic segmentation, token classification, take a look at our [notebook collection](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
 
-This guide will show you how to quickly train an image classification model by decomposing the weight matrix to identify the class of food shown in an image.
+This guide will show you how to quickly train an image classification model - with a low-rank decomposition method - to identify the class of food shown in an image.
 
 <Tip>
 
-This guide focuses on how to apply LoRA-based methods to train an image classification model. It assumes you're already familiar with the general process of training an image classification model so it won't spend too much time discussing those specifics. If you're new, we recommend taking a look at the [Image classification](https://huggingface.co/docs/transformers/tasks/image_classification) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in your training!
-
-</br>
-
-To learn how to apply LoRA to other tasks, take a look at our collection of PEFT [notebooks](https://huggingface.co/collections/PEFT/notebooks-6573b28b33e5a4bf5b157fc1)!
+Some familiarity with the general process of training an image classification model would be really helpful and allow you to focus on the low-rank decomposition methods. If you're new, we recommend taking a look at the [Image classification](https://huggingface.co/docs/transformers/tasks/image_classification) guide first from the Transformers documentation. When you're ready, come back and see how easy it is to drop PEFT in to your training!
 
 </Tip>
 
@@ -40,7 +36,7 @@ pip install -q peft transformers datasets
 
 ## Dataset
 
-In this guide, you'll use the [Food-101](https://huggingface.co/datasets/food101) dataset which contains images of 101 food classes (take a look at the [dataset viewer](https://huggingface.co/datasets/food101/viewer/default/train) to get a better idea of what the dataset looks like). 
+In this guide, you'll use the [Food-101](https://huggingface.co/datasets/food101) dataset which contains images of 101 food classes (take a look at the [dataset viewer](https://huggingface.co/datasets/food101/viewer/default/train) to get a better idea of what the dataset looks like).
 
 Load the dataset with the [`~datasets.load_dataset`] function.
 
@@ -63,7 +59,7 @@ id2label[2]
 "baklava"
 ```
 
-Load an image processor to appropriately resize the training and evaluation images and to normalize the pixel values.
+Load an image processor to properly resize and normalize the pixel values of the training and evaluation images.
 
 ```py
 from transformers import AutoImageProcessor
@@ -122,7 +118,7 @@ train_ds.set_transform(preprocess_train)
 val_ds.set_transform(preprocess_val)
 ```
 
-Finally, you'll need to create a data collator to create a batch of training and evaluation data and convert the labels to `torch.tensor` objects.
+Finally, you'll need a data collator to create a batch of training and evaluation data and convert the labels to `torch.tensor` objects.
 
 ```py
 import torch
@@ -150,18 +146,18 @@ model = AutoModelForImageClassification.from_pretrained(
 
 ### PEFT configuration and model
 
-Every PEFT method requires a configuration that holds all the parameters specifying how the PEFT method should be applied. Once the configuration is setup, pass it to the [`~peft.get_peft_model`] function along with the base model to create a trainable PEFT model.
+Every PEFT method requires a configuration that holds all the parameters specifying how the PEFT method should be applied. Once the configuration is setup, pass it to the [`~peft.get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
 
 <Tip>
 
-Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of parameters you're training with PEFT versus the total number of parameters in the base model!
+Call the [`~PeftModel.print_trainable_parameters`] method to compare the number of parameters of [`PeftModel`] versus the number of parameters in the base model!
 
 </Tip>
 
 <hfoptions id="loras">
 <hfoption id="LoRA">
 
-[LoRA](../conceptual_guides/adapter#low-rank-adaptation-lora) decomposes the weight update matrix into two smaller matrices. The size of these low-rank matrices is determined by its *rank* or `r`. A higher rank means the model has more parameters to train, but it also means the model has more expressivity. You'll also want to specify the `target_modules` which determines where these smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `lora_alpha` (scaling factor), `bias` (whether none, all or only the LoRA bias parameters should be trained), and `modules_to_save` (the modules apart from the LoRA layers to be trained and saved). All of these parameters - and more - are found in the [`LoraConfig`].
+[LoRA](../conceptual_guides/adapter#low-rank-adaptation-lora) decomposes the weight update matrix into *two* smaller matrices. The size of these low-rank matrices is determined by its *rank* or `r`. A higher rank means the model has more parameters to train, but it also means the model has more learning capacity. You'll also want to specify the `target_modules` which determine where the smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `lora_alpha` (scaling factor), `bias` (whether `none`, `all` or only the LoRA bias parameters should be trained), and `modules_to_save` (the modules apart from the LoRA layers to be trained and saved). All of these parameters - and more - are found in the [`LoraConfig`].
 
 ```py
 from peft import LoraConfig, get_peft_model
@@ -182,7 +178,7 @@ model.print_trainable_parameters()
 </hfoption>
 <hfoption id="LoHa">
 
-[LoHa](../conceptual_guides/adapter#low-rank-hadamard-product-loha) decomposes the weight update matrix into four smaller matrices and each pair of smaller matrices are combined with the Hadamard product. This allows the weight update matrix to keep the same number of trainable parameters but with a higher rank. The size of the smaller matrices are determined by its *rank* or `r`. You'll also want to specify the `target_modules` which determines where these smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `alpha` (scaling factor), and `modules_to_save` (the modules apart from the LoHa layers to be trained and saved). All of these parameters - and more - are found in the [`LoHaConfig`].
+[LoHa](../conceptual_guides/adapter#low-rank-hadamard-product-loha) decomposes the weight update matrix into *four* smaller matrices and each pair of smaller matrices are combined with the Hadamard product. This allows the weight update matrix to keep the same number of trainable parameters but with a higher rank. The size of the smaller matrices are determined by its *rank* or `r`. You'll also want to specify the `target_modules` which determines where the smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `alpha` (scaling factor), and `modules_to_save` (the modules apart from the LoHa layers to be trained and saved). All of these parameters - and more - are found in the [`LoHaConfig`].
 
 ```py
 from peft import LoHaConfig, get_peft_model
@@ -202,7 +198,7 @@ model.print_trainable_parameters()
 </hfoption>
 <hfoption id="LoKr>
 
-[LoKr](../conceptual_guides/adapter#low-rank-kronecker-product-lokr) expresses the weight update matrix as a decomposition of a Kronecker product, creating a block matrix that is able to preserve the rank of the original weight matrix. The size of the smaller matrices are determined by its *rank* or `r`. You'll also want to specify the `target_modules` which determines where these smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `alpha` (scaling factor), and `modules_to_save` (the modules apart from the LoKr layers to be trained and saved). All of these parameters - and more - are found in the [`LoKrConfig`].
+[LoKr](../conceptual_guides/adapter#low-rank-kronecker-product-lokr) expresses the weight update matrix as a decomposition of a Kronecker product, creating a block matrix that is able to preserve the rank of the original weight matrix. The size of the smaller matrices are determined by its *rank* or `r`. You'll also want to specify the `target_modules` which determines where the smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `alpha` (scaling factor), and `modules_to_save` (the modules apart from the LoKr layers to be trained and saved). All of these parameters - and more - are found in the [`LoKrConfig`].
 
 ```py
 from peft import LoKrConfig, get_peft_model
@@ -222,7 +218,7 @@ model.print_trainable_parameters()
 </hfoption>
 <hfoption id="AdaLoRA">
 
-[AdaLoRA](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora) efficiently manages the LoRA parameter budget by assigning important weight matrices more parameters and pruning less important ones. In contrast, LoRA evenly distributes parameters across all modules. You can control the average desired *rank* or `r` of the matrices and which modules to apply AdaLoRA to with `target_modules`. Other important parameters to set are `lora_alpha` (scaling factor), and `modules_to_save` (the modules apart from the AdaLoRA layers to be trained and saved). All of these parameters - and more - are found in the [`AdaLoraConfig`].
+[AdaLoRA](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora) efficiently manages the LoRA parameter budget by assigning important weight matrices more parameters and pruning less important ones. In contrast, LoRA evenly distributes parameters across all modules. You can control the average desired *rank* or `r` of the matrices, and which modules to apply AdaLoRA to with `target_modules`. Other important parameters to set are `lora_alpha` (scaling factor), and `modules_to_save` (the modules apart from the AdaLoRA layers to be trained and saved). All of these parameters - and more - are found in the [`AdaLoraConfig`].
 
 ```py
 from peft import AdaLoraConfig, get_peft_model
@@ -244,7 +240,7 @@ model.print_trainable_parameters()
 
 ### Training
 
-For training, let's use the [`~transformers.Trainer`] class from Transformers. The `Trainer` contains a PyTorch training loop, and when you're ready to begin, you can call [`~transformers.Trainer.train`]. To customize the training run, configure the training hyperparameters in the [`~transformers.TrainingArguments`] class. With PEFT methods like LoRA, you can afford to use a higher batch size and learning rate.
+For training, let's use the [`~transformers.Trainer`] class from Transformers. The [`Trainer`] contains a PyTorch training loop, and when you're ready, call [`~transformers.Trainer.train`] to start training. To customize the training run, configure the training hyperparameters in the [`~transformers.TrainingArguments`] class. With LoRA-like methods, you can afford to use a higher batch size and learning rate.
 
 ```py
 from transformers import TrainingArguments, Trainer
@@ -302,7 +298,7 @@ model.push_to_hub(peft_model_id)
 
 ## Inference
 
-Load the model from the Hub for inference and let’s test it out on a food image.
+Let's load the model from the Hub and test it out on a food image.
 
 ```py
 from peft import PeftConfig, PeftModel
@@ -323,6 +319,10 @@ url = "https://huggingface.co/datasets/sayakpaul/sample-datasets/resolve/main/be
 image = Image.open(requests.get(url, stream=True).raw)
 image
 ```
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/sayakpaul/sample-datasets/resolve/main/beignets.jpeg">
+</div>
 
 Convert the image to RGB and return the underlying PyTorch tensors.
 
