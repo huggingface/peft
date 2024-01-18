@@ -196,7 +196,7 @@ model.print_trainable_parameters()
 ```
 
 </hfoption>
-<hfoption id="LoKr>
+<hfoption id="LoKr">
 
 [LoKr](../conceptual_guides/adapter#low-rank-kronecker-product-lokr) expresses the weight update matrix as a decomposition of a Kronecker product, creating a block matrix that is able to preserve the rank of the original weight matrix. The size of the smaller matrices are determined by its *rank* or `r`. You'll also want to specify the `target_modules` which determines where the smaller matrices are inserted. For this guide, you'll target the *query* and *value* matrices of the attention blocks. Other important parameters to set are `alpha` (scaling factor), and `modules_to_save` (the modules apart from the LoKr layers to be trained and saved). All of these parameters - and more - are found in the [`LoKrConfig`].
 
