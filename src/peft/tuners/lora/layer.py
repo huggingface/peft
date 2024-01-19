@@ -496,7 +496,8 @@ class Embedding(nn.Module, LoraLayer):
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
                 after_A = self._embed(x, embedding_A)
-                result += (after_A @ embedding_B) * scaling
+                result = result + (after_A @ embedding_B) * scaling
+
 
         return result
 
