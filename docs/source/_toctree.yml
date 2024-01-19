@@ -32,6 +32,8 @@
       title: int8 training for automatic speech recognition
     - local: task_guides/dreambooth_lora
       title: DreamBooth
+  - local: task_guides/ia3
+    title: IA3
 
 - title: Developer guides
   sections:
