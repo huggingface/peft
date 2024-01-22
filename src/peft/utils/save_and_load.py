@@ -122,6 +122,8 @@ def get_peft_model_state_dict(
         to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
     elif config.peft_type == PeftType.POLY:
         to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
+    elif config.peft_type == PeftType.LN_TUNING:
+        to_return = {k: state_dict[k] for k in state_dict if "select_" in k}
     else:
         raise NotImplementedError
     if getattr(model, "modules_to_save", None) is not None:
@@ -194,6 +196,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         model ([`PeftModel`]): The Peft model.
         peft_model_state_dict (`dict`): The state dict of the Peft model.
     """
+    __import__("ipdb").set_trace()
     config = model.peft_config[adapter_name]
     state_dict = {}
     if getattr(model, "modules_to_save", None) is not None:
@@ -215,6 +218,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         PeftType.IA3,
         PeftType.OFT,
         PeftType.POLY,
+        PeftType.LN_TUNING,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -225,6 +229,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
+            PeftType.LN_TUNING: "select_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:

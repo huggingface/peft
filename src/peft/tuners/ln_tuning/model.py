@@ -14,13 +14,17 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, List, Optional
 
+from torch import nn
 from torch.nn.modules import Module
+from tqdm import tqdm
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, _get_submodules, check_target_module_exists
 from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
+
+from .layer import SelectLayer
 
 
 class LNTuningModel(BaseTuner):
@@ -69,6 +73,8 @@ class LNTuningModel(BaseTuner):
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
 
+    prefix: str = "select_"
+
     def __init__(self, model, config, adapter_name) -> None:
         self.adapter_name = adapter_name
         super().__init__(model, config, adapter_name)
@@ -80,11 +86,12 @@ class LNTuningModel(BaseTuner):
         except AttributeError:
             return getattr(self.model, name)
 
+    # TODO: here need to handle the modules_to_save rather than the target_modules
     @staticmethod
     def _prepare_adapter_config(peft_config: PeftConfig, model_config: dict) -> PeftConfig:
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `target_modules` in `peft_config`")
+                raise ValueError("Please specify `modules_to_save` in `peft_config`")
             peft_config.target_modules = set(
                 TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
@@ -97,21 +104,78 @@ class LNTuningModel(BaseTuner):
         target: Module,
         target_name: str,
         parent: Module,
+        current_key: str,
         **optional_kwargs: Any,
     ) -> None:
-        # Don't need to do anything here: just mark the layernorms as trainable is enough
-        pass
+        # replace the original module with a same new module
+        new_module = self._create_new_module(peft_config, target, adapter_name, **optional_kwargs)
+        if adapter_name != self.active_adapter:
+            new_module.requires_grad_(False)
+        self._replace_module(parent, target_name, new_module, target)
+
+    def _create_new_module(
+        self, peft_config: PeftConfig, target: Module, adapter_name: str, **optional_kwargs: Any
+    ) -> Module:
+        new_module = SelectLayer(target, adapter_name)
+        return new_module
+
+    def _replace_module(self, parent: Module, target_name: str, new_module: Module, target: Module) -> None:
+        setattr(parent, target_name, new_module)
+
+        if hasattr(target, "base_layer"):
+            target = target.base_layer
+
+        if getattr(target, "state", None) is not None:
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = target.state
+            else:
+                new_module.state = target.state
+            new_module.to(target.weight.device)
+
+        for name, module in new_module.named_modules():
+            weight = target.qweight if hasattr(target, "qweight") else target.weight
+            module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: Module):
-        # Need to mark all layernorms as trainable
         for n, p in model.named_parameters():
-            # check to see if the parameter is a layernorm
             flag = False
             for module_name in self.peft_config[self.adapter_name].target_modules:
-                if module_name in n:
+                if module_name in n and self.prefix in n:
                     flag = True
                     break
             p.requires_grad = flag
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
+
+    def _unload_and_optionally_merge(
+        self,
+        merge=True,
+        progressbar: bool = False,
+        safe_merge: bool = False,
+        adapter_names: Optional[List[str]] = None,
+    ):
+        self._unloading_checks(adapter_names)
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        desc = "Unloading adapters " + ("and merging " if merge else "") + "model"
+
+        for key in tqdm(key_list, disable=not progressbar, desc=desc):
+            try:
+                parent, target, target_name = _get_submodules(self.model, key)
+            except AttributeError:
+                continue
+
+            if hasattr(target, "base_layer"):
+                if merge:
+                    target.merge(adapter_names)
+                self._replace_module(parent, target_name, target.base_layer, target)
+
+        return self.model
+
+    def unload(self):
+        return self._unload_and_optionally_merge(merge=False)
+
+    def merge_and_unload(
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+    ) -> nn.Module:
+        return self._unload_and_optionally_merge(merge=True)

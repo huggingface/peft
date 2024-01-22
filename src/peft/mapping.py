@@ -35,6 +35,8 @@ from .tuners import (
     AdaptionPromptConfig,
     IA3Config,
     IA3Model,
+    LNTuningConfig,
+    LNTuningModel,
     LoHaConfig,
     LoHaModel,
     LoKrConfig,
@@ -79,6 +81,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
     "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
     "OFT": OFTConfig,
     "POLY": PolyConfig,
+    "LN_TUNING": LNTuningConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {
@@ -89,6 +92,7 @@ PEFT_TYPE_TO_TUNER_MAPPING = {
     "IA3": IA3Model,
     "OFT": OFTModel,
     "POLY": PolyModel,
+    'LN_TUNING': LNTuningModel,
 }
 
 
