@@ -260,19 +260,13 @@ Let's review the `LoraConfig`. To enable LoRA technique, we must define the targ
 attention blocks of the base model. These matrices are identified by their respective names, "query" and "value". 
 Therefore, we should specify these names in the `target_modules` argument of `LoraConfig`.
 
-After we wrap our base model `model` with `PeftModel` along with the config, we get 
-a new model where only the LoRA parameters are trainable (so-called "update matrices") while the pre-trained parameters 
-are kept frozen. These include the parameters of the randomly initialized classifier parameters too. This is NOT we want 
-when fine-tuning the base model on our custom dataset. To ensure that the classifier parameters are also trained, we 
-specify `modules_to_save`. This also ensures that these modules are serialized alongside the LoRA trainable parameters 
-when using utilities like `save_pretrained()` and `push_to_hub()`.
-
 In addition to specifying the `target_modules` within `LoraConfig`, we also need to specify the `modules_to_save`. When 
 we wrap our base model with `PeftModel` and pass the configuration, we obtain a new model in which only the LoRA parameters 
-are trainable, while the pre-trained parameters and the randomly initialized classifier parameters are kept frozen. 
-However, we do want to train the classifier parameters. By specifying the `modules_to_save` argument, we ensure that the 
+are trainable (the so-called "update matrices"), while the pre-trained parameters and the randomly initialized classifier parameters are kept frozen. 
+However, we do want to train the classifier parameters for finetuning. By specifying the `modules_to_save` argument, we ensure that the 
 classifier parameters are also trainable, and they will be serialized alongside the LoRA trainable parameters when we 
 use utility functions like `save_pretrained()` and `push_to_hub()`.
+
 
 Let's review the rest of the parameters:
 
@@ -362,7 +356,7 @@ total 2.2M
 Let's now prepare an `inference_model` and run inference.
 
 ```python
-from peft import PeftConfig
+from peft import PeftConfig, PeftModel
 
 config = PeftConfig.from_pretrained(model_id)
 model = AutoModelForSemanticSegmentation.from_pretrained(
@@ -415,8 +409,10 @@ we don't include it in this guide, please copy it from [the TensorFlow Model Gar
 ```python
 import matplotlib.pyplot as plt
 
+# < paste the `create_ade20k_label_colormap` function here >
+
 color_seg = np.zeros((pred_seg.shape[0], pred_seg.shape[1], 3), dtype=np.uint8)
-palette = np.array(ade_palette())
+palette = np.array(create_ade20k_label_colormap()) 
 
 for label, color in enumerate(palette):
     color_seg[pred_seg == label, :] = color
