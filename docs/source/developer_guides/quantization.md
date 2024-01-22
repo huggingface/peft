@@ -125,6 +125,12 @@ lora_config = LoraConfig(
 
 model = get_peft_model(model, lora_config)
 ```
+### QLoRA-style training
+QLoRA adds trainable weights to all the linear layers in the transformer architecture. Since the attribute names for these linear layers can vary across architectures, we provide a convenient flag `'all-linear'` for this setting:
+
+```py
+config = LoraConfig(target_modules="all-linear", ...) # adds LoRA to all linear layers like in QLoRA
+```
 
 ## Next steps
 
