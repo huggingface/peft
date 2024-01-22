@@ -74,6 +74,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
     "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["Wqkv", "out_proj", "fc1", "fc2"],
 }
