@@ -403,7 +403,7 @@ upsampled_logits = nn.functional.interpolate(
 pred_seg = upsampled_logits.argmax(dim=1)[0]
 ```
 
-Next, visualize the results.  We need a color palette for this. Here, we use ade_palette(). As it is a long array, so
+Next, visualize the results.  We need a color palette for this. Here, we use `create_ade20k_label_colormap()`. As it returns a long array,
 we don't include it in this guide, please copy it from [the TensorFlow Model Garden repository](https://github.com/tensorflow/models/blob/3f1ca33afe3c1631b733ea7e40c294273b9e406d/research/deeplab/utils/get_dataset_colormap.py#L51).
 
 ```python
