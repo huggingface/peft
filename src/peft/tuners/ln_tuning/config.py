@@ -45,6 +45,14 @@ class LNTuningConfig(PeftConfig):
             ),
         },
     )
+    modules_to_save: Optional[Union[List[str], str]] = field(
+        default=None,
+        metadata={
+            "help": "List of modules to be set as trainable and saved in the final checkpoint. "
+            "For example, in Sequence Classification or Token Classification tasks, "
+            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LN_TUNING
