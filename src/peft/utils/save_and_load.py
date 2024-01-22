@@ -196,7 +196,6 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         model ([`PeftModel`]): The Peft model.
         peft_model_state_dict (`dict`): The state dict of the Peft model.
     """
-    __import__("ipdb").set_trace()
     config = model.peft_config[adapter_name]
     state_dict = {}
     if getattr(model, "modules_to_save", None) is not None:
