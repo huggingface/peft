@@ -30,10 +30,10 @@ def has_valid_embedding_base_layer(layer):
     return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
 
 
-def get_embedding_layer_name(model, layer, is_prompt_learning):
+def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
     """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
-        if (is_prompt_learning and module == layer) or module == getattr(layer, "base_layer", None):
+        if (not is_embedding_in_target_modules and module == layer) or module == getattr(layer, "base_layer", None):
             return name
     return None
 
@@ -125,13 +125,14 @@ def get_peft_model_state_dict(
                 to_return[key.replace("modules_to_save.", "")] = value
 
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
+    is_embedding_in_target_modules = False
     if (
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
         and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
-        save_embedding_layers = True
+        save_embedding_layers = is_embedding_in_target_modules = True
     elif save_embedding_layers == "auto":
         vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
         model_id = getattr(config, "base_model_name_or_path", None)
@@ -145,11 +146,10 @@ def get_peft_model_state_dict(
             save_embedding_layers = False
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
-        is_prompt_learning_method = config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
-            if is_prompt_learning_method or has_valid_embedding_base_layer(layer):
+            if not is_embedding_in_target_modules or has_valid_embedding_base_layer(layer):
                 # support from version >= 0.6.2
-                embedding_module_name = get_embedding_layer_name(model, layer, is_prompt_learning_method)
+                embedding_module_name = get_embedding_layer_name(model, layer, is_embedding_in_target_modules)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
