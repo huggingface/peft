@@ -20,7 +20,64 @@ We are happy to accept contributions to PEFT. If you plan to contribute, please 
 
 ## Installation
 
-The installation instructions can be found [here](https://huggingface.co/docs/peft/install). If you want to provide code contributions to PEFT, you should choose the "source" installation method.
+Before you start, you will need to setup your environment, install the appropriate packages, and configure 🤗 PEFT. 🤗 PEFT is tested on **Python 3.8+**.
+
+🤗 PEFT is available on PyPI, as well as GitHub:
+
+### PyPI
+
+To install 🤗 PEFT from PyPI:
+
+```bash
+pip install peft
+```
+
+### Source
+
+New features that haven't been released yet are added every day, which also means there may be some bugs. To try them out, install from the GitHub repository:
+
+```bash
+pip install git+https://github.com/huggingface/peft
+```
+
+## Create a Pull Request
+
+If you're working on contributing to the library or wish to play with the source code and see live 
+results as you run the code, an editable version can be installed from a locally-cloned version of the 
+repository:
+
+1. Fork the [repository](https://github.com/huggingface/peft) by clicking on the **Fork** button on the repository's page. This creates a copy of the code under your GitHub user account.
+
+2. Clone your fork to your local disk, and add the base repository as a remote:
+
+```bash
+git clone https://github.com/<your Github handle>/peft.git
+cd peft
+git remote add upstream https://github.com/huggingface/peft.git
+```
+
+3. Create a new branch to hold your development changes:
+
+```bash
+git checkout -b a-descriptive-name-for-my-changes
+```
+
+**Do not** work on the `main` branch!
+
+4. Set up a development environment by running the following command in a virtual environment:
+
+```bash
+pip install -e .
+```
+5. Develop the features in your branch and run tests and code quality checks.
+
+6. Push your changes to your branch:
+
+```bash
+   git push origin a-descriptive-name-for-my-changes
+```
+
+7. Now you can go to your fork of the repository on GitHub and click on Pull Request to open a pull request. 
 
 If you are new to creating a pull request, follow [these instructions from GitHub](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request).
 
