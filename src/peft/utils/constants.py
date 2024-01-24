@@ -76,7 +76,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "mistral": ["q_proj", "v_proj"],
     "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
-    "phi": ["Wqkv", "out_proj", "fc1", "fc2"],
+    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
