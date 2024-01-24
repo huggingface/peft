@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Union
 import pytest
 import torch
 from datasets import Audio, DatasetDict, load_dataset
+from parameterized import parameterized
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -697,7 +698,8 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 per_device_eval_batch_size=8,
                 generation_max_length=128,
                 logging_steps=25,
-                remove_unused_columns=False,  # required as the PeftModel forward doesn't have the signature of the wrapped model's forward
+                remove_unused_columns=False,
+                # required as the PeftModel forward doesn't have the signature of the wrapped model's forward
                 label_names=["labels"],  # same reason as above
             )
 
@@ -933,3 +935,110 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+
+PRECISIONS = [(torch.float32), (torch.float16), (torch.bfloat16)]
+
+LORA_PARAMS = {
+    "r": 8,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+}
+
+
+class SimpleModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.embedding_layer = torch.nn.Embedding(1000, 768)
+        self.layer_norm = torch.nn.LayerNorm(768)
+        self.linear_transform = torch.nn.Linear(768, 256)
+
+    def forward(self, input_ids):
+        embedded_output = self.embedding_layer(input_ids)
+        norm_output = self.layer_norm(embedded_output)
+        linear_output = self.linear_transform(norm_output)
+
+        return linear_output
+
+
+class SimpleConv2DModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.embedding_layer = torch.nn.Embedding(1000, 768)
+        self.layer_norm = torch.nn.LayerNorm(768)
+        self.conv2d_transform = torch.nn.Conv2d(1, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+
+    def forward(self, input_ids):
+        # Additional layers for your custom model
+        embedded_output = self.embedding_layer(input_ids)
+        norm_output = self.layer_norm(embedded_output)
+
+        # Reshape for Conv2d input (add batch size dimension)
+        norm_output = norm_output.unsqueeze(1)
+        conv_output = self.conv2d_transform(norm_output)
+
+        # Remove batch size dimension
+        conv_output = conv_output.squeeze(1)
+
+        return conv_output
+
+
+@require_torch_gpu
+class TestAutoCast(unittest.TestCase):
+    @parameterized.expand(PRECISIONS)
+    def test_simple_model(self, *args, **kwargs):
+        self._test_model(SimpleModel(), *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_lora_linear_model(self, *args, **kwargs):
+        simple_model = SimpleModel()
+        config = LoraConfig(
+            **LORA_PARAMS,
+            target_modules=["linear_transform"],
+        )
+
+        lora_model = get_peft_model(simple_model, config)
+
+        self._test_model(lora_model, *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_lora_embedding_model(self, *args, **kwargs):
+        simple_model = SimpleModel()
+        config = LoraConfig(
+            **LORA_PARAMS,
+            target_modules=["embedding_layer"],
+        )
+        lora_model = get_peft_model(simple_model, config)
+
+        self._test_model(lora_model, *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_conv2d_model(self, *args, **kwargs):
+        self._test_model(SimpleConv2DModel(), *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_lora_conv2d_model(self, *args, **kwargs):
+        simple_model = SimpleConv2DModel()
+        config = LoraConfig(
+            **LORA_PARAMS,
+            target_modules=["conv2d_transform"],
+        )
+        lora_model = get_peft_model(simple_model, config)
+        self._test_model(lora_model, *args, **kwargs)
+
+    def _test_model(self, model, precision):
+        # Move model to GPU
+        model = model.cuda()
+
+        # Prepare dummy inputs
+        input_ids = torch.randint(0, 1000, (2, 10)).cuda()
+        if precision == torch.bfloat16:
+            if not torch.cuda.is_bf16_supported():
+                return
+
+        # Forward pass with test precision
+        with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
+            outputs = model(input_ids)
+            self.assertEqual(outputs.dtype, precision)
