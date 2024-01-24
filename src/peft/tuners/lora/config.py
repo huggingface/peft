@@ -108,6 +108,10 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports non-quantized linear layers. DoRA introduces a bigger overhead than
             pure LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
+        layer_replication(`List[Tuple[int, int]]):
+            Build a new stack of layers by stacking the original model layers according to the ranges specified.
+            This allows expanding (or shrinking) the model without duplicating the base model weights.
+            The new layers will all have separate LoRA adapters attached to them.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -249,7 +253,7 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "This enable using LoRA to effectively expand a model to a larger size by repeating some layers. "
+                "This enables using LoRA to effectively expand a model to a larger size by repeating some layers. "
                 "Base weights are shared so the memory usage is close to the original model."
                 "The format is a list of (start, end) pairs which specify the layer ranges to stack."
             )

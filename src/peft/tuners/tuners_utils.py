@@ -19,7 +19,7 @@ import re
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -182,7 +182,7 @@ class BaseTuner(nn.Module, ABC):
         r"""
         A private method to modify the model structure before adapter is applied.
 
-        Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
+        See `peft.tuner.lora.LoraModel._prepare_model` for an example.
 
         Args:
             peft_config (`PeftConfig`):
@@ -695,3 +695,18 @@ def clone_module(module: nn.Module, share_weights=False):
             _share_weights(submodule, clone.get_submodule(name))
 
     return clone
+
+
+def replicate_layers(model: nn.Module, layer_map: List[Tuple[int, int]]):
+    new_layers = []
+    for start, end in layer_map:
+        for i in range(start, end):
+            current_idx = len(new_layers)
+            new_layers.append(clone_module(model.base_model.layers[i], share_weights=True))
+            # This is a hack needed to work around the layer_idx introduced in HF transformers.
+            for submodule in new_layers[-1].modules():
+                if hasattr(submodule, 'layer_idx'):
+                    submodule.layer_idx = current_idx
+    model.base_model.layers = nn.ModuleList(new_layers)
+    if hasattr(model.config, 'num_hidden_layers'):
+        model.config.num_hidden_layers = len(new_layers)

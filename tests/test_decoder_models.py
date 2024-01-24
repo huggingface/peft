@@ -19,7 +19,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AdaLoraConfig, PromptTuningConfig, PromptTuningInit, get_peft_model
+from peft import AdaLoraConfig, LoraConfig, PromptTuningConfig, PromptTuningInit, get_peft_model
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -302,3 +302,22 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
+
+    def test_lora_layer_replication(self):
+        model_id = "HuggingFaceM4/tiny-random-LlamaForCausalLM"
+        config_kwargs = {
+            "target_modules": ['down_proj', 'up_proj'],
+            "task_type": "CAUSAL_LM",
+            "lora_dropout": 0.0,
+            "layer_replication": [[0, 1], [0, 2], [1, 2]]
+        }
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = LoraConfig(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        self.assertEquals(4, len(model.base_model.model.model.layers), 'Expected 4 layers in adapted model.')
+        self.assertEquals(8, len([n for n, _ in model.named_parameters() if '.lora_A.' in n]))
+        self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
+        self._test_generate(model_id, LoraConfig, config_kwargs)

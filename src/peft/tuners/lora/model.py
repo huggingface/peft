@@ -28,7 +28,13 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, clone_module, onload_layer
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    check_target_module_exists,
+    onload_layer,
+    replicate_layers
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -133,8 +139,6 @@ class LoraModel(BaseTuner):
         r"""
         A private method to modify the model structure before adapter is applied.
 
-        Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
-
         Args:
             peft_config (`PeftConfig`):
                 The prepared adapter config.
@@ -142,18 +146,7 @@ class LoraModel(BaseTuner):
                 The model that is going to be adapted.
         """
         if peft_config.layer_replication:
-            new_layers = []
-            for start, end in peft_config.layer_replication:
-                for i in range(start, end):
-                    current_idx = len(new_layers)
-                    new_layers.append(clone_module(model.base_model.layers[i], share_weights=True))
-                    # This is a hack needed to work around the layer_idx introduced in HF transformers.
-                    for submodule in new_layers[-1].modules():
-                        if hasattr(submodule, 'layer_idx'):
-                            submodule.layer_idx = current_idx
-            model.base_model.layers = nn.ModuleList(new_layers)
-            if hasattr(model.config, 'num_hidden_layers'):
-                model.config.num_hidden_layers = len(new_layers)
+            replicate_layers(model, peft_config.layer_replication)
 
     def _create_and_replace(
         self,
