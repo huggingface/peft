@@ -7,6 +7,13 @@
   - local: install
     title: Installation
 
+- title: Tutorial
+  sections:
+  - local: tutorial/peft_model_config
+    title: PEFT configurations and models
+  - local: tutorial/peft_integrations
+    title: PEFT integrations
+
 - title: Task guides
   sections:
   - local: task_guides/seq2seq-prefix-tuning
@@ -32,6 +39,10 @@
 
 - title: Developer guides
   sections:
+  - local: developer_guides/quantization
+    title: Quantization
+  - local: developer_guides/lora
+    title: LoRA
   - local: developer_guides/custom_models
     title: Working with custom models
   - local: developer_guides/low_level_api
@@ -52,10 +63,10 @@
 
 - title: Conceptual guides
   sections:
-  - local: conceptual_guides/lora
-    title: LoRA
+  - local: conceptual_guides/adapter
+    title: Adapters
   - local: conceptual_guides/prompting
-    title: Prompting
+    title: Soft prompts
   - local: conceptual_guides/ia3
     title: IA3
 
@@ -89,6 +100,8 @@
       title: LyCORIS
     - local: package_reference/multitask_prompt_tuning
       title: Multitask Prompt Tuning
+    - local: package_reference/oft
+      title: OFT
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/prefix_tuning

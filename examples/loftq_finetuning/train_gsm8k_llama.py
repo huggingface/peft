@@ -697,7 +697,8 @@ def main():
                 if args.with_tracking:
                     total_loss += loss.detach().float()
                 accelerator.backward(loss)
-                accelerator.print(f"Epoch: {epoch} | Step: {step} | Loss: {loss}")
+                if completed_steps % 50:
+                    accelerator.print(f"Epoch: {epoch} | Step: {completed_steps} | Loss: {loss}")
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -843,23 +844,3 @@ def compute_accuracy(pred: list, gold: list):
 
 if __name__ == "__main__":
     main()
-
-# example command
-
-# python train_gsm8k_llama.py \
-# --model_name_or_path LoftQ/Llama-2-7b-hf-bit4-rank64-backbone \
-# --adapter_name_or_path LoftQ/Llama-2-7b-hf-bit4-rank64-adapters \
-# --output_dir exp_results/gsm8k/llama-2-7b/bit4-rank64/lr3e-4 \
-# --learning_rate 1e-4  \
-# --seed 202 \
-# --dataset_name gsm8k \
-# --dataset_config main \
-# --pad_to_max_length \
-# --max_source_length 128 \
-# --max_target_length 256 \
-# --num_train_epochs 5 \
-# --per_device_train_batch_size 4 \
-# --per_device_eval_batch_size 4 \
-# --gradient_accumulation_steps 4 \
-# --with_tracking \
-# --report_to tensorboard

@@ -16,6 +16,7 @@ import unittest
 from contextlib import contextmanager
 
 import numpy as np
+import pytest
 import torch
 
 from peft.import_utils import is_auto_gptq_available, is_optimum_available
@@ -47,10 +48,11 @@ def require_bitsandbytes(test_case):
     """
     try:
         import bitsandbytes  # noqa: F401
+
+        test_case = pytest.mark.bitsandbytes(test_case)
     except ImportError:
-        return unittest.skip("test requires bitsandbytes")(test_case)
-    else:
-        return test_case
+        test_case = pytest.mark.skip(reason="test requires bitsandbytes")(test_case)
+    return test_case
 
 
 def require_auto_gptq(test_case):

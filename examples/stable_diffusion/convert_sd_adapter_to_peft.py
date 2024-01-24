@@ -39,7 +39,7 @@ class LoRAInfo:
         if self.lora_A is None or self.lora_B is None:
             raise ValueError("At least one of lora_A or lora_B is None, they must both be provided")
         return {
-            f"base_model.model{self.peft_key}.lora_A.weight": self.lora_A,
+            f"base_model.model.{self.peft_key}.lora_A.weight": self.lora_A,
             f"base_model.model.{self.peft_key}.lora_B.weight": self.lora_B,
         }
 
@@ -483,6 +483,10 @@ if __name__ == "__main__":
 
     # Process each model sequentially
     for model, model_name in [(text_encoder, "text_encoder"), (unet, "unet")]:
+        # Skip model if no data was provided
+        if len(adapter_info[model_name]) == 0:
+            continue
+
         config = construct_config_fn(adapter_info[model_name], decompose_factor=decompose_factor)
 
         # Output warning for LoHa with use_effective_conv2d
@@ -497,7 +501,11 @@ if __name__ == "__main__":
             )
 
         model = get_peft_model(model, config)
-        set_peft_model_state_dict(model, combine_peft_state_dict(adapter_info[model_name]))
+        missing_keys, unexpected_keys = set_peft_model_state_dict(
+            model, combine_peft_state_dict(adapter_info[model_name])
+        )
+        if len(unexpected_keys) > 0:
+            raise ValueError(f"Unexpected keys {unexpected_keys} found during conversion")
 
         if args.half:
             model.to(torch.float16)

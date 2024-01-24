@@ -131,8 +131,8 @@ class MixedModel(BaseTuner):
             if "ranknum" in name:
                 module.to(child.weight.device)
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        for n, p in self.model.named_parameters():
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
             if not any(prefix in n for prefix in PREFIXES):
                 p.requires_grad = False
 
@@ -142,12 +142,12 @@ class MixedModel(BaseTuner):
                 continue
 
             if bias == "all":
-                for n, p in self.model.named_parameters():
+                for n, p in model.named_parameters():
                     if "bias" in n:
                         p.requires_grad = True
             elif bias == "lora_only":
                 # TODO: check if this is needed for other supported types
-                for m in self.model.modules():
+                for m in model.modules():
                     if isinstance(m, Layers) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
@@ -178,6 +178,13 @@ class MixedModel(BaseTuner):
         else:
             raise ValueError(f"Unknown config type {type(config)}, should be one of {COMPATIBLE_TUNER_TYPES}.")
         return new_module
+
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.model, name)
 
     def _set_adapter_layers(self, enabled=True):
         for module in self.model.modules():

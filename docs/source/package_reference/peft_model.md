@@ -52,3 +52,16 @@ A `PeftModel` for getting extracting features/embeddings from transformer models
 
 [[autodoc]] PeftModelForFeatureExtraction
     - all
+
+## PeftMixedModel
+
+A `PeftModel` for mixing different adapter types (e.g. LoRA and LoHa).
+
+[[autodoc]] PeftMixedModel
+    - all
+
+## Utilities
+
+[[autodoc]] get_peft_model
+
+[[autodoc]] utils.prepare_model_for_kbit_training

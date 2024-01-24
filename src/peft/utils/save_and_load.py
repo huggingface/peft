@@ -30,10 +30,10 @@ def has_valid_embedding_base_layer(layer):
     return hasattr(layer, "base_layer") and isinstance(layer.base_layer, (torch.nn.Linear, torch.nn.Embedding))
 
 
-def get_embedding_layer_name(model, layer, is_prompt_learning):
+def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
     """Get the name of the embedding module for a given layer."""
     for name, module in model.named_modules():
-        if (is_prompt_learning and module == layer) or module == layer.base_layer:
+        if (not is_embedding_in_target_modules and module == layer) or module == getattr(layer, "base_layer", None):
             return name
     return None
 
@@ -115,6 +115,8 @@ def get_peft_model_state_dict(
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
     elif config.peft_type == PeftType.OFT:
         to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
+    elif config.peft_type == PeftType.POLY:
+        to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
     else:
         raise NotImplementedError
     if getattr(model, "modules_to_save", None) is not None:
@@ -123,21 +125,31 @@ def get_peft_model_state_dict(
                 to_return[key.replace("modules_to_save.", "")] = value
 
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
+    is_embedding_in_target_modules = False
     if (
         save_embedding_layers == "auto"
         and hasattr(config, "target_modules")
         and any(k in config.target_modules for k in EMBEDDING_LAYER_NAMES)
     ):
         warnings.warn("Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`.")
-        save_embedding_layers = True
+        save_embedding_layers = is_embedding_in_target_modules = True
     elif save_embedding_layers == "auto":
-        save_embedding_layers = False
+        vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
+        model_id = getattr(config, "base_model_name_or_path", None)
+        # check if the vocab size of the base model is different from the vocab size of the finetuned model
+        if vocab_size and model_id and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size):
+            warnings.warn(
+                "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
+            )
+            save_embedding_layers = True
+        else:
+            save_embedding_layers = False
 
     if save_embedding_layers and hasattr(model, "get_input_embeddings"):
         for layer in [model.get_input_embeddings(), model.get_output_embeddings()]:
-            if config.is_prompt_learning or has_valid_embedding_base_layer(layer):
+            if not is_embedding_in_target_modules or has_valid_embedding_base_layer(layer):
                 # support from version >= 0.6.2
-                embedding_module_name = get_embedding_layer_name(model, layer, config.is_prompt_learning)
+                embedding_module_name = get_embedding_layer_name(model, layer, is_embedding_in_target_modules)
                 if embedding_module_name:
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
@@ -168,7 +180,15 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         state_dict = peft_model_state_dict
 
-    if config.peft_type in (PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.ADALORA, PeftType.IA3, PeftType.OFT):
+    if config.peft_type in (
+        PeftType.LORA,
+        PeftType.LOHA,
+        PeftType.LOKR,
+        PeftType.ADALORA,
+        PeftType.IA3,
+        PeftType.OFT,
+        PeftType.POLY,
+    ):
         peft_model_state_dict = {}
         parameter_prefix = {
             PeftType.IA3: "ia3_",
@@ -177,6 +197,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.LOHA: "hada_",
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
+            PeftType.POLY: "poly_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
@@ -267,7 +288,10 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
                 )
 
     if use_safetensors:
-        adapters_weights = safe_load_file(filename, device=device)
+        if hasattr(torch.backends, "mps") and (device == torch.device("mps")):
+            adapters_weights = safe_load_file(filename, device="cpu")
+        else:
+            adapters_weights = safe_load_file(filename, device=device)
     else:
         adapters_weights = torch.load(filename, map_location=torch.device(device))
 
