@@ -20,7 +20,7 @@ If you encounter any issue when using PEFT, please check the following list of c
 
 ## Examples don't work
 
-Examples often rely on the most recent package versions, so please ensure they're up-to-date. In particular, check the followin package versions:
+Examples often rely on the most recent package versions, so please ensure they're up-to-date. In particular, check the following package versions:
 
 - `peft`
 - `transformers`
@@ -56,7 +56,7 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
-Alternatively, you can use the [`~utils.cast_mixed_precision_params`] function to correctlt cast the weights:
+Alternatively, you can use the [`~utils.cast_mixed_precision_params`] function to correctly cast the weights:
 
 ```python
 from peft import cast_mixed_precision_params
