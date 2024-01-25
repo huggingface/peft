@@ -85,7 +85,7 @@ DummyModel(
 )
 ```
 
-To only save the adapter, use the [`get_peft_model_state_dict`] function
+To only save the adapter, use the [`get_peft_model_state_dict`] function:
 
 ```python
 from peft import get_peft_model_state_dict
