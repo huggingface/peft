@@ -28,7 +28,7 @@ import torch
 import transformers
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
-from accelerate.utils import get_balanced_memory
+from accelerate.utils import get_balanced_memory, named_module_tensors
 from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
@@ -337,6 +337,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
+
+        weight_map = {
+            name: param
+            for name, param in named_module_tensors(
+                model, recurse=True
+            )
+        }
+
+        disk_modules = []
+        save_folder = ''
+        for name, module in model.named_modules():
+            if hasattr(module, '_hf_hook') and hasattr(module._hf_hook, 'original_devices'):
+                for key in module._hf_hook.original_devices.keys():
+                    if dict(module._hf_hook.original_devices)[key] == torch.device('meta'):
+                        disk_modules.append(str(name) + '.' + str(key))
+                        save_folder = module._hf_hook.weights_map.dataset.save_folder
+
+        kwargs['offload_dir'] = save_folder
+        start_prefix = ""
+        str_dtype = str(model.dtype)
+        offload_index = {
+            p[len(start_prefix) :]: {"safetensors_file": f, "weight_name": p, "dtype": str_dtype}
+            for p, f in weight_map.items()
+            if p in disk_modules
+        }
+        kwargs['offload_index'] = offload_index
+
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
         ) > 0:
@@ -352,7 +379,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+        for name, module in model.named_modules():
+
+            if hasattr(module, '_hf_hook'):
+                if hasattr(module._hf_hook, 'weights_map'):
+                    if module._hf_hook.weights_map:
+                        print (name, module._hf_hook.weights_map.dataset.save_folder)
+                module._hf_hook.pre_forward(module)
         return model
+
 
     def _setup_prompt_encoder(self, adapter_name: str):
         config = self.peft_config[adapter_name]
@@ -721,16 +756,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     no_split_module_classes=no_split_module_classes,
                     low_zero=(device_map == "balanced_low_0"),
                 )
+
             if isinstance(device_map, str):
                 device_map = infer_auto_device_map(
                     self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
                 )
+
+            # device_map = self.hf_device_map
+            # keys = [i for i in device_map.keys()]
+            # for key in keys:
+            #     new_key = 'base_model.model.' + key
+            #     device_map[new_key] = device_map[key]
+
             dispatch_model(
                 self,
                 device_map=device_map,
                 offload_dir=offload_dir,
                 **dispatch_model_kwargs,
             )
+
             hook = AlignDevicesHook(io_same_device=True)
             if self.peft_config[adapter_name].is_prompt_learning:
                 remove_hook_from_submodules(self.prompt_encoder)
@@ -740,6 +784,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if not is_trainable:
             self.eval()
         return load_result
+
 
     def set_adapter(self, adapter_name: str) -> None:
         """

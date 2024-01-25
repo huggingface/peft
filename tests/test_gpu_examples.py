@@ -1063,17 +1063,17 @@ class OffloadSaveTests(unittest.TestCase):
     @require_torch_gpu
     def test_offload_merge(self):
         r"""
-        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
+        Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
         """
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        # TODO: add disk offload once PeftModel.from_pretrained supports
-        memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
+        memory_limits = {0: "0.2GIB", "cpu": "0.2GIB"} # no "disk" for PeftModel.from_pretrained compatibility
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
         self.assertTrue(0 in device_map.values())
         self.assertTrue("cpu" in device_map.values())
+        self.assertTrue("disk" in device_map.values())
 
         config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
@@ -1081,9 +1081,9 @@ class OffloadSaveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
             # load the model with device_map
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
-            self.assertTrue(len({p.device for p in model.parameters()}) == 2)
-            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map, offload_folder='odir').eval()
+            self.assertTrue(len({p.device for p in model.parameters()}) == 2) # 'cuda' and 'meta'
+            model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits, offload_folder='odir')
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
         model.eval()
