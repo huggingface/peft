@@ -71,7 +71,7 @@ class WQLinear_GEMM(torch.nn.Module, LoraLayer):
             if requires_conversion:
                 output = output.to(expected_dtype)
             output = output * scaling
-            result += output
+            result = result + output
         return result
 
     def __repr__(self) -> str:
