@@ -69,13 +69,14 @@ def is_torch_tpu_available(check_device=True):
 def is_auto_awq_available():
     if importlib.util.find_spec("awq") is not None:
         # TODO: change it to 0.2.0
-        AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.1.8")
-        version_autoawq = packaging.version.parse(packaging.version.parse(importlib_metadata.version("autoawq")))
+        # AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.1.7")
+        # version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
+        # if AUTOAWQ_MINIMUM_VERSION >= version_autoawq:
+        #     return True
+        # else:
+        #     raise ImportError(
+        #         f"Found an incompatible version of auto-gptq. Found version {version_autoawq}, "
+        #         f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported"
+        #     )
 
-        if AUTOAWQ_MINIMUM_VERSION >= version_autoawq:
-            return True
-        else:
-            raise ImportError(
-                f"Found an incompatible version of auto-gptq. Found version {version_autoawq}, "
-                f"but only versions above {AUTOAWQ_MINIMUM_VERSION} are supported"
-            )
+        return True
