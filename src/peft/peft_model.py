@@ -349,7 +349,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         save_folder = ''
         for name, module in model.named_modules():
             if hasattr(module, '_hf_hook') and hasattr(module._hf_hook, 'original_devices'):
-                print (module._hf_hook.weights_map.dataset.index)
+                index = module._hf_hook.weights_map.dataset.index
                 for key in module._hf_hook.original_devices.keys():
                     if dict(module._hf_hook.original_devices)[key] == torch.device('meta'):
                         disk_modules.append(str(name) + '.' + str(key))
@@ -359,13 +359,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         start_prefix = ""
         str_dtype = str(model.dtype)
         offload_index = {
-            p[len(start_prefix) :]: {"safetensors_file": f, "weight_name": p, "dtype": str_dtype}
-            for p, f in weight_map.items()
+            p[len(start_prefix) :]: {
+            "safetensors_file": index[p]['safetensors_file'], 
+            "weight_name": p, 
+            "dtype": str_dtype
+            }
+            for p in weight_map.keys()
             if p in disk_modules
         }
-        print (offload_index)
-        kwargs['offload_index'] = offload_index
 
+        kwargs['offload_index'] = offload_index
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
         ) > 0:
@@ -778,6 +781,23 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 offload_index[key]['weight_name'] = new_key
                 offload_index[new_key] = offload_index[key]
                 del offload_index[key]
+
+            #TODO: find where metadata belongs
+
+            keys = list(offload_index.keys())
+            for key in keys:
+                fname = offload_index[key]['safetensors_file']
+                with safe_open(fname, framework="pt") as f:
+                    original_keys = []
+                    for safe_key in f.keys():
+                        original_keys.append(safe_key)
+                    for k, form in zip(original_keys, formats):
+                        safe_tensor = f.get_tensor(k)
+                        metadata = f.metadata()
+                        safe_key = 'base_model.model.' + k
+                        new_safetensors = {safe_key: safe_tensor}
+                        safe_save_file(new_safetensors, fname, metadata={"format": "pt"})
+                        
             dispatch_model_kwargs["offload_index"] = offload_index
 
             dispatch_model(
