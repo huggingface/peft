@@ -775,6 +775,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 device_map[new_key] = device_map[key]
                 del device_map[key]
 
+            # rename offload index weight and model names
             keys = list(offload_index.keys())
             for key in keys:
                 new_key = 'base_model.model.' + key
@@ -782,21 +783,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 offload_index[new_key] = offload_index[key]
                 del offload_index[key]
 
-            #TODO: find where metadata belongs
-
-            keys = list(offload_index.keys())
-            for key in keys:
-                fname = offload_index[key]['safetensors_file']
+            # rename safetensors for dispatch
+            for key, new_key in zip(keys, list(offload_index.keys())):
+                fname = offload_index[new_key]['safetensors_file']
                 with safe_open(fname, framework="pt") as f:
                     original_keys = []
+                    safe_dict = {}
                     for safe_key in f.keys():
                         original_keys.append(safe_key)
-                    for k, form in zip(original_keys, formats):
+
+                    for k in original_keys:
                         safe_tensor = f.get_tensor(k)
                         metadata = f.metadata()
-                        safe_key = 'base_model.model.' + k
-                        new_safetensors = {safe_key: safe_tensor}
-                        safe_save_file(new_safetensors, fname, metadata={"format": "pt"})
+                        final_key = 'base_model.model.' + k
+                        safe_dict[final_key] = safe_tensor
+
+                    print ('Safe dict: ', safe_dict)
+                    # replace original offloaded safetensors with renamed copy
+                    safe_save_file(safe_dict, fname, metadata={"format": "pt"})
                         
             dispatch_model_kwargs["offload_index"] = offload_index
 
@@ -811,7 +815,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if self.peft_config[adapter_name].is_prompt_learning:
                 remove_hook_from_submodules(self.prompt_encoder)
             add_hook_to_module(self.get_base_model(), hook)
-
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         if not is_trainable:
