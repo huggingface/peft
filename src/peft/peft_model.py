@@ -784,23 +784,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 del offload_index[key]
 
             # rename safetensors for dispatch
-            for key, new_key in zip(keys, list(offload_index.keys())):
+            file_seen = set()
+            for new_key in list(offload_index.keys()):
                 fname = offload_index[new_key]['safetensors_file']
-                with safe_open(fname, framework="pt") as f:
-                    original_keys = []
-                    safe_dict = {}
-                    for safe_key in f.keys():
-                        original_keys.append(safe_key)
-
-                    for k in original_keys:
-                        safe_tensor = f.get_tensor(k)
-                        metadata = f.metadata()
-                        final_key = 'base_model.model.' + k
-                        safe_dict[final_key] = safe_tensor
-
-                    print ('Safe dict: ', safe_dict)
-                    # replace original offloaded safetensors with renamed copy
-                    safe_save_file(safe_dict, fname, metadata={"format": "pt"})
+                original_safekeys = []
+                safe_dict = {}
+                if fname not in file_seen:
+                    with safe_open(fname, framework="pt") as f:
+                        for safe_key in f.keys():
+                            original_safekeys.append(safe_key)
+                        for skey in original_safekeys:
+                            safe_tensor = f.get_tensor(skey)
+                            metadata = f.metadata() # TODO: swap in metadata
+                            final_key = 'base_model.model.' + skey
+                            safe_dict[final_key] = safe_tensor
+                        file_seen.add(fname)
+                        print ('Safe dict', safe_dict)
+                        # replace original offloaded safetensors with renamed copy
+                        safe_save_file(safe_dict, fname, metadata=metadata)
                         
             dispatch_model_kwargs["offload_index"] = offload_index
 
