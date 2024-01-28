@@ -784,6 +784,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 del offload_index[key]
 
             # rename safetensors for dispatch
+            # TODO: only rewrite one key at a time to prevent OOM
             file_seen = set()
             for new_key in list(offload_index.keys()):
                 fname = offload_index[new_key]['safetensors_file']
@@ -796,10 +797,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         for skey in original_safekeys:
                             safe_tensor = f.get_tensor(skey)
                             metadata = f.metadata() # TODO: swap in metadata
-                            final_key = 'base_model.model.' + skey
+                            final_key = 'base_model.model.transformer.' + skey
                             safe_dict[final_key] = safe_tensor
                         file_seen.add(fname)
-                        print ('Safe dict', safe_dict)
+                        print ('Safe dict keys', safe_dict.keys(), metadata)
                         # replace original offloaded safetensors with renamed copy
                         safe_save_file(safe_dict, fname, metadata=metadata)
                         
