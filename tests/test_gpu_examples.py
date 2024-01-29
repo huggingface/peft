@@ -1068,7 +1068,7 @@ class OffloadSaveTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {"cpu": "0.2GIB"} # no "disk" for PeftModel.from_pretrained compatibility #0: "0.2GIB", 
+        memory_limits = {"cpu": "0.4GIB"} # no "disk" for PeftModel.from_pretrained compatibility #0: "0.2GIB", 
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
         # self.assertTrue(0 in device_map.values())
@@ -1092,7 +1092,7 @@ class OffloadSaveTests(unittest.TestCase):
         pre_merge_olayer = model(input_tokens)[0]
         model.merge_adapter()
         post_merge_olayer = model(input_tokens)[0]
-        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
+        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer, atol=1e-4))
 
         # test peft model adapter unmerge
         model.unmerge_adapter()

@@ -384,14 +384,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
-
-        for name, module in model.named_modules():
-            if hasattr(module, '_hf_hook'):
-                if hasattr(module._hf_hook, 'weights_map'):
-                    if module._hf_hook.weights_map:
-                        print (name, [i for i in module._hf_hook.weights_map.dataset])
-                module._hf_hook.pre_forward(module)
-
         return model
 
 
