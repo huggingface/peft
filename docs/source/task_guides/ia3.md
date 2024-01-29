@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # IA3
 
-[IA3](../conceptual_guides/ia3) multiplies the model's activations (the keys and values in the self-attention and encoder-decoder attention blocks, and the intermediate activation of the position-wise feedforward network) by three learned vectors. This PEFT method introduces an even smaller number of trainable parameters than LoRA which introduces weight matrices instead of vectors. The original model's parameters are kept frozen and only the vectors are updated. As a result, it is faster, cheaper and more efficient to finetune for a new downstream task.
+[IA3](../conceptual_guides/ia3) multiplies the model's activations (the keys and values in the self-attention and encoder-decoder attention blocks, and the intermediate activation of the position-wise feedforward network) by three learned vectors. This PEFT method introduces an even smaller number of trainable parameters than LoRA which introduces weight matrices instead of vectors. The original model's parameters are kept frozen and only these vectors are updated. As a result, it is faster, cheaper and more efficient to finetune for a new downstream task.
 
 This guide will show you how to train a sequence-to-sequence model with IA3 to *generate a sentiment* given some financial news.
 
@@ -53,7 +53,7 @@ ds["train"][0]
 
 Load a tokenizer and create a preprocessing function that:
 
-1. tokenizes the inputs and pads and truncates the sequence to the `max_length`
+1. tokenizes the inputs, pads and truncates the sequence to the `max_length`
 2. apply the same tokenizer to the labels but with a shorter `max_length` that corresponds to the label
 3. mask the padding tokens
 
@@ -129,7 +129,7 @@ Once the configuration is setup, pass it to the [`get_peft_model`] function alon
 ```py
 from peft import IA3Config
 
-peft_config = IA3Config(task_type="SEQ_2_SEQ_LM", inference_mode=False, feedforward_modules=[])
+peft_config = IA3Config(task_type="SEQ_2_SEQ_LM")
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 "trainable params: 282,624 || all params: 1,229,863,936 || trainable%: 0.022980103060766553"
