@@ -357,7 +357,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         kwargs['offload_dir'] = save_folder # last save folder
         start_prefix = ""
-        str_dtype = str(model.dtype)
+        str_dtype = str(model.dtype).replace("torch.", "") 
         offload_index = {
             p[len(start_prefix) :]: {
             "safetensors_file": index[p]['safetensors_file'], 
@@ -387,9 +387,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         for name, module in model.named_modules():
             if hasattr(module, '_hf_hook'):
-                if hasattr(module._hf_hook, 'weights_map'):
-                    if module._hf_hook.weights_map:
-                        print (name, [i for i in module._hf_hook.weights_map.dataset])
+                # if hasattr(module._hf_hook, 'weights_map'):
+                    # if module._hf_hook.weights_map:
+                        # print (name, [i for i in module._hf_hook.weights_map.dataset])
                 module._hf_hook.pre_forward(module)
 
         return model
@@ -768,23 +768,28 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             #         self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
             #     )
 
+            prefix = 'base_model.model.'
             device_map = self.hf_device_map
             keys = [i for i in device_map.keys()]
             for key in keys:
-                new_key = 'base_model.model.' + key
+                new_key = prefix + key
                 device_map[new_key] = device_map[key]
                 del device_map[key]
 
             # rename offload index weight and model names
+            target_modules = self.peft_config['default'].target_modules
             keys = list(offload_index.keys())
             for key in keys:
-                new_key = 'base_model.model.' + key
+                if any(module in key for module in target_modules):
+                    suffix_pos = key.rfind('.')
+                    new_key = prefix  + key[:suffix_pos] + '.base_layer' + key[suffix_pos:]
+                else:
+                    new_key = prefix + key
                 offload_index[key]['weight_name'] = new_key
                 offload_index[new_key] = offload_index[key]
                 del offload_index[key]
 
             # rename safetensors for dispatch
-            # TODO: only rewrite one key at a time to prevent OOM
             file_seen = set()
             for new_key in list(offload_index.keys()):
                 fname = offload_index[new_key]['safetensors_file']
@@ -796,11 +801,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             original_safekeys.append(safe_key)
                         for skey in original_safekeys:
                             safe_tensor = f.get_tensor(skey)
-                            metadata = f.metadata() # TODO: swap in metadata
-                            final_key = 'base_model.model.transformer.' + skey
+                            metadata = f.metadata()
+                            # TODO: replace 'transformer.' with variable
+                            if any(module in skey for module in target_modules):
+                                suffix_pos = skey.rfind('.')
+                                final_key = prefix + 'transformer.' + skey[:suffix_pos] + '.base_layer' + skey[suffix_pos:]
+                            else:
+                                final_key = prefix + 'transformer.' + skey
                             safe_dict[final_key] = safe_tensor
-                        file_seen.add(fname)
-                        print ('Safe dict keys', safe_dict.keys(), metadata)
                         # replace original offloaded safetensors with renamed copy
                         safe_save_file(safe_dict, fname, metadata=metadata)
                         
@@ -817,6 +825,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if self.peft_config[adapter_name].is_prompt_learning:
                 remove_hook_from_submodules(self.prompt_encoder)
             add_hook_to_module(self.get_base_model(), hook)
+            # add_hook_to_module(self, hook)
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         if not is_trainable:
