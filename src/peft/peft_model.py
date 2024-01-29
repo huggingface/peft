@@ -387,9 +387,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         for name, module in model.named_modules():
             if hasattr(module, '_hf_hook'):
-                # if hasattr(module._hf_hook, 'weights_map'):
-                    # if module._hf_hook.weights_map:
-                        # print (name, [i for i in module._hf_hook.weights_map.dataset])
+                if hasattr(module._hf_hook, 'weights_map'):
+                    if module._hf_hook.weights_map:
+                        print (name, [i for i in module._hf_hook.weights_map.dataset])
                 module._hf_hook.pre_forward(module)
 
         return model
@@ -805,12 +805,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             # TODO: replace 'transformer.' with variable
                             if any(module in skey for module in target_modules):
                                 suffix_pos = skey.rfind('.')
-                                final_key = prefix + 'transformer.' + skey[:suffix_pos] + '.base_layer' + skey[suffix_pos:]
+                                extended_prefix = prefix + 'transformer.' + skey[:suffix_pos]
+                                final_key = extended_prefix + '.base_layer' + skey[suffix_pos:]
+                                lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
+                                # add LoRA keys and values to disk offload if module is offloaded
+                                for lora_key, lora_val in lora_dict.items():
+                                    divide = lora_key.rfind('.')
+                                    new_key = lora_key[:divide] + '.default' + lora_key[divide:]
+                                    safe_dict[new_key] = lora_val
                             else:
                                 final_key = prefix + 'transformer.' + skey
                             safe_dict[final_key] = safe_tensor
-                        # replace original offloaded safetensors with renamed copy
-                        safe_save_file(safe_dict, fname, metadata=metadata)
+
+                        file_seen.add(fname)
+                    # replace original offloaded safetensors with renamed copy
+                    for key in safe_dict.keys():
+                        if key not in offload_index:
+                            offload_index[key] = {'safetensors_file': fname, 'weight_name': key}
+                    safe_save_file(safe_dict, fname, metadata=metadata)
                         
             dispatch_model_kwargs["offload_index"] = offload_index
 
@@ -825,7 +837,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if self.peft_config[adapter_name].is_prompt_learning:
                 remove_hook_from_submodules(self.prompt_encoder)
             add_hook_to_module(self.get_base_model(), hook)
-            # add_hook_to_module(self, hook)
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         if not is_trainable:
