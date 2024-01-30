@@ -139,7 +139,7 @@ def get_peft_model_state_dict(
 
         # For some models e.g. diffusers the text config file is stored in a subfolder
         # we need to make sure we can donwload that config.
-        has_remote_config = model_id is not None and file_exists(model_id, "config.jon")
+        has_remote_config = model_id is not None and model_id != "" and file_exists(model_id, "config.jon")
 
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
         if (
