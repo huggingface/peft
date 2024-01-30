@@ -15,14 +15,20 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.7.2.dev0"
+VERSION = "0.8.0"
 
 extras = {}
 extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
 extras["docs_specific"] = ["hf-doc-builder"]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
 extras["test"] = extras["dev"] + [
-    "pytest", "pytest-cov", "pytest-xdist", "parameterized", "datasets", "diffusers<0.21.0", "scipy"
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",
+    "parameterized",
+    "datasets",
+    "diffusers<0.21.0",
+    "scipy",
 ]
 
 setup(
