@@ -20,7 +20,6 @@ import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
-from transformers import PreTrainedModel
 
 from .other import EMBEDDING_LAYER_NAMES, SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
 from .peft_types import PeftType
@@ -137,12 +136,16 @@ def get_peft_model_state_dict(
     elif save_embedding_layers == "auto":
         vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
         model_id = getattr(config, "base_model_name_or_path", None)
-        is_hf_transformers_model = isinstance(model, PreTrainedModel)
+
+        # For some models e.g. diffusers the text config file is stored in a subfolder
+        # we need to make sure we can donwload that config.
+        has_remote_config = model_id is not None and file_exists(model_id, "config.jon")
+
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
         if (
             vocab_size
             and model_id
-            and is_hf_transformers_model
+            and has_remote_config
             and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size)
         ):
             warnings.warn(
