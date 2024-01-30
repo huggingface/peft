@@ -1,0 +1,24 @@
+{
+  "auto_mapping": null,
+  "base_model_name_or_path": "bigscience/mt0-large",
+  "bias": "none",
+  "d_initial": 0.1,
+  "fan_in_fan_out": false,
+  "inference_mode": true,
+  "init_vera_weights": true,
+  "layers_pattern": null,
+  "layers_to_transform": null,
+  "modules_to_save": null,
+  "peft_type": "VERA",
+  "projection_prng_key": 2748,
+  "r": 512,
+  "revision": null,
+  "save_projection": true,
+  "target_modules": [
+    "v",
+    "q",
+    "k"
+  ],
+  "task_type": "SEQ_2_SEQ_LM",
+  "vera_dropout": 0.0
+}

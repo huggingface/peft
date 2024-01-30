@@ -18,6 +18,7 @@
 # limitations under the License.
 
 from .adaption_prompt import AdaptionPromptConfig, AdaptionPromptModel
+from .vera import VeraConfig, VeraModel
 from .lora import LoraConfig, LoraModel, LoftQConfig
 from .loha import LoHaConfig, LoHaModel
 from .lokr import LoKrConfig, LoKrModel
@@ -27,6 +28,7 @@ from .p_tuning import PromptEncoder, PromptEncoderConfig, PromptEncoderReparamet
 from .prefix_tuning import PrefixEncoder, PrefixTuningConfig
 from .prompt_tuning import PromptEmbedding, PromptTuningConfig, PromptTuningInit
 from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTuningConfig, MultitaskPromptTuningInit
+
 from .oft import OFTConfig, OFTModel
 from .mixed import MixedModel
 from .poly import PolyConfig, PolyModel

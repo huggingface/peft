@@ -37,6 +37,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VeraConfig,
 )
 
 
@@ -48,6 +49,7 @@ ALL_CONFIG_CLASSES = (
     IA3Config,
     LoHaConfig,
     LoraConfig,
+    VeraConfig,
     MultitaskPromptTuningConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,

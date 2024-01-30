@@ -158,6 +158,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
+                "vera_kwargs": {"init_vera_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -171,6 +172,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
+                "vera_kwargs": {"init_vera_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -250,6 +252,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
+                "vera_kwargs": {"init_vera_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
@@ -282,6 +285,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
+                "vera_kwargs": {"init_vera_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
