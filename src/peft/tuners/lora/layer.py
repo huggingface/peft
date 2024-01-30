@@ -140,7 +140,13 @@ class LoraLayer(BaseTunerLayer):
             "num_iter": self.kwargs.get("loftq_iter", 1),
         }
 
-        qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
+        qweight_nf, lora_A_nf, lora_B_nf = loftq_init(weight, method="normal", **kwargs)
+        qweight_uni, lora_A_uni, lora_B_uni = loftq_init(weight, method="uniform", **kwargs)
+        err_nf = torch.dist(weight, qweight_nf + lora_B_nf @ lora_A_nf)
+        err_uni = torch.dist(weight, qweight_uni + lora_B_uni @ lora_A_uni)
+        (qweight, lora_A, lora_B) = (
+            (qweight_nf, lora_A_nf, lora_B_nf) if err_nf < err_uni else (qweight_uni, lora_A_uni, lora_B_uni)
+        )
         if adapter_name in self.lora_A.keys():
             # initialize A the same way as the default for nn.Linear and B to zero
             self.lora_A[adapter_name].weight.data = lora_A
