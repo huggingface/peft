@@ -25,6 +25,8 @@
 
 - title: Developer guides
   sections:
+  - local: developer_guides/model_merging
+    title: Model merging
   - local: developer_guides/quantization
     title: Quantization
   - local: developer_guides/lora
