@@ -143,7 +143,7 @@ def get_peft_model_state_dict(
 
         if model_id is not None:
             try:
-                has_remote_config = file_exists(model_id, "config.jon")
+                has_remote_config = file_exists(model_id, "config.json")
             except (HFValidationError, EntryNotFoundError):
                 warnings.warn(
                     f"Could not find a config file in {model_id} - will assume that the vocabulary was not modified."
