@@ -650,8 +650,22 @@ class PeftCommonTester:
         # check if `generate` works
         _ = model.generate(**inputs)
 
-        with self.assertRaises(TypeError):
-            # check if `generate` raises an error if no positional arguments are passed
+    def _test_generate_pos_args(self, model_id, config_cls, config_kwargs, raises_err: bool):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+        if raises_err:
+            with self.assertRaises(TypeError):
+                # check if `generate` raises an error if positional arguments are passed
+                _ = model.generate(inputs["input_ids"])
+        else:
+            # check if `generate` works if positional arguments are passed
             _ = model.generate(inputs["input_ids"])
 
     def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
@@ -671,10 +685,6 @@ class PeftCommonTester:
 
         # check if `generate` works
         _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
-
-        with self.assertRaises(TypeError):
-            # check if `generate` raises an error if no positional arguments are passed
-            _ = model.generate(input_ids, attention_mask=attention_mask)
 
     def _test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
         if config_cls not in (PrefixTuningConfig,):

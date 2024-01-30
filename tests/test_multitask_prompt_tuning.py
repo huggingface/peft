@@ -214,9 +214,8 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         # check if `generate` works
         _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
-        with self.assertRaises(TypeError):
-            # check if `generate` raises an error if no positional arguments are passed
-            _ = model.generate(input_ids, attention_mask=attention_mask)
+        # check if `generate` works if positional arguments are passed
+        _ = model.generate(input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
     def test_use_cache(self) -> None:
         """Test that MultiTaskPromptTuning works when Llama config use_cache=True."""
