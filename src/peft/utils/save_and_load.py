@@ -18,7 +18,7 @@ from typing import Optional
 
 import torch
 from huggingface_hub import file_exists, hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError
+from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 from safetensors.torch import load_file as safe_load_file
 
 from .other import EMBEDDING_LAYER_NAMES, SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
@@ -136,8 +136,27 @@ def get_peft_model_state_dict(
     elif save_embedding_layers == "auto":
         vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
         model_id = getattr(config, "base_model_name_or_path", None)
+
+        # For some models e.g. diffusers the text config file is stored in a subfolder
+        # we need to make sure we can donwload that config.
+        has_remote_config = False
+
+        if model_id is not None:
+            try:
+                has_remote_config = file_exists(model_id, "config.jon")
+            except (HFValidationError, EntryNotFoundError):
+                warnings.warn(
+                    f"Could not find a config file in {model_id} - will assume that the vocabulary was not modified."
+                )
+                has_remote_config = False
+
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
-        if vocab_size and model_id and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size):
+        if (
+            vocab_size
+            and model_id
+            and has_remote_config
+            and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size)
+        ):
             warnings.warn(
                 "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
             )
