@@ -39,6 +39,8 @@ PEFT supports the following methods:
 9. LoKr: [KronA: Parameter Efficient Tuning with Kronecker Adapter](https://hf.co/papers/2212.10650) based on [Navigating Text-To-Image Customization:From LyCORIS Fine-Tuning to Model Evaluation](https://hf.co/papers/2309.14859) implementation
 10. LoftQ: [LoftQ: LoRA-Fine-Tuning-aware Quantization for Large Language Models](https://hf.co/papers/2310.08659)
 11. OFT: [Controlling Text-to-Image Diffusion by Orthogonal Finetuning](https://hf.co/papers/2306.07280)
+12. Polytropon: [Combining Modular Skills in Multitask Learning](https://hf.co/papers/2202.13914) and Multi-Head Routing: [Multi-Head Adapter Routing for Cross-Task Generalization](https://hf.co/papers/2211.03831)
+13. AdaptationPrompt/LlamaAdapter: [LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention](https://hf.co/papers/2303.16199)
 
 ## Quickstart
 
@@ -80,7 +82,7 @@ model.eval()
 inputs = tokenizer("Preheat the oven to 350 degrees and place the cookie dough", return_tensors="pt")
 
 outputs = model.generate(input_ids=inputs["input_ids"].to("cuda"), max_new_tokens=50)
-print(tokenizer.batch_decode(outputs.detach().cpu().numpy(), skip_special_tokens=True)[0])
+print(tokenizer.batch_decode(outputs, skip_special_tokens=True)[0])
 
 "Preheat the oven to 350 degrees and place the cookie dough in the center of the oven. In a large bowl, combine the flour, baking powder, baking soda, salt, and cinnamon. In a separate bowl, combine the egg yolks, sugar, and vanilla."
 ```
@@ -114,7 +116,7 @@ With LoRA you can fully finetune a 12B parameter model that would've otherwise r
 
 Quantization is another method for reducing the memory requirements of a model by representing the data in a lower precision. It can be combined with PEFT methods to make it even easier to train and load LLMs for inference.
 
-* Learn how to load a [facebook/opt-6.7b](https://huggingface.co/facebook/opt-6.7b) model in 8-bit and finetune with LoRA in this [notebook](https://colab.research.google.com/drive/1jCkpikz0J2o20FBQmYmAGdiKmJGOMo-o?usp=sharing).
+* Learn how to finetune [meta-llama/Llama-2-7b-hf](https://huggingface.co/meta-llama/Llama-2-7b-hf) with QLoRA and the [TRL](https://huggingface.co/docs/trl/index) library on a 16GB GPU in the [Finetune LLMs on your own consumer hardware using tools from PyTorch and Hugging Face ecosystem](https://pytorch.org/blog/finetune-llms/) blog post.
 * Learn how to finetune a [openai/whisper-large-v2](https://huggingface.co/openai/whisper-large-v2) model for multilingual automatic speech recognition with LoRA and 8-bit quantization in this [notebook](https://colab.research.google.com/drive/1DOkD_5OUjFa0r5Ik3SgywJLJtEo2qLxO?usp=sharing) (see this [notebook](https://colab.research.google.com/drive/1vhF8yueFqha3Y3CpTHN6q9EVcII9EYzs?usp=sharing) instead for an example of streaming a dataset).
 
 ### Save compute and storage
@@ -134,7 +136,7 @@ The iterative diffusion process consumes a lot of memory which can make it diffi
 | CompVis/stable-diffusion-v1-4 | 27.5GB GPU / 3.97GB CPU | 15.5GB GPU / 3.84GB CPU | 8.12GB GPU / 3.77GB CPU | 
 
 > [!TIP]
-> Take a look at the [examples/lora_dreambooth/train_dreambooth.py](examples/lora_dreambooth/train_dreambooth.py) training script to try training your own Stable Diffusion model with LoRA, and play around with the [smangrul/peft-lora-sd-dreambooth](https://huggingface.co/spaces/smangrul/peft-lora-sd-dreambooth) Space which is running on a T4 instance.
+> Take a look at the [examples/lora_dreambooth/train_dreambooth.py](examples/lora_dreambooth/train_dreambooth.py) training script to try training your own Stable Diffusion model with LoRA, and play around with the [smangrul/peft-lora-sd-dreambooth](https://huggingface.co/spaces/smangrul/peft-lora-sd-dreambooth) Space which is running on a T4 instance. Learn more about the PEFT integration in Diffusers in this [tutorial](https://huggingface.co/docs/peft/main/en/tutorial/peft_integrations#diffusers).
 
 ### Accelerate
 
@@ -144,6 +146,7 @@ The iterative diffusion process consumes a lot of memory which can make it diffi
 
 PEFT can also be applied to training LLMs with RLHF components such as the ranker and policy. Get started by reading:
 
+* [Fine-tune a Mistral-7b model with Direct Preference Optimization](https://towardsdatascience.com/fine-tune-a-mistral-7b-model-with-direct-preference-optimization-708042745aac) with PEFT and the [TRL](https://huggingface.co/docs/trl/index) library to learn more about the Direct Preference Optimization (DPO) method and how to apply it to a LLM.
 * [Fine-tuning 20B LLMs with RLHF on a 24GB consumer GPU](https://huggingface.co/blog/trl-peft) with PEFT and the [TRL](https://huggingface.co/docs/trl/index) library, and then try out the [gpt2-sentiment_peft.ipynb](https://github.com/huggingface/trl/blob/main/examples/notebooks/gpt2-sentiment.ipynb) notebook to optimize GPT2 to generate positive movie reviews.
 * [StackLLaMA: A hands-on guide to train LLaMA with RLHF](https://huggingface.co/blog/stackllama) with PEFT, and then try out the [stack_llama/scripts](https://github.com/huggingface/trl/tree/main/examples/research_projects/stack_llama/scripts) for supervised finetuning, reward modeling, and RL finetuning.
 
