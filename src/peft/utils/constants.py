@@ -99,7 +99,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value", "dense_4h_to_h"],
     "RefinedWeb": ["query_key_value", "dense_4h_to_h"],
     "falcon": ["query_key_value", "dense_4h_to_h"],
-    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
+    "phi": ["q_proj", "v_proj", "fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -122,7 +122,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "RefinedWeb": ["dense_4h_to_h"],
     "RefinedWebModel": ["dense_4h_to_h"],
     "falcon": ["dense_4h_to_h"],
-    "phi": ["fc1", "fc2"],
+    "phi": ["fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
