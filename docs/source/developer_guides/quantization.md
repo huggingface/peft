@@ -100,12 +100,15 @@ You're all set for training with whichever training method you prefer!
 
 LoftQ initialization does not require quantizing the base model with the `load_in_4bits` parameter in the [`~transformers.AutoModelForCausalLM.from_pretrained`] method! Learn more about LoftQ initialization in the [Initialization options](../developer_guides/lora#initialization) section.
 
+Note: You can only perform LoftQ initialization on a GPU.
+
 </Tip>
 
 ```py
-from peft import AutoModelForCausalLM, LoftQConfig, LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM
+from peft import LoftQConfig, LoraConfig, get_peft_model
 
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", device_map="auto")
 loftq_config = LoftQConfig(loftq_bits=4)
 ```
 
@@ -118,13 +121,16 @@ lora_config = LoraConfig(
     r=16,
     lora_alpha=8,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05
+    lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM"
 )
 
 model = get_peft_model(model, lora_config)
 ```
+
+
+
 ### QLoRA-style training
 QLoRA adds trainable weights to all the linear layers in the transformer architecture. Since the attribute names for these linear layers can vary across architectures, we provide a convenient flag `'all-linear'` for this setting:
 
