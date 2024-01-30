@@ -1,0 +1,4 @@
+timestamp,experiment_id,project_name,duration,emissions,energy_consumed,country_name,country_iso_code,region,on_cloud,cloud_provider,cloud_region
+2023-07-31T17:43:30,7f045061-94a9-4207-9a65-a32b8c304a72,codecarbon,7.899841785430908,0.00016108967602305926,0.0002844599611920524,USA,USA,Iowa,Y,gcp,us-central1
+2023-09-29T13:12:21,51175838-7d7b-4cb7-9a5c-130577de82d6,codecarbon,11.88234543800354,0.00025434237819199916,0.00044913010452410243,USA,USA,Iowa,Y,gcp,us-central1
+2023-10-30T11:48:34,fac63310-5e52-462f-907f-0d32c50f3bc7,codecarbon,7.963252305984497,0.0001522024061581396,0.00026876638911908817,USA,USA,Iowa,Y,gcp,us-central1
