@@ -28,24 +28,33 @@ class OFTConfig(LycorisConfig):
     Args:
         r (`int`): OFT rank.
         module_dropout (`int`): The dropout probability for disabling OFT modules during training.
-        target_modules (`Union[List[str],str]`): The names of the modules to apply OFT to. If this is specified as
-            'all-linear', then all linear/Conv1D modules are chosen, excluding the output layer.
-        init_weights (`bool`): Whether to perform initialization of OFT weights.
-        layers_to_transform (`Union[List[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the OFT transformations on the
-            layer indexes that are specified in this list. If a single integer is passed, it will apply the OFT
-            transformations on the layer at this index.
+        target_modules (`Optional[Union[List[str], str]]`):
+            The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
+            names will be replaced. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings. If this is specified as 'all-linear', then all linear modules are chosen, excluding
+            the output layer. If this is not specified, modules will be chosen according to the model architecture. If
+            the architecture is not known, an error will be raised -- in this case, you should specify the target
+            modules manually.
+        init_weights (`bool`):
+            Whether to perform initialization of OFT weights.
+        layers_to_transform (`Union[List[int], int]`):
+            The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
+            that are specified in this list. If a single integer is passed, it will apply the transformations on the
+            layer at this index.
         layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
-            pattern is not in the common layers pattern.
+            The layer pattern name, used only if `layers_to_transform` is different from `None`.
         rank_pattern (`dict`):
             The mapping from layer names or regexp expression to ranks which are different from the default rank
             specified by `r`.
-        modules_to_save (`List[str]`): The names of modules to be set as trainable except OFT parameters.
-        coft (`bool`): Whether to use the constrainted variant of OFT or not.
+        modules_to_save (`List[str]`):
+            List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
+        coft (`bool`):
+            Whether to use the constrainted variant of OFT or not, off by default.
         eps (`float`):
             The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
-        block_share (`bool`): Whether to share the OFT parameters between blocks or not.
+        block_share (`bool`):
+            Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
 
     r: int = field(default=8, metadata={"help": "OFT rank"})

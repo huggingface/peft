@@ -34,6 +34,7 @@ class SVDQuantLinear(torch.nn.Module, AdaLoraLayer):
         # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
         # for backwards compatibility
         self.quant_linear_module = base_layer
+        self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

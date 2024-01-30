@@ -58,6 +58,19 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
+Alternatively, you can use the utility function `cast_mixed_precision_params` from peft as shown below:
+```python
+from peft import cast_mixed_precision_params
+
+peft_model = get_peft_model(...)
+cast_mixed_precision_params(peft_model, dtype=torch.float16)
+
+# proceed as usual
+trainer = Trainer(model=peft_model, fp16=True, ...)
+trainer.train()
+```
+
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model, which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
@@ -100,3 +113,27 @@ You should probably TRAIN this model on a down-stream task to be able to use it 
 ```
 
 The mentioned layers should be added to `modules_to_save` in the config to avoid the described problem.
+
+### Extending the vocabulary
+
+For many language fine-tuning tasks, extending the model's vocabulary is necessary since new tokens are being introduced. This requires extending the embedding layer to account for the new tokens and also storing the embedding layer in addition to the adapter weights when saving the adapter.
+
+Save the embedding layer by adding it to the `target_modules` of the config. The embedding layer name must follow the standard naming scheme from Transformers. For example, the Mistral config could look like this:
+
+```python
+config = LoraConfig(..., target_modules=["embed_tokens", "lm_head", "q_proj", "v_proj"])
+```
+
+Once added to `target_modules`, PEFT automatically stores the embedding layer when saving the adapter if the model has the [`~transformers.PreTrainedModel.get_input_embeddings`] and [`~transformers.PreTrainedModel.get_output_embeddings`]. This is generally the case for Transformers models.
+
+If the model's embedding layer doesn't follow the Transformer's naming scheme, you can still save it by manually passing `save_embedding_layers=True` when saving the adapter:
+
+```python
+model = get_peft_model(...)
+# train the model
+model.save_adapter("my_adapter", save_embedding_layers=True)
+```
+
+For inference, load the base model first and resize it the same way you did before you trained the model. After you've resized the base model, you can load the PEFT checkpoint.
+
+For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
