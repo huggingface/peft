@@ -184,7 +184,9 @@ def _low_rank_decomposition(weight, reduced_rank=32):
 
 
 @torch.no_grad()
-def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, reduced_rank: int, num_iter=1):
+def loftq_init(
+    weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, reduced_rank: int, num_iter=1, method="normal"
+):
     if num_bits not in [2, 4, 8]:
         raise ValueError("Only support 2, 4, 8 bits quantization")
     if num_iter <= 0:
@@ -199,7 +201,7 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
         f"| Num Iter: {num_iter} | Num Bits: {num_bits}"
     )
     if not is_bnb_4bit_available() or num_bits in [2, 8]:
-        quantizer = NFQuantizer(num_bits=num_bits, device=device, method="normal", block_size=64)
+        quantizer = NFQuantizer(num_bits=num_bits, device=device, method=method, block_size=64)
         compute_device = device
     else:
         compute_device = "cuda"
