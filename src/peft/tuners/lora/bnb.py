@@ -153,11 +153,14 @@ if is_bnb_available():
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = self.base_layer(x, *args, **kwargs)
+                with torch.no_grad():
+                    result = self.base_layer(x, *args, **kwargs)
             elif self.merged:
-                result = self.base_layer(x, *args, **kwargs)
+                with torch.no_grad():
+                    result = self.base_layer(x, *args, **kwargs)
             else:
-                result = self.base_layer(x, *args, **kwargs)
+                with torch.no_grad():
+                    result = self.base_layer(x, *args, **kwargs)
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
                         continue
@@ -312,11 +315,14 @@ if is_bnb_4bit_available():
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
-                result = self.base_layer(x, *args, **kwargs)
+                with torch.no_grad():
+                    result = self.base_layer(x, *args, **kwargs)
             elif self.merged:
-                result = self.base_layer(x, *args, **kwargs)
+                with torch.no_grad():
+                    result = self.base_layer(x, *args, **kwargs)
             else:
-                result = self.base_layer(x, *args, **kwargs)
+                with torch.no_grad():
+                    result = self.base_layer(x, *args, **kwargs)
                 # As per Tim Dettmers, for 4bit, we need to defensively clone here.
                 # The reason is that in some cases, an error can occur that backprop
                 # does not work on a manipulated view. This issue may be solved with
