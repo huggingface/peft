@@ -1,4 +1,5 @@
 [tool.black]
+# Only used by `hf-doc-builder´.
 line-length = 119
 target-version = ['py36']
 

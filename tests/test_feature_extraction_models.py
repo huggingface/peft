@@ -64,6 +64,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
+
     transformers_class = AutoModel
 
     def prepare_inputs_for_testing(self):

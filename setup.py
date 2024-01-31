@@ -18,8 +18,15 @@ from setuptools import find_packages, setup
 VERSION = "0.8.2"
 
 extras = {}
-extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
-extras["docs_specific"] = ["hf-doc-builder"]
+extras["quality"] = [
+    "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "hf-doc-builder",
+    "ruff~=0.1.15",
+]
+extras["docs_specific"] = [
+    "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "hf-doc-builder",
+]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
 extras["test"] = extras["dev"] + [
     "pytest",

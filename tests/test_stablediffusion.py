@@ -89,6 +89,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     Tests that diffusers StableDiffusion model works with PEFT as expected.
 
     """
+
     transformers_class = StableDiffusionPipeline
 
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):

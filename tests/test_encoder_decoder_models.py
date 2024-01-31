@@ -39,6 +39,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
+
     transformers_class = AutoModelForSeq2SeqLM
 
     def prepare_inputs_for_testing(self):
