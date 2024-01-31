@@ -386,10 +386,10 @@ class LoraModel(BaseTuner):
             adapter_name (`str`):
                 Name of the new adapter.
             combination_type (`str`):
-                Type of merging. Can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
-                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type you should be aware that
-                rank of the resulting adapter will be equal to the sum of all adapters ranks. So it's possible that the
-                mixed adapter may become too big and result in OOM errors.
+                The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
+                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type, the
+                rank of the resulting adapter is equal to the sum of all adapters ranks (the
+                mixed adapter may be too big and result in OOM errors).
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
@@ -403,9 +403,9 @@ class LoraModel(BaseTuner):
                 one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
                 documentation. Defaults to None.
             ties_density (`float`, *optional*):
-                Value between 0 and 1. 0 represents all values are pruned and 1 represents no values are pruned.
+                Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned.
             majority_sign_method (`str`):
-                The method to use to get the magnitude of the sign vlaues. Should be one of ["total", "frequency"].
+                The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
         """
 
         if adapter_name in list(self.peft_config.keys()):
