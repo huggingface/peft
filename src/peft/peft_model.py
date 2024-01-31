@@ -1132,14 +1132,14 @@ class PeftModelForCausalLM(PeftModel):
             inputs_embeds = torch.cat((prompts, inputs_embeds), dim=1)
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
-    def generate(self, **kwargs):
+    def generate(self, *args, **kwargs):
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
         if hasattr(self.base_model, "model"):
             self.base_model.model.generation_config = self.generation_config
         else:
             self.base_model.generation_config = self.generation_config
         try:
-            outputs = self.base_model.generate(**kwargs)
+            outputs = self.base_model.generate(*args, **kwargs)
         except:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             raise

@@ -191,6 +191,13 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             f"trainable%: {100 * trainable_params / all_param:.4f}"
         )
 
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.base_model, name)
+
     def forward(self, *args: Any, **kwargs: Any):
         """
         Forward pass of the model.
