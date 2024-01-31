@@ -320,7 +320,7 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+                result = result + lora_B(lora_A(dropout(x))) * scaling
 
         result = result.to(previous_dtype)
         return result
@@ -502,7 +502,7 @@ class Embedding(nn.Module, LoraLayer):
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
                 after_A = self._embed(x, embedding_A)
-                result += (after_A @ embedding_B) * scaling
+                result = result + (after_A @ embedding_B) * scaling
 
         return result
 
@@ -687,7 +687,7 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+                result = result + lora_B(lora_A(dropout(x))) * scaling
 
         result = result.to(previous_dtype)
         return result
