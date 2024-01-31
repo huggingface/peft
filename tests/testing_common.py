@@ -435,9 +435,10 @@ class PeftCommonTester:
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
+        if config_cls not in (LoraConfig, IA3Config):
             # Merge layers only supported for LoRA and IA³
             return
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -635,6 +636,31 @@ class PeftCommonTester:
             logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
         self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
+
+    def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        model.eval()
+        torch.manual_seed(0)
+        model.merge_adapter()
+        logits_0 = model(**self.prepare_inputs_for_testing())[0]
+
+        # merging again should not change anything
+        # also check warning:
+        with self.assertWarnsRegex(UserWarning, "All adapters are already merged, nothing to do"):
+            model.merge_adapter()
+        logits_1 = model(**self.prepare_inputs_for_testing())[0]
+
+        self.assertTrue(torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6))
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)

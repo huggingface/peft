@@ -485,6 +485,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
+    def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
+        # calling merge twice with the same arguments should not change the output
+        config_kwargs = config_kwargs.copy()
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
+        self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         # Custom models do not (necessarily) have a generate method, so this test is not performed
         pass
