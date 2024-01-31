@@ -130,7 +130,7 @@ those are a major building block of this model, we should apply LoRA to the 2D c
 those layers, let's look at all the layer names:
 
 ```python
-print([(n, type(m)) for n, m in MLP().named_modules()])
+print([(n, type(m)) for n, m in model.named_modules()])
 ```
 
 This will print a very long list, we'll only show the first few:

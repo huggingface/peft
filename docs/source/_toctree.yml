@@ -10,18 +10,14 @@
 - title: Tutorial
   sections:
   - local: tutorial/peft_model_config
-    title: PEFT configurations and models
+    title: Configurations and models
   - local: tutorial/peft_integrations
-    title: PEFT integrations
+    title: Integrations
 
-- title: Task guides
+- title: PEFT method guides
   sections:
-  - local: task_guides/seq2seq-prefix-tuning
-    title: Prefix tuning for conditional generation
-  - local: task_guides/clm-prompt-tuning
-    title: Prompt tuning for causal language modeling
-  - local: task_guides/ptuning-seq-classification
-    title: P-tuning for sequence classification
+  - local: task_guides/prompt_based_methods
+    title: Prompt-based methods
   - title: LoRA
     sections:
     - local: task_guides/image_classification_lora

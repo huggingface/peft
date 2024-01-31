@@ -1,4 +1,3 @@
-#!/bin/bash
 PEFT_TYPE="boft"
 BLOCK_NUM=8
 BLOCK_SIZE=0

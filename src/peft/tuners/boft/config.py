@@ -29,7 +29,7 @@ class BOFTConfig(PeftConfig):
         boft_block_size (`int`): BOFT block size across different layers.
         boft_block_num (`int`): Number of BOFT blocks per injected layer.
         boft_n_butterfly_factor (`int`): Number of butterfly factors across different layers.
-        target_modules (`Union[List[str],str]`): The names of the modules to apply Lora to.
+        target_modules (`Union[List[str],str]`): The names of the modules to apply the adapter to.
         boft_dropout (`float`): The multiplicative dropout probability for BOFT layers.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set

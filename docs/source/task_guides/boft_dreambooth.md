@@ -75,7 +75,7 @@ You can also put your custom images into `boft_dreambooth/data/dreambooth`.
 or using the following script arguments:
 
 ```bash
-export MODEL_NAME="CompVis/stable-diffusion-v1-4"
+export MODEL_NAME="runwayml/stable-diffusion-v1-5"
 export INSTANCE_DIR="path-to-instance-images"
 export CLASS_DIR="path-to-class-images"
 export OUTPUT_DIR="path-to-save-model"

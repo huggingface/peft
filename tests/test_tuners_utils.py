@@ -24,11 +24,11 @@ from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
 from peft import IA3Config, LoHaConfig, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
-    INCLUDE_LINEAR_LAYERS_SHORTHAND,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
 )
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu
 

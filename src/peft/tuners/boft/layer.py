@@ -175,6 +175,10 @@ class BOFTLayer(BaseTunerLayer):
         # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
         import fbd_cuda
 
+    def unscale_layer(self, scale=None) -> None:
+        # scale is not used
+        pass
+
     def update_layer(
         self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
     ):

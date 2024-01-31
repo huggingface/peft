@@ -1,4 +1,3 @@
-
 IDX=$1
 PROMPT_IDX=$((IDX % 25))
 CLASS_IDX=$((IDX % 30))
