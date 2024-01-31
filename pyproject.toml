@@ -1,9 +1,10 @@
 [tool.black]
 # Only used by `hf-doc-builder´.
 line-length = 119
-target-version = ['py36']
+target-version = ['py38']
 
 [tool.ruff]
+target-version = "py38"
 ignore = ["C901", "E501", "E741", "W605"]
 select = ["C", "E", "F", "I", "W"]
 line-length = 119
