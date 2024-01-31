@@ -281,9 +281,14 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         if token is None:
             token = hf_hub_download_kwargs.get("use_auth_token", None)
 
+        hub_filename = (
+            os.path.join(hf_hub_download_kwargs["subfolder"], SAFETENSORS_WEIGHTS_NAME)
+            if hf_hub_download_kwargs.get("subfolder", None) is not None
+            else SAFETENSORS_WEIGHTS_NAME
+        )
         has_remote_safetensors_file = file_exists(
             repo_id=model_id,
-            filename=SAFETENSORS_WEIGHTS_NAME,
+            filename=hub_filename,
             revision=hf_hub_download_kwargs.get("revision", None),
             repo_type=hf_hub_download_kwargs.get("repo_type", None),
             token=token,
