@@ -20,8 +20,9 @@
 # This script exists to ensure that this issue does not reoccur.
 
 import torch
-import peft
 from accelerate import notebook_launcher
+
+import peft
 
 
 def init():

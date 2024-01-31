@@ -1,7 +1,9 @@
-import json, os
 import argparse
-from pathlib import Path
+import json
+import os
 from datetime import date
+from pathlib import Path
+
 from tabulate import tabulate
 
 
