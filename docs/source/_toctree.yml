@@ -98,6 +98,8 @@
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
+    - local: package_reference/poly
+      title: Polytropon
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/prefix_tuning
