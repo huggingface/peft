@@ -387,9 +387,9 @@ class LoraModel(BaseTuner):
                 Name of the new adapter.
             combination_type (`str`):
                 The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
-                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type, the
-                rank of the resulting adapter is equal to the sum of all adapters ranks (the
-                mixed adapter may be too big and result in OOM errors).
+                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type, the rank of the resulting
+                adapter is equal to the sum of all adapters ranks (the mixed adapter may be too big and result in OOM
+                errors).
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
