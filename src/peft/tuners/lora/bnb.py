@@ -172,7 +172,7 @@ if is_bnb_available():
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
-                    result += output
+                    result = result + output
 
             return result
 
@@ -333,7 +333,7 @@ if is_bnb_4bit_available():
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
-                    result += output
+                    result = result + output
 
             return result
 
