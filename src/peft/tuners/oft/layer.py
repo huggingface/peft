@@ -20,7 +20,7 @@ from typing import Any, List, Optional, Set, Tuple
 import torch
 import torch.nn as nn
 
-from peft.tuners.lycoris_utils import LycorisLayer
+from peft.tuners.lycoris_utils import LycorisLayer, check_adapters_to_merge
 
 
 class OFTLayer(nn.Module, LycorisLayer):
@@ -135,13 +135,10 @@ class OFTLayer(nn.Module, LycorisLayer):
                 The list of adapter names that should be merged. If `None`, all active adapters will be merged.
                 Defaults to `None`.
         """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
         for active_adapter in adapter_names:
             if active_adapter in self._available_adapters:
