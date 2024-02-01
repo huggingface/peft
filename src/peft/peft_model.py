@@ -755,19 +755,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     low_zero=(device_map == "balanced_low_0"),
                 )
 
-            # if isinstance(device_map, str):
-            #     device_map = infer_auto_device_map(
-            #         self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
-            #     )
+            if isinstance(device_map, str):
+                device_map = infer_auto_device_map(
+                    self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
+                )
 
             prefix = 'base_model.model.'
-            device_map = self.hf_device_map
-            keys = [i for i in device_map.keys()]
-            for key in keys:
-                new_key = prefix + key
-                device_map[new_key] = device_map[key]
-                del device_map[key]
-
             # rename offload index weight and model names
             target_modules = self.peft_config['default'].target_modules
             keys = list(offload_index.keys())
@@ -791,22 +784,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     with safe_open(fname, framework="pt") as f:
                         for safe_key in f.keys():
                             original_safekeys.append(safe_key)
+                        
                         for skey in original_safekeys:
                             safe_tensor = f.get_tensor(skey)
                             metadata = f.metadata()
-                            # TODO: replace 'transformer.' with variable
+                            block_id = 'transformer.'
+                            print (new_key)
                             if any(module in skey for module in target_modules):
                                 suffix_pos = skey.rfind('.')
-                                extended_prefix = prefix + 'transformer.' + skey[:suffix_pos]
+                                extended_prefix = prefix + block_id + skey[:suffix_pos]
                                 final_key = extended_prefix + '.base_layer' + skey[suffix_pos:]
                                 lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
+                                
                                 # add LoRA keys and values to disk offload if module is offloaded
                                 for lora_key, lora_val in lora_dict.items():
                                     divide = lora_key.rfind('.')
                                     new_key = lora_key[:divide] + '.default' + lora_key[divide:]
                                     safe_dict[new_key] = lora_val
                             else:
-                                final_key = prefix + 'transformer.' + skey
+                                final_key = prefix + block_id + skey
                             safe_dict[final_key] = safe_tensor
 
                         file_seen.add(fname)

@@ -1,0 +1,15 @@
+{
+  "weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      2304
+    ]
+  },
+  "bias": {
+    "dtype": "float32",
+    "shape": [
+      2304
+    ]
+  }
+}

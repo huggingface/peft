@@ -1061,9 +1061,9 @@ class OffloadSaveTests(unittest.TestCase):
 
     # @pytest.mark.single_gpu_tests
     # @require_torch_gpu
-    def test_offload_merge(self):
+    def test_offload_load(self):
         r"""
-        Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
+        Test the loading of a LoRA model with CPU- and disk-offloaded modules
         """
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
@@ -1081,8 +1081,44 @@ class OffloadSaveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
             # load the model with device_map
-            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map, offload_folder='odir').eval()
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="cpu")
+            lora_model = PeftModel.from_pretrained(model, tmp_dir)
+            offloaded_model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map, offload_folder='odir').eval()
             # self.assertTrue(len({p.device for p in model.parameters()}) == 2) # 'cuda' and 'meta'
+            offloaded_lora_model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits, offload_folder='odir')
+
+        input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+        offloaded_lora_model.eval()
+        lora_model.eval()
+        output = lora_model(input_tokens)[0]
+        offloaded_output = offloaded_lora_model(input_tokens)[0]
+        self.assertFalse(torch.allclose(output, offloaded_output, atol=1e-4))
+
+
+    # @pytest.mark.single_gpu_tests
+    # @require_torch_gpu
+    def test_offload_merge(self):
+        r"""
+        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
+        """
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        memory_limits = {0: "0.4GIB", "cpu": "10GIB"} # TODO: disk offload once LoRA merge is safetensors compatible
+        # offloads around half of all transformer modules
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        self.assertTrue(0 in device_map.values())
+        self.assertTrue("cpu" in device_map.values())
+        self.assertTrue("disk" in device_map.values())
+
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+
+        model = get_peft_model(model, config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            # load the model with device_map
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map, offload_folder='odir').eval()
+            self.assertTrue(len({p.device for p in model.parameters()}) == 2) # 'cuda' and 'meta'
             model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits, offload_folder='odir')
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
@@ -1092,7 +1128,7 @@ class OffloadSaveTests(unittest.TestCase):
         pre_merge_olayer = model(input_tokens)[0]
         model.merge_adapter()
         post_merge_olayer = model(input_tokens)[0]
-        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer, atol=1e-4))
+        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
 
         # test peft model adapter unmerge
         model.unmerge_adapter()
