@@ -355,6 +355,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         disk_modules.append(str(name) + '.' + str(key))
                         save_folder = module._hf_hook.weights_map.dataset.save_folder
 
+        if disk_modules and hasattr(kwargs, 'use_safetensors') and kwargs['use_safetensors'] == False:
+            raise AssertionError, 'Disk offloading not currently supported for use without safetensors'
+
         kwargs['offload_dir'] = save_folder # last save folder
         start_prefix = ""
         str_dtype = str(model.dtype).replace("torch.", "") 
@@ -761,6 +764,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
 
             prefix = 'base_model.model.'
+            # device_map = self.hf_device_map
+            # keys = [i for i in device_map.keys()]
+            # for key in keys:
+            #     new_key = prefix + key
+            #     device_map[new_key] = device_map[key]
+            #     del device_map[key]
+
             # rename offload index weight and model names
             target_modules = self.peft_config['default'].target_modules
             keys = list(offload_index.keys())
@@ -789,7 +799,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             safe_tensor = f.get_tensor(skey)
                             metadata = f.metadata()
                             block_id = 'transformer.'
-                            print (new_key)
                             if any(module in skey for module in target_modules):
                                 suffix_pos = skey.rfind('.')
                                 extended_prefix = prefix + block_id + skey[:suffix_pos]
@@ -804,8 +813,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             else:
                                 final_key = prefix + block_id + skey
                             safe_dict[final_key] = safe_tensor
-
                         file_seen.add(fname)
+
                     # replace original offloaded safetensors with renamed copy
                     for key in safe_dict.keys():
                         if key not in offload_index:
@@ -821,10 +830,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 **dispatch_model_kwargs,
             )
 
-            hook = AlignDevicesHook(io_same_device=True)
-            if self.peft_config[adapter_name].is_prompt_learning:
-                remove_hook_from_submodules(self.prompt_encoder)
-            add_hook_to_module(self.get_base_model(), hook)
+            # hook = AlignDevicesHook(io_same_device=True)
+            # if self.peft_config[adapter_name].is_prompt_learning:
+            #     remove_hook_from_submodules(self.prompt_encoder)
+            # add_hook_to_module(self.get_base_model(), hook)
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         if not is_trainable:
