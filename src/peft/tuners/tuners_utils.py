@@ -631,3 +631,29 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         linear_module_names -= {last_module_name}
     peft_config.target_modules = linear_module_names
     return peft_config
+
+
+def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[List[str]] = None) -> list[str]:
+    """
+    Helper function to check which adapters should be merged.
+
+    Only return those adapters that are not already merged. Give a warning if some or all of the adapters are already
+    merged.
+
+    """
+    if adapter_names is None:
+        adapter_names = module.active_adapters
+
+    if module.merged:
+        merged_adapters = set(module.merged_adapters)
+        adapter_names = [name for name in adapter_names if name not in merged_adapters]
+
+        if adapter_names:
+            warnings.warn(
+                f"Already following adapters were merged {','.join(module.merged_adapters)}. "
+                f"You are now additionally merging {','.join(adapter_names)}."
+            )
+        else:
+            warnings.warn("All adapters are already merged, nothing to do.")
+
+    return adapter_names
