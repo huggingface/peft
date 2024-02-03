@@ -764,16 +764,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
 
             prefix = 'base_model.model.'
-            # device_map = self.hf_device_map
-            # keys = [i for i in device_map.keys()]
-            # for key in keys:
-            #     new_key = prefix + key
-            #     device_map[new_key] = device_map[key]
-            #     del device_map[key]
-
             # rename offload index weight and model names
             target_modules = self.peft_config['default'].target_modules
             keys = list(offload_index.keys())
+            block_id = keys[0].split('.')[0] + '.' # for writing safetensors key
+
             for key in keys:
                 if any(module in key for module in target_modules):
                     suffix_pos = key.rfind('.')
@@ -788,11 +783,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             file_seen = set()
             for new_key in list(offload_index.keys()):
                 fname = offload_index[new_key]['safetensors_file']
+
+                # make a new file name
                 new_fname_list = [i for i in fname.split('/')]
                 for i, name in enumerate(new_fname_list):
                     if '--' in name:
                         new_fname_list[i] += '-lora'
                 new_fname = '/'.join(new_fname_list)
+
                 original_safekeys = []
                 safe_dict = {}
                 if fname not in file_seen:
@@ -803,7 +801,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         for skey in original_safekeys:
                             safe_tensor = f.get_tensor(skey)
                             metadata = f.metadata()
-                            block_id = 'transformer.'
                             if any(module in skey for module in target_modules):
                                 suffix_pos = skey.rfind('.')
                                 extended_prefix = prefix + block_id + skey[:suffix_pos]
@@ -820,7 +817,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             safe_dict[final_key] = safe_tensor
                         file_seen.add(fname)
 
-                    # place offloaded tensors in new file (avoids overwriting )
+                    # avoid overwriting original safetensors
                     for key in safe_dict.keys():
                         offload_index[key] = {'safetensors_file': new_fname, 'weight_name': key}
                     if not os.path.exists(new_fname):
