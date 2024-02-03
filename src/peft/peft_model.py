@@ -27,15 +27,15 @@ import packaging.version
 import torch
 import transformers
 from accelerate import dispatch_model, infer_auto_device_map
-from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
-from accelerate.utils import get_balanced_memory, named_module_tensors, extract_submodules_state_dict
+from accelerate.hooks import remove_hook_from_submodules
+from accelerate.utils import get_balanced_memory, named_module_tensors
 from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
+from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
-from safetensors import safe_open
 
 from . import __version__
 from .config import PeftConfig
@@ -338,40 +338,35 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
-        weight_map = {
-            name: param
-            for name, param in named_module_tensors(
-                model, recurse=True
-            )
-        }
+        weight_map = dict(named_module_tensors(model, recurse=True))
 
         disk_modules = []
-        save_folder = ''
+        save_folder = ""
         for name, module in model.named_modules():
-            if hasattr(module, '_hf_hook') and hasattr(module._hf_hook, 'original_devices'):
+            if hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "original_devices"):
                 index = module._hf_hook.weights_map.dataset.index
                 for key in module._hf_hook.original_devices.keys():
-                    if dict(module._hf_hook.original_devices)[key] == torch.device('meta'):
-                        disk_modules.append(str(name) + '.' + str(key))
+                    if dict(module._hf_hook.original_devices)[key] == torch.device("meta"):
+                        disk_modules.append(str(name) + "." + str(key))
                         save_folder = module._hf_hook.weights_map.dataset.save_folder
 
-        if disk_modules and hasattr(kwargs, 'use_safetensors') and kwargs['use_safetensors'] == False:
-            raise AssertionError ("Disk offloading not currently supported for use without safetensors")
+        if disk_modules and hasattr(kwargs, "use_safetensors") and not kwargs["use_safetensors"]:
+            raise AssertionError("Disk offloading not currently supported for use without safetensors")
 
-        kwargs['offload_dir'] = save_folder # last save folder
+        kwargs["offload_dir"] = save_folder  # last save folder
         start_prefix = ""
-        str_dtype = str(model.dtype).replace("torch.", "") 
+        str_dtype = str(model.dtype).replace("torch.", "")
         offload_index = {
             p[len(start_prefix) :]: {
-            "safetensors_file": index[p]['safetensors_file'], 
-            "weight_name": p, 
-            "dtype": str_dtype
+                "safetensors_file": index[p]["safetensors_file"],
+                "weight_name": p,
+                "dtype": str_dtype,
             }
             for p in weight_map.keys()
             if p in disk_modules
         }
 
-        kwargs['offload_index'] = offload_index
+        kwargs["offload_index"] = offload_index
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
         ) > 0:
@@ -388,7 +383,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
         model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
         return model
-
 
     def _setup_prompt_encoder(self, adapter_name: str):
         config = self.peft_config[adapter_name]
@@ -763,33 +757,33 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
                 )
 
-            prefix = 'base_model.model.'
+            prefix = "base_model.model."
             # rename offload index weight and model names
-            target_modules = self.peft_config['default'].target_modules
+            target_modules = self.peft_config["default"].target_modules
             keys = list(offload_index.keys())
-            block_id = keys[0].split('.')[0] + '.' # for writing safetensors key
+            block_id = keys[0].split(".")[0] + "."  # for writing safetensors key
 
             for key in keys:
                 if any(module in key for module in target_modules):
-                    suffix_pos = key.rfind('.')
-                    new_key = prefix  + key[:suffix_pos] + '.base_layer' + key[suffix_pos:]
+                    suffix_pos = key.rfind(".")
+                    new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
                 else:
                     new_key = prefix + key
-                offload_index[key]['weight_name'] = new_key
+                offload_index[key]["weight_name"] = new_key
                 offload_index[new_key] = offload_index[key]
                 del offload_index[key]
 
             # rename safetensors for dispatch
             file_seen = set()
             for new_key in list(offload_index.keys()):
-                fname = offload_index[new_key]['safetensors_file']
+                fname = offload_index[new_key]["safetensors_file"]
 
                 # make a new file name
-                new_fname_list = [i for i in fname.split('/')]
+                new_fname_list = list(fname.split("/"))
                 for i, name in enumerate(new_fname_list):
-                    if '--' in name:
-                        new_fname_list[i] += '-lora'
-                new_fname = '/'.join(new_fname_list)
+                    if "--" in name:
+                        new_fname_list[i] += "-lora"
+                new_fname = "/".join(new_fname_list)
 
                 original_safekeys = []
                 safe_dict = {}
@@ -797,20 +791,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     with safe_open(fname, framework="pt") as f:
                         for safe_key in f.keys():
                             original_safekeys.append(safe_key)
-                        
+
                         for skey in original_safekeys:
                             safe_tensor = f.get_tensor(skey)
                             metadata = f.metadata()
                             if any(module in skey for module in target_modules):
-                                suffix_pos = skey.rfind('.')
+                                suffix_pos = skey.rfind(".")
                                 extended_prefix = prefix + block_id + skey[:suffix_pos]
-                                final_key = extended_prefix + '.base_layer' + skey[suffix_pos:]
-                                lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
-                                
+                                final_key = extended_prefix + ".base_layer" + skey[suffix_pos:]
+                                lora_dict = {
+                                    key: val for key, val in adapters_weights.items() if extended_prefix in key
+                                }
+
                                 # add LoRA keys and values to disk offload if module is offloaded
                                 for lora_key, lora_val in lora_dict.items():
-                                    divide = lora_key.rfind('.')
-                                    new_key = lora_key[:divide] + '.default' + lora_key[divide:]
+                                    divide = lora_key.rfind(".")
+                                    new_key = lora_key[:divide] + ".default" + lora_key[divide:]
                                     safe_dict[new_key] = lora_val
                             else:
                                 final_key = prefix + block_id + skey
@@ -819,12 +815,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
                     # avoid overwriting original safetensors
                     for key in safe_dict.keys():
-                        offload_index[key] = {'safetensors_file': new_fname, 'weight_name': key}
+                        offload_index[key] = {"safetensors_file": new_fname, "weight_name": key}
                     if not os.path.exists(new_fname):
-                        base_name = '/'.join([i for i in new_fname.split('/')][:-1])
+                        base_name = "/".join(list(new_fname.split("/"))[:-1])
                         os.makedirs(base_name)
                     safe_save_file(safe_dict, new_fname, metadata=metadata)
-                        
+
             dispatch_model_kwargs["offload_index"] = offload_index
 
             dispatch_model(
@@ -843,7 +839,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if not is_trainable:
             self.eval()
         return load_result
-
 
     def set_adapter(self, adapter_name: str) -> None:
         """
