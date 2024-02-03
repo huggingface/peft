@@ -356,7 +356,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         save_folder = module._hf_hook.weights_map.dataset.save_folder
 
         if disk_modules and hasattr(kwargs, 'use_safetensors') and kwargs['use_safetensors'] == False:
-            raise AssertionError, 'Disk offloading not currently supported for use without safetensors'
+            raise AssertionError ("Disk offloading not currently supported for use without safetensors")
 
         kwargs['offload_dir'] = save_folder # last save folder
         start_prefix = ""
@@ -788,6 +788,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             file_seen = set()
             for new_key in list(offload_index.keys()):
                 fname = offload_index[new_key]['safetensors_file']
+                new_fname_list = [i for i in fname.split('/')]
+                for i, name in enumerate(new_fname_list):
+                    if '--' in name:
+                        new_fname_list[i] += '-lora'
+                new_fname = '/'.join(new_fname_list)
                 original_safekeys = []
                 safe_dict = {}
                 if fname not in file_seen:
@@ -815,11 +820,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             safe_dict[final_key] = safe_tensor
                         file_seen.add(fname)
 
-                    # replace original offloaded safetensors with renamed copy
+                    # place offloaded tensors in new file (avoids overwriting )
                     for key in safe_dict.keys():
-                        if key not in offload_index:
-                            offload_index[key] = {'safetensors_file': fname, 'weight_name': key}
-                    safe_save_file(safe_dict, fname, metadata=metadata)
+                        offload_index[key] = {'safetensors_file': new_fname, 'weight_name': key}
+                    if not os.path.exists(new_fname):
+                        base_name = '/'.join([i for i in new_fname.split('/')][:-1])
+                        os.makedirs(base_name)
+                    safe_save_file(safe_dict, new_fname, metadata=metadata)
                         
             dispatch_model_kwargs["offload_index"] = offload_index
 

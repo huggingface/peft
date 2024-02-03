@@ -1046,7 +1046,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         self.assertEqual(n_total_default, n_total_other)
 
 
-@require_torch_gpu
+# @require_torch_gpu
 class OffloadSaveTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "gpt2"
@@ -1059,8 +1059,8 @@ class OffloadSaveTests(unittest.TestCase):
         gc.collect()
         torch.cuda.empty_cache()
 
-    @pytest.mark.single_gpu_tests
-    @require_torch_gpu
+    # @pytest.mark.single_gpu_tests
+    # @require_torch_gpu
     def test_offload_load(self):
         r"""
         Test the loading of a LoRA model with CPU- and disk-offloaded modules
@@ -1091,18 +1091,10 @@ class OffloadSaveTests(unittest.TestCase):
             offloaded_model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map, offload_folder='odir')
             self.assertTrue(len({p.device for p in offloaded_model.parameters()}) == 2) # 'cpu' and 'meta'
             offloaded_lora_model = PeftModel.from_pretrained(offloaded_model, tmp_dir, max_memory=memory_limits, offload_folder='odir').eval()
+            offloaded_output = offloaded_lora_model(input_tokens)[0]
+            print (offloaded_output)
 
-            out = input_tokens
-            for name, module in offloaded_lora_model.named_modules():
-                print (name)
-                if hasattr(module, '_hf_hook') and module._hf_hook.offload:
-                    module._hf_hook.pre_forward(module)
-                    print ([p[0] for p in module.parameters()])
-
-            # offloaded_output = offloaded_lora_model(input_tokens)[0]
-            # print (offloaded_output)
-
-        self.assertTrue(torch.allclose(output, offloaded_output, atol=1e-4))
+        self.assertTrue(torch.allclose(output, offloaded_output, atol=1e-5))
 
 
     # @pytest.mark.single_gpu_tests
