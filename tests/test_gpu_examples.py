@@ -1059,8 +1059,6 @@ class OffloadSaveTests(unittest.TestCase):
         gc.collect()
         torch.cuda.empty_cache()
 
-    @pytest.mark.single_gpu_tests
-    @require_torch_gpu
     def test_offload_load(self):
         r"""
         Test the loading of a LoRA model with CPU- and disk-offloaded modules

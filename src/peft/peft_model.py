@@ -27,7 +27,7 @@ import packaging.version
 import torch
 import transformers
 from accelerate import dispatch_model, infer_auto_device_map
-from accelerate.hooks import remove_hook_from_submodules
+from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory, named_module_tensors
 from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
 from safetensors import safe_open
@@ -830,10 +830,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 **dispatch_model_kwargs,
             )
 
-            # hook = AlignDevicesHook(io_same_device=True)
-            # if self.peft_config[adapter_name].is_prompt_learning:
-            #     remove_hook_from_submodules(self.prompt_encoder)
-            # add_hook_to_module(self.get_base_model(), hook)
+            hook = AlignDevicesHook(io_same_device=True)
+            if self.peft_config[adapter_name].is_prompt_learning:
+                remove_hook_from_submodules(self.prompt_encoder)
+            add_hook_to_module(self.get_base_model(), hook)
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         if not is_trainable:
