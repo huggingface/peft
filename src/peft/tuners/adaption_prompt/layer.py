@@ -75,6 +75,9 @@ class AdaptedAttention(nn.Module):
         k_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].k_proj_layer
         v_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].v_proj_layer
         o_proj_layer = TRANSFORMERS_MODEL_CONFIG[self.model_type].o_proj_layer
+        factor = (
+            self.model.k_proj.in_features // self.model.k_proj.out_features
+        )  # Mistral has different input and output dimension for k_proj and v_proj layers
 
         if k_proj_layer == v_proj_layer:
             _, key, value = getattr(self.model, k_proj_layer)(self.adaption_prompt).split(embed_dim, dim=2)
@@ -82,14 +85,15 @@ class AdaptedAttention(nn.Module):
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
         # (bsz, num_heads, adapter_len, head_dim)
+
         adapter_k = (
-            key.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            key.view(1, self.adapter_len, self.model.num_heads, (self.model.head_dim // factor))
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
         # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
-            value.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            value.view(1, self.adapter_len, self.model.num_heads, (self.model.head_dim // factor))
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
@@ -100,6 +104,15 @@ class AdaptedAttention(nn.Module):
         query_states = compute_query_states(model=self.model, **kwargs)
 
         previous_dtype = query_states.dtype
+
+        # Reshape and average the extra tensors
+        query_states_reshaped = query_states.reshape(
+            bsz, self.model.num_heads, -1, (self.model.head_dim // factor), factor
+        )
+
+        # Take the mean along the last dimension to get [bsz, 32, X, 32]
+        query_states = query_states_reshaped.mean(dim=-1)
+
         # (bsz, num_heads, q_len, adapter_len)
         scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
             self.model.head_dim
@@ -109,6 +122,10 @@ class AdaptedAttention(nn.Module):
         scores = self.adaption_gate * F.softmax(scores, dim=-1, dtype=torch.float32).to(previous_dtype)
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
+
+        adapter_output = torch.repeat_interleave(
+            adapter_output, repeats=factor, dim=2
+        )  # https://github.com/huggingface/transformers/blob/e547458c43dfdbbb8f6a7757237e234c44e20a8f/src/transformers/models/mistral/modeling_mistral.py#L181
         # (bsz, q_len, hidden_size)
         if o_proj_layer is not None:
             adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
