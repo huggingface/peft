@@ -229,4 +229,4 @@ def loftq_init(
 
     lora_A, lora_B = R, L
 
-    return dequantized_weight.to(device=device, dtype=dtype), lora_A, lora_B
+    return dequantized_weight.to(device=device, dtype=dtype), lora_A.to(device), lora_B.to(device)
