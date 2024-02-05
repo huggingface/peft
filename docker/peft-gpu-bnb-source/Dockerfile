@@ -40,7 +40,7 @@ SHELL ["/bin/bash", "-c"]
 
 # Install apt libs
 RUN apt-get update && \
-    apt-get install -y curl git wget && \
+    apt-get install -y curl git wget cmake && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
