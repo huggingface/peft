@@ -341,6 +341,47 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "lora." + rep
 
+    class Embedding4bit(torch.nn.Module, LoraLayer): # WORK IN PROGRESS
+        # LoRA implemented in an Embedding layer
+        def __init__(
+            self,
+            base_layer: nn.Module,
+            adapter_name: str,
+            r: int = 0,
+            lora_alpha: int = 1,
+            lora_dropout: float = 0.0,
+            init_lora_weights: Union[bool, str] = True,
+            use_rslora: bool = False,
+            **kwargs,
+        ) -> None:
+            super().__init__()
+            LoraLayer.__init__(self, base_layer)
+            self._active_adapter = adapter_name
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+
+        def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+            raise NotImplementedError
+
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+            raise NotImplementedError
+
+        def unmerge(self) -> None:
+            raise NotImplementedError
+
+        def get_delta_weight(self, adapter) -> torch.Tensor:
+            raise NotImplementedError
+
+        def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            raise NotImplementedError
+
+        def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+            raise NotImplementedError
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "lora." + rep
+
+    # WIP NOTE for dispatch_bnb_4bit: consider instances of type bnb.nn.Embedding: https://github.com/TimDettmers/bitsandbytes/blob/main/bitsandbytes/nn/modules.py
     def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
         new_module = None
 
