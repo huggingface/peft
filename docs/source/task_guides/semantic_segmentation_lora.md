@@ -260,13 +260,19 @@ Let's review the `LoraConfig`. To enable LoRA technique, we must define the targ
 attention blocks of the base model. These matrices are identified by their respective names, "query" and "value". 
 Therefore, we should specify these names in the `target_modules` argument of `LoraConfig`.
 
+After we wrap our base model `model` with `PeftModel` along with the config, we get 
+a new model where only the LoRA parameters are trainable (so-called "update matrices") while the pre-trained parameters 
+are kept frozen. These include the parameters of the randomly initialized classifier parameters too. This is NOT we want 
+when fine-tuning the base model on our custom dataset. To ensure that the classifier parameters are also trained, we 
+specify `modules_to_save`. This also ensures that these modules are serialized alongside the LoRA trainable parameters 
+when using utilities like `save_pretrained()` and `push_to_hub()`.
+
 In addition to specifying the `target_modules` within `LoraConfig`, we also need to specify the `modules_to_save`. When 
 we wrap our base model with `PeftModel` and pass the configuration, we obtain a new model in which only the LoRA parameters 
-are trainable (the so-called "update matrices"), while the pre-trained parameters and the randomly initialized classifier parameters are kept frozen. 
-However, we do want to train the classifier parameters for finetuning. By specifying the `modules_to_save` argument, we ensure that the 
+are trainable, while the pre-trained parameters and the randomly initialized classifier parameters are kept frozen. 
+However, we do want to train the classifier parameters. By specifying the `modules_to_save` argument, we ensure that the 
 classifier parameters are also trainable, and they will be serialized alongside the LoRA trainable parameters when we 
 use utility functions like `save_pretrained()` and `push_to_hub()`.
-
 
 Let's review the rest of the parameters:
 
@@ -356,7 +362,7 @@ total 2.2M
 Let's now prepare an `inference_model` and run inference.
 
 ```python
-from peft import PeftConfig, PeftModel
+from peft import PeftConfig
 
 config = PeftConfig.from_pretrained(model_id)
 model = AutoModelForSemanticSegmentation.from_pretrained(
@@ -403,16 +409,14 @@ upsampled_logits = nn.functional.interpolate(
 pred_seg = upsampled_logits.argmax(dim=1)[0]
 ```
 
-Next, visualize the results.  We need a color palette for this. Here, we use `create_ade20k_label_colormap()`. As it returns a long array,
+Next, visualize the results.  We need a color palette for this. Here, we use ade_palette(). As it is a long array, so
 we don't include it in this guide, please copy it from [the TensorFlow Model Garden repository](https://github.com/tensorflow/models/blob/3f1ca33afe3c1631b733ea7e40c294273b9e406d/research/deeplab/utils/get_dataset_colormap.py#L51).
 
 ```python
 import matplotlib.pyplot as plt
 
-# < paste the `create_ade20k_label_colormap` function here >
-
 color_seg = np.zeros((pred_seg.shape[0], pred_seg.shape[1], 3), dtype=np.uint8)
-palette = np.array(create_ade20k_label_colormap()) 
+palette = np.array(ade_palette())
 
 for label, color in enumerate(palette):
     color_seg[pred_seg == label, :] = color
@@ -438,5 +442,4 @@ If you wish to use this example and improve the results, here are some things th
 * Try a larger SegFormer model variant (explore available model variants on the [Hugging Face Hub](https://huggingface.co/models?search=segformer)).
 * Try different values for the arguments available in `LoraConfig`.
 * Tune the learning rate and batch size.
-
 
