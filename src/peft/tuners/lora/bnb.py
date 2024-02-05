@@ -341,7 +341,7 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "lora." + rep
 
-    class Embedding4bit(torch.nn.Module, LoraLayer): # WORK IN PROGRESS
+    class Embedding4bit(torch.nn.Module, LoraLayer):  # WORK IN PROGRESS
         # LoRA implemented in an Embedding layer
         def __init__(
             self,
