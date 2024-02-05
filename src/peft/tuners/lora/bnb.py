@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 
 import bitsandbytes as bnb
 import torch
@@ -345,7 +345,7 @@ if is_bnb_4bit_available():
         # LoRA implemented in an Embedding layer
         def __init__(
             self,
-            base_layer: nn.Module,
+            base_layer: torch.nn.Module,
             adapter_name: str,
             r: int = 0,
             lora_alpha: int = 1,
