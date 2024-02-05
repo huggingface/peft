@@ -196,6 +196,11 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_generate(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
+        # positional args are supported for PeftModelForCausalLM
+        self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=False)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
