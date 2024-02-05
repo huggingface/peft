@@ -58,7 +58,7 @@ RUN source activate peft && \
     auto-gptq && \
     git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && \
     cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=OFF . && \
-    python setup.py develop && \ 
+    pip install -e . && \ 
     pip freeze | grep bitsandbytes
 
 RUN echo "source activate peft" >> ~/.profile
