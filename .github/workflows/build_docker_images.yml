@@ -2,7 +2,8 @@ name: Build Docker images (scheduled)
 
 on:
   push:
-    - branches: ["younesbelkada-patch-2"]
+    branches:
+      - younesbelkada-patch-2
 
 concurrency:
   group: docker-image-builds
