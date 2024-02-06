@@ -11,6 +11,7 @@ extend-select = [
     "E", # PEP8 errors
     "F", # PEP8 formatting
     "I", # Import sorting
+    "UP032", # f-string instead of format call
     "W", # PEP8 warnings
 ]
 ignore = [
