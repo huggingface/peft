@@ -300,7 +300,7 @@ def detect_adapter_type(keys: List[str]) -> PeftType:
         elif "diff" in key:
             raise ValueError("Currently full diff adapters are not implemented")
         else:
-            raise ValueError("Unkown adapter type, probably not implemented")
+            raise ValueError("Unknown adapter type, probably not implemented")
 
 
 if __name__ == "__main__":

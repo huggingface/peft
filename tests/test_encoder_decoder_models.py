@@ -104,6 +104,12 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
 
+    # skip non lora models - generate does not work for prefix tuning, prompt tuning
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
+        # positional arguments are not supported for PeftModelForSeq2SeqLM
+        self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=True)
+
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate_half_prec(model_id, config_cls, config_kwargs)
