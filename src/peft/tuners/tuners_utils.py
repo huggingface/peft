@@ -18,7 +18,7 @@ import re
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -351,7 +351,7 @@ class BaseTuner(nn.Module, ABC):
                 with onload_layer(module):
                     module.unmerge()
 
-    def _unloading_checks(self, adapter_names: Optional[List[str]]):
+    def _unloading_checks(self, adapter_names: Optional[list[str]]):
         adapters_to_consider = adapter_names or self.active_adapters
         is_modules_to_save_available = any(
             self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
@@ -632,7 +632,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     return peft_config
 
 
-def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[List[str]] = None) -> list[str]:
+def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
     """
     Helper function to check which adapters should be merged.
 

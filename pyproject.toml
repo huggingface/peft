@@ -11,6 +11,7 @@ extend-select = [
     "E", # PEP8 errors
     "F", # PEP8 formatting
     "I", # Import sorting
+    "UP006", # use dict[...] and list[...] instead typing.*
     "UP009", # UTF-8 declaration not needed in py3
     "UP032", # f-string instead of format call
     "W", # PEP8 warnings

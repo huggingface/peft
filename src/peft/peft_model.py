@@ -20,7 +20,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import packaging.version
 import torch
@@ -136,7 +136,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model.config.pretraining_tp = 1
 
     @property
-    def peft_config(self) -> Dict[str, PeftConfig]:
+    def peft_config(self) -> dict[str, PeftConfig]:
         if self._is_prompt_learning:
             return self._peft_config
         return self.base_model.peft_config
@@ -152,7 +152,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         return adapters
 
     @peft_config.setter
-    def peft_config(self, value: Dict[str, PeftConfig]):
+    def peft_config(self, value: dict[str, PeftConfig]):
         if self._is_prompt_learning:
             self._peft_config = value
         else:
@@ -162,7 +162,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self,
         save_directory: str,
         safe_serialization: bool = True,
-        selected_adapters: Optional[List[str]] = None,
+        selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
         **kwargs: Any,
@@ -636,7 +636,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             _set_trainable(self, adapter_name)
 
     @classmethod
-    def _split_kwargs(cls, kwargs: Dict[str, Any]):
+    def _split_kwargs(cls, kwargs: dict[str, Any]):
         _kwargs_not_in_hf_hub_download_signature = ("use_auth_token",)
         hf_hub_download_kwargs = {}
         other_kwargs = {}
