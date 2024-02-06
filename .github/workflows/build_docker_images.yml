@@ -1,9 +1,10 @@
 name: Build Docker images (scheduled)
 
 on:
-  push:
-    branches:
-      - younesbelkada-patch-2
+  workflow_dispatch:
+  workflow_call:
+  schedule:
+    - cron: "0 1 * * *"
 
 concurrency:
   group: docker-image-builds
