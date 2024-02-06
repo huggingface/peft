@@ -83,18 +83,19 @@ def _check_config_compatible(peft_config: PeftConfig) -> None:
 
 class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     """
-    Peft model for mixing different types of adapters.
+    PeftMixedModel for loading mixing different types of adapters for inference.
 
-    This class currently does not support saving and loading. Instead, it is assumed that the adapters are already
-    trained and loading the model requires a script to be run each time.
+    This class does not support loading/saving, and it shouldn't usually be initialized directly. Instead, use
+    `get_peft_model` with the argument `mixed=True`.
 
-    Currently, the main purpose of mixed adapter types is to combine trained adapters for inference. Although it is
-    technically possible to train a mixed adapter model, this has not been tested and is not recommended.
+    <Tip>
 
-    Note: This class should usually not be initialized directly. Instead, use `get_peft_model` with the argument
-    `mixed=True`.
+    Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
+    more about using different adapter types.
 
-    Below is an example that shows how to load a mixed model with two different types of adapters.
+    </Tip>
+
+    Example:
 
     ```py
     >>> from peft import get_peft_model
@@ -105,16 +106,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     >>> peft_model.set_adapter(["adapter1", "adapter2"])  # activate both adapters
     >>> peft_model(data)  # forward pass using both adapters
     ```
-
-    Tips:
-
-    - Not all adapter types can be combined. See `peft.tuners.mixed.COMPATIBLE_TUNER_TYPES` for a list of compatible
-      types. An error will be raised if you are trying to combine incompatible adapter types.
-    - It is possible to mix multiple adapters of the same type. This can be useful to combine adapters with very
-      different configs.
-    - If you want to combine a lot of different adapters, it is most performant to add the same types of adapters
-      consecutively. E.g., add LoRA1, LoRA2, LoHa1, LoHa2 in this order, instead of LoRA1, LoHa1, LoRA2, LoHa2. As long
-      as the adapters are commutative, the order does not matter for the final result.
 
     Args:
         model (`torch.nn.Module`):

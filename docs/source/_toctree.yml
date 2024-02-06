@@ -40,13 +40,13 @@
   - local: developer_guides/lora
     title: LoRA
   - local: developer_guides/custom_models
-    title: Working with custom models
+    title: Custom models
   - local: developer_guides/low_level_api
-    title: PEFT low level API
+    title: Adapter injection
   - local: developer_guides/mixed_models
-    title: Mixing different adapter types
+    title: Mixed adapter types
   - local: developer_guides/contributing
-    title: Contributing to PEFT
+    title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
 
