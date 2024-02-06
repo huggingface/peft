@@ -31,7 +31,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.1.0-devel-ubuntu20.04 AS build-image
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
