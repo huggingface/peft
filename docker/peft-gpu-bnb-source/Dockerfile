@@ -57,7 +57,8 @@ RUN source activate peft && \
     optimum \
     auto-gptq && \
     git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && \
-    cmake -DCOMPUTE_BACKEND=cuda -DNO_CUBLASLT=OFF . && \
+    cmake -B . -DCOMPUTE_BACKEND=cuda -S . && \
+    cmake --build . && \
     pip install -e . && \ 
     pip freeze | grep bitsandbytes
 
