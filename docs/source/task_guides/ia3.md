@@ -33,6 +33,8 @@ You'll use the sentences_allagree subset of the [financial_phrasebank](https://h
 Load the dataset with the [`~datasets.load_dataset`] function. This subset of the dataset only contains a train split, so use the [`~datasets.train_test_split`] function to create a train and validation split. Create a new `text_label` column so it is easier to understand what the `label` values `0`, `1`, and `2` mean.
 
 ```py
+from datasets import load_dataset
+
 ds = load_dataset("financial_phrasebank", "sentences_allagree")
 ds = ds["train"].train_test_split(test_size=0.1)
 ds["validation"] = ds["test"]
@@ -93,6 +95,9 @@ processed_ds = ds.map(
 Create a training and evaluation [`DataLoader`](https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader), and set `pin_memory=True` to speed up data transfer to the GPU during training if your dataset samples are on a CPU.
 
 ```py
+from torch.utils.data import DataLoader
+from transformers import default_data_collator
+
 train_ds = processed_ds["train"]
 eval_ds = processed_ds["validation"]
 
@@ -127,7 +132,7 @@ Call the [`~PeftModel.print_trainable_parameters`] method to compare the number 
 Once the configuration is setup, pass it to the [`get_peft_model`] function along with the base model to create a trainable [`PeftModel`].
 
 ```py
-from peft import IA3Config
+from peft import IA3Config, get_peft_model
 
 peft_config = IA3Config(task_type="SEQ_2_SEQ_LM")
 model = get_peft_model(model, peft_config)
@@ -140,6 +145,9 @@ model.print_trainable_parameters()
 Set up an optimizer and learning rate scheduler.
 
 ```py
+import torch
+from transformers import get_linear_schedule_with_warmup
+
 lr = 8e-3
 num_epochs = 3
 
@@ -154,7 +162,10 @@ lr_scheduler = get_linear_schedule_with_warmup(
 Move the model to the GPU and create a training loop that reports the loss and perplexity for each epoch.
 
 ```py
-model = model.to("cuda")
+from tqdm import tqdm
+
+device = "cuda"
+model = model.to(device)
 
 for epoch in range(num_epochs):
     model.train()
@@ -208,7 +219,7 @@ To load the model for inference, use the [`~AutoPeftModelForSeq2SeqLM.from_pretr
 ```py
 from peft import AutoPeftModelForSeq2SeqLM
 
-model = AutoPeftModelForSeq2SeqLM.from_pretrained("stevhliu/mt0-large-ia3").to("cuda")
+model = AutoPeftModelForSeq2SeqLM.from_pretrained("<your-hf-account-name>/mt0-large-ia3").to("cuda")
 tokenizer = AutoTokenizer.from_pretrained("bigscience/mt0-large")
 
 i = 15
