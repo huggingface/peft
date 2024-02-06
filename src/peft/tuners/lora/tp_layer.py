@@ -83,6 +83,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 
     @property
     def is_paralle_a(self):
+        # See https://github.com/huggingface/peft/pull/1439 for more details
         warnings.warn(
             "`is_paralle_a` is going to be deprecated in a future release. Please use `is_parallel_a`", FutureWarning
         )
