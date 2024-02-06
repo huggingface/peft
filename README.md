@@ -407,7 +407,7 @@ Learn more about the [low level API in the docs](https://huggingface.co/docs/pef
 
 ### Mixing different adapter types
 
-Ususally, it is not possible to combine different adapter types in the same model, e.g. combining LoRA with AdaLoRA, LoHa, or LoKr. Using a mixed model, this can, however, be achieved:
+Usually, it is not possible to combine different adapter types in the same model, e.g. combining LoRA with AdaLoRA, LoHa, or LoKr. Using a mixed model, this can, however, be achieved:
 
 ```python
 from peft import PeftMixedModel

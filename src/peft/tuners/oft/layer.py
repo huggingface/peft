@@ -72,7 +72,7 @@ class OFTLayer(nn.Module, LycorisLayer):
             r (`int`): Rank for the added adapter.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
-            coft (`bool`): Whether to use the constrainted variant of OFT or not.
+            coft (`bool`): Whether to use the constrained variant of OFT or not.
             eps (`float`):
                 The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
             block_share (`bool`): Whether to share the OFT parameters between blocks or not.

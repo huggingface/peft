@@ -56,7 +56,7 @@ class IA3Config(PeftConfig):
                 "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'."
                 "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
                 "If not specified, modules will be chosen according to the model architecture, If the architecture is "
-                "not known, an error will be raised -- in this case, you shoud specify the target modules manually."
+                "not known, an error will be raised -- in this case, you should specify the target modules manually."
             ),
         },
     )
