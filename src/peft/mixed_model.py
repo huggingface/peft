@@ -88,6 +88,15 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     This class does not support loading/saving, and it shouldn't usually be initialized directly. Instead, use
     `get_peft_model` with the argument `mixed=True`.
 
+    <Tip>
+
+    Read the [Mixed adapter types](https://huggingface.co/docs/peft/en/developer_guides/mixed_models) guide to learn
+    more about using different adapter types.
+
+    </Tip>
+
+    Example:
+
     ```py
     >>> from peft import get_peft_model
 
