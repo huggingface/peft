@@ -26,21 +26,7 @@ PEFT is integrated with Transformers for easy model training and inference, Diff
 > [!TIP]
 > Visit the [PEFT](https://huggingface.co/PEFT) organization to read about the PEFT methods implemented in the library and to see notebooks demonstrating how to apply these methods to a variety of downstream tasks. Click the "Watch repos" button on the organization page to be notified of newly implemented methods and notebooks!
 
-PEFT supports the following methods:
-
-1. LoRA: [LoRA: Low-Rank Adaptation of Large Language Models](https://hf.co/papers/2106.09685)
-2. Prefix Tuning: [Prefix-Tuning: Optimizing Continuous Prompts for Generation](https://hf.co/papers/2101.00190), [P-Tuning v2: Prompt Tuning Can Be Comparable to Fine-tuning Universally Across Scales and Tasks](https://hf.co/papers/2110.07602)
-3. P-Tuning: [GPT Understands, Too](https://hf.co/papers/2103.10385)
-4. Prompt Tuning: [The Power of Scale for Parameter-Efficient Prompt Tuning](https://hf.co/papers/2104.08691)
-5. AdaLoRA: [Adaptive Budget Allocation for Parameter-Efficient Fine-Tuning](https://hf.co/papers/2303.10512)  
-6. $(IA)^3$: [Few-Shot Parameter-Efficient Fine-Tuning is Better and Cheaper than In-Context Learning](https://hf.co/papers/2205.05638)
-7. MultiTask Prompt Tuning: [Multitask Prompt Tuning Enables Parameter-Efficient Transfer Learning](https://hf.co/papers/2303.02861)
-8. LoHa: [FedPara: Low-Rank Hadamard Product for Communication-Efficient Federated Learning](https://hf.co/papers/2108.06098)
-9. LoKr: [KronA: Parameter Efficient Tuning with Kronecker Adapter](https://hf.co/papers/2212.10650) based on [Navigating Text-To-Image Customization:From LyCORIS Fine-Tuning to Model Evaluation](https://hf.co/papers/2309.14859) implementation
-10. LoftQ: [LoftQ: LoRA-Fine-Tuning-aware Quantization for Large Language Models](https://hf.co/papers/2310.08659)
-11. OFT: [Controlling Text-to-Image Diffusion by Orthogonal Finetuning](https://hf.co/papers/2306.07280)
-12. Polytropon: [Combining Modular Skills in Multitask Learning](https://hf.co/papers/2202.13914) and Multi-Head Routing: [Multi-Head Adapter Routing for Cross-Task Generalization](https://hf.co/papers/2211.03831)
-13. AdaptationPrompt/LlamaAdapter: [LLaMA-Adapter: Efficient Fine-tuning of Language Models with Zero-init Attention](https://hf.co/papers/2303.16199)
+Check the PEFT Adapters API Reference section for a list of supported PEFT methods, and read the [Adapters](https://huggingface.co/docs/peft/en/conceptual_guides/adapter), [Soft prompts](https://huggingface.co/docs/peft/en/conceptual_guides/prompting), and [IA3](https://huggingface.co/docs/peft/en/conceptual_guides/ia3) conceptual guides to learn more about how these methods work.
 
 ## Quickstart
 
