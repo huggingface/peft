@@ -303,7 +303,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         self.assertFalse(torch.allclose(default_before.logits, default_after.logits))
 
         with adapted.disable_adapter():
-            # Test that the output is the same as the original ouput.
+            # Test that the output is the same as the original output.
             default_disabled = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
             assert_close(original_before.logits, default_disabled.logits, rtol=0, atol=0)
 

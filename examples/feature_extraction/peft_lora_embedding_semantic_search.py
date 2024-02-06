@@ -42,7 +42,7 @@ logger = get_logger(__name__)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Training a PEFT model for Sematic Search task")
+    parser = argparse.ArgumentParser(description="Training a PEFT model for Semantic Search task")
     parser.add_argument("--dataset_name", type=str, default=None, help="dataset name on HF hub")
     parser.add_argument(
         "--max_length",
