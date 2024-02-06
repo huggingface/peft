@@ -239,7 +239,7 @@ class Linear(nn.Module, LoraLayer):
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weights = base_layer.weight.data.clone()
+                    orig_weights = base_layer.weight.data.copy()
                     orig_weights = orig_weights + self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
