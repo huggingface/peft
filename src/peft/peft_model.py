@@ -784,7 +784,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model_config = getattr(self, "config", None)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config is not None:
+        if model_config is not None and "_name_or_path" in model_config:
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
