@@ -20,7 +20,7 @@ Training a model for each task can be costly, take up storage space, and the mod
 
 PEFT provides two methods for model merging:
 
-* [TIES-Merging](https://hf.co/papers/2306.01708) - TrIm, Elect, and Merge (TIES) is a three-step method for merging models. First, redundant parameters are trimmed, then conflicting signs are resolved into an aggregated vector, and finally the parameters whose signs are the same as the aggregate sign are averaged. This method takes into account that some values (redundant and sign disagreement) can degrade performance in the merged model.
+* [TIES](https://hf.co/papers/2306.01708) - TrIm, Elect, and Merge (TIES) is a three-step method for merging models. First, redundant parameters are trimmed, then conflicting signs are resolved into an aggregated vector, and finally the parameters whose signs are the same as the aggregate sign are averaged. This method takes into account that some values (redundant and sign disagreement) can degrade performance in the merged model.
 * [DARE](https://hf.co/papers/2311.03099) - Drop And REscale is a method that can be used to prepare for model merging methods like TIES. It works by randomly dropping parameters according to a drop rate and rescaling the remaining parameters. This helps to reduce the number of redundant and potentially interfering parameters among multiple models.
 
 Models are merged with the [`~LoraModel.add_weighted_adapter`] method, and the specific model merging method is specified in the `combination_type` parameter. This guide will show you how to merge models with TIES, DARE, and a combination of both TIES and DARE.
@@ -31,7 +31,9 @@ The [`~utils.ties`] method uses a [`~utils.magnitude_based_pruning`] approach to
 
 With PEFT, TIES merging is enabled by setting `combination_type="ties"` and setting `ties_density` to a value of the weights to keep from the individual models. For example, let's merge three finetuned [TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T) models: [tinyllama_lora_nobots](https://huggingface.co/smangrul/tinyllama_lora_norobots), [tinyllama_lora_sql](https://huggingface.co/smangrul/tinyllama_lora_sql), and [tinyllama_lora_adcopy](https://huggingface.co/smangrul/tinyllama_lora_adcopy).
 
-Load the base model and then use the [`~PeftModel.load_adapter`] method to load and assign each adapter a name:
+Load the base model and use the [`~transformers.PreTrainedModel.resize_token_embeddings`] method to account for special tokens added to the embedding layer for each finetuned model. This method ensures the special tokens and initialization of the embedding layers are consistent.
+
+Then you can use the [`~PeftModel.load_adapter`] method to load and assign each adapter a name:
 
 ```py
 from peft import PeftConfig, PeftModel

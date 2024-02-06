@@ -99,5 +99,9 @@
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     title: Adapters
+  - sections:
+    - local: package_reference/merge_utils
+      title: Model merge
+    title: Utilities
   title: API reference
 
