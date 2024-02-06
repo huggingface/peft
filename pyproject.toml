@@ -11,15 +11,14 @@ extend-select = [
     "E", # PEP8 errors
     "F", # PEP8 formatting
     "I", # Import sorting
-    "UP006", # use dict[...] and list[...] instead typing.*
-    "UP009", # UTF-8 declaration not needed in py3
-    "UP032", # f-string instead of format call
+    "UP", # Pyupgrade upgrades
     "W", # PEP8 warnings
 ]
 ignore = [
     "C901", # Function too complex
     "E501", # Line length (handled by ruff-format)
     "E741", # Ambiguous variable name
+    "UP007", # X | Y style Unions
     "W605", # Invalid escape sequence
 ]
 

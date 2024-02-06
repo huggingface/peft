@@ -48,7 +48,7 @@ def is_optimum_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
 
 
-@lru_cache()
+@lru_cache
 def is_torch_tpu_available(check_device=True):
     "Checks if `torch_xla` is installed and potentially if a TPU is in the environment"
     if importlib.util.find_spec("torch_xla") is not None:

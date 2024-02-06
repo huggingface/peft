@@ -30,7 +30,7 @@ def main(slack_channel_name=None):
     for log in Path().glob("*.log"):
         section_num_failed = 0
         i = 0
-        with open(log, "r") as f:
+        with open(log) as f:
             for line in f:
                 line = json.loads(line)
                 i += 1

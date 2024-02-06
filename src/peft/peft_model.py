@@ -289,7 +289,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
         **kwargs: Any,
-    ) -> "PeftModel":
+    ) -> PeftModel:
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 

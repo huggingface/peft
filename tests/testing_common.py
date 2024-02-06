@@ -173,7 +173,7 @@ class PeftCommonTester:
         # check the generated README.md
         filename = os.path.join(tmp_dirname, "README.md")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             readme = f.read()
         metainfo = re.search(r"---\n(.*?)\n---", readme, re.DOTALL).group(1)
         dct = yaml.safe_load(metainfo)
@@ -188,7 +188,7 @@ class PeftCommonTester:
         # check the generated config.json
         filename = os.path.join(tmp_dirname, "adapter_config.json")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             config = json.load(f)
 
         if hasattr(model, "config"):  # custom models don't have a config attribute

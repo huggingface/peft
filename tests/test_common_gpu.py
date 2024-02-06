@@ -598,7 +598,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         original_module = lm_head.original_module
         modules_to_save = lm_head.modules_to_save.default
 
-        inputs = torch.randn((1024))
+        inputs = torch.randn(1024)
         o1 = lm_head(inputs)
         o1.mean().backward()
 

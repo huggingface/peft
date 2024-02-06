@@ -159,7 +159,7 @@ class PeftConfigMixin(PushToHubMixin):
             path_json_file (`str`):
                 The path to the json file.
         """
-        with open(path_json_file, "r") as file:
+        with open(path_json_file) as file:
             json_object = json.load(file)
 
         return json_object
