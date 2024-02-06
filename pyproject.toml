@@ -6,6 +6,8 @@ target-version = ['py38']
 [tool.ruff]
 target-version = "py38"
 line-length = 119
+
+[tool.ruff.lint]
 extend-select = [
     "C", # Complexity
     "E", # PEP8 errors
@@ -22,7 +24,7 @@ ignore = [
     "W605", # Invalid escape sequence
 ]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 lines-after-imports = 2
 known-first-party = ["peft"]
 
