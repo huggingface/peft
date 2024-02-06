@@ -81,6 +81,13 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 
         self.is_target_conv_1d_layer = False
 
+    @property
+    def is_paralle_a(self):
+        warnings.warn(
+            "`is_paralle_a` is going to be deprecated in a future release. Please use `is_parallel_a`", FutureWarning
+        )
+        return self.is_parallel_a
+
     def update_layer(
         self,
         adapter_name,
