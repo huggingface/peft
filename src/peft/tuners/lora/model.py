@@ -496,7 +496,7 @@ class LoraModel(BaseTuner):
                         loras_B.append(current_adapter_lora_B.data)
 
                     if len(loras_A) == 0:
-                        raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+                        raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
                     loras_A = torch.cat(loras_A, dim=0)
                     loras_B = torch.cat(loras_B, dim=1)
                     target_lora_A.data[: loras_A.shape[0], :] = loras_A
@@ -535,7 +535,7 @@ class LoraModel(BaseTuner):
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
-            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+            raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
 
         delta_weight = valid_weights[0] * target.get_delta_weight(valid_adapters[0])
         for adapter, weight in zip(valid_adapters[1:], valid_weights[1:]):

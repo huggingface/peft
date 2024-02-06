@@ -103,7 +103,7 @@ class BaseTuner(nn.Module, ABC):
         A private method to create and replace the target module with the adapter module.
     - **_check_target_module_exists**:
         A private helper method to check if the passed module's key name matches any of the target modules in the
-        adatper_config.
+        adapter_config.
 
     The easiest is to check what is done in the `peft.tuners.lora.LoraModel` class.
 
@@ -129,7 +129,7 @@ class BaseTuner(nn.Module, ABC):
         self.model = model
         self.targeted_module_names: list[str] = []
 
-        # For advanced developpers, if you want to attach multiple adapters to your
+        # For advanced developers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
         if not hasattr(self, "peft_config"):
             self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
@@ -203,7 +203,7 @@ class BaseTuner(nn.Module, ABC):
         current_key: str,
     ) -> None:
         r"""
-        Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
+        Inplace replacement of the target module with the adapter layer. This method needs to be overridden by all the
         tuner classes.
 
         Check `peft.tuners.lora.LoraModel._create_and_replace` for an example.
@@ -228,7 +228,7 @@ class BaseTuner(nn.Module, ABC):
     def _mark_only_adapters_as_trainable(self, model: nn.Module):
         r"""
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
-        be overriden for all tuner classes to match the correct key names.
+        be overridden for all tuner classes to match the correct key names.
 
         Check `peft.tuners.lora.LoraModel._mark_only_adapters_as_trainable` for an example.
         """
@@ -366,7 +366,7 @@ class BaseTunerLayer(ABC):
     A tuner layer mixin that provides the common methods and attributes for all tuners.
 
     Args:
-        is_plugable (`bool`, *optional*):
+        is_pluggable (`bool`, *optional*):
             Whether the adapter layer can be plugged to any pytorch module
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
@@ -631,3 +631,29 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         linear_module_names -= {last_module_name}
     peft_config.target_modules = linear_module_names
     return peft_config
+
+
+def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[List[str]] = None) -> list[str]:
+    """
+    Helper function to check which adapters should be merged.
+
+    Only return those adapters that are not already merged. Give a warning if some or all of the adapters are already
+    merged.
+
+    """
+    if adapter_names is None:
+        adapter_names = module.active_adapters
+
+    if module.merged:
+        merged_adapters = set(module.merged_adapters)
+        adapter_names = [name for name in adapter_names if name not in merged_adapters]
+
+        if adapter_names:
+            warnings.warn(
+                f"Already following adapters were merged {','.join(module.merged_adapters)}. "
+                f"You are now additionally merging {','.join(adapter_names)}."
+            )
+        else:
+            warnings.warn("All adapters are already merged, nothing to do.")
+
+    return adapter_names

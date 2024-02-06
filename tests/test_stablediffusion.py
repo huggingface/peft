@@ -159,6 +159,38 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "loha_kwargs": {"init_weights": [False]},
+                "oft_kwargs": {"init_weights": [False]},
+            },
+        )
+    )
+    def test_merge_layers_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
+        # Instantiate model & adapters
+        model = self.instantiate_sd_peft(model_id, config_cls, config_kwargs)
+
+        # Generate output for peft modified StableDiffusion
+        dummy_input = self.prepare_inputs_for_testing()
+        with temp_seed(seed=42):
+            peft_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
+
+        # Merge adapter and model
+        if config_cls not in [LoHaConfig, OFTConfig]:
+            # TODO: Merging the text_encoder is leading to issues on CPU with PyTorch 2.1
+            model.text_encoder = model.text_encoder.merge_and_unload(safe_merge=True)
+        model.unet = model.unet.merge_and_unload(safe_merge=True)
+
+        # Generate output for peft merged StableDiffusion
+        with temp_seed(seed=42):
+            merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
+
+        # Images are in uint8 drange, so use large atol
+        self.assertTrue(np.allclose(peft_output, merged_output, atol=1.0))
+
+    @parameterized.expand(
+        PeftStableDiffusionTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
             },
             filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft"])],
         )
