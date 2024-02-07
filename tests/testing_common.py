@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -124,7 +123,7 @@ class ClassInstantier(OrderedDict):
 
         for model_id in model_list:
             for key, value in self.items():
-                if "{}_kwargs".format(key) in grid_parameters:
+                if f"{key}_kwargs" in grid_parameters:
                     peft_configs = []
                     current_peft_config = value[1].copy()
                     for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
@@ -174,7 +173,7 @@ class PeftCommonTester:
         # check the generated README.md
         filename = os.path.join(tmp_dirname, "README.md")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             readme = f.read()
         metainfo = re.search(r"---\n(.*?)\n---", readme, re.DOTALL).group(1)
         dct = yaml.safe_load(metainfo)
@@ -189,7 +188,7 @@ class PeftCommonTester:
         # check the generated config.json
         filename = os.path.join(tmp_dirname, "adapter_config.json")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             config = json.load(f)
 
         if hasattr(model, "config"):  # custom models don't have a config attribute

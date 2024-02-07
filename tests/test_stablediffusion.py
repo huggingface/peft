@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -89,6 +88,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
     Tests that diffusers StableDiffusion model works with PEFT as expected.
 
     """
+
     transformers_class = StableDiffusionPipeline
 
     def instantiate_sd_peft(self, model_id, config_cls, config_kwargs):

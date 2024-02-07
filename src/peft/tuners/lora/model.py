@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +21,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import nn
@@ -141,7 +140,7 @@ class LoraModel(BaseTuner):
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
+        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
         r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
 
@@ -333,7 +332,7 @@ class LoraModel(BaseTuner):
         merge=True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
@@ -590,7 +589,7 @@ class LoraModel(BaseTuner):
         self.active_adapter = new_adapter or []
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
