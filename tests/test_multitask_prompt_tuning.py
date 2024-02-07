@@ -134,7 +134,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            assert len(list(state_dict.keys())) == 3
+            assert len(state_dict) == 3
 
             # check if tensors equal
             for key in state_dict.keys():
@@ -177,7 +177,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            assert len(list(state_dict.keys())) == 3
+            assert len(state_dict) == 3
 
             # check if tensors equal
             for key in state_dict.keys():
