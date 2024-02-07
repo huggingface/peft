@@ -21,7 +21,6 @@ ignore = [
     "E501", # Line length (handled by ruff-format)
     "E741", # Ambiguous variable name
     "UP007", # X | Y style Unions
-    "W605", # Invalid escape sequence
 ]
 
 [tool.ruff.lint.isort]
