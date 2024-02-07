@@ -138,7 +138,7 @@ model.add_weighted_adapter(
     adapter_name=weighted_adapter_name,
     combination_type="linear"
 )
-model.set_adapters(weighted_adapter_name)
+model.set_adapter(weighted_adapter_name)
 ```
 
 <Tip>
