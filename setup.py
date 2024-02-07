@@ -18,8 +18,15 @@ from setuptools import find_packages, setup
 VERSION = "0.8.2"
 
 extras = {}
-extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
-extras["docs_specific"] = ["hf-doc-builder"]
+extras["quality"] = [
+    "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "hf-doc-builder",
+    "ruff~=0.2.1",
+]
+extras["docs_specific"] = [
+    "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "hf-doc-builder",
+]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
 extras["test"] = extras["dev"] + [
     "pytest",
@@ -36,7 +43,7 @@ setup(
     version=VERSION,
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
-    long_description=open("README.md", "r", encoding="utf-8").read(),
+    long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     keywords="deep learning",
     license="Apache",

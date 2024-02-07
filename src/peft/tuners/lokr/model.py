@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -103,7 +102,7 @@ class LoKrModel(LycorisTuner):
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(f"(.*\.)?{key}$", current_key), pattern_keys), target_name)
+        target_name_key = next(filter(lambda key: re.match(rf"(.*\.)?{key}$", current_key), pattern_keys), target_name)
 
         kwargs = config.to_dict()
         kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)

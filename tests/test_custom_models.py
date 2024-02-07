@@ -788,7 +788,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
                 f.write(text)
 
             model.save_pretrained(tmp_dirname)
-            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+            with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
         self.assertIn("library_name: peft", model_card)
@@ -803,7 +803,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
-            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+            with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
         self.assertIn("library_name: peft", model_card)

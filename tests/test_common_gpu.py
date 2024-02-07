@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -599,7 +598,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         original_module = lm_head.original_module
         modules_to_save = lm_head.modules_to_save.default
 
-        inputs = torch.randn((1024))
+        inputs = torch.randn(1024)
         o1 = lm_head(inputs)
         o1.mean().backward()
 

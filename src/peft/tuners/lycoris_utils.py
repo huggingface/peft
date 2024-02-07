@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +16,7 @@ from __future__ import annotations
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Type, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -80,7 +79,7 @@ class LycorisLayer(BaseTunerLayer):
 
     @property
     @abstractmethod
-    def _available_adapters(self) -> Set[str]:
+    def _available_adapters(self) -> set[str]:
         ...
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
@@ -108,7 +107,7 @@ class LycorisLayer(BaseTunerLayer):
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         ...
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -197,7 +196,7 @@ class LycorisTuner(BaseTuner):
     """
 
     prefix: str
-    layers_mapping: Dict[Type[torch.nn.Module], Type[LycorisLayer]]
+    layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
     def __init__(self, model, config, adapter_name):
         super().__init__(model, config, adapter_name)
@@ -311,7 +310,7 @@ class LycorisTuner(BaseTuner):
         merge: bool = True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
         if merge:
             if getattr(self.model, "quantization_method", None) == "gptq":
@@ -351,7 +350,7 @@ class LycorisTuner(BaseTuner):
         self._set_adapter_layers(enabled=False)
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
         This method merges the adapter layers into the base model. This is needed if someone wants to use the base

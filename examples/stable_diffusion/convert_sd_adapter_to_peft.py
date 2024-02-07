@@ -184,7 +184,7 @@ def construct_peft_lohaconfig(info: Dict[str, LoHaInfo], **kwargs) -> LoHaConfig
     alpha_pattern = dict(sorted(filter(lambda x: x[1] != alpha, alphas.items()), key=lambda x: x[0]))
 
     # Determine whether any of modules have effective conv2d decomposition
-    use_effective_conv2d = any(((val.hada_t1 is not None) or (val.hada_t2 is not None) for val in info.values()))
+    use_effective_conv2d = any((val.hada_t1 is not None) or (val.hada_t2 is not None) for val in info.values())
 
     config = LoHaConfig(
         r=r,
@@ -227,7 +227,7 @@ def construct_peft_lokrconfig(info: Dict[str, LoKrInfo], decompose_factor: int =
     alpha_pattern = dict(sorted(filter(lambda x: x[1] != alpha, alphas.items()), key=lambda x: x[0]))
 
     # Determine whether any of modules have effective conv2d decomposition
-    use_effective_conv2d = any(((val.lokr_t2 is not None) for val in info.values()))
+    use_effective_conv2d = any((val.lokr_t2 is not None) for val in info.values())
 
     # decompose_both should be enabled if any w1 matrix in any layer is decomposed into 2
     decompose_both = any((val.lokr_w1_a is not None and val.lokr_w1_b is not None) for val in info.values())
