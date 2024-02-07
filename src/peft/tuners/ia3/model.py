@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +17,7 @@ import re
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import List, Optional
+from typing import Optional
 
 import torch
 from torch import nn
@@ -284,7 +283,7 @@ class IA3Model(BaseTuner):
         return peft_config
 
     def _unload_and_optionally_merge(
-        self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, merge: bool = True, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         r"""
         This method merges the (IA)^3 layers into the base model. This is needed if someone wants to use the base model
@@ -323,7 +322,7 @@ class IA3Model(BaseTuner):
 
         return self.model
 
-    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> torch.nn.Module:
+    def merge_and_unload(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> torch.nn.Module:
         r"""
         This method merges the IA³ layers into the base model. This is needed if someone wants to use the base model as
         a standalone model.

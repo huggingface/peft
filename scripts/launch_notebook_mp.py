@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,8 +19,9 @@
 # This script exists to ensure that this issue does not reoccur.
 
 import torch
-import peft
 from accelerate import notebook_launcher
+
+import peft
 
 
 def init():
