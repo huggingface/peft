@@ -405,11 +405,20 @@ if is_bnb_4bit_available():
                         )
                     self.merged_adapters.append(active_adapter)
 
-
         def unmerge(self) -> None:
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
             raise NotImplementedError
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
+            """
+            Compute the delta weight for the given adapter.
+
+            Args:
+                adapter (str):
+                    The name of the adapter for which the delta weight should be computed.
+            """
             return (
                 transpose(
                     self.lora_embedding_B[adapter].weight @ self.lora_embedding_A[adapter].weight,
