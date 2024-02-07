@@ -19,6 +19,7 @@ import os
 import tempfile
 import unittest
 
+import pytest
 import torch
 from parameterized import parameterized
 from torch import nn
@@ -743,9 +744,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that bias=all and bias=lora_only give a warning with the correct message
         msg_start = "Careful, disabling adapter layers with bias configured to be"
-        with self.assertWarns(UserWarning, msg=msg_start):
+        with pytest.warns(UserWarning, match=msg_start):
             run_with_disable(config_kwargs, bias="lora_only")
-        with self.assertWarns(UserWarning, msg=msg_start):
+        with pytest.warns(UserWarning, match=msg_start):
             run_with_disable(config_kwargs, bias="all")
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
@@ -822,7 +823,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             if save_embedding_layers == "auto":
                 # assert warning
                 msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
-                with self.assertWarns(UserWarning, msg=msg_start):
+                with pytest.warns(UserWarning, match=msg_start):
                     model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
             else:
                 model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
@@ -847,9 +848,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             if save_embedding_layers is True:
-                # assert warning
-                msg_start = "Could not identify embedding layer(s) because the model is not a 🤗 transformers model."
-                with self.assertWarns(UserWarning, msg=msg_start):
+                with pytest.warns(
+                    UserWarning,
+                    match=r"Could not identify embedding layer\(s\) because the model is not a 🤗 transformers model\.",
+                ):
                     model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
             else:
                 model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)

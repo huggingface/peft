@@ -14,6 +14,7 @@
 import unittest
 from unittest.mock import Mock, call, patch
 
+import pytest
 import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -120,8 +121,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         # Raise an error when tokenizer_kwargs is used with prompt_tuning_init!='TEXT', because this argument has no
         # function in that case
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        msg = "tokenizer_kwargs only valid when using prompt_tuning_init='TEXT'."
-        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+        with pytest.raises(ValueError, match="tokenizer_kwargs only valid when using prompt_tuning_init='TEXT'."):
             PromptTuningConfig(
                 base_model_name_or_path=model_id,
                 tokenizer_name_or_path=model_id,

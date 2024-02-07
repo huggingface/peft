@@ -17,6 +17,7 @@
 import unittest
 from copy import deepcopy
 
+import pytest
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
@@ -310,9 +311,9 @@ class PeftCustomKwargsTester(unittest.TestCase):
         model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
         model = StableDiffusionPipeline.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
-        with self.assertRaisesRegex(
+        with pytest.raises(
             ValueError,
-            "Only instances of PreTrainedModel support `target_modules='all-linear'`",
+            match="Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
 

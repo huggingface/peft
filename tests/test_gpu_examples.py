@@ -1350,8 +1350,7 @@ class MixedPrecisionTests(unittest.TestCase):
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
-            msg = "Attempting to unscale FP16 gradients."
-            with self.assertRaisesRegex(ValueError, msg):
+            with pytest.raises(ValueError, match="Attempting to unscale FP16 gradients."):
                 trainer.train()
 
     @pytest.mark.single_gpu_tests

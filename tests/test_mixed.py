@@ -19,6 +19,7 @@ import re
 import tempfile
 import unittest
 
+import pytest
 import torch
 from parameterized import parameterized
 from torch import nn
@@ -633,7 +634,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert torch.allclose(output_0, output_deleted_1, atol=atol, rtol=rtol)
 
         msg = re.escape("Adapter(s) ['adapter1'] not found, available adapters: ['adapter0']")
-        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+        with pytest.raises(ValueError, match=msg):
             peft_model.set_adapter(["adapter0", "adapter1"])
 
         # re-add adapter1
@@ -657,7 +658,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert not torch.allclose(output_deleted_0, output_01, atol=atol, rtol=rtol)
 
         msg = re.escape("Adapter(s) ['adapter0'] not found, available adapters: ['adapter1']")
-        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+        with pytest.raises(ValueError, match=msg):
             peft_model.set_adapter(["adapter0", "adapter1"])
 
         peft_model.delete_adapter("adapter1")
@@ -674,8 +675,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # TODO: theoretically, we could allow this if it's the same target layer
         config1 = LoHaConfig(target_modules=["lin0"], modules_to_save=["lin1"])
         peft_model.add_adapter("adapter1", config1)
-        msg = "Only one adapter can be set at a time for modules_to_save"
-        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+        with pytest.raises(ValueError, match="Only one adapter can be set at a time for modules_to_save"):
             peft_model.set_adapter(["adapter0", "adapter1"])
 
     def test_get_nb_trainable_parameters(self):
@@ -714,7 +714,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
 
         config1 = PrefixTuningConfig()
         msg = "The provided `peft_type` 'PREFIX_TUNING' is not compatible with the `PeftMixedModel`."
-        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+        with pytest.raises(ValueError, match=msg):
             peft_model.add_adapter("adapter1", config1)
 
     def test_decoder_model(self):

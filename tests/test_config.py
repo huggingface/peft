@@ -224,15 +224,10 @@ class PeftConfigTester(unittest.TestCase):
 
         valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
 
-        with self.assertRaisesRegex(
-            ValueError,
-            expected_regex="`layers_to_transform` cannot be used when `target_modules` is a str.",
-        ):
+        with pytest.raises(ValueError, match="`layers_to_transform` cannot be used when `target_modules` is a str."):
             LoraConfig(**invalid_config1)
 
-        with self.assertRaisesRegex(
-            ValueError, expected_regex="`layers_pattern` cannot be used when `target_modules` is a str."
-        ):
+        with pytest.raises(ValueError, match="`layers_pattern` cannot be used when `target_modules` is a str."):
             LoraConfig(**invalid_config2)
 
         # should run without errors
@@ -245,9 +240,7 @@ class PeftConfigTester(unittest.TestCase):
         # an example invalid config
         invalid_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
 
-        with self.assertRaisesRegex(
-            ValueError, expected_regex="^`feedforward_modules` should be a subset of `target_modules`$"
-        ):
+        with pytest.raises(ValueError, match="^`feedforward_modules` should be a subset of `target_modules`$"):
             IA3Config(**invalid_config)
 
     def test_ia3_is_feedforward_subset_valid_config(self):

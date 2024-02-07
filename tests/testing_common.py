@@ -20,6 +20,7 @@ import tempfile
 from collections import OrderedDict
 from dataclasses import replace
 
+import pytest
 import torch
 import yaml
 from diffusers import StableDiffusionPipeline
@@ -489,25 +490,19 @@ class PeftCommonTester:
             if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
                 module.data[0] = torch.nan
 
-        with self.assertRaises(ValueError) as error_context:
+        with pytest.raises(
+            ValueError, match="NaNs detected in the merged weights. The adapter default seems to be broken"
+        ):
             model = model.merge_and_unload(safe_merge=True)
-
-        assert (
-            str(error_context.exception)
-            == "NaNs detected in the merged weights. The adapter default seems to be broken"
-        )
 
         for name, module in model.named_parameters():
             if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
                 module.data[0] = torch.inf
 
-        with self.assertRaises(ValueError) as error_context:
+        with pytest.raises(
+            ValueError, match="NaNs detected in the merged weights. The adapter default seems to be broken"
+        ):
             model = model.merge_and_unload(safe_merge=True)
-
-        assert (
-            str(error_context.exception)
-            == "NaNs detected in the merged weights. The adapter default seems to be broken"
-        )
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
         if issubclass(config_cls, PromptLearningConfig):
@@ -646,7 +641,7 @@ class PeftCommonTester:
 
         # merging again should not change anything
         # also check warning:
-        with self.assertWarnsRegex(UserWarning, "All adapters are already merged, nothing to do"):
+        with pytest.warns(UserWarning, match="All adapters are already merged, nothing to do"):
             model.merge_adapter()
         logits_1 = model(**self.prepare_inputs_for_testing())[0]
 
@@ -677,7 +672,7 @@ class PeftCommonTester:
 
         inputs = self.prepare_inputs_for_testing()
         if raises_err:
-            with self.assertRaises(TypeError):
+            with pytest.raises(TypeError):
                 # check if `generate` raises an error if positional arguments are passed
                 _ = model.generate(inputs["input_ids"])
         else:
@@ -1002,7 +997,7 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         if config.peft_type not in ("LORA", "ADALORA", "IA3"):
-            with self.assertRaises(AttributeError):
+            with pytest.raises(AttributeError):
                 model = model.unload()
         else:
             dummy_input = self.prepare_inputs_for_testing()
@@ -1112,7 +1107,7 @@ class PeftCommonTester:
             combination_type="linear",
         )
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             model.add_weighted_adapter(
                 adapter_list[1:],
                 weight_list[1:],
@@ -1120,7 +1115,7 @@ class PeftCommonTester:
                 combination_type="linear",
             )
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             model.add_weighted_adapter(
                 adapter_list[1:],
                 weight_list[1:],
@@ -1129,7 +1124,7 @@ class PeftCommonTester:
                 density=0.5,
             )
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             model.add_weighted_adapter(
                 adapter_list[1:],
                 weight_list[1:],
@@ -1138,7 +1133,7 @@ class PeftCommonTester:
                 density=0.5,
             )
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             model.add_weighted_adapter(
                 adapter_list[1:],
                 weight_list[1:],
@@ -1270,7 +1265,7 @@ class PeftCommonTester:
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, "adapter0")
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             model.add_adapter("adapter1", replace(config, r=20))
 
         # (superficial) test that the model is not left in a half-initialized state when adding an adapter fails
