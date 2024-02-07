@@ -341,32 +341,29 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         weight_map = dict(named_module_tensors(model, recurse=True))
 
         disk_modules = []
-        save_folder = ""
+        index = None
         for name, module in model.named_modules():
             if hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "original_devices"):
                 index = module._hf_hook.weights_map.dataset.index
                 for key in module._hf_hook.original_devices.keys():
                     if dict(module._hf_hook.original_devices)[key] == torch.device("meta"):
                         disk_modules.append(str(name) + "." + str(key))
-                        save_folder = module._hf_hook.weights_map.dataset.save_folder
 
         if disk_modules and hasattr(kwargs, "use_safetensors") and not kwargs["use_safetensors"]:
-            raise AssertionError("Disk offloading not currently supported for use without safetensors")
+            raise AssertionError("Disk offloading not currently only supported for safetensors")
 
-        kwargs["offload_dir"] = save_folder  # last save folder
         start_prefix = ""
-        str_dtype = str(model.dtype).replace("torch.", "")
-        offload_index = {
-            p[len(start_prefix) :]: {
-                "safetensors_file": index[p]["safetensors_file"],
-                "weight_name": p,
-                "dtype": str_dtype,
+        if index:
+            offload_index = {
+                p[len(start_prefix) :]: {
+                    "safetensors_file": index[p]["safetensors_file"],
+                    "weight_name": p,
+                    "dtype": str(weight_map[p].dtype).replace("torch.", ""),
+                }
+                for p in weight_map.keys()
+                if p in disk_modules
             }
-            for p in weight_map.keys()
-            if p in disk_modules
-        }
-
-        kwargs["offload_index"] = offload_index
+            kwargs["offload_index"] = offload_index
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
         ) > 0:
@@ -782,34 +779,31 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 new_fname_list = list(fname.split("/"))
                 for i, name in enumerate(new_fname_list):
                     if "--" in name:
-                        new_fname_list[i] += "-lora"
+                        new_fname_list[i] += "-peft"
                 new_fname = "/".join(new_fname_list)
 
-                original_safekeys = []
-                safe_dict = {}
                 if fname not in file_seen:
+                    original_safekeys = []
+                    safe_dict = {}
                     with safe_open(fname, framework="pt") as f:
                         for safe_key in f.keys():
-                            original_safekeys.append(safe_key)
-
-                        for skey in original_safekeys:
-                            safe_tensor = f.get_tensor(skey)
+                            safe_tensor = f.get_tensor(safe_key)
                             metadata = f.metadata()
-                            if any(module in skey for module in target_modules):
-                                suffix_pos = skey.rfind(".")
-                                extended_prefix = prefix + block_id + skey[:suffix_pos]
-                                final_key = extended_prefix + ".base_layer" + skey[suffix_pos:]
+                            if any(module in safe_key for module in target_modules):
+                                suffix_pos = safe_key.rfind(".")
+                                extended_prefix = prefix + block_id + safe_key[:suffix_pos]
+                                final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
                                 lora_dict = {
                                     key: val for key, val in adapters_weights.items() if extended_prefix in key
                                 }
 
-                                # add LoRA keys and values to disk offload if module is offloaded
+                                # add LoRA keys and values to disk offload
                                 for lora_key, lora_val in lora_dict.items():
                                     divide = lora_key.rfind(".")
                                     new_key = lora_key[:divide] + ".default" + lora_key[divide:]
                                     safe_dict[new_key] = lora_val
                             else:
-                                final_key = prefix + block_id + skey
+                                final_key = prefix + block_id + safe_key
                             safe_dict[final_key] = safe_tensor
                         file_seen.add(fname)
 
