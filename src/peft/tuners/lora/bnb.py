@@ -363,7 +363,48 @@ if is_bnb_4bit_available():
             raise NotImplementedError
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
-            raise NotImplementedError
+            """
+            Merge the active adapter weights into the base weights
+
+            Args:
+                safe_merge (`bool`, *optional*):
+                    If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                    before merging the weights. This is useful if you want to check if the merge operation will produce
+                    NaNs. Defaults to `False`.
+                adapter_names (`List[str]`, *optional*):
+                    The list of adapter names that should be merged. If None, all active adapters will be merged.
+                    Defaults to `None`.
+            """
+            adapter_names = check_adapters_to_merge(self, adapter_names)
+            if not adapter_names:
+                return # no adapter to merge
+            
+            for active_adapter in adapter_names:
+                if active_adapter in self.lora_embedding_A.keys():
+                    base_layer = self.get_base_layer()
+                    weight = base_layer.weight
+                    lora_data = self.get_delta_weight(active_adapter)
+                    kwargs = weight.__dict__
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the copy operation.
+                        orig_weights = weight.data.clone()
+
+                        w_data = bnb.functional.dequantize_4bit(orig_weights, weight.quant_state) + lora_data
+                        if not torch.isfinite(w_data).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken."
+                            )
+                        self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                            weight.device
+                        )
+                    else:
+                        w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                        self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad = False, **kwargs).to(
+                            weight.device
+                        )
+                    self.merged_adapters.append(active_adapter)
+
 
         def unmerge(self) -> None:
             raise NotImplementedError
@@ -374,7 +415,7 @@ if is_bnb_4bit_available():
                     self.lora_embedding_B[adapter].weight @ self.lora_embedding_A[adapter].weight,
                     False,
                 )
-                * self.scaling[adapter] # Q: Use False or True? True is used in Linear's get_delta_weight method under .layer
+                * self.scaling[adapter] # TODO: Use False or True? True is used in Linear's get_delta_weight method under .layer
             )
 
         def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
