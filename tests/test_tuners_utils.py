@@ -302,7 +302,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         new_config = _maybe_include_all_linear_layers(config, model)
         if isinstance(expected_target_modules, list):
             # assert that expected and actual target_modules have the same items
-            self.assertCountEqual(new_config.target_modules, expected_target_modules)
+            assert set(new_config.target_modules) == set(expected_target_modules)
         else:
             assert new_config.target_modules == expected_target_modules
 
