@@ -18,20 +18,8 @@
   sections:
   - local: task_guides/prompt_based_methods
     title: Prompt-based methods
-  - title: LoRA
-    sections:
-    - local: task_guides/image_classification_lora
-      title: Image classification
-    - local: task_guides/semantic_segmentation_lora
-      title: Semantic segmentation
-    - local: task_guides/token-classification-lora
-      title: Token classification
-    - local: task_guides/semantic-similarity-lora
-      title: Semantic similarity
-    - local: task_guides/int8-asr
-      title: int8 training for automatic speech recognition
-    - local: task_guides/dreambooth_lora
-      title: DreamBooth
+  - local: task_guides/lora_based_methods
+    title: LoRA methods
 
 - title: Developer guides
   sections:
