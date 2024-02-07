@@ -130,13 +130,15 @@ model = PeftModel.from_pretrained(base_model, peft_model_id, adapter_name="sft")
 Then load a different adapter and merge it with the first one:
 
 ```python
+weighted_adapter_name = "sft-dpo"
 model.load_adapter("alignment-handbook/zephyr-7b-dpo-lora", adapter_name="dpo")
 model.add_weighted_adapter(
     adapters=["sft", "dpo"],
     weights=[0.7, 0.3],
-    adapter_name="sft-dpo",
+    adapter_name=weighted_adapter_name,
     combination_type="linear"
 )
+model.set_adapter(weighted_adapter_name)
 ```
 
 <Tip>
