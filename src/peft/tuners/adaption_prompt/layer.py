@@ -87,7 +87,7 @@ class AdaptedAttention(nn.Module):
         # (bsz, num_heads, adapter_len, head_dim)
 
         adapter_k = (
-            key.view(1, self.adapter_len, self.model.num_heads, (self.model.head_dim // factor))
+            key.view(1, self.adapter_len, (self.model.num_heads// factor), self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
