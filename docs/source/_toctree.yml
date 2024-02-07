@@ -18,20 +18,8 @@
   sections:
   - local: task_guides/prompt_based_methods
     title: Prompt-based methods
-  - title: LoRA
-    sections:
-    - local: task_guides/image_classification_lora
-      title: Image classification
-    - local: task_guides/semantic_segmentation_lora
-      title: Semantic segmentation
-    - local: task_guides/token-classification-lora
-      title: Token classification
-    - local: task_guides/semantic-similarity-lora
-      title: Semantic similarity
-    - local: task_guides/int8-asr
-      title: int8 training for automatic speech recognition
-    - local: task_guides/dreambooth_lora
-      title: DreamBooth
+  - local: task_guides/lora_based_methods
+    title: LoRA methods
   - local: task_guides/ia3
     title: IA3
 
@@ -42,13 +30,13 @@
   - local: developer_guides/lora
     title: LoRA
   - local: developer_guides/custom_models
-    title: Working with custom models
+    title: Custom models
   - local: developer_guides/low_level_api
-    title: PEFT low level API
+    title: Adapter injection
   - local: developer_guides/mixed_models
-    title: Mixing different adapter types
+    title: Mixed adapter types
   - local: developer_guides/contributing
-    title: Contributing to PEFT
+    title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
 
@@ -100,6 +88,8 @@
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
+    - local: package_reference/poly
+      title: Polytropon
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/prefix_tuning

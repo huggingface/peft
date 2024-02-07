@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -124,7 +123,7 @@ class ClassInstantier(OrderedDict):
 
         for model_id in model_list:
             for key, value in self.items():
-                if "{}_kwargs".format(key) in grid_parameters:
+                if f"{key}_kwargs" in grid_parameters:
                     peft_configs = []
                     current_peft_config = value[1].copy()
                     for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
@@ -174,7 +173,7 @@ class PeftCommonTester:
         # check the generated README.md
         filename = os.path.join(tmp_dirname, "README.md")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             readme = f.read()
         metainfo = re.search(r"---\n(.*?)\n---", readme, re.DOTALL).group(1)
         dct = yaml.safe_load(metainfo)
@@ -189,7 +188,7 @@ class PeftCommonTester:
         # check the generated config.json
         filename = os.path.join(tmp_dirname, "adapter_config.json")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             config = json.load(f)
 
         if hasattr(model, "config"):  # custom models don't have a config attribute
@@ -435,9 +434,10 @@ class PeftCommonTester:
             self.assertIs(model_from_pretrained.peft_config["default"], config)
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
+        if config_cls not in (LoraConfig, IA3Config):
             # Merge layers only supported for LoRA and IA³
             return
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -514,8 +514,7 @@ class PeftCommonTester:
         )
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
-            # Merge layers only supported for LoRA and IA³
+        if issubclass(config_cls, PromptLearningConfig):
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -527,10 +526,6 @@ class PeftCommonTester:
         )
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
-
-        if config.peft_type not in ("IA3", "LORA"):
-            with self.assertRaises(AttributeError):
-                model = model.merge_and_unload()
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
@@ -636,6 +631,31 @@ class PeftCommonTester:
 
         self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
 
+    def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
+            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        model.eval()
+        torch.manual_seed(0)
+        model.merge_adapter()
+        logits_0 = model(**self.prepare_inputs_for_testing())[0]
+
+        # merging again should not change anything
+        # also check warning:
+        with self.assertWarnsRegex(UserWarning, "All adapters are already merged, nothing to do"):
+            model.merge_adapter()
+        logits_1 = model(**self.prepare_inputs_for_testing())[0]
+
+        self.assertTrue(torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6))
+
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -650,8 +670,22 @@ class PeftCommonTester:
         # check if `generate` works
         _ = model.generate(**inputs)
 
-        with self.assertRaises(TypeError):
-            # check if `generate` raises an error if no positional arguments are passed
+    def _test_generate_pos_args(self, model_id, config_cls, config_kwargs, raises_err: bool):
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        inputs = self.prepare_inputs_for_testing()
+        if raises_err:
+            with self.assertRaises(TypeError):
+                # check if `generate` raises an error if positional arguments are passed
+                _ = model.generate(inputs["input_ids"])
+        else:
+            # check if `generate` works if positional arguments are passed
             _ = model.generate(inputs["input_ids"])
 
     def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
@@ -672,10 +706,6 @@ class PeftCommonTester:
         # check if `generate` works
         _ = model.generate(input_ids=input_ids, attention_mask=attention_mask)
 
-        with self.assertRaises(TypeError):
-            # check if `generate` raises an error if no positional arguments are passed
-            _ = model.generate(input_ids, attention_mask=attention_mask)
-
     def _test_prefix_tuning_half_prec_conversion(self, model_id, config_cls, config_kwargs):
         if config_cls not in (PrefixTuningConfig,):
             return
@@ -692,8 +722,11 @@ class PeftCommonTester:
         self.assertEqual(model.base_model_torch_dtype, torch.float16)
 
     def _test_training(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (IA3Config, LoraConfig):
+        if issubclass(config_cls, PromptLearningConfig):
             return
+        if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("AdaLora with RoBERTa does not work correctly")
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -709,7 +742,7 @@ class PeftCommonTester:
         output = model(**inputs)[0]
         loss = output.sum()
         loss.backward()
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        parameter_prefix = model.prefix
         for n, param in model.named_parameters():
             if (parameter_prefix in n) or ("modules_to_save" in n):
                 self.assertIsNotNone(param.grad)
@@ -717,8 +750,10 @@ class PeftCommonTester:
                 self.assertIsNone(param.grad)
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
-            return
+        if (config_cls == PrefixTuningConfig) and ("deberta" in model_id.lower()):
+            # TODO: raises an error:
+            # TypeError: DebertaModel.forward() got an unexpected keyword argument 'past_key_values'
+            self.skipTest("DeBERTa with PrefixTuning does not work correctly")
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -807,8 +842,11 @@ class PeftCommonTester:
         self.assertLess(nb_trainable, nb_trainable_all)
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
+        if issubclass(config_cls, PromptLearningConfig):
             return
+        if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("AdaLora with RoBERTa does not work correctly")
 
         model = self.transformers_class.from_pretrained(model_id)
 
