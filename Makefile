@@ -1,6 +1,6 @@
 .PHONY: quality style test docs
 
-check_dirs := .
+check_dirs := src tests examples docs scripts docker
 
 # Check that source code meets quality standards
 
