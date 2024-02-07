@@ -20,6 +20,8 @@
     title: Prompt-based methods
   - local: task_guides/lora_based_methods
     title: LoRA methods
+  - local: task_guides/ia3
+    title: IA3
 
 - title: Developer guides
   sections:
