@@ -114,7 +114,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             model = get_peft_model(model, config)
 
         expected_call = call(model_id, trust_remote_code=True, foo="bar")
-        self.assertEqual(mock.call_args, expected_call)
+        assert mock.call_args == expected_call
 
     def test_prompt_tuning_config_invalid_args(self):
         # Raise an error when tokenizer_kwargs is used with prompt_tuning_init!='TEXT', because this argument has no
