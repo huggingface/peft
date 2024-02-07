@@ -33,7 +33,8 @@ from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
-
+from peft.utils import INCLUDE_LAYER_NORMS_SHORTHAND
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 
 logger = logging.getLogger(__name__)
 
@@ -650,7 +651,6 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
             module_dict["unmatched"].append(key)
     return module_dict
 
-
 def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
     """
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
@@ -686,6 +686,37 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     peft_config.target_modules = linear_module_names
     return peft_config
 
+
+def _maybe_include_lm_layernorm_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
+    """
+    Helper function to update `target_modules` to all layernorm layers if provided as 'all-layernorm'.
+    """
+
+    # if `target_modules` is a string, convert to lower case and check if it matches "all-layernorm"
+    if not (
+        isinstance(peft_config.target_modules, str)
+        and peft_config.target_modules.lower() == INCLUDE_LAYER_NORMS_SHORTHAND
+    ):
+        return peft_config
+
+    from transformers import PreTrainedModel
+    if not isinstance(model, PreTrainedModel):
+        raise ValueError(
+            f"Only instances of PreTrainedModel support `target_modules={INCLUDE_LAYER_NORMS_SHORTHAND!r}`"
+        )
+
+    # exclude nn.LayerNorm in ViTs
+    layernorm_classes = ALL_LAYERNORM_LAYERS[1:]
+
+    layernorm_module_names = set()
+    for name, module in model.named_modules():
+        # match with all LM layernorm classes.
+        if isinstance(module, layernorm_classes):
+            names = name.rsplit(".", 1)[-1]  # get the base name
+            layernorm_module_names.add(names)
+
+    peft_config.target_modules = layernorm_module_names
+    return peft_config
 
 def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
     """

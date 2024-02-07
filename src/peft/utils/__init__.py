@@ -32,6 +32,7 @@ from .other import (
     WEIGHTS_NAME,
     SAFETENSORS_WEIGHTS_NAME,
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
+    INCLUDE_LAYER_NORMS_SHORTHAND,
     _set_trainable,
     bloom_model_postprocess_past_key_value,
     prepare_model_for_kbit_training,
