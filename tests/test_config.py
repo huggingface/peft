@@ -31,6 +31,8 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     PeftConfig,
+    PeftType,
+    PolyConfig,
     PrefixTuningConfig,
     PromptEncoder,
     PromptEncoderConfig,
@@ -51,6 +53,7 @@ ALL_CONFIG_CLASSES = (
     PromptEncoderConfig,
     PromptTuningConfig,
     OFTConfig,
+    PolyConfig,
 )
 
 
@@ -74,6 +77,18 @@ class PeftConfigTester(unittest.TestCase):
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_task_type(self, config_class):
         config_class(task_type="test")
+
+    def test_from_peft_type(self):
+        r"""
+        Test if the config is correctly loaded using:
+        - from_peft_type
+        """
+        from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        for peft_type in PeftType:
+            expected_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+            config = PeftConfig.from_peft_type(peft_type=peft_type)
+            assert type(config) is expected_cls
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_pretrained(self, config_class):

@@ -16,8 +16,10 @@
 from __future__ import annotations
 
 import importlib
+import os
 from typing import Optional
 
+from huggingface_hub import file_exists
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -25,6 +27,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
+    AutoTokenizer,
 )
 
 from .config import PeftConfig
@@ -38,6 +41,7 @@ from .peft_model import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
 )
+from .utils.constants import TOKENIZER_CONFIG_NAME
 
 
 class _BaseAutoPeftModel:
@@ -99,6 +103,26 @@ class _BaseAutoPeftModel:
             )
 
         base_model = target_class.from_pretrained(base_model_path, **kwargs)
+
+        tokenizer_exists = False
+        if os.path.exists(os.path.join(pretrained_model_name_or_path, TOKENIZER_CONFIG_NAME)):
+            tokenizer_exists = True
+        else:
+            token = kwargs.get("token", None)
+            if token is None:
+                token = kwargs.get("use_auth_token", None)
+
+            tokenizer_exists = file_exists(
+                repo_id=pretrained_model_name_or_path,
+                filename=TOKENIZER_CONFIG_NAME,
+                revision=kwargs.get("revision", None),
+                repo_type=kwargs.get("repo_type", None),
+                token=token,
+            )
+
+        if tokenizer_exists:
+            tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
+            base_model.resize_token_embeddings(len(tokenizer))
 
         return cls._target_peft_class.from_pretrained(
             base_model,

@@ -266,7 +266,7 @@ class AdaLoraModel(LoraModel):
                 rank_idx = rank_idx.view(-1)
                 rank = rank_idx.sum().item()
             else:
-                raise ValueError("Unexcepted type of rank_idx")
+                raise ValueError("Unexpected type of rank_idx")
             key = ".".join(name.split(".")[0:-2]) if adapter_name in name else ".".join(name.split(".")[0:-1])
             _, target, _ = _get_submodules(self.model, key)
             lora_E_weights = target.lora_E[adapter_name][rank_idx]
@@ -305,6 +305,26 @@ class AdaLoraModel(LoraModel):
         return state_dict
 
     def update_and_allocate(self, global_step):
+        """
+        This method updates Adalora budget and mask.
+
+        This should be called in every training step after `loss.backward()` and before `zero_grad()`.
+
+        `tinit`, `tfinal` and `deltaT` are handled with in the method.
+
+        Args:
+            global_step (`int`): The current training step, it is used to calculate adalora budget.
+
+        Example:
+
+        ```python
+        >>> loss = model(**input).loss
+        >>> loss.backward()
+        >>> optimizer.step()
+        >>> model.base_model.update_and_allocate(i_step)
+        >>> optimizer.zero_grad()
+        ```
+        """
         lora_config = self.peft_config[self.trainable_adapter_name]
         # Update the importance score and allocate the budget
         if global_step < lora_config.total_step - lora_config.tfinal:
