@@ -744,14 +744,10 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
         # Implementation follows this:
         # https://github.com/Baijiong-Lin/LoRA-Torch/blob/4bfed6820b64fcf47064c30f30606a190a4f0d2e/loratorch/layers.py#L73-L79
@@ -795,7 +791,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                     )
                     del base_layer.out_proj.get_base_layer().weight
                     base_layer.out_proj.get_base_layer().weight = weight_merged
-                    # self.get_base_layer().out_proj.merge(adapter_names=[active_adapter])
+                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
