@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -72,6 +71,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     Directly copied from:
     https://github.com/huggingface/peft/blob/main/examples/int8_training/peft_bnb_whisper_large_v2_training.ipynb
     """
+
     processor: Any
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
@@ -727,6 +727,74 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
 
+    @pytest.mark.single_gpu_tests
+    def test_4bit_non_default_adapter_name(self):
+        # See PR 1294
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_4bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_4bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
+    @pytest.mark.single_gpu_tests
+    def test_8bit_non_default_adapter_name(self):
+        # See PR 1294
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_8bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            device_map="auto",
+            load_in_8bit=True,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
+
 
 @require_torch_gpu
 @require_auto_gptq
@@ -941,6 +1009,41 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.single_gpu_tests
+    def test_non_default_adapter_name(self):
+        # See issue 1346
+        config = LoraConfig(
+            r=16,
+            target_modules=["q_proj", "v_proj"],
+            task_type="CAUSAL_LM",
+        )
+
+        # default adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config)
+        n_trainable_default, n_total_default = model.get_nb_trainable_parameters()
+
+        # other adapter name
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            quantization_config=self.quantization_config,
+        )
+        model = prepare_model_for_kbit_training(model)
+        model = get_peft_model(model, config, adapter_name="other")
+        n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
+
+        self.assertGreater(n_trainable_other, 0)  # sanity check
+        self.assertEqual(n_trainable_default, n_trainable_other)
+        self.assertEqual(n_total_default, n_total_other)
 
 
 @require_torch_gpu
@@ -1196,3 +1299,82 @@ class MultiprocessTester(unittest.TestCase):
         cmd = ["python", script_path]
         with patch_environment(omp_num_threads=1):
             run_command(cmd, env=os.environ.copy())
+
+
+@require_torch_gpu
+class MixedPrecisionTests(unittest.TestCase):
+    def setUp(self):
+        self.causal_lm_model_id = "facebook/opt-350m"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        self.config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            task_type="CAUSAL_LM",
+        )
+
+        data = load_dataset("ybelkada/english_quotes_copy")
+        self.data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
+    @pytest.mark.single_gpu_tests
+    def test_model_loaded_in_float16_raises(self):
+        # This test shows the issue with loading the model in fp16 and then trying to use it with mixed precision
+        # training, which should not use fp16. If this is ever automated in PEFT, this test should fail. In that case,
+        # remove this test, adjust the next one, and remove the entry about FP16 usage from troubleshooting.md.
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            msg = "Attempting to unscale FP16 gradients."
+            with self.assertRaisesRegex(ValueError, msg):
+                trainer.train()
+
+    @pytest.mark.single_gpu_tests
+    def test_model_loaded_in_float16_working(self):
+        # Same test as before but containing the fix to make it work
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config)
+
+        # for now, this is unfortunately necessary to avoid the error:
+        # ValueError: Attempting to unscale FP16 gradients.
+        for param in model.parameters():
+            if param.requires_grad:
+                param.data = param.data.float()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,
+                    max_steps=3,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.train()

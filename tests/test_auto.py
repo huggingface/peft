@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -46,6 +45,21 @@ class PeftAutoModelTester(unittest.TestCase):
 
             model = AutoPeftModelForCausalLM.from_pretrained(model_id)
             self.assertTrue(isinstance(model, PeftModelForCausalLM))
+
+        # check if kwargs are passed correctly
+        model = AutoPeftModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16)
+        self.assertTrue(isinstance(model, PeftModelForCausalLM))
+        self.assertTrue(model.base_model.lm_head.weight.dtype == torch.bfloat16)
+
+        adapter_name = "default"
+        is_trainable = False
+        # This should work
+        _ = AutoPeftModelForCausalLM.from_pretrained(model_id, adapter_name, is_trainable, torch_dtype=torch.bfloat16)
+
+    def test_peft_causal_lm_extended_vocab(self):
+        model_id = "peft-internal-testing/tiny-random-OPTForCausalLM-extended-vocab"
+        model = AutoPeftModelForCausalLM.from_pretrained(model_id)
+        self.assertTrue(isinstance(model, PeftModelForCausalLM))
 
         # check if kwargs are passed correctly
         model = AutoPeftModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.bfloat16)

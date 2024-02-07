@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,7 +14,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -45,6 +44,8 @@ from .tuners import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     OFTModel,
+    PolyConfig,
+    PolyModel,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
@@ -56,7 +57,7 @@ if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
 
-MODEL_TYPE_TO_PEFT_MODEL_MAPPING: Dict[str, PeftModel] = {
+MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, PeftModel] = {
     "SEQ_CLS": PeftModelForSequenceClassification,
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
@@ -65,7 +66,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING: Dict[str, PeftModel] = {
     "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
 }
 
-PEFT_TYPE_TO_CONFIG_MAPPING: Dict[str, PeftConfig] = {
+PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
     "ADAPTION_PROMPT": AdaptionPromptConfig,
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
@@ -77,6 +78,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: Dict[str, PeftConfig] = {
     "IA3": IA3Config,
     "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
     "OFT": OFTConfig,
+    "POLY": PolyConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {
@@ -86,10 +88,11 @@ PEFT_TYPE_TO_TUNER_MAPPING = {
     "ADALORA": AdaLoraModel,
     "IA3": IA3Model,
     "OFT": OFTModel,
+    "POLY": PolyModel,
 }
 
 
-def get_peft_config(config_dict: Dict[str, Any]) -> PeftConfig:
+def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
     """
     Returns a Peft config object from a dictionary.
 

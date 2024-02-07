@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -52,6 +51,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
+
     transformers_class = AutoModelForCausalLM
 
     def prepare_inputs_for_testing(self):
@@ -194,6 +194,11 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
+        # positional args are supported for PeftModelForCausalLM
+        self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=False)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):

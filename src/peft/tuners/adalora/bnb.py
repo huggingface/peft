@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -41,6 +40,7 @@ if is_bnb_available():
             # Freezing the pre-trained weight matrix
             self.get_base_layer().weight.requires_grad = False
 
+            self._active_adapter = adapter_name
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -98,6 +98,7 @@ if is_bnb_4bit_available():
             # Freezing the pre-trained weight matrix
             self.get_base_layer().weight.requires_grad = False
 
+            self._active_adapter = adapter_name
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:

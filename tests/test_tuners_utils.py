@@ -19,22 +19,23 @@ from copy import deepcopy
 
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
+from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
 from peft import IA3Config, LoHaConfig, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
-    INCLUDE_LINEAR_LAYERS_SHORTHAND,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
 )
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu
 
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
 # tests for correct behaviour with different config kwargs for BaseTuners (Ex: feedforward for IA3, etc) and
-# tests for utlity function to include all linear layers
+# tests for utility function to include all linear layers
 
 REGEX_TEST_CASES = [
     # tuple of
@@ -65,14 +66,16 @@ REGEX_TEST_CASES = [
     ("foo.bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [1], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [0, 1, 2], ["bar"], True),
-    # TODO: Unclear what expected behaviour is when layers_pattern is an empty list.
-    # Currently, an empty layers_pattern leads to all layer indexes being matched,
-    # which means layers_to_transform is ignored.
-    ("foo.bar.1.baz", ["baz"], [1], [], True),
-    # TODO: Below test currently fails, again because of empty layers_pattern
-    # layers_to_transform is 0, but layers_pattern is empty, so all layer indexes are matched
-    # ("foo.bar.1.baz", ["baz"], [0], [], False),
-    ("foo.bar.1.baz", ["baz"], [1], ["ar"], True),
+    # empty layers_to_transform
+    ("foo.bar.7.baz", ["baz"], [], ["bar"], True),
+    ("foo.bar.7.baz", ["baz"], None, ["bar"], True),
+    # empty layers_pattern
+    ("foo.whatever.1.baz", ["baz"], [1], [], True),
+    ("foo.whatever.1.baz", ["baz"], [0], [], False),
+    ("foo.whatever.1.baz", ["baz"], [1], "", True),
+    ("foo.whatever.1.baz", ["baz"], [0], "", False),
+    ("foo.whatever.1.baz", ["baz"], [1], None, True),
+    ("foo.whatever.1.baz", ["baz"], [0], None, False),
     # some realistic examples: transformers model
     ("transformer.h.1.attn.attention.q_proj.foo", ["q_proj"], None, [], False),
     ("transformer.h.1.attn.attention.q_proj", [], None, [], False),
@@ -312,3 +315,59 @@ class PeftCustomKwargsTester(unittest.TestCase):
             "Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
+
+
+class MLP(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+
+class TestTargetedModuleNames(unittest.TestCase):
+    """Check that the attribute targeted_module_names is correctly set.
+
+    This checks LoRA and IA³, but this should be sufficient, testing all other tuners is not necessary.
+    """
+
+    def test_one_targeted_module_regex(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules="lin0"))
+        self.assertEqual(model.targeted_module_names, ["lin0"])
+
+    def test_two_targeted_module_regex(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules="lin.*"))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_one_targeted_module_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
+        self.assertEqual(model.targeted_module_names, ["lin0"])
+
+    def test_two_targeted_module_list(self):
+        model = MLP()
+        model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"]))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_ia3_targeted_module_regex(self):
+        model = MLP()
+        model = get_peft_model(model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*"))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_ia3_targeted_module_list(self):
+        model = MLP()
+        model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=["lin0", "lin1"]))
+        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+
+    def test_realistic_example(self):
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
+        config = LoraConfig(task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        expected = [
+            f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
+        ]
+        self.assertEqual(model.targeted_module_names, expected)

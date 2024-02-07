@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +18,7 @@ import re
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -28,7 +27,7 @@ from torch import nn
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
-from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -103,7 +102,7 @@ class BaseTuner(nn.Module, ABC):
         A private method to create and replace the target module with the adapter module.
     - **_check_target_module_exists**:
         A private helper method to check if the passed module's key name matches any of the target modules in the
-        adatper_config.
+        adapter_config.
 
     The easiest is to check what is done in the `peft.tuners.lora.LoraModel` class.
 
@@ -118,14 +117,18 @@ class BaseTuner(nn.Module, ABC):
             dictionary with a key `adapter_name` and a value of that peft config.
         config (`dict[str, Any]`):
             The model configuration object, it should be a dictionary of `str` to `Any` objects.
+        targeted_module_names (`list[str]`):
+            The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
+            double-check that the `config.target_modules` where specified correctly.
     """
 
     def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
         super().__init__()
 
         self.model = model
+        self.targeted_module_names: list[str] = []
 
-        # For advanced developpers, if you want to attach multiple adapters to your
+        # For advanced developers, if you want to attach multiple adapters to your
         # model, just add a `peft_config` dict attribute to your model.
         if not hasattr(self, "peft_config"):
             self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
@@ -199,7 +202,7 @@ class BaseTuner(nn.Module, ABC):
         current_key: str,
     ) -> None:
         r"""
-        Inplace replacement of the target module with the adapter layer. This method needs to be overriden by all the
+        Inplace replacement of the target module with the adapter layer. This method needs to be overridden by all the
         tuner classes.
 
         Check `peft.tuners.lora.LoraModel._create_and_replace` for an example.
@@ -224,7 +227,7 @@ class BaseTuner(nn.Module, ABC):
     def _mark_only_adapters_as_trainable(self, model: nn.Module):
         r"""
         A helper method to mark only the adapter layers as trainable (i.e. module.requires_grad = False) This needs to
-        be overriden for all tuner classes to match the correct key names.
+        be overridden for all tuner classes to match the correct key names.
 
         Check `peft.tuners.lora.LoraModel._mark_only_adapters_as_trainable` for an example.
         """
@@ -293,6 +296,7 @@ class BaseTuner(nn.Module, ABC):
             if not self._check_target_module_exists(peft_config, key):
                 continue
 
+            self.targeted_module_names.append(key)
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
@@ -347,7 +351,7 @@ class BaseTuner(nn.Module, ABC):
                 with onload_layer(module):
                     module.unmerge()
 
-    def _unloading_checks(self, adapter_names: Optional[List[str]]):
+    def _unloading_checks(self, adapter_names: Optional[list[str]]):
         adapters_to_consider = adapter_names or self.active_adapters
         is_modules_to_save_available = any(
             self.peft_config[adapter].modules_to_save for adapter in adapters_to_consider
@@ -361,7 +365,7 @@ class BaseTunerLayer(ABC):
     A tuner layer mixin that provides the common methods and attributes for all tuners.
 
     Args:
-        is_plugable (`bool`, *optional*):
+        is_pluggable (`bool`, *optional*):
             Whether the adapter layer can be plugged to any pytorch module
         active_adapters (Union[List[`str`], `str`], *optional*):
             The name of the active adapter.
@@ -540,29 +544,40 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
     """
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
+    elif key in config.target_modules:
+        # this module is specified directly in target_modules
+        target_module_found = True
     else:
-        target_module_found = key in config.target_modules or any(
-            key.endswith(f".{target_key}") for target_key in config.target_modules
+        target_module_found = any(key.endswith(f".{target_key}") for target_key in config.target_modules)
+
+        layer_indexes = getattr(config, "layers_to_transform", None)
+        layers_pattern = getattr(config, "layers_pattern", None)
+
+        is_using_layer_indexes = layer_indexes is not None and (
+            len(layer_indexes) != 0 if isinstance(layer_indexes, list) else True
         )
-        is_using_layer_indexes = getattr(config, "layers_to_transform", None) is not None
-        layer_indexing_pattern = getattr(config, "layers_pattern", None)
-
         if is_using_layer_indexes and target_module_found:
-            layers_pattern = COMMON_LAYERS_PATTERN if layer_indexing_pattern is None else layer_indexing_pattern
-            layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+            layer_index = None
+            # TODO: It's still unclear how empty layers_pattern (None, [], or "") should behave
+            # For now, empty layers_pattern means any layer pattern is ok
+            if layers_pattern is None or len(layers_pattern) == 0:
+                layer_index = re.match(r".*\.[^.]*\.(\d+)\.", key)
+            else:
+                layers_pattern = [layers_pattern] if isinstance(layers_pattern, str) else layers_pattern
+                for pattern in layers_pattern:
+                    layer_index = re.match(rf".*\.{pattern}\.(\d+)\.", key)
+                    if layer_index is not None:
+                        break
 
-            for pattern in layers_pattern:
-                layer_index = re.match(f".*.{pattern}\.(\d+)\.*", key)
-                if layer_index is not None:
-                    layer_index = int(layer_index.group(1))
-                    if isinstance(config.layers_to_transform, int):
-                        target_module_found = layer_index == config.layers_to_transform
-                    else:
-                        target_module_found = layer_index in config.layers_to_transform
-
-                    break
+            if layer_index is None:
+                target_module_found = False
+            else:
+                layer_index = int(layer_index.group(1))
+                if isinstance(layer_indexes, int):
+                    target_module_found = layer_index == layer_indexes
                 else:
-                    target_module_found = False
+                    target_module_found = layer_index in layer_indexes
+
     return target_module_found
 
 
@@ -615,3 +630,29 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         linear_module_names -= {last_module_name}
     peft_config.target_modules = linear_module_names
     return peft_config
+
+
+def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
+    """
+    Helper function to check which adapters should be merged.
+
+    Only return those adapters that are not already merged. Give a warning if some or all of the adapters are already
+    merged.
+
+    """
+    if adapter_names is None:
+        adapter_names = module.active_adapters
+
+    if module.merged:
+        merged_adapters = set(module.merged_adapters)
+        adapter_names = [name for name in adapter_names if name not in merged_adapters]
+
+        if adapter_names:
+            warnings.warn(
+                f"Already following adapters were merged {','.join(module.merged_adapters)}. "
+                f"You are now additionally merging {','.join(adapter_names)}."
+            )
+        else:
+            warnings.warn("All adapters are already merged, nothing to do.")
+
+    return adapter_names

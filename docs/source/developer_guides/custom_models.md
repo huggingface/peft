@@ -14,13 +14,13 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# Working with custom models
+# Custom models
 
 Some fine-tuning techniques, such as prompt tuning, are specific to language models. That means in 🤗 PEFT, it is
 assumed a 🤗 Transformers model is being used. However, other fine-tuning techniques - like
 [LoRA](../conceptual_guides/lora) - are not restricted to specific model types.
 
-In this guide, we will see how LoRA can be applied to a multilayer perceptron and a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library.
+In this guide, we will see how LoRA can be applied to a multilayer perceptron, a computer vision model from the [timm](https://huggingface.co/docs/timm/index) library, or a new 🤗 Transformers architecture.
 
 ## Multilayer perceptron
 
@@ -46,7 +46,7 @@ class MLP(nn.Module):
         return self.seq(X)
 ```
 
-This is a straightforward multilayer perceptron with an input layer, a hidden layer, and an output layer. 
+This is a straightforward multilayer perceptron with an input layer, a hidden layer, and an output layer.
 
 <Tip>
 
@@ -130,7 +130,7 @@ those are a major building block of this model, we should apply LoRA to the 2D c
 those layers, let's look at all the layer names:
 
 ```python
-print([(n, type(m)) for n, m in MLP().named_modules()])
+print([(n, type(m)) for n, m in model.named_modules()])
 ```
 
 This will print a very long list, we'll only show the first few:
@@ -222,3 +222,19 @@ If that doesn't help, check the existing modules in your model architecture with
 Additionally, linear layers are common targets to be adapted (e.g. in [QLoRA paper](https://arxiv.org/abs/2305.14314), authors suggest to adapt them as well). Their names will often contain the strings `fc` or `dense`.
 
 If you want to add a new model to PEFT, please create an entry in [constants.py](https://github.com/huggingface/peft/blob/main/src/peft/utils/constants.py) and open a pull request on the [repository](https://github.com/huggingface/peft/pulls). Don't forget to update the [README](https://github.com/huggingface/peft#models-support-matrix) as well.
+
+## Verify parameters and layers
+
+You can verify whether you've correctly applied a PEFT method to your model in a few ways.
+
+* Check the fraction of parameters that are trainable with the [`~PeftModel.print_trainable_parameters`] method. If this number is lower or higher than expected, check the model `repr` by printing the model. This shows the names of all the layer types in the model. Ensure that only the intended target layers are replaced by the adapter layers. For example, if LoRA is applied to `nn.Linear` layers, then you should only see `lora.Linear` layers being used.
+
+```py
+peft_model.print_trainable_parameters()
+```
+
+* Another way you can view the adapted layers is to use the `targeted_module_names` attribute to list the name of each module that was adapted.
+
+```python
+print(peft_model.targeted_module_names)
+```

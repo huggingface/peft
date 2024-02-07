@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,6 +38,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
+
     transformers_class = AutoModelForSeq2SeqLM
 
     def prepare_inputs_for_testing(self):
@@ -103,6 +103,12 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
+
+    # skip non lora models - generate does not work for prefix tuning, prompt tuning
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
+        # positional arguments are not supported for PeftModelForSeq2SeqLM
+        self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=True)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):

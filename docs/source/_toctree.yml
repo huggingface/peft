@@ -10,18 +10,14 @@
 - title: Tutorial
   sections:
   - local: tutorial/peft_model_config
-    title: PEFT configurations and models
+    title: Configurations and models
   - local: tutorial/peft_integrations
-    title: PEFT integrations
+    title: Integrations
 
-- title: Task guides
+- title: PEFT method guides
   sections:
-  - local: task_guides/seq2seq-prefix-tuning
-    title: Prefix tuning for conditional generation
-  - local: task_guides/clm-prompt-tuning
-    title: Prompt tuning for causal language modeling
-  - local: task_guides/ptuning-seq-classification
-    title: P-tuning for sequence classification
+  - local: task_guides/prompt_based_methods
+    title: Prompt-based methods
   - title: LoRA
     sections:
     - local: task_guides/image_classification_lora
@@ -44,13 +40,13 @@
   - local: developer_guides/lora
     title: LoRA
   - local: developer_guides/custom_models
-    title: Working with custom models
+    title: Custom models
   - local: developer_guides/low_level_api
-    title: PEFT low level API
+    title: Adapter injection
   - local: developer_guides/mixed_models
-    title: Mixing different adapter types
+    title: Mixed adapter types
   - local: developer_guides/contributing
-    title: Contributing to PEFT
+    title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
 
@@ -102,6 +98,8 @@
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
+    - local: package_reference/poly
+      title: Polytropon
     - local: package_reference/p_tuning
       title: P-tuning
     - local: package_reference/prefix_tuning

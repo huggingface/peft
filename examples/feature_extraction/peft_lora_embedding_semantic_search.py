@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -42,7 +41,7 @@ logger = get_logger(__name__)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Training a PEFT model for Sematic Search task")
+    parser = argparse.ArgumentParser(description="Training a PEFT model for Semantic Search task")
     parser.add_argument("--dataset_name", type=str, default=None, help="dataset name on HF hub")
     parser.add_argument(
         "--max_length",
@@ -138,12 +137,12 @@ def parse_args():
     parser.add_argument(
         "--sanity_test",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to enable sanity test.",
     )
     parser.add_argument(
         "--use_peft",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to use PEFT.",
     )
     args = parser.parse_args()
 
@@ -170,7 +169,7 @@ def load_model_hook(models, input_dir):
 
 class AutoModelForSentenceEmbedding(nn.Module):
     def __init__(self, model_name, tokenizer, normalize=True):
-        super(AutoModelForSentenceEmbedding, self).__init__()
+        super().__init__()
 
         self.model = AutoModel.from_pretrained(model_name)  # , load_in_8bit=True, device_map={"":0})
         self.normalize = normalize
