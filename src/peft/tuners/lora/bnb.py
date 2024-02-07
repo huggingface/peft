@@ -377,7 +377,16 @@ if is_bnb_4bit_available():
             )
 
         def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError
+            base_layer = self.get_base_layer()
+            return F.embedding(
+            input,
+            weight,
+            padding_idx=base_layer.padding_idx,
+            max_norm=base_layer.max_norm,
+            norm_type=base_layer.norm_type,
+            scale_grad_by_freq=base_layer.scale_grad_by_freq,
+            sparse=base_layer.sparse,
+        )
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
             raise NotImplementedError
