@@ -948,6 +948,29 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self.assertTrue(torch.allclose(output_custom1, output_custom2))
         self.assertTrue(torch.allclose(output_default, output_custom1))
 
+    def test_mha_gradients_set_correctly(self):
+        # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
+        base_model = ModelMha()
+        config = LoraConfig(target_modules=["mha"])
+        model = get_peft_model(base_model, config)
+
+        self.assertFalse(model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad)
+        self.assertFalse(model.base_model.model.mha.base_layer.in_proj_weight.requires_grad)
+
+        # _restore_weights used to ignore the gradient, this checks that it is indeed considered
+        model.base_model.model.mha._restore_weights()
+        self.assertFalse(model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad)
+        self.assertFalse(model.base_model.model.mha.base_layer.in_proj_weight.requires_grad)
+
+        model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad = True
+        model.base_model.model.mha.base_layer.in_proj_weight.requires_grad = True
+        self.assertTrue(model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad)
+        self.assertTrue(model.base_model.model.mha.base_layer.in_proj_weight.requires_grad)
+
+        model.base_model.model.mha._restore_weights()
+        self.assertTrue(model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad)
+        self.assertTrue(model.base_model.model.mha.base_layer.in_proj_weight.requires_grad)
+
 
 class TestMultiRankAdapter(unittest.TestCase):
     """Tests related to multirank LoRA adapters"""
