@@ -250,6 +250,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
 
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```
+        for name, param in model_peft.named_parameters():
+            if ...: # some check on name (ex. if 'lora' in name)
+                param.requires_grad = False
+        ```
+
         Args:
             adapter_name (str): The name of the adapter to set as active
         """
