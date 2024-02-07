@@ -368,7 +368,13 @@ if is_bnb_4bit_available():
             raise NotImplementedError
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
-            raise NotImplementedError
+            return (
+                transpose(
+                    self.lora_embedding_B[adapter].weight @ self.lora_embedding_A[adapter].weight,
+                    False,
+                )
+                * self.scaling[adapter] # Q: Use False or True? True is used in Linear's get_delta_weight method under .layer
+            )
 
         def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError
