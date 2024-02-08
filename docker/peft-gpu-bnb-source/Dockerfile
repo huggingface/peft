@@ -31,7 +31,7 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
@@ -40,7 +40,7 @@ SHELL ["/bin/bash", "-c"]
 
 # Install apt libs
 RUN apt-get update && \
-    apt-get install -y curl git wget && \
+    apt-get install -y curl git wget cmake && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
@@ -57,8 +57,9 @@ RUN source activate peft && \
     optimum \
     auto-gptq && \
     git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && \
-    CUDA_VERSION=121 make cuda12x && \
-    python setup.py develop && \ 
+    cmake -B . -DCOMPUTE_BACKEND=cuda -S . && \
+    cmake --build . && \
+    pip install -e . && \ 
     pip freeze | grep bitsandbytes
 
 RUN echo "source activate peft" >> ~/.profile

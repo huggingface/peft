@@ -15,11 +15,18 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.8.2.dev0"
+VERSION = "0.8.2"
 
 extras = {}
-extras["quality"] = ["black ~= 22.0", "ruff>=0.0.241", "urllib3<=2.0.0"]
-extras["docs_specific"] = ["hf-doc-builder"]
+extras["quality"] = [
+    "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "hf-doc-builder",
+    "ruff~=0.2.1",
+]
+extras["docs_specific"] = [
+    "black",  # doc-builder has an implicit dependency on Black, see huggingface/doc-builder#434
+    "hf-doc-builder",
+]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
 extras["test"] = extras["dev"] + [
     "pytest",
@@ -36,7 +43,7 @@ setup(
     version=VERSION,
     description="Parameter-Efficient Fine-Tuning (PEFT)",
     license_files=["LICENSE"],
-    long_description=open("README.md", "r", encoding="utf-8").read(),
+    long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     keywords="deep learning",
     license="Apache",
@@ -76,7 +83,7 @@ setup(
 
 # Release checklist
 # 1. Change the version in __init__.py and setup.py to the release version, e.g. from "0.6.0.dev0" to "0.6.0"
-# 2. Check if there are any deprecations that need to be addressed for this release by seaching for "# TODO" in the code
+# 2. Check if there are any deprecations that need to be addressed for this release by searching for "# TODO" in the code
 # 3. Commit these changes with the message: "Release: VERSION", create a PR and merge it.
 # 4. Add a tag in git to mark the release: "git tag -a VERSION -m 'Adds tag VERSION for pypi' "
 #    Push the tag to git:
