@@ -79,8 +79,12 @@ class LycorisLayer(BaseTunerLayer):
 
     @property
     @abstractmethod
+<<<<<<< HEAD
     def _available_adapters(self) -> set[str]:
         ...
+=======
+    def _available_adapters(self) -> Set[str]: ...
+>>>>>>> 2d7f5a3 (Run 'make style')
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
