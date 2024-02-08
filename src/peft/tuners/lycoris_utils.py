@@ -79,12 +79,8 @@ class LycorisLayer(BaseTunerLayer):
 
     @property
     @abstractmethod
-<<<<<<< HEAD
     def _available_adapters(self) -> set[str]:
         ...
-=======
-    def _available_adapters(self) -> Set[str]: ...
->>>>>>> 2d7f5a3 (Run 'make style')
 
     def _init_empty_weights(self, cls, *args, **kwargs) -> None:
         # A helper method that allows to initialize the layer of the given class without spending time to initialize the
@@ -99,7 +95,8 @@ class LycorisLayer(BaseTunerLayer):
         self.to_empty(device=final_device)
 
     @abstractmethod
-    def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs): ...
+    def create_adapter_parameters(self, adapter_name: str, r: int, **kwargs):
+        ...
 
     # TODO: refactor LoRA to use the same approach
     @abstractmethod
@@ -107,7 +104,8 @@ class LycorisLayer(BaseTunerLayer):
         """Activations added on top of the base layer output (i.e. after the base layer forward pass)"""
 
     @abstractmethod
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor: ...
+    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
+        ...
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -146,7 +144,8 @@ class LycorisLayer(BaseTunerLayer):
                 self.merged_adapters.append(active_adapter)
 
     @abstractmethod
-    def reset_adapter_parameters(self, adapter_name: str): ...
+    def reset_adapter_parameters(self, adapter_name: str):
+        ...
 
     def set_scale(self, adapter, scale):
         if adapter not in self._available_adapters:
@@ -187,7 +186,8 @@ class LycorisLayer(BaseTunerLayer):
                 self.scaling[active_adapter] /= scale
 
     @abstractmethod
-    def update_layer(self, adapter_name: str, r: int, alpha: float, **kwargs): ...
+    def update_layer(self, adapter_name: str, r: int, alpha: float, **kwargs):
+        ...
 
 
 class LycorisTuner(BaseTuner):
@@ -221,7 +221,8 @@ class LycorisTuner(BaseTuner):
         target_name,
         parent,
         current_key,
-    ): ...
+    ):
+        ...
 
     @classmethod
     def _create_new_module(cls, config: LycorisConfig, adapter_name: str, target: nn.Module, **kwargs) -> LycorisLayer:
