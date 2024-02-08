@@ -72,6 +72,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
     Directly copied from:
     https://github.com/huggingface/peft/blob/main/examples/int8_training/peft_bnb_whisper_large_v2_training.ipynb
     """
+
     processor: Any
 
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
