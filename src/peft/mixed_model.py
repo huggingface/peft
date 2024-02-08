@@ -248,7 +248,7 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
 
         ```py
         >>> for name, param in model_peft.named_parameters():
-        ...     if ...: # some check on name (ex. if 'lora' in name)
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
         ...         param.requires_grad = False
         ```
 
