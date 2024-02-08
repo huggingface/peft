@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -80,6 +79,15 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         )
 
         self.is_target_conv_1d_layer = False
+
+    @property
+    def is_paralle_a(self):
+        # TODO: remove it in PEFT 0.10.0
+        # See https://github.com/huggingface/peft/pull/1439 for more details
+        warnings.warn(
+            "`is_paralle_a` is going to be deprecated in a future release. Please use `is_parallel_a`", FutureWarning
+        )
+        return self.is_parallel_a
 
     def update_layer(
         self,

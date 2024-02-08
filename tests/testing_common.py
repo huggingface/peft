@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -124,7 +123,7 @@ class ClassInstantier(OrderedDict):
 
         for model_id in model_list:
             for key, value in self.items():
-                if "{}_kwargs".format(key) in grid_parameters:
+                if f"{key}_kwargs" in grid_parameters:
                     peft_configs = []
                     current_peft_config = value[1].copy()
                     for current_key, current_value in grid_parameters[f"{key}_kwargs"].items():
@@ -174,7 +173,7 @@ class PeftCommonTester:
         # check the generated README.md
         filename = os.path.join(tmp_dirname, "README.md")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             readme = f.read()
         metainfo = re.search(r"---\n(.*?)\n---", readme, re.DOTALL).group(1)
         dct = yaml.safe_load(metainfo)
@@ -189,7 +188,7 @@ class PeftCommonTester:
         # check the generated config.json
         filename = os.path.join(tmp_dirname, "adapter_config.json")
         self.assertTrue(os.path.exists(filename))
-        with open(filename, "r", encoding="utf-8") as f:
+        with open(filename, encoding="utf-8") as f:
             config = json.load(f)
 
         if hasattr(model, "config"):  # custom models don't have a config attribute
@@ -515,8 +514,7 @@ class PeftCommonTester:
         )
 
     def _test_merge_layers(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
-            # Merge layers only supported for LoRA and IA³
+        if issubclass(config_cls, PromptLearningConfig):
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -528,10 +526,6 @@ class PeftCommonTester:
         )
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
-
-        if config.peft_type not in ("IA3", "LORA"):
-            with self.assertRaises(AttributeError):
-                model = model.merge_and_unload()
 
         dummy_input = self.prepare_inputs_for_testing()
         model.eval()
@@ -728,8 +722,11 @@ class PeftCommonTester:
         self.assertEqual(model.base_model_torch_dtype, torch.float16)
 
     def _test_training(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (IA3Config, LoraConfig):
+        if issubclass(config_cls, PromptLearningConfig):
             return
+        if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("AdaLora with RoBERTa does not work correctly")
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -745,7 +742,7 @@ class PeftCommonTester:
         output = model(**inputs)[0]
         loss = output.sum()
         loss.backward()
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        parameter_prefix = model.prefix
         for n, param in model.named_parameters():
             if (parameter_prefix in n) or ("modules_to_save" in n):
                 self.assertIsNotNone(param.grad)
@@ -753,8 +750,10 @@ class PeftCommonTester:
                 self.assertIsNone(param.grad)
 
     def _test_inference_safetensors(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
-            return
+        if (config_cls == PrefixTuningConfig) and ("deberta" in model_id.lower()):
+            # TODO: raises an error:
+            # TypeError: DebertaModel.forward() got an unexpected keyword argument 'past_key_values'
+            self.skipTest("DeBERTa with PrefixTuning does not work correctly")
 
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -843,8 +842,11 @@ class PeftCommonTester:
         self.assertLess(nb_trainable, nb_trainable_all)
 
     def _test_training_gradient_checkpointing(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
+        if issubclass(config_cls, PromptLearningConfig):
             return
+        if (config_cls == AdaLoraConfig) and ("roberta" in model_id.lower()):
+            # TODO: no gradients on the "dense" layer, other layers work, not sure why
+            self.skipTest("AdaLora with RoBERTa does not work correctly")
 
         model = self.transformers_class.from_pretrained(model_id)
 

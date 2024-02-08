@@ -14,24 +14,24 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# PEFT as a utility library
+# Adapter injection
 
-Let's cover in this section how you can leverage PEFT's low level API to inject trainable adapters into any `torch` module. 
-The development of this API has been motivated by the need for super users to not rely on modeling classes that are exposed in PEFT library and still be able to use adapter methods such as LoRA, IA3 and AdaLoRA.
+With PEFT, you can inject trainable adapters into any `torch` module which allows you to use adapter methods without relying on the modeling classes in PEFT. Currently, PEFT supports injecting [LoRA](../conceptual_guides/adapter#low-rank-adaptation-lora), [AdaLoRA](../conceptual_guides/adapter#adaptive-low-rank-adaptation-adalora), and [IA3](../conceptual_guides/ia3) into models because for these adapters, inplace modification of the model is sufficient for finetuning it.
 
-## Supported tuner types
+Check the table below to see when you should inject adapters.
 
-Currently the supported adapter types are the 'injectable' adapters, meaning adapters where an inplace modification of the model is sufficient to correctly perform the fine tuning. As such, only [LoRA](../conceptual_guides/lora), AdaLoRA and [IA3](../conceptual_guides/ia3) are currently supported in this API.
+| Pros | Cons |
+|---|---|
+| the model is modified inplace, keeping all the original attributes and methods | manually write the `from_pretrained` and `save_pretrained` utility functions from Hugging Face to save and load adapters |
+| works for any `torch` module and modality | doesn't work with any of the utility methods provided by `PeftModel` such as disabling and merging adapters |
 
-## `inject_adapter_in_model` method 
+To perform the adapter injection, use the [`inject_adapter_in_model`] method. This method takes 3 arguments, the PEFT config, the model, and an optional adapter name. You can also attach multiple adapters to the model if you call [`inject_adapter_in_model`] multiple times with different adapter names.
 
-To perform the adapter injection, simply use `inject_adapter_in_model` method that takes 3 arguments, the PEFT config and the model itself and an optional adapter name. You can also attach multiple adapters in the model if you call multiple times `inject_adapter_in_model` with different adapter names.
+For example, to inject LoRA adapters into the `linear` submodule of the `DummyModel` module:
 
-Below is a basic example usage of how to inject LoRA adapters into the submodule `linear` of the module `DummyModel`.
 ```python
 import torch
 from peft import inject_adapter_in_model, LoraConfig
-
 
 class DummyModel(torch.nn.Module):
     def __init__(self):
@@ -62,7 +62,7 @@ dummy_inputs = torch.LongTensor([[0, 1, 2, 3, 4, 5, 6, 7]])
 dummy_outputs = model(dummy_inputs)
 ```
 
-If you print the model, you will notice that the adapters have been correctly injected into the model
+Print the model to see that the adapters have been correctly injected.
 
 ```bash
 DummyModel(
@@ -84,8 +84,8 @@ DummyModel(
   (lm_head): Linear(in_features=10, out_features=10, bias=True)
 )
 ```
-Note that it should be up to users to properly take care of saving the adapters (in case they want to save adapters only), as `model.state_dict()` will return the full state dict of the model.
-In case you want to extract the adapters state dict you can use the `get_peft_model_state_dict` method:
+
+To only save the adapter, use the [`get_peft_model_state_dict`] function:
 
 ```python
 from peft import get_peft_model_state_dict
@@ -94,14 +94,4 @@ peft_state_dict = get_peft_model_state_dict(model)
 print(peft_state_dict)
 ```
 
-## Pros and cons 
-
-When to use this API and when to not use it? Let's discuss in this section the pros and cons 
-
-Pros:
-- The model gets modified in-place, meaning the model will preserve all its original attributes and methods
-- Works for any torch module, and any modality (vision, text, multi-modal)
-
-Cons:
-- You need to manually writing Hugging Face `from_pretrained` and `save_pretrained` utility methods if you want to easily save / load adapters from the Hugging Face Hub.
-- You cannot use any of the utility method provided by `PeftModel` such as disabling adapters, merging adapters, etc.
+Otherwise, `model.state_dict()` returns the full state dict of the model.
