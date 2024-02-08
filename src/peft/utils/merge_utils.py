@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import Literal
+from typing import List, Literal
 
 import torch
 
@@ -141,12 +141,12 @@ def disjoint_merge(task_tensors: torch.Tensor, majority_sign_mask: torch.Tensor)
     return mixed_task_tensors / torch.clamp(num_params_preserved, min=1.0)
 
 
-def task_arthimetic(task_tensors: list[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
+def task_arthimetic(task_tensors: List[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
     """
     Merge the task tensors using `task arthimetic`.
 
     Args:
-        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
+        task_tensors(`List[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
 
     Returns:
@@ -161,7 +161,7 @@ def task_arthimetic(task_tensors: list[torch.Tensor], weights: torch.Tensor) -> 
 
 
 def ties(
-    task_tensors: list[torch.Tensor],
+    task_tensors: List[torch.Tensor],
     weights: torch.Tensor,
     density: float,
     majority_sign_method: Literal["total", "frequency"] = "total",
@@ -170,7 +170,7 @@ def ties(
     Merge the task tensors using `ties`.
 
     Args:
-        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
+        task_tensors(`List[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
         density (`float`):The fraction of values to preserve. Should be in [0,1].
         majority_sign_method (`str`):
@@ -182,22 +182,22 @@ def ties(
     # sparsify
     task_tensors = [prune(tensor, density, method="magnitude") for tensor in task_tensors]
     task_tensors = torch.stack(task_tensors, dim=0)
+    # Elect Sign
+    majority_sign_mask = calculate_majority_sign_mask(task_tensors, method=majority_sign_method)
     # weighted task tensors
     weights = reshape_weight_task_tensors(task_tensors, weights)
     weighted_task_tensors = task_tensors * weights
-    # Elect Sign
-    majority_sign_mask = calculate_majority_sign_mask(weighted_task_tensors, method=majority_sign_method)
     # Disjoint Merge
     mixed_task_tensors = disjoint_merge(weighted_task_tensors, majority_sign_mask)
     return mixed_task_tensors
 
 
-def dare_linear(task_tensors: list[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
+def dare_linear(task_tensors: List[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
     """
     Merge the task tensors using `dare linear`.
 
     Args:
-        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
+        task_tensors(`List[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
         density (`float`):The fraction of values to preserve. Should be in [0,1].
 
@@ -215,7 +215,7 @@ def dare_linear(task_tensors: list[torch.Tensor], weights: torch.Tensor, density
 
 
 def dare_ties(
-    task_tensors: list[torch.Tensor],
+    task_tensors: List[torch.Tensor],
     weights: torch.Tensor,
     density: float,
     majority_sign_method: Literal["total", "frequency"] = "total",
@@ -224,7 +224,7 @@ def dare_ties(
     Merge the task tensors using `dare ties`.
 
     Args:
-        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
+        task_tensors(`List[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
         density (`float`):The fraction of values to preserve. Should be in [0,1].
         majority_sign_method (`str`):
@@ -236,11 +236,11 @@ def dare_ties(
     # sparsify
     task_tensors = [prune(tensor, density, method="random", rescale=True) for tensor in task_tensors]
     task_tensors = torch.stack(task_tensors, dim=0)
+    # Elect Sign
+    majority_sign_mask = calculate_majority_sign_mask(task_tensors, method=majority_sign_method)
     # weighted task tensors
     weights = reshape_weight_task_tensors(task_tensors, weights)
     weighted_task_tensors = task_tensors * weights
-    # Elect Sign
-    majority_sign_mask = calculate_majority_sign_mask(weighted_task_tensors, method=majority_sign_method)
     # Disjoint Merge
     mixed_task_tensors = disjoint_merge(weighted_task_tensors, majority_sign_mask)
     return mixed_task_tensors
