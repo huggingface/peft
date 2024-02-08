@@ -430,7 +430,7 @@ class LoraModel(BaseTuner):
             # adapters ranks may be different, new rank is sum of all ranks
             # be careful, because output adapter rank may be really big if mixing a lot of adapters
             new_rank = sum(adapters_ranks)
-        elif "svd" in combination_type:
+        elif combination_type.endswith("svd"):
             # new rank is the max of all ranks of the adapters if not provided
             new_rank = svd_rank or max(adapters_ranks)
         else:
