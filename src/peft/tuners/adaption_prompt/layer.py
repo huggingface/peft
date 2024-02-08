@@ -84,34 +84,28 @@ class AdaptedAttention(nn.Module):
         else:
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
-        # (bsz, num_heads, adapter_len, head_dim)
 
+        # (bsz, num_key_value_heads, adapter_len, head_dim)
         adapter_k = (
-            key.view(1, self.adapter_len, (self.model.num_heads// factor), self.model.head_dim)
+            key.view(1, self.adapter_len, (self.model.num_heads // factor), self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
-        # (bsz, num_heads, adapter_len, head_dim)
         adapter_v = (
-            value.view(1, self.adapter_len, (self.model.num_heads// factor), self.model.head_dim)
+            value.view(1, self.adapter_len, (self.model.num_heads // factor), self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
-
+        # Below is taken from https://github.com/huggingface/transformers/blob/e547458c43dfdbbb8f6a7757237e234c44e20a8f/src/transformers/models/mistral/modeling_mistral.py#L181
+        # (bsz, num_heads, adapter_len, head_dim)
+        adapter_k = torch.repeat_interleave(adapter_k, repeats=factor, dim=1)
+        adapter_v = torch.repeat_interleave(adapter_v, repeats=factor, dim=1)
         # Recompute query states.
         compute_query_states = TRANSFORMERS_MODEL_CONFIG[self.model_type].compute_query_states
         # (bsz, num_heads, q_len, head_dim)
         query_states = compute_query_states(model=self.model, **kwargs)
 
         previous_dtype = query_states.dtype
-
-        # Reshape and average the extra tensors
-        query_states_reshaped = query_states.reshape(
-            bsz, self.model.num_heads, -1, (self.model.head_dim // factor), factor
-        )
-
-        # Take the mean along the last dimension to get [bsz, 32, X, 32]
-        query_states = query_states_reshaped.mean(dim=-1)
 
         # (bsz, num_heads, q_len, adapter_len)
         scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
@@ -123,9 +117,6 @@ class AdaptedAttention(nn.Module):
         # (bsz, q_len, num_heads * head_dim)
         adapter_output = torch.matmul(scores, adapter_v).transpose(1, 2).reshape(bsz, q_len, -1)
 
-        adapter_output = torch.repeat_interleave(
-            adapter_output, repeats=factor, dim=2
-        )  # https://github.com/huggingface/transformers/blob/e547458c43dfdbbb8f6a7757237e234c44e20a8f/src/transformers/models/mistral/modeling_mistral.py#L181
         # (bsz, q_len, hidden_size)
         if o_proj_layer is not None:
             adapter_output = getattr(self.model, o_proj_layer)(adapter_output)
