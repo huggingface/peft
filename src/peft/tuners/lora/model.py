@@ -402,9 +402,8 @@ class LoraModel(BaseTuner):
                 one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
                 documentation. Defaults to None.
             density (`float`, *optional*):
-                Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned.
-                Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`,
-                `dare_ties_svd`, `dare_linear_svd`]
+                Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned. Should be used
+                with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`, `dare_ties_svd`, `dare_linear_svd`]
             majority_sign_method (`str`):
                 The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
                 Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_ties_svd`]
