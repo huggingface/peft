@@ -1066,7 +1066,7 @@ class OffloadSaveTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained compatibility
+        memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
 
         # offload around half of all transformer modules to the disk
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
@@ -1088,7 +1088,6 @@ class OffloadSaveTests(unittest.TestCase):
             self.assertTrue(len({p.device for p in offloaded_model.parameters()}) == 2)  # 'cpu' and 'meta'
             offloaded_lora_model = PeftModel.from_pretrained(offloaded_model, tmp_dir, max_memory=memory_limits).eval()
             offloaded_output = offloaded_lora_model(input_tokens)[0]
-
         self.assertTrue(torch.allclose(output, offloaded_output, atol=1e-5))
 
     @pytest.mark.single_gpu_tests

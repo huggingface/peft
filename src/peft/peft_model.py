@@ -757,63 +757,63 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             prefix = "base_model.model."
             # rename offload index weight and model names
             target_modules = self.peft_config["default"].target_modules
-            keys = list(offload_index.keys())
-            block_id = keys[0].split(".")[0] + "."  # for writing safetensors key
+            if offload_index:
+                keys = list(offload_index.keys())
+                block_id = keys[0].split(".")[0] + "."  # for writing safetensors key
 
-            for key in keys:
-                if any(module in key for module in target_modules):
-                    suffix_pos = key.rfind(".")
-                    new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
-                else:
-                    new_key = prefix + key
-                offload_index[key]["weight_name"] = new_key
-                offload_index[new_key] = offload_index[key]
-                del offload_index[key]
+                for key in keys:
+                    if any(module in key for module in target_modules):
+                        suffix_pos = key.rfind(".")
+                        new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
+                    else:
+                        new_key = prefix + key
+                    offload_index[key]["weight_name"] = new_key
+                    offload_index[new_key] = offload_index[key]
+                    del offload_index[key]
 
-            # rename safetensors for dispatch
-            file_seen = set()
-            for new_key in list(offload_index.keys()):
-                fname = offload_index[new_key]["safetensors_file"]
+                # rename safetensors for dispatch
+                file_seen = set()
+                for new_key in list(offload_index.keys()):
+                    fname = offload_index[new_key]["safetensors_file"]
 
-                # make a new file name
-                new_fname_list = list(fname.split("/"))
-                for i, name in enumerate(new_fname_list):
-                    if "--" in name:
-                        new_fname_list[i] += "-peft"
-                new_fname = "/".join(new_fname_list)
+                    # make a new file name
+                    new_fname_list = list(fname.split("/"))
+                    for i, name in enumerate(new_fname_list):
+                        if "--" in name:
+                            new_fname_list[i] += "-peft"
+                    new_fname = "/".join(new_fname_list)
 
-                if fname not in file_seen:
-                    original_safekeys = []
-                    safe_dict = {}
-                    with safe_open(fname, framework="pt") as f:
-                        for safe_key in f.keys():
-                            safe_tensor = f.get_tensor(safe_key)
-                            metadata = f.metadata()
-                            if any(module in safe_key for module in target_modules):
-                                suffix_pos = safe_key.rfind(".")
-                                extended_prefix = prefix + block_id + safe_key[:suffix_pos]
-                                final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
-                                lora_dict = {
-                                    key: val for key, val in adapters_weights.items() if extended_prefix in key
-                                }
+                    if fname not in file_seen:
+                        safe_dict = {}
+                        with safe_open(fname, framework="pt") as f:
+                            for safe_key in f.keys():
+                                safe_tensor = f.get_tensor(safe_key)
+                                metadata = f.metadata()
+                                if any(module in safe_key for module in target_modules):
+                                    suffix_pos = safe_key.rfind(".")
+                                    extended_prefix = prefix + block_id + safe_key[:suffix_pos]
+                                    final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
+                                    lora_dict = {
+                                        key: val for key, val in adapters_weights.items() if extended_prefix in key
+                                    }
 
-                                # add LoRA keys and values to disk offload
-                                for lora_key, lora_val in lora_dict.items():
-                                    divide = lora_key.rfind(".")
-                                    new_key = lora_key[:divide] + ".default" + lora_key[divide:]
-                                    safe_dict[new_key] = lora_val
-                            else:
-                                final_key = prefix + block_id + safe_key
-                            safe_dict[final_key] = safe_tensor
-                        file_seen.add(fname)
+                                    # add LoRA keys and values to disk offload
+                                    for lora_key, lora_val in lora_dict.items():
+                                        divide = lora_key.rfind(".")
+                                        new_key = lora_key[:divide] + ".default" + lora_key[divide:]
+                                        safe_dict[new_key] = lora_val
+                                else:
+                                    final_key = prefix + block_id + safe_key
+                                safe_dict[final_key] = safe_tensor
+                            file_seen.add(fname)
 
-                    # avoid overwriting original safetensors
-                    for key in safe_dict.keys():
-                        offload_index[key] = {"safetensors_file": new_fname, "weight_name": key}
-                    if not os.path.exists(new_fname):
-                        base_name = "/".join(list(new_fname.split("/"))[:-1])
-                        os.makedirs(base_name)
-                    safe_save_file(safe_dict, new_fname, metadata=metadata)
+                        # avoid overwriting original safetensors
+                        for key in safe_dict.keys():
+                            offload_index[key] = {"safetensors_file": new_fname, "weight_name": key}
+                        if not os.path.exists(new_fname):
+                            base_name = "/".join(list(new_fname.split("/"))[:-1])
+                            os.makedirs(base_name)
+                        safe_save_file(safe_dict, new_fname, metadata=metadata)
 
             dispatch_model_kwargs["offload_index"] = offload_index
 

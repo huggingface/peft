@@ -1,0 +1,207 @@
+{
+  "base_model.model.transformer.h.10.ln_1.weight": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.ln_1.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.attn.c_attn.base_layer.weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      2304
+    ]
+  },
+  "base_model.model.transformer.h.10.attn.c_attn.base_layer.bias": {
+    "dtype": "float32",
+    "shape": [
+      2304
+    ]
+  },
+  "base_model.model.transformer.h.10.attn.c_attn.lora_A.default.weight": {
+    "dtype": "float32",
+    "shape": [
+      8,
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.attn.c_attn.lora_B.default.weight": {
+    "dtype": "float32",
+    "shape": [
+      2304,
+      8
+    ]
+  },
+  "base_model.model.transformer.h.10.attn.c_proj.weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.attn.c_proj.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.ln_2.weight": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.ln_2.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.mlp.c_fc.weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      3072
+    ]
+  },
+  "base_model.model.transformer.h.10.mlp.c_fc.bias": {
+    "dtype": "float32",
+    "shape": [
+      3072
+    ]
+  },
+  "base_model.model.transformer.h.10.mlp.c_proj.weight": {
+    "dtype": "float32",
+    "shape": [
+      3072,
+      768
+    ]
+  },
+  "base_model.model.transformer.h.10.mlp.c_proj.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.ln_1.weight": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.ln_1.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.attn.c_attn.base_layer.weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      2304
+    ]
+  },
+  "base_model.model.transformer.h.11.attn.c_attn.base_layer.bias": {
+    "dtype": "float32",
+    "shape": [
+      2304
+    ]
+  },
+  "base_model.model.transformer.h.11.attn.c_attn.lora_A.default.weight": {
+    "dtype": "float32",
+    "shape": [
+      8,
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.attn.c_attn.lora_B.default.weight": {
+    "dtype": "float32",
+    "shape": [
+      2304,
+      8
+    ]
+  },
+  "base_model.model.transformer.h.11.attn.c_proj.weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.attn.c_proj.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.ln_2.weight": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.ln_2.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.mlp.c_fc.weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      3072
+    ]
+  },
+  "base_model.model.transformer.h.11.mlp.c_fc.bias": {
+    "dtype": "float32",
+    "shape": [
+      3072
+    ]
+  },
+  "base_model.model.transformer.h.11.mlp.c_proj.weight": {
+    "dtype": "float32",
+    "shape": [
+      3072,
+      768
+    ]
+  },
+  "base_model.model.transformer.h.11.mlp.c_proj.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.ln_f.weight": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "base_model.model.transformer.ln_f.bias": {
+    "dtype": "float32",
+    "shape": [
+      768
+    ]
+  },
+  "weight": {
+    "dtype": "float32",
+    "shape": [
+      768,
+      2304
+    ]
+  },
+  "bias": {
+    "dtype": "float32",
+    "shape": [
+      2304
+    ]
+  }
+}
