@@ -20,7 +20,17 @@ import torch
 
 
 def reshape_weight_task_tensors(task_tensors, weights):
-    new_shape = weights.shape + (1,) * (len(task_tensors.shape) - len(weights.shape))
+    """
+    Reshapes `weights` to match the shape of `task_tensors` by unsqeezing in the remaining dimenions.
+
+    Args:
+        task_tensors (`torch.Tensor`): The tensors that will be used to reshape `weights`.
+        weights (`torch.Tensor`): The tensor to be reshaped.
+
+    Returns:
+        `torch.Tensor`: The reshaped tensor.
+    """
+    new_shape = weights.shape + (1,) * (task_tensors.dim() - weights.dim())
     weights = weights.view(new_shape)
     return weights
 
@@ -38,7 +48,7 @@ def magnitude_based_pruning(tensor: torch.Tensor, density: float) -> torch.Tenso
         `torch.Tensor`: The tensor with the pruned weights.
     """
     mask = torch.zeros_like(tensor).reshape(-1)
-    k = int(density * tensor.reshape(-1).shape[0])
+    k = int(density * tensor.numel())
     top_k = torch.topk(tensor.abs().reshape(-1), k=k, largest=True)
     mask[top_k[1]] = 1
     return tensor * mask.reshape(tensor.shape)
@@ -82,7 +92,7 @@ def prune(
         warnings.warn(f"The density {density} is greater than or equal to 1, no pruning will be performed.")
         return tensor
     elif density < 0:
-        raise ValueError("Density should be >= 0, got {density}")
+        raise ValueError(f"Density should be >= 0, got {density}")
     if method == "magnitude":
         return magnitude_based_pruning(tensor, density)
     elif method == "random":
@@ -107,7 +117,7 @@ def calculate_majority_sign_mask(
 
     sign = tensor.sign()
     if method == "total":
-        sign_magnitude = (sign * tensor.abs()).sum(dim=0)
+        sign_magnitude = tensor.sum(dim=0)
     elif method == "frequency":
         sign_magnitude = sign.sum(dim=0)
     else:
@@ -132,12 +142,12 @@ def disjoint_merge(task_tensors: torch.Tensor, majority_sign_mask: torch.Tensor)
     return mixed_task_tensors / torch.clamp(num_params_preserved, min=1.0)
 
 
-def task_arthimetic(task_tensors: torch.Tensor, weights: torch.Tensor) -> torch.Tensor:
+def task_arthimetic(task_tensors: list[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
     """
     Merge the task tensors using `task arthimetic`.
 
     Args:
-        task_tensors(`torch.Tensor`):The task tensors to merge.
+        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
 
     Returns:
@@ -152,7 +162,7 @@ def task_arthimetic(task_tensors: torch.Tensor, weights: torch.Tensor) -> torch.
 
 
 def ties(
-    task_tensors: torch.Tensor,
+    task_tensors: list[torch.Tensor],
     weights: torch.Tensor,
     density: float,
     majority_sign_method: Literal["total", "frequency"] = "total",
@@ -161,7 +171,7 @@ def ties(
     Merge the task tensors using `ties`.
 
     Args:
-        task_tensors(`torch.Tensor`):The task tensors to merge.
+        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
         density (`float`):The fraction of values to preserve. Should be in [0,1].
         majority_sign_method (`str`):
@@ -183,12 +193,12 @@ def ties(
     return mixed_task_tensors
 
 
-def dare_linear(task_tensors: torch.Tensor, weights: torch.Tensor, density: float) -> torch.Tensor:
+def dare_linear(task_tensors: list[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
     """
     Merge the task tensors using `dare linear`.
 
     Args:
-        task_tensors(`torch.Tensor`):The task tensors to merge.
+        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
         density (`float`):The fraction of values to preserve. Should be in [0,1].
 
@@ -206,7 +216,7 @@ def dare_linear(task_tensors: torch.Tensor, weights: torch.Tensor, density: floa
 
 
 def dare_ties(
-    task_tensors: torch.Tensor,
+    task_tensors: list[torch.Tensor],
     weights: torch.Tensor,
     density: float,
     majority_sign_method: Literal["total", "frequency"] = "total",
@@ -215,7 +225,7 @@ def dare_ties(
     Merge the task tensors using `dare ties`.
 
     Args:
-        task_tensors(`torch.Tensor`):The task tensors to merge.
+        task_tensors(`list[torch.Tensor]`):The task tensors to merge.
         weights (`torch.Tensor`):The weights of the task tensors.
         density (`float`):The fraction of values to preserve. Should be in [0,1].
         majority_sign_method (`str`):

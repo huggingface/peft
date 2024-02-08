@@ -22,7 +22,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import torch
 from torch import nn
@@ -369,7 +369,7 @@ class LoraModel(BaseTuner):
         svd_full_matrices=True,
         svd_driver=None,
         density=None,
-        majority_sign_method="total",
+        majority_sign_method: Literal["total", "frequency"] = "total",
     ) -> None:
         """
         This method adds a new adapter by merging the given adapters with the given weights.
@@ -402,10 +402,13 @@ class LoraModel(BaseTuner):
                 Name of the cuSOLVER method to be used. This keyword argument only works when merging on CUDA. Can be
                 one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
                 documentation. Defaults to None.
-            ties_density (`float`, *optional*):
+            density (`float`, *optional*):
                 Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned.
+                Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`,
+                `dare_ties_svd`, `dare_linear_svd`]
             majority_sign_method (`str`):
                 The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
+                Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_ties_svd`]
         """
 
         if adapter_name in list(self.peft_config.keys()):
@@ -556,7 +559,7 @@ class LoraModel(BaseTuner):
         elif combination_type == "dare_ties_svd":
             delta_weight = dare_ties(delta_weight, valid_weights, density, majority_sign_method)
         else:
-            raise ValueError("Invalid combination type")
+            raise ValueError(f"Invalid value passed to combination type: {combination_type}")
 
         conv2d = isinstance(target, Conv2d)
         if conv2d:
