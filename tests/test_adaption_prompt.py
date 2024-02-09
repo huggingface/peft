@@ -27,6 +27,7 @@ from peft.tuners.adaption_prompt import AdaptionPromptConfig
 from peft.utils.other import prepare_model_for_int8_training
 from peft.utils.save_and_load import get_peft_model_state_dict
 from tests.testing_common import PeftCommonTester
+from peft.utils.peft_types import TaskType
 
 
 def is_llama_available() -> bool:
@@ -439,3 +440,75 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         with model.disable_adapter():
             output_peft_disabled = model(dummy_input).logits
         self.assertTrue(torch.allclose(output_before, output_peft_disabled))
+
+    def test_llama_gqa(self) -> None:
+        """Test that AdaptionPrompt works when Llama2 using group query attention(GQA) or not."""
+        # test for llama with gqa
+        model_config = LlamaConfig(
+            vocab_size=16,
+            hidden_size=8,
+            intermediate_size=8,
+            num_hidden_layers=8,
+            num_attention_heads=4,
+            num_key_value_heads=None,
+            hidden_act="silu",
+            max_position_embeddings=2048,
+            initializer_range=0.02,
+            rms_norm_eps=1e-6,
+            use_cache=True,
+            pad_token_id=None,
+            bos_token_id=1,
+            eos_token_id=2,
+            pretraining_tp=1,
+            tie_word_embeddings=False,
+            rope_theta=10000.0,
+            rope_scaling=None,
+            attention_bias=False
+        )
+        model = LlamaForCausalLM(config=model_config)
+        adaption_config = AdaptionPromptConfig(
+            task_type=TaskType.CAUSAL_LM,
+            inference_mode=False,
+            target_modules='self_attn', adapter_len=16,
+            adapter_layers=4
+        )
+        peft_model = get_peft_model(model, adaption_config)
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]])
+        output = peft_model(input_ids=input_ids)
+        del model
+        del peft_model
+
+        # test for llama without gqa
+        model_config = LlamaConfig(
+            vocab_size=16,
+            hidden_size=8,
+            intermediate_size=8,
+            num_hidden_layers=8,
+            num_attention_heads=4,
+            num_key_value_heads=None,
+            hidden_act="silu",
+            max_position_embeddings=2048,
+            initializer_range=0.02,
+            rms_norm_eps=1e-6,
+            use_cache=True,
+            pad_token_id=None,
+            bos_token_id=1,
+            eos_token_id=2,
+            pretraining_tp=1,
+            tie_word_embeddings=False,
+            rope_theta=10000.0,
+            rope_scaling=None,
+            attention_bias=False
+        )
+        model = LlamaForCausalLM(config=model_config)
+        adaption_config = AdaptionPromptConfig(
+            task_type=TaskType.CAUSAL_LM,
+            inference_mode=False,
+            target_modules='self_attn', adapter_len=16,
+            adapter_layers=4
+        )
+        peft_model = get_peft_model(model, adaption_config)
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]])
+        output = peft_model(input_ids=input_ids)
+        del model
+        del peft_model

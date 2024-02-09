@@ -17,6 +17,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.models.llama.modeling_llama import repeat_kv
 
 from .config import TRANSFORMERS_MODEL_CONFIG
 
@@ -80,15 +81,15 @@ class AdaptedAttention(nn.Module):
         else:
             key = getattr(self.model, k_proj_layer)(self.adaption_prompt)
             value = getattr(self.model, v_proj_layer)(self.adaption_prompt)
-        # (bsz, num_heads, adapter_len, head_dim)
+        # (bsz, num_kv_heads, adapter_len, head_dim)
         adapter_k = (
-            key.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            key.view(1, self.adapter_len, self.model.num_key_value_heads, self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
-        # (bsz, num_heads, adapter_len, head_dim)
+        # (bsz, num_kv_heads, adapter_len, head_dim)
         adapter_v = (
-            value.view(1, self.adapter_len, self.model.num_heads, self.model.head_dim)
+            value.view(1, self.adapter_len, self.model.num_key_value_heads, self.model.head_dim)
             .repeat(bsz, 1, 1, 1)
             .transpose(1, 2)
         )
@@ -99,6 +100,11 @@ class AdaptedAttention(nn.Module):
         query_states = compute_query_states(model=self.model, **kwargs)
 
         previous_dtype = query_states.dtype
+
+        # repeat kv for GQA
+        adapter_k = repeat_kv(adapter_k, self.model.num_key_value_groups)
+        adapter_v = repeat_kv(adapter_v, self.model.num_key_value_groups)
+
         # (bsz, num_heads, q_len, adapter_len)
         scores = torch.matmul(query_states, adapter_k.transpose(2, 3).to(previous_dtype)) / math.sqrt(
             self.model.head_dim
