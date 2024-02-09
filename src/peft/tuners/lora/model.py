@@ -21,7 +21,7 @@ from dataclasses import asdict, replace
 from enum import Enum
 from functools import reduce
 from itertools import chain
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 from torch import nn
@@ -36,6 +36,7 @@ from peft.utils import (
     _get_submodules,
     get_quantization_config,
 )
+from peft.utils.merge_utils import dare_linear, dare_ties, task_arthimetic, ties
 
 from .config import LoraConfig
 from .gptq import dispatch_gptq
@@ -375,6 +376,8 @@ class LoraModel(BaseTuner):
         svd_clamp=None,
         svd_full_matrices=True,
         svd_driver=None,
+        density=None,
+        majority_sign_method: Literal["total", "frequency"] = "total",
     ) -> None:
         """
         This method adds a new adapter by merging the given adapters with the given weights.
@@ -391,9 +394,10 @@ class LoraModel(BaseTuner):
             adapter_name (`str`):
                 Name of the new adapter.
             combination_type (`str`):
-                Type of merging. Can be one of [`svd`, `linear`, `cat`]. When using the `cat` combination_type you
-                should be aware that rank of the resulting adapter will be equal to the sum of all adapters ranks. So
-                it's possible that the mixed adapter may become too big and result in OOM errors.
+                The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
+                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type, the rank of the resulting
+                adapter is equal to the sum of all adapters ranks (the mixed adapter may be too big and result in OOM
+                errors).
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
@@ -406,6 +410,12 @@ class LoraModel(BaseTuner):
                 Name of the cuSOLVER method to be used. This keyword argument only works when merging on CUDA. Can be
                 one of [None, `gesvd`, `gesvdj`, `gesvda`]. For more info please refer to `torch.linalg.svd`
                 documentation. Defaults to None.
+            density (`float`, *optional*):
+                Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned. Should be used
+                with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`, `dare_ties_svd`, `dare_linear_svd`]
+            majority_sign_method (`str`):
+                The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
+                Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_ties_svd`]
         """
 
         if adapter_name in list(self.peft_config.keys()):
@@ -418,16 +428,18 @@ class LoraModel(BaseTuner):
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
         adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
-        if combination_type == "linear":
+        if combination_type in ("linear", "ties", "dare_ties", "dare_linear"):
             # all adapters ranks should be same, new rank is just this value
             if len(set(adapters_ranks)) != 1:
-                raise ValueError("All adapters must have the same r value when using `linear` combination_type")
+                raise ValueError(
+                    "All adapters must have the same r value when using combination_type linear, ties, dare_ties or dare_linear."
+                )
             new_rank = adapters_ranks[0]
         elif combination_type == "cat":
             # adapters ranks may be different, new rank is sum of all ranks
             # be careful, because output adapter rank may be really big if mixing a lot of adapters
             new_rank = sum(adapters_ranks)
-        elif combination_type == "svd":
+        elif combination_type.endswith("svd"):
             # new rank is the max of all ranks of the adapters if not provided
             new_rank = svd_rank or max(adapters_ranks)
         else:
@@ -477,19 +489,7 @@ class LoraModel(BaseTuner):
 
                 target_lora_A.data = target_lora_A.data * 0.0
                 target_lora_B.data = target_lora_B.data * 0.0
-                if combination_type == "linear":
-                    for adapter, weight in zip(adapters, weights):
-                        if adapter in target.lora_A:
-                            current_adapter_lora_A = target.lora_A[adapter].weight
-                            current_adapter_lora_B = target.lora_B[adapter].weight
-                        elif adapter in target.lora_embedding_A:
-                            current_adapter_lora_A = target.lora_embedding_A[adapter]
-                            current_adapter_lora_B = target.lora_embedding_B[adapter]
-                        else:
-                            continue
-                        target_lora_A.data += current_adapter_lora_A.data * math.sqrt(weight) * target.scaling[adapter]
-                        target_lora_B.data += current_adapter_lora_B.data * math.sqrt(weight)
-                elif combination_type == "cat":
+                if combination_type == "cat":
                     loras_A, loras_B = [], []
                     for adapter, weight in zip(adapters, weights):
                         if adapter in target.lora_A:
@@ -509,45 +509,65 @@ class LoraModel(BaseTuner):
                     loras_B = torch.cat(loras_B, dim=1)
                     target_lora_A.data[: loras_A.shape[0], :] = loras_A
                     target_lora_B.data[:, : loras_B.shape[1]] = loras_B
-                elif combination_type == "svd":
-                    target_lora_A.data, target_lora_B.data = self._svd_weighted_adapter(
+                elif combination_type in ["svd", "ties_svd", "dare_linear_svd", "dare_ties_svd"]:
+                    target_lora_A.data, target_lora_B.data = self._svd_generalized_task_arithmetic_weighted_adapter(
+                        combination_type,
                         adapters,
                         weights,
                         new_rank,
                         target,
                         target_lora_A,
                         target_lora_B,
+                        density,
+                        majority_sign_method,
                         svd_clamp,
                         full_matrices=svd_full_matrices,
                         driver=svd_driver,
                     )
+                elif combination_type in ["linear", "ties", "dare_linear", "dare_ties"]:
+                    target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
+                        combination_type, adapters, weights, target, density, majority_sign_method
+                    )
 
-    def _svd_weighted_adapter(
+    def _svd_generalized_task_arithmetic_weighted_adapter(
         self,
+        combination_type,
         adapters,
         weights,
         new_rank,
         target,
         target_lora_A,
         target_lora_B,
+        density,
+        majority_sign_method,
         clamp=None,
         full_matrices=True,
         driver=None,
     ):
         valid_adapters = []
         valid_weights = []
+        is_embedding = any(adapter in target.lora_embedding_A for adapter in adapters)
         for adapter, weight in zip(adapters, weights):
             if adapter in target.lora_A or adapter in target.lora_embedding_A:
                 valid_adapters.append(adapter)
-                valid_weights.append(weight)
+                valid_weights.append(weight * target.scaling[adapter])
 
         # if no valid adapter, nothing to do
         if len(valid_adapters) == 0:
-            raise ValueError("No matching LoRAs found. Please raise an issue on GitHub.")
+            raise ValueError("No matching LoRAs found. Please raise an issue on Github.")
+        delta_weight = [target.get_delta_weight(adapter) for adapter in valid_adapters]
+        valid_weights = torch.tensor(valid_weights).to(delta_weight[0].device)
+        if combination_type == "svd":
+            delta_weight = task_arthimetic(delta_weight, valid_weights)
+        elif combination_type == "ties_svd":
+            delta_weight = ties(delta_weight, valid_weights, density, majority_sign_method)
+        elif combination_type == "dare_linear_svd":
+            delta_weight = dare_linear(delta_weight, valid_weights, density)
+        elif combination_type == "dare_ties_svd":
+            delta_weight = dare_ties(delta_weight, valid_weights, density, majority_sign_method)
+        else:
+            raise ValueError(f"Invalid value passed to combination type: {combination_type}")
 
-        delta_weight = valid_weights[0] * target.get_delta_weight(valid_adapters[0])
-        for adapter, weight in zip(valid_adapters[1:], valid_weights[1:]):
-            delta_weight += weight * target.get_delta_weight(adapter)
         conv2d = isinstance(target, Conv2d)
         if conv2d:
             conv2d_1x1 = target.weight.size()[2:4] == (1, 1)
@@ -555,7 +575,7 @@ class LoraModel(BaseTuner):
                 delta_weight = delta_weight.flatten(start_dim=1)
             else:
                 delta_weight = delta_weight.squeeze()
-        if hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out:
+        if (hasattr(target, "fan_in_fan_out") and target.fan_in_fan_out) or is_embedding:
             delta_weight = delta_weight.T
 
         # based on https://github.com/kohya-ss/sd-scripts/blob/main/networks/svd_merge_lora.py#L114-L131
@@ -574,6 +594,48 @@ class LoraModel(BaseTuner):
             U = U.reshape(target_lora_B.data.shape)
             Vh = Vh.reshape(target_lora_A.data.shape)
         return Vh, U
+
+    def _generalized_task_arithmetic_weighted_adapter(
+        self,
+        combination_type,
+        adapters,
+        weights,
+        target,
+        density,
+        majority_sign_method,
+    ):
+        # account weights for LoRA A and B layers.
+        valid_weights = []
+        lora_A_deltas = []
+        lora_B_deltas = []
+        for adapter, weight in zip(adapters, weights):
+            if adapter in target.lora_A:
+                current_adapter_lora_A = target.lora_A[adapter].weight
+                current_adapter_lora_B = target.lora_B[adapter].weight
+            elif adapter in target.lora_embedding_A:
+                current_adapter_lora_A = target.lora_embedding_A[adapter]
+                current_adapter_lora_B = target.lora_embedding_B[adapter]
+            else:
+                continue
+            valid_weights.append(math.sqrt(weight * target.scaling[adapter]))
+            lora_A_deltas.append(current_adapter_lora_A.data)
+            lora_B_deltas.append(current_adapter_lora_B.data)
+        valid_weights = torch.tensor(valid_weights).to(lora_A_deltas[0].device)
+        lora_deltas = [lora_A_deltas, lora_B_deltas]
+        dtype = lora_A_deltas[0].dtype
+        for i, task_tensors in enumerate(lora_deltas):
+            if combination_type == "linear":
+                lora_deltas[i] = task_arthimetic(task_tensors, valid_weights)
+            elif combination_type == "ties":
+                lora_deltas[i] = ties(task_tensors, valid_weights, density, majority_sign_method)
+            elif combination_type == "dare_linear":
+                lora_deltas[i] = dare_linear(task_tensors, valid_weights, density)
+            elif combination_type == "dare_ties":
+                lora_deltas[i] = dare_ties(task_tensors, valid_weights, density, majority_sign_method)
+            else:
+                raise ValueError("Invalid combination type")
+        lora_deltas = [delta.to(dtype) for delta in lora_deltas]
+        return lora_deltas
 
     def delete_adapter(self, adapter_name: str) -> None:
         """
