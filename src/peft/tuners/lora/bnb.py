@@ -435,13 +435,7 @@ if is_bnb_4bit_available():
                 adapter (str):
                     The name of the adapter for which the delta weight should be computed.
             """
-            return (
-                transpose(
-                    self.lora_embedding_B[adapter].weight @ self.lora_embedding_A[adapter].weight,
-                    False,
-                )
-                * self.scaling[adapter] # TODO: Use False or True? True is used in Linear's get_delta_weight method under .layer
-            )
+            return self.lora_embedding_B[adapter].weight @ self.lora_embedding_A[adapter].weight * self.scaling[adapter]
 
         def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
             base_layer = self.get_base_layer()
