@@ -350,7 +350,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         disk_modules.append(str(name) + "." + str(key))
 
         if disk_modules and hasattr(kwargs, "use_safetensors") and not kwargs["use_safetensors"]:
-            raise AssertionError("Disk offloading not currently only supported for safetensors")
+            raise ValueError("Disk offloading currently only supported for safetensors")
 
         start_prefix = ""
         if index:
