@@ -14,6 +14,7 @@
 import copy
 import inspect
 import warnings
+from contextlib import nullcontext
 from typing import Optional, Tuple
 
 import accelerate
@@ -194,7 +195,17 @@ class ModulesToSaveWrapper(torch.nn.Module):
         return self.modules_to_save[self.active_adapter].weight
 
     def update(self, adapter_name):
-        self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
+        context_manager = nullcontext()
+        for _, param in self.original_module.named_parameters():
+            num_params = param.numel()
+            # if using DS Zero 3 and the weights are initialized empty
+            if num_params == 0 and hasattr(param, "ds_numel"):
+                import deepspeed
+
+                context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
+                break
+        with context_manager:
+            self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -248,6 +259,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
+
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
 
         Args:
             adapter_name (str): The name of the adapter to set as active

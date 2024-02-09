@@ -381,6 +381,15 @@ class LycorisTuner(BaseTuner):
     def set_adapter(self, adapter_name: str | list[str]) -> None:
         """Set the active adapter(s).
 
+        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
+
         Args:
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
