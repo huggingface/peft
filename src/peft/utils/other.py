@@ -195,7 +195,6 @@ class ModulesToSaveWrapper(torch.nn.Module):
         return self.modules_to_save[self.active_adapter].weight
 
     def update(self, adapter_name):
-        # init null context manager
         context_manager = nullcontext()
         for _, param in self.original_module.named_parameters():
             num_params = param.numel()
