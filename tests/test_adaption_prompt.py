@@ -25,9 +25,9 @@ from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
 from peft.tuners.adaption_prompt import AdaptionPromptConfig
 from peft.utils.other import prepare_model_for_int8_training
+from peft.utils.peft_types import TaskType
 from peft.utils.save_and_load import get_peft_model_state_dict
 from tests.testing_common import PeftCommonTester
-from peft.utils.peft_types import TaskType
 
 
 def is_llama_available() -> bool:
@@ -463,18 +463,19 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             tie_word_embeddings=False,
             rope_theta=10000.0,
             rope_scaling=None,
-            attention_bias=False
+            attention_bias=False,
         )
         model = LlamaForCausalLM(config=model_config)
         adaption_config = AdaptionPromptConfig(
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
-            target_modules='self_attn', adapter_len=16,
-            adapter_layers=4
+            target_modules="self_attn",
+            adapter_len=16,
+            adapter_layers=4,
         )
         peft_model = get_peft_model(model, adaption_config)
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]])
-        output = peft_model(input_ids=input_ids)
+        _ = peft_model(input_ids=input_ids)
         del model
         del peft_model
 
@@ -498,17 +499,18 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             tie_word_embeddings=False,
             rope_theta=10000.0,
             rope_scaling=None,
-            attention_bias=False
+            attention_bias=False,
         )
         model = LlamaForCausalLM(config=model_config)
         adaption_config = AdaptionPromptConfig(
             task_type=TaskType.CAUSAL_LM,
             inference_mode=False,
-            target_modules='self_attn', adapter_len=16,
-            adapter_layers=4
+            target_modules="self_attn",
+            adapter_len=16,
+            adapter_layers=4,
         )
         peft_model = get_peft_model(model, adaption_config)
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]])
-        output = peft_model(input_ids=input_ids)
+        _ = peft_model(input_ids=input_ids)
         del model
         del peft_model
