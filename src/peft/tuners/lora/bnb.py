@@ -417,7 +417,15 @@ if is_bnb_4bit_available():
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter in self.lora_embedding_A.keys():
                     # TODO: Test if warning is needed here for rounding error as in Linear
-                    self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                    weight = self.get_base_layer().weight
+                    kwargs = weight.__dict__
+                    lora_data = self.get_delta_weight(active_adapter)
+                    w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                    if "bnb_quantized" in kwargs:
+                        kwargs["bnb_quantized"] = False
+                    self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                    weight.device
+                )
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
             """
