@@ -450,7 +450,27 @@ if is_bnb_4bit_available():
         )
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-            raise NotImplementedError
+            if self.disable_adapters:
+                if self.merged:
+                    self.unmerge()
+                result = self.base_layer(x, *args, **kwargs)
+            elif self.merged:
+                result = self.base_layer(x, *args, **kwargs)
+            else:
+                result = self.base_layer(x, *args, **kwargs)
+                # Defensively clone as done for Linear4bit - needs testing, if required for Embedding4bit
+                result = result.clone()
+                for active_adapter in self.active_adapters:
+                    if active_adapter not in self.lora_embedding_A:
+                        continue
+                    embedding_A = self.lora_embedding_A[active_adapter].T
+                    embedding_B = self.lora_embedding_B[active_adapter].T
+                    scaling = self.scaling[active_adapter]
+                    after_A = self._embed(x, embedding_A)
+                    result += (after_A @ embedding_B) * scaling
+
+            # TODO: Check if dtype conversion is required
+            return result
 
         def __repr__(self) -> str:
             rep = super().__repr__()
