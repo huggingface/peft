@@ -249,15 +249,34 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         mpt = mpt.to(self.torch_device)
         _ = mpt.generate(input_ids=input_ids, task_ids=task_ids)
 
+    def test_generate_text_with_random_init(self) -> None:
+        model = LlamaForCausalLM(self._create_test_llama_config())
+
+        config = self._create_multitask_prompt_tuning_config()
+        config.prompt_tuning_init = MultitaskPromptTuningInit.RANDOM
+
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+        task_ids = torch.LongTensor([0]).to(self.torch_device)
+
+        # check if `generate` works
+        _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
+
+        with self.assertRaises(ValueError):
+            # check if `generate` raises an error if task_ids are not passed
+            _ = model.generate(input_ids, attention_mask=attention_mask)
+
     @parameterized.expand(
         [
-            MultitaskPromptTuningInit.TEXT,
             MultitaskPromptTuningInit.AVERAGE_SOURCE_TASKS,
             MultitaskPromptTuningInit.EXACT_SOURCE_TASK,
             MultitaskPromptTuningInit.ONLY_SOURCE_SHARED,
         ],
     )
-    def test_generate_text(self, prompt_tuning_init) -> None:
+    def test_generate_text_with_other_init(self, prompt_tuning_init) -> None:
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model = LlamaForCausalLM(self._create_test_llama_config())
             model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
@@ -273,6 +292,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
                 prompt_tuning_init=prompt_tuning_init,
                 prompt_tuning_init_state_dict_path=os.path.join(tmp_dirname, WEIGHTS_NAME),
             )
+            model = LlamaForCausalLM(self._create_test_llama_config())
             model = get_peft_model(model, config)
             model = model.to(self.torch_device)
 
@@ -283,6 +303,6 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             # check if `generate` works
             _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
-            with self.assertRaises(TypeError):
-                # check if `generate` raises an error if no positional arguments are passed
+            with self.assertRaises(ValueError):
+                # check if `generate` raises an error if task_ids are not passed
                 _ = model.generate(input_ids, attention_mask=attention_mask)
