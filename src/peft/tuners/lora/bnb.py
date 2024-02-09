@@ -362,7 +362,44 @@ if is_bnb_4bit_available():
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
         def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
-            raise NotImplementedError
+            # TODO: Check update_layer for correctness
+            if r <= 0:
+                raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+
+            self.r[adapter_name] = r
+            self.lora_alpha[adapter_name] = lora_alpha
+            if lora_dropout > 0.0:
+                lora_dropout_layer = nn.Dropout(p=lora_dropout)
+            else:
+                lora_dropout_layer = nn.Identity()
+
+            self.lora_dropout[adapter_name] = lora_dropout_layer
+            base_layer = self.get_base_layer()
+            weight = getattr(base_layer, "weight", None)
+            # Actual trainable parameters
+            weight_A = torch.randn((r, self.in_features))
+            weight_B = torch.randn((self.out_features, r))
+            # Quantize to 4 bit
+            weight_A, _ = bnb.functional.quantize_4bit(weight_A)  # TODO: Quantize using Params4bit instead?
+            weight_B, quant_state = bnb.functional.quantize_4bit(weight_B)
+
+            self.lora_embedding_A[adapter_name] = nn.Parameter(weight_A)
+            self.lora_embedding_B[adapter_name] = nn.Parameter(weight_B)
+
+            if use_rslora:
+                self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
+            else:
+                self.scaling[adapter_name] = lora_alpha / r
+
+            if init_lora_weights == "loftq":
+                self.loftq_init(adapter_name)
+            elif init_lora_weights:
+                self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+            if weight is not None:
+                # the layer is already completely initialized, this is an update
+                self.to(base_layer.weight.device, dtype=weight.dtype)
+            self.set_adapter(self.active_adapters)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
