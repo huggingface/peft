@@ -381,6 +381,7 @@ if is_bnb_4bit_available():
             
             for active_adapter in adapter_names:
                 if active_adapter in self.lora_embedding_A.keys():
+                    # TODO: Test if warning is needed here for rounding error as in Linear
                     base_layer = self.get_base_layer()
                     weight = base_layer.weight
                     lora_data = self.get_delta_weight(active_adapter)
@@ -409,7 +410,14 @@ if is_bnb_4bit_available():
             """
             This method unmerges all merged adapter layers from the base weights.
             """
-            raise NotImplementedError
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            while len(self.merged_adapters) > 0:
+                active_adapter = self.merged_adapters.pop()
+                if active_adapter in self.lora_embedding_A.keys():
+                    # TODO: Test if warning is needed here for rounding error as in Linear
+                    self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
 
         def get_delta_weight(self, adapter) -> torch.Tensor:
             """
