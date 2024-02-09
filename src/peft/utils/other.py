@@ -203,6 +203,7 @@ class ModulesToSaveWrapper(torch.nn.Module):
                 import deepspeed
 
                 context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
+                break
         with context_manager:
             self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
 
