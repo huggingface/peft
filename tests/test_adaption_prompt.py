@@ -450,7 +450,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             intermediate_size=8,
             num_hidden_layers=8,
             num_attention_heads=4,
-            num_key_value_heads=None,
+            num_key_value_heads=2,
             hidden_act="silu",
             max_position_embeddings=2048,
             initializer_range=0.02,
