@@ -523,21 +523,23 @@ if is_bnb_4bit_available():
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
-        
-        fourbit_update = {
-                    "compute_dtype": target_base_layer.compute_dtype,
-                    "compress_statistics": target_base_layer.weight.compress_statistics,
-                    "quant_type": target_base_layer.weight.quant_type,
-                }
 
         loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
         if loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
             fourbit_kwargs = kwargs.copy()
-            fourbit_kwargs.update(fourbit_update)
+            fourbit_kwargs.update({
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
+                })
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
         elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Embedding):
             fourbit_kwargs = kwargs.copy()
-            fourbit_kwargs.update(fourbit_update)
+            fourbit_kwargs.update({
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
+                })
             new_module = Embedding4bit(target, adapter_name, **fourbit_kwargs)
 
         return new_module
