@@ -515,25 +515,29 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "lora." + rep
 
-    # WIP NOTE for dispatch_bnb_4bit: consider instances of type bnb.nn.Embedding: https://github.com/TimDettmers/bitsandbytes/blob/main/bitsandbytes/nn/modules.py
     def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+        # TODO: Check for correctness when handling Embedding instances
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
             target_base_layer = target
-
-        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
-        if loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
-            fourbit_kwargs = kwargs.copy()
-            fourbit_kwargs.update(
-                {
+        
+        fourbit_update = {
                     "compute_dtype": target_base_layer.compute_dtype,
                     "compress_statistics": target_base_layer.weight.compress_statistics,
                     "quant_type": target_base_layer.weight.quant_type,
                 }
-            )
+
+        loaded_in_4bit = kwargs.get("loaded_in_4bit", False)
+        if loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Linear4bit):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(fourbit_update)
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Embedding):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(fourbit_update)
+            new_module = Embedding4bit(target, adapter_name, **fourbit_kwargs)
 
         return new_module
