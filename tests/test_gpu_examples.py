@@ -1066,7 +1066,7 @@ class OffloadSaveTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {"cpu": "0.4GIB"} # no "disk" for PeftModel.from_pretrained() compatibility
+        memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
 
         # offload around half of all transformer modules to the disk
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
@@ -1099,7 +1099,7 @@ class OffloadSaveTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        memory_limits = {0: "0.2GIB", "cpu": "0.2GIB"} # no "disk" for PeftModel.from_pretrained() compatibility
+        memory_limits = {0: "0.2GIB", "cpu": "0.2GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
         self.assertTrue(0 in device_map.values())
