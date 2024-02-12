@@ -141,9 +141,9 @@ def disjoint_merge(task_tensors: torch.Tensor, majority_sign_mask: torch.Tensor)
     return mixed_task_tensors / torch.clamp(num_params_preserved, min=1.0)
 
 
-def task_arthimetic(task_tensors: List[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
+def task_arithmetic(task_tensors: List[torch.Tensor], weights: torch.Tensor) -> torch.Tensor:
     """
-    Merge the task tensors using `task arthimetic`.
+    Merge the task tensors using `task arithmetic`.
 
     Args:
         task_tensors(`List[torch.Tensor]`):The task tensors to merge.
