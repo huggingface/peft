@@ -55,7 +55,7 @@ TRANSFORMERS_MODEL_CONFIG = {
         v_proj_layer="v_proj",
         o_proj_layer="o_proj",
     ),
-    "mistral": ModelTypeConfig(  # same for Mistral,
+    "mistral": ModelTypeConfig(  # same as llama,
         compute_query_states=llama_compute_query_states,
         target_modules="self_attn",
         k_proj_layer="k_proj",
