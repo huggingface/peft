@@ -71,9 +71,7 @@ def onload_layer(layer):
             layer.base_layer._hf_hook.weights_map, "dataset"
         ):
             index = layer.base_layer._hf_hook.weights_map.dataset.index
-            module_name = [i for i in dict(layer.base_layer._hf_hook.weights_map.dataset).keys()][
-                0
-            ]  # any module will do
+            module_name = list(dict(layer.base_layer._hf_hook.weights_map.dataset).keys())[0]  # any module will do
             file_name = index[module_name]["safetensors_file"]
             base_name_arr = []
             # get effective dir name
