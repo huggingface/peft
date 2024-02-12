@@ -779,11 +779,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         fname = offload_index[new_key]["safetensors_file"]
 
                         # make a new file name
-                        new_fname_list = list(fname.split("/"))
+                        new_fname_list = list(os.path.split(fname))
                         for i, name in enumerate(new_fname_list):
                             if "--" in name:
                                 new_fname_list[i] += "-peft"
-                        new_fname = "/".join(new_fname_list)
+                        new_fname = os.path.join(*new_fname_list)
 
                         if fname not in file_seen:
                             safe_dict = {}
