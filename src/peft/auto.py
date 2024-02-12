@@ -18,8 +18,6 @@ import importlib
 import os
 from typing import Optional
 
-from huggingface_hub import file_exists
-from huggingface_hub.utils import HfHubHTTPError, HFValidationError
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -42,6 +40,7 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .utils.constants import TOKENIZER_CONFIG_NAME
+from .utils.other import check_file_exists_on_hf_hub
 
 
 class _BaseAutoPeftModel:
@@ -112,16 +111,13 @@ class _BaseAutoPeftModel:
             if token is None:
                 token = kwargs.get("use_auth_token", None)
 
-            try:
-                tokenizer_exists = file_exists(
-                    repo_id=pretrained_model_name_or_path,
-                    filename=TOKENIZER_CONFIG_NAME,
-                    revision=kwargs.get("revision", None),
-                    repo_type=kwargs.get("repo_type", None),
-                    token=token,
-                )
-            except (HfHubHTTPError, HFValidationError):  # not on the Hub, so probably local repo
-                pass
+            tokenizer_exists = check_file_exists_on_hf_hub(
+                repo_id=pretrained_model_name_or_path,
+                filename=TOKENIZER_CONFIG_NAME,
+                revision=kwargs.get("revision", None),
+                repo_type=kwargs.get("repo_type", None),
+                token=token,
+            )
 
         if tokenizer_exists:
             tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
