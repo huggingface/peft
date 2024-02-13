@@ -763,6 +763,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     keys = list(offload_index.keys())
                     block_id = keys[0].split(".")[0] + "."  # for writing safetensors key
 
+                    # replace original offload index keys with PeftModel keys
                     for key in keys:
                         if any(module in key for module in target_modules):
                             suffix_pos = key.rfind(".")
@@ -773,19 +774,19 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         offload_index[new_key] = offload_index[key]
                         del offload_index[key]
 
+                    files_seen = set()
                     # rename safetensors for dispatch
-                    file_seen = set()
                     for new_key in list(offload_index.keys()):
                         fname = offload_index[new_key]["safetensors_file"]
 
                         # make a new file name
-                        new_fname_list = list(os.path.split(fname))
+                        new_fname_list = list(fname.split(os.sep))
                         for i, name in enumerate(new_fname_list):
                             if "--" in name:
                                 new_fname_list[i] += "-peft"
                         new_fname = os.path.join(*new_fname_list)
 
-                        if fname not in file_seen:
+                        if fname not in files_seen:
                             safe_dict = {}
                             with safe_open(fname, framework="pt") as f:
                                 for safe_key in f.keys():
@@ -807,15 +808,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                                     else:
                                         final_key = prefix + block_id + safe_key
                                     safe_dict[final_key] = safe_tensor
-                                file_seen.add(fname)
+                                files_seen.add(new_fname)
 
                             # avoid overwriting original safetensors
                             for key in safe_dict.keys():
                                 offload_index[key] = {"safetensors_file": new_fname, "weight_name": key}
-                            if not os.path.exists(new_fname):
-                                base_name = "/".join(list(new_fname.split("/"))[:-1])
+
+                            base_name = os.path.dirname(new_fname)
+                            if not os.path.exists(base_name):
                                 os.makedirs(base_name)
                             safe_save_file(safe_dict, new_fname, metadata=metadata)
+
 
             dispatch_model_kwargs["offload_index"] = offload_index
 
