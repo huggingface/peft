@@ -1389,7 +1389,6 @@ class PeftAwqGPUTests(unittest.TestCase):
     """
 
     def setUp(self):
-
         self.causal_lm_model_id = "ybelkada/opt-125m-awq"
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
 

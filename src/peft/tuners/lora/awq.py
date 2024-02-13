@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -91,7 +90,7 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if isinstance(target_base_layer, AWQ_WQLinear_GEMM):
+    if is_auto_awq_available() and isinstance(target_base_layer, AWQ_WQLinear_GEMM):
         new_module = WQLinear_GEMM(target, adapter_name, **kwargs)
         target.qweight = target_base_layer.qweight
 
