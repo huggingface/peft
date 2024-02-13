@@ -1090,7 +1090,6 @@ class OffloadSaveTests(unittest.TestCase):
             offloaded_output = offloaded_lora_model(input_tokens)[0]
         self.assertTrue(torch.allclose(output, offloaded_output, atol=1e-5))
 
-
     @pytest.mark.single_gpu_tests
     @require_torch_gpu
     def test_offload_merge(self):
@@ -1113,8 +1112,7 @@ class OffloadSaveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir)
             # load the model with device_map
-            model = AutoModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id, device_map=device_map).eval()
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
             self.assertTrue(len({p.device for p in model.parameters()}) == 2)  # 'cuda' and 'meta' (cpu or disk)
             model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
 
