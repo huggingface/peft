@@ -576,7 +576,7 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         pass
     except Exception as e:
         warnings.warn(
-            f"War not able to fetch remote file due to the following error {e} - silently ignoring the lookup"
+            f"Unable to fetch remote file due to the following error {e} - silently ignoring the lookup"
             f" for the file {filename} in {repo_id}."
         )
 
