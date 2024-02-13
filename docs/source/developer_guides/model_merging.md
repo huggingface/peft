@@ -29,9 +29,13 @@ Models are merged with the [`~LoraModel.add_weighted_adapter`] method, and the s
 
 With PEFT, merging is enabled by setting `combination_type` and `ties_density` to a value of the weights to keep from the individual models. For example, let's merge three finetuned [TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T) models: [tinyllama_lora_nobots](https://huggingface.co/smangrul/tinyllama_lora_norobots), [tinyllama_lora_sql](https://huggingface.co/smangrul/tinyllama_lora_sql), and [tinyllama_lora_adcopy](https://huggingface.co/smangrul/tinyllama_lora_adcopy).
 
-<Tip>
+<Tip warninig={true}>
 
-If you're merging with TIES, use the [`~transformers.PreTrainedModel.resize_token_embeddings`] method to account for special tokens added to the embedding layer for each finetuned model. This method ensures the special tokens and initialization of the embedding layers are consistent.
+When you're attempting to merge fully trained models with TIES, you should be aware of any special tokens each model may have added to the embedding layer which are not a part of the original checkpoint's vocabulary. This may cause an issue because each model may have added a special token to the same embedding position. If this is the case, you should use the [`~transformers.PreTrainedModel.resize_token_embeddings`] method to avoid merging the special tokens at the same embedding index.
+
+<br>
+
+This shouldn't be an issue if you're only merging PEFT modules trained from a shared base model.
 
 </Tip>
 
@@ -46,7 +50,6 @@ config = PeftConfig.from_pretrained("smangrul/tinyllama_lora_norobots")
 model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, load_in_4bit=True, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained("smangrul/tinyllama_lora_norobots")
 
-# model.resize_token_embeddings(len(tokenizer)) if using TIES method
 model = PeftModel.from_pretrained(model, "smangrul/tinyllama_lora_norobots", adapter_name="norobots")
 _ = model.load_adapter("smangrul/tinyllama_lora_sql", adapter_name="sql")
 _ = model.load_adapter("smangrul/tinyllama_lora_adcopy", adapter_name="adcopy")
@@ -57,9 +60,11 @@ Set the adapters, weights, `adapter_name`, `combination_type`, and `ties_density
 <hfoptions id="merge-method">
 <hfoption id="TIES">
 
+Weight values greater than `1.0` typically produce better results because they preserve the correct scale. A good default starting value for the weights is to set all values to `1.0`.
+
 ```py
 adapters = ["norobots", "adcopy", "sql"]
-weights = [2.0, 0.3, 0.7]
+weights = [2.0, 1.0, 1.0]
 adapter_name = "merge"
 density = 0.2
 model.add_weighted_adapter(adapters, weights, adapter_name, combination_type="ties", density=density)
