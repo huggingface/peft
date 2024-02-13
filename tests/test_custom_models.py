@@ -473,6 +473,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
+        else:
+            config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
@@ -483,6 +485,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
+    def test_merge_layers_is_idempotent(self, test_name, model_id, config_cls, config_kwargs):
+        # calling merge twice with the same arguments should not change the output
+        config_kwargs = config_kwargs.copy()
+        if issubclass(config_cls, LoraConfig):
+            config_kwargs["init_lora_weights"] = False
+        elif issubclass(config_cls, IA3Config):
+            config_kwargs["init_ia3_weights"] = False
+        self._test_merge_layers_is_idempotent(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(TEST_CASES)
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
@@ -778,7 +790,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
                 f.write(text)
 
             model.save_pretrained(tmp_dirname)
-            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+            with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
         self.assertIn("library_name: peft", model_card)
@@ -793,7 +805,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
-            with open(os.path.join(tmp_dirname, "README.md"), "r") as f:
+            with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
         self.assertIn("library_name: peft", model_card)

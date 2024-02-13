@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -44,7 +43,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModelForCausalLM.from_pretrained(model_id)
+            model = AutoPeftModelForCausalLM.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModelForCausalLM))
 
         # check if kwargs are passed correctly
@@ -80,7 +79,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModelForSeq2SeqLM.from_pretrained(model_id)
+            model = AutoPeftModelForSeq2SeqLM.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModelForSeq2SeqLM))
 
         # check if kwargs are passed correctly
@@ -101,7 +100,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModelForSequenceClassification.from_pretrained(model_id)
+            model = AutoPeftModelForSequenceClassification.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModelForSequenceClassification))
 
         # check if kwargs are passed correctly
@@ -124,7 +123,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModelForTokenClassification.from_pretrained(model_id)
+            model = AutoPeftModelForTokenClassification.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModelForTokenClassification))
 
         # check if kwargs are passed correctly
@@ -147,7 +146,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModelForQuestionAnswering.from_pretrained(model_id)
+            model = AutoPeftModelForQuestionAnswering.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModelForQuestionAnswering))
 
         # check if kwargs are passed correctly
@@ -170,7 +169,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModelForFeatureExtraction.from_pretrained(model_id)
+            model = AutoPeftModelForFeatureExtraction.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModelForFeatureExtraction))
 
         # check if kwargs are passed correctly
@@ -193,7 +192,7 @@ class PeftAutoModelTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             model.save_pretrained(tmp_dirname)
 
-            model = AutoPeftModel.from_pretrained(model_id)
+            model = AutoPeftModel.from_pretrained(tmp_dirname)
             self.assertTrue(isinstance(model, PeftModel))
 
         # check if kwargs are passed correctly

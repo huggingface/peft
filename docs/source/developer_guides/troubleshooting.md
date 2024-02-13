@@ -20,7 +20,7 @@ If you encounter any issue when using PEFT, please check the following list of c
 
 ## Examples don't work
 
-Examples often rely on the most recent package versions, so please ensure they're up-to-date. In particular, check the version of the following packages:
+Examples often rely on the most recent package versions, so please ensure they're up-to-date. In particular, check the following package versions:
 
 - `peft`
 - `transformers`
@@ -39,11 +39,9 @@ Installing PEFT from source is useful for keeping up with the latest development
 python -m pip install git+https://github.com/huggingface/peft
 ```
 
-## Training errors
+## ValueError: Attempting to unscale FP16 gradients
 
-### Getting: ValueError: Attempting to unscale FP16 gradients
-
-This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the `Trainer` class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without having to load the whole model in FP32, add the following snippet to your code:
+This error probably occurred because the model was loaded with `torch_dtype=torch.float16` and then used in an automatic mixed precision (AMP) context, e.g. by setting `fp16=True` in the [`~transformers.Trainer`] class from 🤗 Transformers. The reason is that when using AMP, trainable weights should never use fp16. To make this work without loading the whole model in fp32, add the following to your code:
 
 ```python
 peft_model = get_peft_model(...)
@@ -58,7 +56,8 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
-Alternatively, you can use the utility function `cast_mixed_precision_params` from peft as shown below:
+Alternatively, you can use the [`~utils.cast_mixed_precision_params`] function to correctly cast the weights:
+
 ```python
 from peft import cast_mixed_precision_params
 
@@ -70,10 +69,9 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
-
 ## Bad results from a loaded PEFT model
 
-There can be several reasons for getting a poor result from a loaded PEFT model, which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
+There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
 
 When opening an issue, it helps a lot if you provide a minimal code example that reproduces the issue. Also, please report if the loaded model performs at the same level as the model did before fine-tuning, if it performs at a random level, or if it is only slightly worse than expected. This information helps us identify the problem more quickly.
 
@@ -87,7 +85,7 @@ If your model outputs are not exactly the same as previous runs, there could be 
 
 ### Incorrectly loaded model
 
-Please ensure that you load the model correctly. A common error is trying to load a _trained_ model with `get_peft_model`, which is incorrect. Instead, the loading code should look like this:
+Please ensure that you load the model correctly. A common error is trying to load a _trained_ model with [`get_peft_model`] which is incorrect. Instead, the loading code should look like this:
 
 ```python
 from peft import PeftModel, PeftConfig
@@ -103,7 +101,7 @@ For some tasks, it is important to correctly configure `modules_to_save` in the 
 
 As an example, this is necessary if you use LoRA to fine-tune a language model for sequence classification because 🤗 Transformers adds a randomly initialized classification head on top of the model. If you do not add this layer to `modules_to_save`, the classification head won't be saved. The next time you load the model, you'll get a _different_ randomly initialized classification head, resulting in completely different results.
 
-In PEFT, we try to correctly guess the `modules_to_save` if you provide the `task_type` argument in the config. This should work for transformers models that follow the standard naming scheme. It is always a good idea to double check though because we can't guarantee all models follow the naming scheme.
+PEFT tries to correctly guess the `modules_to_save` if you provide the `task_type` argument in the config. This should work for transformers models that follow the standard naming scheme. It is always a good idea to double check though because we can't guarantee all models follow the naming scheme.
 
 When you load a transformers model that has randomly initialized layers, you should see a warning along the lines of:
 
