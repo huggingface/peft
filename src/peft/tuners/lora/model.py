@@ -36,7 +36,7 @@ from peft.utils import (
     _get_submodules,
     get_quantization_config,
 )
-from peft.utils.merge_utils import dare_linear, dare_ties, task_arthimetic, ties
+from peft.utils.merge_utils import dare_linear, dare_ties, task_arithmetic, ties
 
 from .config import LoraConfig
 from .gptq import dispatch_gptq
@@ -558,7 +558,7 @@ class LoraModel(BaseTuner):
         delta_weight = [target.get_delta_weight(adapter) for adapter in valid_adapters]
         valid_weights = torch.tensor(valid_weights).to(delta_weight[0].device)
         if combination_type == "svd":
-            delta_weight = task_arthimetic(delta_weight, valid_weights)
+            delta_weight = task_arithmetic(delta_weight, valid_weights)
         elif combination_type == "ties_svd":
             delta_weight = ties(delta_weight, valid_weights, density, majority_sign_method)
         elif combination_type == "dare_linear_svd":
@@ -625,7 +625,7 @@ class LoraModel(BaseTuner):
         dtype = lora_A_deltas[0].dtype
         for i, task_tensors in enumerate(lora_deltas):
             if combination_type == "linear":
-                lora_deltas[i] = task_arthimetic(task_tensors, valid_weights)
+                lora_deltas[i] = task_arithmetic(task_tensors, valid_weights)
             elif combination_type == "ties":
                 lora_deltas[i] = ties(task_tensors, valid_weights, density, majority_sign_method)
             elif combination_type == "dare_linear":

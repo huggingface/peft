@@ -15,6 +15,7 @@ extend-select = [
     "I", # Import sorting
     "UP", # Pyupgrade upgrades
     "W", # PEP8 warnings
+    "PT009", # Pytest assertions
 ]
 ignore = [
     "C901", # Function too complex

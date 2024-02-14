@@ -120,19 +120,13 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
 
         flan_8bit = get_peft_model(flan_8bit, flan_lora_config)
-        self.assertTrue(
-            isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear8bitLt)
-        )
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear8bitLt)
 
         opt_8bit = get_peft_model(opt_8bit, opt_lora_config)
-        self.assertTrue(
-            isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
-        )
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
-        self.assertTrue(
-            isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
-        )
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -170,19 +164,13 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = IA3Config(target_modules=["q_proj", "v_proj", "fc2"], feedforward_modules=["fc2"])
 
         flan_8bit = get_peft_model(flan_8bit, flan_ia3_config)
-        self.assertTrue(
-            isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, IA3Linear8bitLt)
-        )
+        assert isinstance(flan_8bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, IA3Linear8bitLt)
 
         opt_8bit = get_peft_model(opt_8bit, opt_ia3_config)
-        self.assertTrue(
-            isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear8bitLt)
-        )
+        assert isinstance(opt_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear8bitLt)
 
         whisper_8bit = get_peft_model(whisper_8bit, config)
-        self.assertTrue(
-            isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear8bitLt)
-        )
+        assert isinstance(whisper_8bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear8bitLt)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -211,8 +199,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
         # check that both adapters are in the same layer
-        self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
-        self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+        assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+        assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -248,8 +236,8 @@ class PeftGPUCommonTests(unittest.TestCase):
             model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
             # check that both adapters are in the same layer
-            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
-            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -285,8 +273,8 @@ class PeftGPUCommonTests(unittest.TestCase):
             model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
             # check that both adapters are in the same layer
-            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l)
-            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l)
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.ia3_l
 
     @pytest.mark.single_gpu_tests
     def test_lora_gptq_quantization_from_pretrained_safetensors(self):
@@ -323,8 +311,8 @@ class PeftGPUCommonTests(unittest.TestCase):
             model.generate(input_ids=torch.LongTensor([[0, 2, 3, 1]]).to(0))
 
             # check that both adapters are in the same layer
-            self.assertIn("default", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
-            self.assertIn("adapter2", model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A)
+            assert "default" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
+            assert "adapter2" in model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -367,17 +355,13 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
 
         flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
-        self.assertTrue(
-            isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear4bit)
-        )
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear4bit)
 
         opt_4bit = get_peft_model(opt_4bit, opt_lora_config)
-        self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit))
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
-        self.assertTrue(
-            isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
-        )
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests
@@ -415,17 +399,13 @@ class PeftGPUCommonTests(unittest.TestCase):
         config = IA3Config(target_modules=["q_proj", "v_proj", "fc2"], feedforward_modules=["fc2"])
 
         flan_4bit = get_peft_model(flan_4bit, flan_ia3_config)
-        self.assertTrue(
-            isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, IA3Linear4bit)
-        )
+        assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, IA3Linear4bit)
 
         opt_4bit = get_peft_model(opt_4bit, opt_ia3_config)
-        self.assertTrue(isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit))
+        assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
 
         whisper_4bit = get_peft_model(whisper_4bit, config)
-        self.assertTrue(
-            isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
-        )
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, IA3Linear4bit)
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
@@ -445,10 +425,10 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="balanced")
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
         model = get_peft_model(model, lora_config)
-        self.assertTrue(isinstance(model, PeftModel))
+        assert isinstance(model, PeftModel)
 
         dummy_input = "This is a dummy input:"
         input_ids = tokenizer(dummy_input, return_tensors="pt").input_ids.to(self.device)
@@ -470,11 +450,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = AutoModelForSeq2SeqLM.from_pretrained(self.seq2seq_model_id, device_map="balanced", load_in_8bit=True)
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
-        self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
         model = get_peft_model(model, lora_config)
-        self.assertTrue(isinstance(model, PeftModel))
-        self.assertTrue(isinstance(model.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear8bitLt))
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear8bitLt)
 
         dummy_input = "This is a dummy input:"
         input_ids = tokenizer(dummy_input, return_tensors="pt").input_ids.to(self.device)
@@ -546,8 +526,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = get_peft_model(model, config)
         trainable_params, all_params = model.get_nb_trainable_parameters()
 
-        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
-        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
+        assert trainable_params == EXPECTED_TRAINABLE_PARAMS
+        assert all_params == EXPECTED_ALL_PARAMS
 
         # test with double quant
         bnb_config = BitsAndBytesConfig(
@@ -566,8 +546,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         model = get_peft_model(model, config)
         trainable_params, all_params = model.get_nb_trainable_parameters()
 
-        self.assertEqual(trainable_params, EXPECTED_TRAINABLE_PARAMS)
-        self.assertEqual(all_params, EXPECTED_ALL_PARAMS)
+        assert trainable_params == EXPECTED_TRAINABLE_PARAMS
+        assert all_params == EXPECTED_ALL_PARAMS
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -602,9 +582,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         o1 = lm_head(inputs)
         o1.mean().backward()
 
-        self.assertTrue(modules_to_save.weight.requires_grad is True)
-        self.assertTrue(original_module.weight.grad is None)
-        self.assertTrue(modules_to_save.weight.grad is not None)
+        assert modules_to_save.weight.requires_grad is True
+        assert original_module.weight.grad is None
+        assert modules_to_save.weight.grad is not None
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -633,15 +613,11 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         atol = 0.01
         rtol = 10
-        self.assertFalse(torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol))
-        self.assertTrue(isinstance(model, PeftModel))
-        self.assertTrue(
-            isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear8bitLt)
-        )
-        self.assertTrue(
-            isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear8bitLt)
-        )
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear8bitLt)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear8bitLt)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -673,11 +649,11 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         atol = 0.01
         rtol = 10
-        self.assertFalse(torch.allclose(out_base, out_before, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(out_base, out_after, atol=atol, rtol=rtol))
-        self.assertTrue(isinstance(model, PeftModel))
-        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt))
-        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt))
+        assert not torch.allclose(out_base, out_before, atol=atol, rtol=rtol)
+        assert torch.allclose(out_base, out_after, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -715,11 +691,11 @@ class PeftGPUCommonTests(unittest.TestCase):
         # tolerances are pretty high because some deviations are expected with quantization
         atol = 0.01
         rtol = 10
-        self.assertFalse(torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol))
-        self.assertTrue(isinstance(model, PeftModel))
-        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit))
-        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit))
+        assert not torch.allclose(out_base, out_before_merge, atol=atol, rtol=rtol)
+        assert torch.allclose(out_before_merge, out_after_merge, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, bnb.nn.Linear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, bnb.nn.Linear4bit)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -757,11 +733,11 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         atol = 0.01
         rtol = 10
-        self.assertFalse(torch.allclose(out_base, out_before, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(out_base, out_after, atol=atol, rtol=rtol))
-        self.assertTrue(isinstance(model, PeftModel))
-        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit))
-        self.assertTrue(isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit))
+        assert not torch.allclose(out_base, out_before, atol=atol, rtol=rtol)
+        assert torch.allclose(out_base, out_after, atol=atol, rtol=rtol)
+        assert isinstance(model, PeftModel)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
