@@ -378,6 +378,7 @@ if is_bnb_4bit_available():
             
             for active_adapter in adapter_names:
                 if active_adapter in self.lora_embedding_A.keys():
+                    # TODO: Test if warning is needed here for rounding error as in Linear
                     base_layer = self.get_base_layer()
                     weight = base_layer.weight
                     lora_data = self.get_delta_weight(active_adapter)
