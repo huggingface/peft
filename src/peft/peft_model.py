@@ -349,7 +349,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if dict(module._hf_hook.original_devices)[key] == torch.device("meta"):
                         disk_modules.append(str(name) + "." + str(key))
 
-        if disk_modules and hasattr(kwargs, "use_safetensors") and not kwargs["use_safetensors"]:
+        if disk_modules and not kwargs.get("use_safetensors", True):
             raise ValueError("Disk offloading currently only supported for safetensors")
 
         start_prefix = ""
