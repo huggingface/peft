@@ -84,7 +84,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
 
-        self.assertTrue(not dummy_output.requires_grad)
+        assert not dummy_output.requires_grad
 
     def test_prepare_for_int8_training(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
@@ -92,7 +92,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         model = model.to(self.torch_device)
 
         for param in model.parameters():
-            self.assertTrue(not param.requires_grad)
+            assert not param.requires_grad
 
         model = get_peft_model(model, self._create_multitask_prompt_tuning_config())
 
@@ -109,7 +109,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
 
-        self.assertTrue(dummy_output.requires_grad)
+        assert dummy_output.requires_grad
 
     def test_save_pretrained(self) -> None:
         seed = 420
@@ -131,30 +131,28 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 3)
+            assert len(state_dict) == 3
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
             # check if `adapter_model.safetensors` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     def test_save_pretrained_regression(self) -> None:
         seed = 420
@@ -176,30 +174,28 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 3)
+            assert len(state_dict) == 3
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
             # check if `adapter_model.bin` is present for regression
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `pytorch_model.bin` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "pytorch_model.bin"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     def test_generate(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())

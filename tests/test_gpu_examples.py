@@ -137,7 +137,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         training = model.training
         model.eval()
         output = model(**batch.to(model.device))
-        self.assertTrue(torch.isfinite(output.logits).all())
+        assert torch.isfinite(output.logits).all()
         model.train(training)
 
     @pytest.mark.single_gpu_tests
@@ -192,11 +192,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_4bit(self):
@@ -250,11 +250,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
     def test_causal_lm_training_multi_gpu_4bit(self):
@@ -270,7 +270,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 load_in_4bit=True,
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -311,11 +311,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     @require_torch_gpu
@@ -375,11 +375,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     @require_torch_gpu
@@ -438,11 +438,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
@@ -460,7 +460,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="auto",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
             model = prepare_model_for_int8_training(model)
@@ -502,11 +502,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     def test_seq2seq_lm_training_single_gpu(self):
@@ -523,7 +523,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map={"": 0},
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), {0})
+            assert set(model.hf_device_map.values()) == {0}
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_int8_training(model)
@@ -562,11 +562,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
@@ -584,7 +584,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                 device_map="balanced",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
             model = prepare_model_for_int8_training(model)
@@ -623,11 +623,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     def test_audio_model_training(self):
@@ -721,11 +721,11 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     def test_4bit_non_default_adapter_name(self):
@@ -757,9 +757,10 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = get_peft_model(model, config, adapter_name="other")
         n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
 
-        self.assertGreater(n_trainable_other, 0)  # sanity check
-        self.assertEqual(n_trainable_default, n_trainable_other)
-        self.assertEqual(n_total_default, n_total_other)
+        assert n_trainable_other > 0
+        # sanity check
+        assert n_trainable_default == n_trainable_other
+        assert n_total_default == n_total_other
 
     @pytest.mark.single_gpu_tests
     def test_8bit_non_default_adapter_name(self):
@@ -791,9 +792,10 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = get_peft_model(model, config, adapter_name="other")
         n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
 
-        self.assertGreater(n_trainable_other, 0)  # sanity check
-        self.assertEqual(n_trainable_default, n_trainable_other)
-        self.assertEqual(n_total_default, n_total_other)
+        assert n_trainable_other > 0
+        # sanity check
+        assert n_trainable_default == n_trainable_other
+        assert n_total_default == n_total_other
 
 
 @require_torch_gpu
@@ -825,7 +827,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         training = model.training
         model.eval()
         output = model(**batch.to(model.device))
-        self.assertTrue(torch.isfinite(output.logits).all())
+        assert torch.isfinite(output.logits).all()
         model.train(training)
 
     @pytest.mark.single_gpu_tests
@@ -876,11 +878,11 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     def test_adalora_causalLM(self):
@@ -941,11 +943,11 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
@@ -963,7 +965,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
                 quantization_config=self.quantization_config,
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1004,11 +1006,11 @@ class PeftGPTQGPUTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.single_gpu_tests
     def test_non_default_adapter_name(self):
@@ -1041,9 +1043,10 @@ class PeftGPTQGPUTests(unittest.TestCase):
         model = get_peft_model(model, config, adapter_name="other")
         n_trainable_other, n_total_other = model.get_nb_trainable_parameters()
 
-        self.assertGreater(n_trainable_other, 0)  # sanity check
-        self.assertEqual(n_trainable_default, n_trainable_other)
-        self.assertEqual(n_total_default, n_total_other)
+        assert n_trainable_other > 0
+        # sanity check
+        assert n_trainable_default == n_trainable_other
+        assert n_total_default == n_total_other
 
 
 @require_torch_gpu
@@ -1072,8 +1075,8 @@ class OffloadSaveTests(unittest.TestCase):
         memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
-        self.assertTrue(0 in device_map.values())
-        self.assertTrue("cpu" in device_map.values())
+        assert 0 in device_map.values()
+        assert "cpu" in device_map.values()
 
         config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
@@ -1082,7 +1085,7 @@ class OffloadSaveTests(unittest.TestCase):
             model.save_pretrained(tmp_dir)
             # load the model with device_map
             model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
-            self.assertTrue(len({p.device for p in model.parameters()}) == 2)
+            assert len({p.device for p in model.parameters()}) == 2
             model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
@@ -1092,17 +1095,17 @@ class OffloadSaveTests(unittest.TestCase):
         pre_merge_olayer = model(input_tokens)[0]
         model.merge_adapter()
         post_merge_olayer = model(input_tokens)[0]
-        self.assertTrue(torch.allclose(post_merge_olayer, pre_merge_olayer))
+        assert torch.allclose(post_merge_olayer, pre_merge_olayer)
 
         # test peft model adapter unmerge
         model.unmerge_adapter()
         post_unmerge_olayer = model(input_tokens)[0]
-        self.assertTrue(torch.allclose(post_unmerge_olayer, pre_merge_olayer))
+        assert torch.allclose(post_unmerge_olayer, pre_merge_olayer)
 
         # test LoRA merge and unload
         model = model.merge_and_unload()
         post_unload_merge_olayer = model(input_tokens)[0]
-        self.assertTrue(torch.allclose(post_unload_merge_olayer, pre_merge_olayer))
+        assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
 @require_torch_gpu
@@ -1203,15 +1206,15 @@ class LoftQTests(unittest.TestCase):
 
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device)
         # first, sanity check that all errors are > 0.0
-        self.assertTrue(mae_quantized > 0.0)
-        self.assertTrue(mse_quantized > 0.0)
-        self.assertTrue(mae_loftq > 0.0)
-        self.assertTrue(mse_loftq > 0.0)
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
         factor = 3
-        self.assertTrue(mae_loftq < mae_quantized / factor)
-        self.assertTrue(mse_loftq < mse_quantized / factor)
+        assert mae_loftq < (mae_quantized / factor)
+        assert mse_loftq < (mse_quantized / factor)
 
     @parameterized.expand(["cuda", "cpu"])
     def test_bloomz_loftq_4bit_iter_5(self, device):
@@ -1219,14 +1222,14 @@ class LoftQTests(unittest.TestCase):
         # iterations, but in practice the difference is not that large, at least not for this small base model.
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, loftq_iter=5, device=device)
         # first, sanity check that all errors are > 0.0
-        self.assertTrue(mae_quantized > 0.0)
-        self.assertTrue(mse_quantized > 0.0)
-        self.assertTrue(mae_loftq > 0.0)
-        self.assertTrue(mse_loftq > 0.0)
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
-        self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
 
     @parameterized.expand(["cuda", "cpu"])
     def test_bloomz_loftq_8bit(self, device):
@@ -1234,14 +1237,14 @@ class LoftQTests(unittest.TestCase):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device)
 
         # first, sanity check that all errors are > 0.0
-        self.assertTrue(mae_quantized > 0.0)
-        self.assertTrue(mse_quantized > 0.0)
-        self.assertTrue(mae_loftq > 0.0)
-        self.assertTrue(mse_loftq > 0.0)
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
-        self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
 
     @parameterized.expand(["cuda", "cpu"])
     def test_bloomz_loftq_8bit_iter_5(self, device):
@@ -1249,14 +1252,14 @@ class LoftQTests(unittest.TestCase):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, loftq_iter=5, device=device)
 
         # first, sanity check that all errors are > 0.0
-        self.assertTrue(mae_quantized > 0.0)
-        self.assertTrue(mse_quantized > 0.0)
-        self.assertTrue(mae_loftq > 0.0)
-        self.assertTrue(mse_loftq > 0.0)
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        self.assertTrue(mae_loftq < mae_quantized / self.error_factor)
-        self.assertTrue(mse_loftq < mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
 
     @parameterized.expand(["cuda", "cpu"])
     def test_t5_loftq_4bit(self, device):
@@ -1264,15 +1267,15 @@ class LoftQTests(unittest.TestCase):
             bits=4, device=device, model_id="t5-small"
         )
         # first, sanity check that all errors are > 0.0
-        self.assertTrue(mae_quantized > 0.0)
-        self.assertTrue(mse_quantized > 0.0)
-        self.assertTrue(mae_loftq > 0.0)
-        self.assertTrue(mse_loftq > 0.0)
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
         factor = 3
-        self.assertTrue(mae_loftq < mae_quantized / factor)
-        self.assertTrue(mse_loftq < mse_quantized / factor)
+        assert mae_loftq < (mae_quantized / factor)
+        assert mse_loftq < (mse_quantized / factor)
 
     @parameterized.expand(["cuda", "cpu"])
     def test_t5_loftq_8bit(self, device):
@@ -1280,15 +1283,15 @@ class LoftQTests(unittest.TestCase):
             bits=8, device=device, model_id="t5-small"
         )
         # first, sanity check that all errors are > 0.0
-        self.assertTrue(mae_quantized > 0.0)
-        self.assertTrue(mse_quantized > 0.0)
-        self.assertTrue(mae_loftq > 0.0)
-        self.assertTrue(mse_loftq > 0.0)
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
         factor = 3
-        self.assertTrue(mae_loftq < mae_quantized / factor)
-        self.assertTrue(mse_loftq < mse_quantized / factor)
+        assert mae_loftq < (mae_quantized / factor)
+        assert mse_loftq < (mse_quantized / factor)
 
 
 @require_bitsandbytes
@@ -1347,8 +1350,7 @@ class MixedPrecisionTests(unittest.TestCase):
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
-            msg = "Attempting to unscale FP16 gradients."
-            with self.assertRaisesRegex(ValueError, msg):
+            with pytest.raises(ValueError, match="Attempting to unscale FP16 gradients."):
                 trainer.train()
 
     @pytest.mark.single_gpu_tests

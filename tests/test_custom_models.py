@@ -19,6 +19,7 @@ import os
 import tempfile
 import unittest
 
+import pytest
 import torch
 from parameterized import parameterized
 from torch import nn
@@ -540,7 +541,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.eval()
         with torch.no_grad():
             output = model(**X)
-        self.assertTrue(torch.isfinite(output).all())
+        assert torch.isfinite(output).all()
 
     @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
@@ -569,16 +570,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         tol = 1e-4
         params_before = dict(model_before.named_parameters())
         params_after = dict(model.named_parameters())
-        self.assertEqual(params_before.keys(), params_after.keys())
+        assert params_before.keys() == params_after.keys()
 
         prefix = PREFIXES[config_cls]
         for name, param_before in params_before.items():
             param_after = params_after[name]
             if (prefix in name) or ("modules_to_save" in name):
                 # target_modules and modules_to_save _are_ updated
-                self.assertFalse(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
+                assert not torch.allclose(param_before, param_after, atol=tol, rtol=tol)
             else:
-                self.assertTrue(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
+                assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
     @parameterized.expand(TEST_CASES)
     def test_parameters_after_loading_model(self, test_name, model_id, config_cls, config_kwargs):
@@ -614,10 +615,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
             params_after = get_state_dict(model_from_pretrained)
 
-            self.assertEqual(params_before.keys(), params_after.keys())
+            assert params_before.keys() == params_after.keys()
             for name, param_before in params_before.items():
                 param_after = params_after[name]
-                self.assertTrue(torch.allclose(param_before, param_after, atol=tol, rtol=tol))
+                assert torch.allclose(param_before, param_after, atol=tol, rtol=tol)
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
@@ -633,7 +634,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.eval()
         outputs_before = model(**X)
 
-        self.assertTrue(torch.allclose(outputs_base, outputs_before))
+        assert torch.allclose(outputs_base, outputs_before)
 
         model.train()
         # EmbConv1D is slow to learn for some reason
@@ -659,9 +660,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        self.assertFalse(torch.allclose(outputs_before, outputs_after))
-        self.assertTrue(torch.allclose(outputs_before, outputs_disabled))
-        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable))
+        assert not torch.allclose(outputs_before, outputs_after)
+        assert torch.allclose(outputs_before, outputs_disabled)
+        assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
@@ -707,13 +708,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             atol, rtol = 1e-3, 1e-3
 
         # check that there is a difference in results after training
-        self.assertFalse(torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol))
+        assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        self.assertTrue(torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol))
+        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
-        self.assertTrue(torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol))
+        assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapter_with_bias_warns(self, test_name, model_id, config_cls, config_kwargs):
@@ -743,9 +744,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that bias=all and bias=lora_only give a warning with the correct message
         msg_start = "Careful, disabling adapter layers with bias configured to be"
-        with self.assertWarns(UserWarning, msg=msg_start):
+        with pytest.warns(UserWarning, match=msg_start):
             run_with_disable(config_kwargs, bias="lora_only")
-        with self.assertWarns(UserWarning, msg=msg_start):
+        with pytest.warns(UserWarning, match=msg_start):
             run_with_disable(config_kwargs, bias="all")
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
@@ -793,9 +794,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
-        self.assertIn("library_name: peft", model_card)
-        self.assertIn("meta: hello", model_card)
-        self.assertIn("This is a model card", model_card)
+        assert "library_name: peft" in model_card
+        assert "meta: hello" in model_card
+        assert "This is a model card" in model_card
 
     def test_non_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
@@ -808,9 +809,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with open(os.path.join(tmp_dirname, "README.md")) as f:
                 model_card = f.read()
 
-        self.assertIn("library_name: peft", model_card)
+        assert "library_name: peft" in model_card
         # rough check that the model card is pre-filled
-        self.assertGreater(len(model_card), 1000)
+        assert len(model_card) > 1000
 
     @parameterized.expand(["auto", True, False])
     def test_targeting_lora_to_embedding_layer(self, save_embedding_layers):
@@ -822,7 +823,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             if save_embedding_layers == "auto":
                 # assert warning
                 msg_start = "Setting `save_embedding_layers` to `True` as embedding layers found in `target_modules`."
-                with self.assertWarns(UserWarning, msg=msg_start):
+                with pytest.warns(UserWarning, match=msg_start):
                     model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
             else:
                 model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
@@ -830,15 +831,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
             state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
             if save_embedding_layers in ["auto", True]:
-                self.assertTrue("base_model.model.embed_tokens.base_layer.weight" in state_dict)
-                self.assertTrue(
-                    torch.allclose(
-                        model.base_model.model.embed_tokens.base_layer.weight,
-                        state_dict["base_model.model.embed_tokens.base_layer.weight"],
-                    )
+                assert "base_model.model.embed_tokens.base_layer.weight" in state_dict
+                assert torch.allclose(
+                    model.base_model.model.embed_tokens.base_layer.weight,
+                    state_dict["base_model.model.embed_tokens.base_layer.weight"],
                 )
             else:
-                self.assertFalse("base_model.model.embed_tokens.base_layer.weight" in state_dict)
+                assert "base_model.model.embed_tokens.base_layer.weight" not in state_dict
             del state_dict
 
     @parameterized.expand(["auto", True, False])
@@ -849,16 +848,17 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
             if save_embedding_layers is True:
-                # assert warning
-                msg_start = "Could not identify embedding layer(s) because the model is not a 🤗 transformers model."
-                with self.assertWarns(UserWarning, msg=msg_start):
+                with pytest.warns(
+                    UserWarning,
+                    match=r"Could not identify embedding layer\(s\) because the model is not a 🤗 transformers model\.",
+                ):
                     model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
             else:
                 model.save_pretrained(tmp_dirname, save_embedding_layers=save_embedding_layers)
             from safetensors.torch import load_file as safe_load_file
 
             state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
-            self.assertFalse("base_model.model.emb.base_layer.weight" in state_dict)
+            assert "base_model.model.emb.base_layer.weight" not in state_dict
             del state_dict
 
     @parameterized.expand(
@@ -917,11 +917,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             assert torch.allclose(sd_default[k0], sd_custom1[k1])
             assert torch.allclose(sd_default[k0], sd_custom2[k2])
 
-        self.assertFalse(torch.allclose(output_base, output_default))
-        self.assertFalse(torch.allclose(output_base, output_custom1))
-        self.assertFalse(torch.allclose(output_base, output_custom2))
-        self.assertTrue(torch.allclose(output_custom1, output_custom2))
-        self.assertTrue(torch.allclose(output_default, output_custom1))
+        assert not torch.allclose(output_base, output_default)
+        assert not torch.allclose(output_base, output_custom1)
+        assert not torch.allclose(output_base, output_custom2)
+        assert torch.allclose(output_custom1, output_custom2)
+        assert torch.allclose(output_default, output_custom1)
 
 
 class TestMultiRankAdapter(unittest.TestCase):
@@ -953,7 +953,7 @@ class TestMultiRankAdapter(unittest.TestCase):
         rank_current = model.lin0.lora_A["second"].weight.shape[0]
         rank_expected = config_2.rank_pattern["lin0"]
 
-        self.assertTrue(rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}")
+        assert rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}"
 
     def test_multirank_2(self):
         rank_pattern = {}
@@ -987,9 +987,9 @@ class TestMultiRankAdapter(unittest.TestCase):
                 if isinstance(module, BaseTunerLayer):
                     rank_expected = rank_pattern.get(key, r)
                     rank_current = module.lora_A[adapter].weight.shape[0]
-                    self.assertTrue(
-                        rank_current == rank_expected, f"Rank {rank_current} is not equal to expected {rank_expected}"
-                    )
+                    assert (
+                        rank_current == rank_expected
+                    ), f"Rank {rank_current} is not equal to expected {rank_expected}"
 
 
 class TestRepr(unittest.TestCase):
@@ -999,45 +999,45 @@ class TestRepr(unittest.TestCase):
         config = LoraConfig(target_modules=["lin0"])
         model = get_peft_model(MLP(), config)
         print_output = repr(model.model.lin0)
-        self.assertTrue(print_output.startswith("lora.Linear"))
-        self.assertTrue("in_features=10" in print_output)
-        self.assertTrue("out_features=20" in print_output)
-        self.assertTrue("lora_A" in print_output)
-        self.assertTrue("lora_B" in print_output)
-        self.assertTrue("default" in print_output)
+        assert print_output.startswith("lora.Linear")
+        assert "in_features=10" in print_output
+        assert "out_features=20" in print_output
+        assert "lora_A" in print_output
+        assert "lora_B" in print_output
+        assert "default" in print_output
 
     def test_repr_lora_embedding(self):
         config = LoraConfig(target_modules=["emb"])
         model = get_peft_model(ModelEmbConv1D(), config)
         print_output = repr(model.model.emb)
-        self.assertTrue(print_output.startswith("lora.Embedding"))
-        self.assertTrue("100, 5" in print_output)
-        self.assertTrue("lora_embedding_A" in print_output)
-        self.assertTrue("lora_embedding_B" in print_output)
-        self.assertTrue("default" in print_output)
+        assert print_output.startswith("lora.Embedding")
+        assert "100, 5" in print_output
+        assert "lora_embedding_A" in print_output
+        assert "lora_embedding_B" in print_output
+        assert "default" in print_output
 
     def test_repr_lora_conv1d(self):
         config = LoraConfig(target_modules=["conv1d"])
         model = get_peft_model(ModelEmbConv1D(), config)
         print_output = repr(model.model.conv1d)
-        self.assertTrue(print_output.startswith("lora.Linear"))
-        self.assertTrue("in_features=5" in print_output)
-        self.assertTrue("out_features=1" in print_output)
-        self.assertTrue("lora_A" in print_output)
-        self.assertTrue("lora_B" in print_output)
-        self.assertTrue("default" in print_output)
+        assert print_output.startswith("lora.Linear")
+        assert "in_features=5" in print_output
+        assert "out_features=1" in print_output
+        assert "lora_A" in print_output
+        assert "lora_B" in print_output
+        assert "default" in print_output
 
     def test_repr_lora_conv2d(self):
         config = LoraConfig(target_modules=["conv2d"])
         model = get_peft_model(ModelConv2D(), config)
         print_output = repr(model.model.conv2d)
-        self.assertTrue(print_output.startswith("lora.Conv2d"))
-        self.assertTrue("5, 10" in print_output)
-        self.assertTrue("kernel_size=(3, 3)" in print_output)
-        self.assertTrue("stride=(1, 1)" in print_output)
-        self.assertTrue("lora_A" in print_output)
-        self.assertTrue("lora_B" in print_output)
-        self.assertTrue("default" in print_output)
+        assert print_output.startswith("lora.Conv2d")
+        assert "5, 10" in print_output
+        assert "kernel_size=(3, 3)" in print_output
+        assert "stride=(1, 1)" in print_output
+        assert "lora_A" in print_output
+        assert "lora_B" in print_output
+        assert "default" in print_output
 
 
 class MultipleActiveAdaptersTester(unittest.TestCase):
@@ -1084,9 +1084,9 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         self.set_multiple_active_adapters(peft_model, ["adapter_1", "adapter_2"])
         combined_output = peft_model(**X)
 
-        self.assertFalse(torch.allclose(adapter_1_output, adapter_2_output, atol=1e-5))
-        self.assertFalse(torch.allclose(adapter_1_output, combined_output, atol=1e-5))
-        self.assertFalse(torch.allclose(adapter_2_output, combined_output, atol=1e-5))
+        assert not torch.allclose(adapter_1_output, adapter_2_output, atol=1e-5)
+        assert not torch.allclose(adapter_1_output, combined_output, atol=1e-5)
+        assert not torch.allclose(adapter_2_output, combined_output, atol=1e-5)
 
         if tuner_method == "lora":
             # create a weighted adapter combining both adapters and check that
@@ -1096,7 +1096,7 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
             )
             peft_model.set_adapter("new_combined_adapter")
             new_combined_output = peft_model(**X)
-            self.assertTrue(torch.allclose(new_combined_output, combined_output, atol=1e-5))
+            assert torch.allclose(new_combined_output, combined_output, atol=1e-5)
 
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_multiple_active_adapters_merge_and_unmerge(
@@ -1120,14 +1120,14 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
 
         peft_model.merge_adapter()
         merged_combined_output = peft_model(**X)
-        self.assertTrue(torch.allclose(merged_combined_output, combined_output, atol=1e-5))
+        assert torch.allclose(merged_combined_output, combined_output, atol=1e-5)
 
         peft_model.unmerge_adapter()
 
         with peft_model.disable_adapter():
             disabled_adapter_output = peft_model(**X)
 
-        self.assertTrue(torch.allclose(disabled_adapter_output, base_output, atol=1e-4))
+        assert torch.allclose(disabled_adapter_output, base_output, atol=1e-4)
 
     @parameterized.expand(MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES)
     def test_merge_layers_multi(self, test_name, tuner_method, config_cls, config_kwargs_1, config_kwargs_2):
@@ -1153,14 +1153,14 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         with torch.inference_mode():
             logits_adapter_2 = model(**dummy_input)[0]
 
-        self.assertFalse(torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3))
+        assert not torch.allclose(logits_adapter_1, logits_adapter_2, atol=1e-3, rtol=1e-3)
 
         model.set_adapter("default")
 
         with torch.inference_mode():
             logits_adapter_1_after_set = model(**dummy_input)[0]
 
-        self.assertTrue(torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3))
+        assert torch.allclose(logits_adapter_1_after_set, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_copy = copy.deepcopy(model)
         model_copy_2 = copy.deepcopy(model)
@@ -1169,22 +1169,22 @@ class MultipleActiveAdaptersTester(unittest.TestCase):
         with torch.inference_mode():
             logits_merged_all = model_merged_all(**dummy_input)[0]
 
-        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3))
-        self.assertFalse(torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3))
+        assert not torch.allclose(logits_merged_all, logits_adapter_2, atol=1e-3, rtol=1e-3)
+        assert not torch.allclose(logits_merged_all, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_2 = model_copy.merge_and_unload(adapter_names=["adapter-2"])
 
         with torch.inference_mode():
             logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
 
-        self.assertTrue(torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3))
+        assert torch.allclose(logits_merged_adapter_2, logits_adapter_2, atol=1e-3, rtol=1e-3)
 
         model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
 
         with torch.inference_mode():
             logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
-        self.assertTrue(torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3))
+        assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
 
 class RequiresGradTester(unittest.TestCase):
@@ -1203,7 +1203,7 @@ class RequiresGradTester(unittest.TestCase):
         params_with_requires_grad = [name for name, param in model.named_parameters() if param.requires_grad]
         diff = set(params_expected).symmetric_difference(set(params_with_requires_grad))
         msg = f"Expected {params_expected} to require gradients, got {params_with_requires_grad}"
-        self.assertEqual(len(diff), 0, msg=msg)
+        assert len(diff) == 0, msg
 
     def test_requires_grad_modules_to_save_default(self):
         config = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
