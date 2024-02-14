@@ -1430,6 +1430,8 @@ class SimpleConv2DModel(torch.nn.Module):
 
 @require_torch_gpu
 class TestAutoCast(unittest.TestCase):
+    # This test makes sure, that Lora dtypes are consistent with the types
+    # infered by torch.autocast under tested PRECISIONS
     @parameterized.expand(PRECISIONS)
     def test_simple_model(self, *args, **kwargs):
         self._test_model(SimpleModel(), *args, **kwargs)
