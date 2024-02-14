@@ -18,16 +18,16 @@ rendered properly in your Markdown viewer.
 
 Training a model for each task can be costly, take up storage space, and the models aren't able to learn new information to improve their performance. Multitask learning can overcome some of these limitations by training a model to learn several tasks, but it is expensive to train and designing a dataset for it is challenging. *Model merging* offers a solution to these challenges by combining multiple pretrained models into one model, giving it the combined abilities of each individual model without any additional training.
 
-PEFT provides two methods for model merging:
+PEFT provides several methods for merging models like a linear or SVD combination. This guide focuses on two methods that are more efficient for merging LoRA adapters by eliminating redundant parameters:
 
 * [TIES](https://hf.co/papers/2306.01708) - TrIm, Elect, and Merge (TIES) is a three-step method for merging models. First, redundant parameters are trimmed, then conflicting signs are resolved into an aggregated vector, and finally the parameters whose signs are the same as the aggregate sign are averaged. This method takes into account that some values (redundant and sign disagreement) can degrade performance in the merged model.
 * [DARE](https://hf.co/papers/2311.03099) - Drop And REscale is a method that can be used to prepare for other model merging methods like TIES. It works by randomly dropping parameters according to a drop rate and rescaling the remaining parameters. This helps to reduce the number of redundant and potentially interfering parameters among multiple models.
 
-Models are merged with the [`~LoraModel.add_weighted_adapter`] method, and the specific model merging method is specified in the `combination_type` parameter. This guide will show you how to merge models with TIES and DARE.
+Models are merged with the [`~LoraModel.add_weighted_adapter`] method, and the specific model merging method is specified in the `combination_type` parameter.
 
 ## Merge method
 
-With PEFT, merging is enabled by setting `combination_type` and `ties_density` to a value of the weights to keep from the individual models. For example, let's merge three finetuned [TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T) models: [tinyllama_lora_nobots](https://huggingface.co/smangrul/tinyllama_lora_norobots), [tinyllama_lora_sql](https://huggingface.co/smangrul/tinyllama_lora_sql), and [tinyllama_lora_adcopy](https://huggingface.co/smangrul/tinyllama_lora_adcopy).
+With TIES and DARE, merging is enabled by setting `combination_type` and `density` to a value of the weights to keep from the individual models. For example, let's merge three finetuned [TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T](https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T) models: [tinyllama_lora_nobots](https://huggingface.co/smangrul/tinyllama_lora_norobots), [tinyllama_lora_sql](https://huggingface.co/smangrul/tinyllama_lora_sql), and [tinyllama_lora_adcopy](https://huggingface.co/smangrul/tinyllama_lora_adcopy).
 
 <Tip warninig={true}>
 
@@ -35,7 +35,7 @@ When you're attempting to merge fully trained models with TIES, you should be aw
 
 <br>
 
-This shouldn't be an issue if you're only merging PEFT modules trained from a shared base model.
+This shouldn't be an issue if you're only merging LoRA adapters trained from the same base model.
 
 </Tip>
 
@@ -47,7 +47,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 config = PeftConfig.from_pretrained("smangrul/tinyllama_lora_norobots")
-model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, load_in_4bit=True, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, load_in_4bit=True, device_map="auto").eval()
 tokenizer = AutoTokenizer.from_pretrained("smangrul/tinyllama_lora_norobots")
 
 model = PeftModel.from_pretrained(model, "smangrul/tinyllama_lora_norobots", adapter_name="norobots")
@@ -55,7 +55,7 @@ _ = model.load_adapter("smangrul/tinyllama_lora_sql", adapter_name="sql")
 _ = model.load_adapter("smangrul/tinyllama_lora_adcopy", adapter_name="adcopy")
 ```
 
-Set the adapters, weights, `adapter_name`, `combination_type`, and `ties_density` with the [`~LoraModel.add_weighted_adapter`] method.
+Set the adapters, weights, `adapter_name`, `combination_type`, and `density` with the [`~LoraModel.add_weighted_adapter`] method.
 
 <hfoptions id="merge-method">
 <hfoption id="TIES">
@@ -87,7 +87,6 @@ model.add_weighted_adapter(adapters, weights, adapter_name, combination_type="da
 Set the newly merged model as the active model with the [`~LoraModel.set_adapter`] method.
 
 ```py
-model.eval()
 model.set_adapter("merge")
 ```
 
