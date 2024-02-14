@@ -22,7 +22,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 
 
 if is_auto_awq_available():
-    from awq.modules.linear import WQLinear_GEMM as AWQ_WQLinear_GEMM
+    from awq.modules.linear import WQLinear_GEMM
 
 
 class AwqLoraLinear(torch.nn.Module, LoraLayer):
@@ -90,7 +90,7 @@ def dispatch_awq(
     else:
         target_base_layer = target
 
-    if is_auto_awq_available() and isinstance(target_base_layer, AWQ_WQLinear_GEMM):
+    if is_auto_awq_available() and isinstance(target_base_layer, WQLinear_GEMM):
         new_module = AwqLoraLinear(target, adapter_name, **kwargs)
         target.qweight = target_base_layer.qweight
 
