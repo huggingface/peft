@@ -378,7 +378,6 @@ if is_bnb_4bit_available():
             
             for active_adapter in adapter_names:
                 if active_adapter in self.lora_embedding_A.keys():
-                    # TODO: Test if warning is needed here for rounding error as in Linear
                     base_layer = self.get_base_layer()
                     weight = base_layer.weight
                     lora_data = self.get_delta_weight(active_adapter)
@@ -456,7 +455,7 @@ if is_bnb_4bit_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
-                # TODO: Defensively clone as done for Linear4bit - needs testing, if required for Embedding4bit
+                # Defensively clone as done for Linear4bit
                 result = result.clone()
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_embedding_A:
