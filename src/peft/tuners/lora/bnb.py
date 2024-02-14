@@ -12,13 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import math
 import warnings
 from typing import Any, List, Optional, Union
 
 import bitsandbytes as bnb
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
