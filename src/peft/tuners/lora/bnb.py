@@ -447,6 +447,7 @@ if is_bnb_4bit_available():
         )
 
         def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+            # No dtype conversion
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
@@ -466,7 +467,6 @@ if is_bnb_4bit_available():
                     after_A = self._embed(x, embedding_A)
                     result += (after_A @ embedding_B) * scaling
 
-            # TODO: Check if dtype conversion is required
             return result
 
         def __repr__(self) -> str:
