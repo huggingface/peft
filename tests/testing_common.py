@@ -684,6 +684,9 @@ class PeftCommonTester:
         if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
+        if self.torch_device == "mps":  # BFloat16 is not supported on MPS
+            return pytest.skip("BFloat16 is not supported on MPS")
+
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.bfloat16)
         config = config_cls(
             base_model_name_or_path=model_id,

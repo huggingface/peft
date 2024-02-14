@@ -18,6 +18,7 @@ import tempfile
 import unittest
 from unittest import TestCase
 
+import pytest
 import torch
 from torch.testing import assert_close
 
@@ -403,6 +404,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         assert_close(expected, actual, rtol=0, atol=0)
 
     def test_bf16_inference(self) -> None:
+        if self.torch_device == "mps":
+            return pytest.skip("Skipping bf16 test on MPS")
+
         """Test that AdaptionPrompt works when Llama using a half-precision model."""
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         original = LlamaForCausalLM.from_pretrained(
