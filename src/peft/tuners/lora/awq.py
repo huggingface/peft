@@ -25,7 +25,7 @@ if is_auto_awq_available():
     from awq.modules.linear import WQLinear_GEMM as AWQ_WQLinear_GEMM
 
 
-class WQLinear_GEMM(torch.nn.Module, LoraLayer):
+class AwqLoraLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
         base_layer,
@@ -91,7 +91,7 @@ def dispatch_awq(
         target_base_layer = target
 
     if is_auto_awq_available() and isinstance(target_base_layer, AWQ_WQLinear_GEMM):
-        new_module = WQLinear_GEMM(target, adapter_name, **kwargs)
+        new_module = AwqLoraLinear(target, adapter_name, **kwargs)
         target.qweight = target_base_layer.qweight
 
     return new_module
