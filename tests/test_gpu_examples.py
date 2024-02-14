@@ -1463,3 +1463,66 @@ class PeftAwqGPUTests(unittest.TestCase):
 
             # assert loss is not None
             self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_causal_lm_training_multi_gpu(self):
+        r"""
+        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                quantization_config=self.quantization_config,
+            )
+
+            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
+            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+
+            # assert loss is not None
+            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
