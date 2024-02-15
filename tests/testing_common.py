@@ -1066,6 +1066,15 @@ class PeftCommonTester:
             density=0.5,
         )
 
+        # test magnitude_prune_svd re-weighting with multiple adapters
+        model.add_weighted_adapter(
+            adapter_list[1:],
+            weight_list[1:],
+            "multi_adapter_magnitude_prune_svd_reweighting",
+            combination_type="magnitude_prune_svd",
+            density=0.5,
+        )
+
         # test cat re-weighting with multiple adapters
         model.add_weighted_adapter(
             adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
@@ -1096,6 +1105,15 @@ class PeftCommonTester:
             weight_list[:2],
             "multi_adapter_dare_ties_reweighting",
             combination_type="dare_ties",
+            density=0.5,
+        )
+
+        # test magnitude_prune re-weighting with multiple adapters
+        model.add_weighted_adapter(
+            adapter_list[:2],
+            weight_list[:2],
+            "multi_adapter_magnitude_prune_reweighting",
+            combination_type="magnitude_prune",
             density=0.5,
         )
 
@@ -1142,18 +1160,29 @@ class PeftCommonTester:
                 density=0.5,
             )
 
+        with pytest.raises(ValueError):
+            model.add_weighted_adapter(
+                adapter_list[1:],
+                weight_list[1:],
+                "multi_adapter_magnitude_prune_reweighting_uneven_r",
+                combination_type="magnitude_prune",
+                density=0.5,
+            )
+
         new_adapters = [
             "single_adapter_reweighting",
             "multi_adapter_svd_reweighting",
             "multi_adapter_ties_svd_reweighting",
             "multi_adapter_dare_linear_svd_reweighting",
             "multi_adapter_dare_ties_svd_reweighting",
+            "multi_adapter_magnitude_prune_svd_reweighting",
             "multi_adapter_cat_reweighting",
             "multi_adapter_linear_reweighting",
             "multi_adapter_linear_reweighting_single_enabled",
             "multi_adapter_ties_reweighting",
             "multi_adapter_dare_linear_reweighting",
             "multi_adapter_dare_ties_reweighting",
+            "multi_adapter_magnitude_prune_reweighting",
         ]
         for new_adapter in new_adapters:
             assert new_adapter in model.peft_config
