@@ -395,7 +395,7 @@ class LoraModel(BaseTuner):
                 Name of the new adapter.
             combination_type (`str`):
                 The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
-                `dare_ties_svd`, `dare_linear_svd`, `magnintude_prune`, `magnitude_prune_svd`]. When using the `cat`
+                `dare_ties_svd`, `dare_linear_svd`, `magnitude_prune`, `magnitude_prune_svd`]. When using the `cat`
                 combination_type, the rank of the resulting adapter is equal to the sum of all adapters ranks (the
                 mixed adapter may be too big and result in OOM errors).
             svd_rank (`int`, *optional*):
@@ -531,7 +531,7 @@ class LoraModel(BaseTuner):
                         full_matrices=svd_full_matrices,
                         driver=svd_driver,
                     )
-                elif combination_type in ["linear", "ties", "dare_linear", "dare_ties", "magnintude_prune"]:
+                elif combination_type in ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"]:
                     target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
