@@ -160,6 +160,28 @@ def task_arithmetic(task_tensors: List[torch.Tensor], weights: torch.Tensor) -> 
     return mixed_task_tensors
 
 
+def magnitude_prune(task_tensors: List[torch.Tensor], weights: torch.Tensor, density: float) -> torch.Tensor:
+    """
+    Merge the task tensors using `task arithmetic`.
+
+    Args:
+        task_tensors(`List[torch.Tensor]`):The task tensors to merge.
+        weights (`torch.Tensor`):The weights of the task tensors.
+        density (`float`): The fraction of values to preserve. Should be in [0,1].
+
+    Returns:
+        `torch.Tensor`: The merged tensor.
+    """
+    # sparsify
+    task_tensors = [prune(tensor, density, method="magnitude") for tensor in task_tensors]
+    task_tensors = torch.stack(task_tensors, dim=0)
+    # weighted task tensors
+    weights = reshape_weight_task_tensors(task_tensors, weights)
+    weighted_task_tensors = task_tensors * weights
+    mixed_task_tensors = weighted_task_tensors.sum(dim=0)
+    return mixed_task_tensors
+
+
 def ties(
     task_tensors: List[torch.Tensor],
     weights: torch.Tensor,
