@@ -72,6 +72,8 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     value_states = model.v_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
 
     seq_len = q_len
+    kv_seq_len = value_states.shape[-2]
+
     if past_key_value is not None:
         if isinstance(past_key_value, tuple):
             # for transformers <= 4.35
@@ -85,7 +87,6 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
             # `rotary_emb` forward pass.
             if "position_ids" in list(inspect.signature(model.rotary_emb.forward).parameters):
                 if position_ids is None:
-                    kv_seq_len = value_states.shape[-2]
                     past_seen_tokens = past_key_value.get_usable_length(kv_seq_len, model.layer_idx)
                     kv_seq_len += past_seen_tokens
 
@@ -100,6 +101,17 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
                 # boilerplate in `llama_apply_rotary_pos_emb` we just return here the correct query states
                 # embeddings
                 return (query_states * cos) + (llama_rotate_half(query_states) * sin)
+
+    # For transformers > 4.37.2 `position_ids` became a required arguments in the
+    # rotary embedding's forward pass. and cos/sin are indexed through the
+    # `rotary_emb` forward pass.
+    if "position_ids" in list(inspect.signature(model.rotary_emb.forward).parameters):
+        if position_ids is None:
+            new_cache_positions = torch.arange(kv_seq_len, kv_seq_len + q_len, device=value_states.device)
+            position_ids = new_cache_positions.unsqueeze(0)
+
+        cos, sin = model.rotary_emb(value_states, seq_len=kv_seq_len, position_ids=position_ids)
+        return (query_states * cos) + (llama_rotate_half(query_states) * sin)
 
     cos, sin = model.rotary_emb(value_states, seq_len=seq_len)
 
