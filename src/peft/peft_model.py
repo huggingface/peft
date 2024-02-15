@@ -53,6 +53,7 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
 )
+from .tuners.tuners_utils import BaseTunerLayer
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -695,14 +696,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         # rename offload index weight and model names
         adapter_names = list(self.peft_config.keys())
         for adapter_name in adapter_names:
-            target_modules = self.peft_config[adapter_name].target_modules
             keys = list(offload_index.keys())
-            block_id = keys[0].split(".")[0] + "."  # for writing safetensors key
+            block_id = keys[0].split(".")[0] + "."  # for writing safetensors key,
 
             # replace original offload index keys with PeftModel keys
             for key in keys:
-                if any(module in key for module in target_modules):
-                    suffix_pos = key.rfind(".")
+                suffix_pos = key.rfind(".")
+                extended_prefix = prefix + key[:suffix_pos]
+                module = dict(self.named_modules())[extended_prefix]
+                if isinstance(module, BaseTunerLayer):
                     new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
                 else:
                     new_key = prefix + key
@@ -730,9 +732,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     for safe_key in f.keys():
                         safe_tensor = f.get_tensor(safe_key)
                         metadata = f.metadata()
-                        if any(module in safe_key for module in target_modules):
-                            suffix_pos = safe_key.rfind(".")
-                            extended_prefix = prefix + block_id + safe_key[:suffix_pos]
+                        suffix_pos = safe_key.rfind(".")
+                        extended_prefix = prefix + block_id + safe_key[:suffix_pos]
+                        safe_module = dict(self.named_modules())[extended_prefix]
+                        if isinstance(safe_module, BaseTunerLayer):
                             final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
                             lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
 
@@ -754,8 +757,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if not os.path.exists(base_name):
                         os.makedirs(base_name)
                     safe_save_file(safe_dict, new_fname, metadata=metadata)
-
-        return
 
     def load_adapter(self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any):
         """
