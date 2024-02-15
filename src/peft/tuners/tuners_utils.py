@@ -67,6 +67,7 @@ def onload_layer(layer):
         and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
         and layer.base_layer._hf_hook.offload
     ):
+        # check if the base layer is disk-offloaded (must contain a 'dataset' and an offload index)
         if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values() and hasattr(
             layer.base_layer._hf_hook.weights_map, "dataset"
         ):
