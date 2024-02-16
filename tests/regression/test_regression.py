@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -112,7 +111,7 @@ def strtobool(val):
     elif val in ("n", "no", "f", "false", "off", "0"):
         return 0
     else:
-        raise ValueError("invalid truth value {!r}".format(val))
+        raise ValueError(f"invalid truth value {val!r}")
 
 
 # same as in ..testing_utils.py but cannot be imported
@@ -249,7 +248,7 @@ class RegressionTester(unittest.TestCase):
             base_model = self.load_base_model()
             model = PeftModel.from_pretrained(base_model, os.path.join(path, version))
             output = self.get_output(model)
-            self.assertTrue(torch.allclose(output_loaded, output, atol=self.tol, rtol=self.tol))
+            assert torch.allclose(output_loaded, output, atol=self.tol, rtol=self.tol)
 
     def get_output(self, model):
         raise NotImplementedError

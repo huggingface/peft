@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,13 +13,17 @@
 # limitations under the License.
 import copy
 import inspect
+import os
 import warnings
+from contextlib import nullcontext
 from typing import Optional, Tuple
 
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
+from huggingface_hub import file_exists
+from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 from safetensors.torch import storage_ptr, storage_size
 
 from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
@@ -195,7 +198,17 @@ class ModulesToSaveWrapper(torch.nn.Module):
         return self.modules_to_save[self.active_adapter].weight
 
     def update(self, adapter_name):
-        self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
+        context_manager = nullcontext()
+        for _, param in self.original_module.named_parameters():
+            num_params = param.numel()
+            # if using DS Zero 3 and the weights are initialized empty
+            if num_params == 0 and hasattr(param, "ds_numel"):
+                import deepspeed
+
+                context_manager = deepspeed.zero.GatheredParameters(self.original_module.parameters(), modifier_rank=0)
+                break
+        with context_manager:
+            self.modules_to_save.update(torch.nn.ModuleDict({adapter_name: copy.deepcopy(self.original_module)}))
 
         if hasattr(self.modules_to_save[adapter_name], "_hf_hook"):
             old_hook = self.modules_to_save[adapter_name]._hf_hook
@@ -249,6 +262,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter
+
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
 
         Args:
             adapter_name (str): The name of the adapter to set as active
@@ -518,3 +540,44 @@ def cast_mixed_precision_params(model, dtype):
             p.data = p.to(dtype)
         else:
             p.data = p.to(torch.float32)
+
+
+def str_to_bool(value: str) -> int:
+    """
+    Converts a string representation of truth to `True` (1) or `False` (0).
+
+    True values are `y`, `yes`, `t`, `true`, `on`, and `1`; False value are `n`, `no`, `f`, `false`, `off`, and `0`;
+    """
+    # same as function as in accelerate.utils, which replaces the deprecated distutils.util.strtobool
+    value = value.lower()
+    if value in ("y", "yes", "t", "true", "on", "1"):
+        return 1
+    elif value in ("n", "no", "f", "false", "off", "0"):
+        return 0
+    else:
+        raise ValueError(f"invalid truth value {value}")
+
+
+def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Optional[bool]:
+    """Check if a file exists on HF Hub, if check was not successful returns None instead of erroring.
+
+    Respect offline mode if set.
+
+    """
+    exists: Optional[bool] = None
+    if str_to_bool(os.environ.get("HF_HUB_OFFLINE", "0")):
+        # user set offline mode, cannot check
+        return exists
+
+    try:
+        exists = file_exists(repo_id, filename, **kwargs)
+    except (HFValidationError, EntryNotFoundError):
+        # error, exists stays None
+        pass
+    except Exception as e:
+        warnings.warn(
+            f"Unable to fetch remote file due to the following error {e} - silently ignoring the lookup"
+            f" for the file {filename} in {repo_id}."
+        )
+
+    return exists
