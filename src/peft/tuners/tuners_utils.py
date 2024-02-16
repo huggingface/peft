@@ -70,6 +70,7 @@ def onload_layer(layer):
         if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values() and hasattr(
             layer.base_layer._hf_hook.weights_map, "dataset"
         ):
+            # find the disk-offload index (maps modules to safetensors) from the `dataset` (OffloadedWeightsLoader object)
             index = layer.base_layer._hf_hook.weights_map.dataset.index
             module_name = list(dict(layer.base_layer._hf_hook.weights_map.dataset).keys())[0]  # any module will do
             file_name = index[module_name]["safetensors_file"]
