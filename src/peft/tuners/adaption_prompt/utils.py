@@ -58,6 +58,11 @@ def llama_apply_rotary_pos_emb(q, cos, sin, position_ids):
 
 
 def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
+    """
+    Compute query states for Llama models specifically. They need to be recomputed as the forward() method of the
+    original LlamaModel in the transformers library does not return them. See the related discussion in the PR:
+    https://github.com/huggingface/peft/pull/268
+    """
     hidden_states = kwargs.get("hidden_states")
     position_ids = kwargs.get("position_ids")
     past_key_value = kwargs.get("past_key_value")
