@@ -44,10 +44,14 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         fan_in_fan_out: bool = False,
         init_lora_weights: bool = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
         **kwargs,
     ):
         super().__init__()
         LoraLayer.__init__(self, base_layer=base_layer)
+
+        if use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
         self.backend = backend
         self.is_parallel_a = isinstance(base_layer, backend.RowParallelLinear)

@@ -101,6 +101,8 @@ class LoraConfig(PeftConfig):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
             quantized model in this case, as LoftQ will quantize the model itself.
+        use_dora (`bool`):
+            TODO https://arxiv.org/abs/2402.09353
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -223,6 +225,10 @@ class LoraConfig(PeftConfig):
                 "weights and initialize Lora layers. Also set `init_lora_weights='loftq'` in this case."
             )
         },
+    )
+    use_dora: bool = field(
+        default=False,
+        metadata={"help": "TODO https://arxiv.org/abs/2402.09353"},
     )
 
     def __post_init__(self):

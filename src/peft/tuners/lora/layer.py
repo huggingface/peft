@@ -47,6 +47,9 @@ class LoraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
+        self.use_dora: dict[str, bool] = {}
+        self.lora_magnitude_vector: torch.nn.ParameterDict = torch.nn.ParameterDict({})  # for DoRA
+        self._caches: dict[str, Any] = {}
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -72,7 +75,7 @@ class LoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
         # This code works for linear layers, override for other layer types
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -97,6 +100,12 @@ class LoraLayer(BaseTunerLayer):
             self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        if use_dora:
+            self.dora_init(adapter_name)
+            self.use_dora[adapter_name] = True
+        else:
+            self.use_dora[adapter_name] = False
 
         # check weight and qweight (for GPTQ)
         for weight_name in ("weight", "qweight"):
@@ -150,6 +159,42 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
 
+    def _get_weight_norm(self) -> torch.Tensor:
+        # calculate L2 norm of weight matrix, column-wise
+        base_layer = self.get_base_layer()
+        if hasattr(base_layer, "weight"):
+            weight = base_layer.weight
+        else:
+            weight = base_layer.qweight
+        # FIXME check the dims, won't work with quantized
+        weight_norm = torch.torch.linalg.vector_norm(weight, dim=0)
+        return weight_norm
+
+    def dora_init(self, adapter_name: str) -> None:
+        weight_norm = self._get_weight_norm()
+        self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
+        # add lora_magnitude_vector to the list of learnable parameters
+        self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+    def _cache_store(self, key: str, value: Any) -> None:
+        self._caches[key] = value
+
+    def _cache_pop(self, key: str) -> Any:
+        value = self._caches.pop(key)
+        return value
+
+    def apply_dora(self, adapter_name: str, x: torch.Tensor) -> torch.Tensor:
+        x = self.lora_magnitude_vector[adapter_name] * x
+        weight_norm = self._get_weight_norm()
+        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # "[...] we suggest treating ||V +∆V ||_c in
+        # Eq. (5) as a constant, thereby detaching it from the gradient
+        # graph. This means that while ||V + ∆V ||_c dynamically
+        # reflects the updates of ∆V , it won’t receive any gradient
+        # during backpropagation"
+        # TODO: is detach() enough?
+        return x / weight_norm.detach()
+
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -200,6 +245,7 @@ class Linear(nn.Module, LoraLayer):
         is_target_conv_1d_layer: bool = False,
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -207,7 +253,15 @@ class Linear(nn.Module, LoraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+        )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -235,7 +289,15 @@ class Linear(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    if self.use_dora[active_adapter]:
+                        weight_norm = self._get_weight_norm()
+                        # We need to cache weight_norm because it has to be based on the original weights. We
+                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                        # different value
+                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                        delta_weight = self.lora_magnitude_vector[active_adapter] * delta_weight / weight_norm
+                    orig_weights += delta_weight
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -244,7 +306,12 @@ class Linear(nn.Module, LoraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    if self.use_dora[active_adapter]:
+                        weight_norm = self._get_weight_norm()
+                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                        delta_weight = self.lora_magnitude_vector[active_adapter] * delta_weight / weight_norm
+                    base_layer.weight.data += delta_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -257,7 +324,11 @@ class Linear(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                delta_weight = self.get_delta_weight(active_adapter)
+                if self.use_dora[active_adapter]:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    delta_weight = self.lora_magnitude_vector[active_adapter] * delta_weight / weight_norm
+                self.get_base_layer().weight.data -= delta_weight
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -312,7 +383,11 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+                x = dropout(x)
+                BA = lora_B.weight @ lora_A.weight
+                if self.use_dora[active_adapter]:
+                    BA = self.apply_dora(active_adapter, BA)
+                result = result + (x @ BA.T) * scaling
 
         result = result.to(previous_dtype)
         return result
@@ -333,15 +408,27 @@ class Embedding(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        if use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+        )
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -507,15 +594,27 @@ class Conv2d(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+        if use_dora:
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora):
+        self._active_adapter = adapter_name
+        self.update_layer(
+            adapter_name,
+            r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            init_lora_weights=init_lora_weights,
+            use_rslora=use_rslora,
+            use_dora=use_dora,
+        )
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 

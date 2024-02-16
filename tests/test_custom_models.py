@@ -54,6 +54,8 @@ TEST_CASES = [
             "lora_dropout": 0.1,
         },
     ),
+    ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin1"], "use_dora": True}),
+    ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
@@ -593,7 +595,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)

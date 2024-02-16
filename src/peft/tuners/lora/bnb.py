@@ -38,10 +38,14 @@ if is_bnb_available():
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
             use_rslora: bool = False,
+            use_dora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
+
+            if use_dora:
+                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
             self._active_adapter = adapter_name
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
@@ -216,10 +220,14 @@ if is_bnb_4bit_available():
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
             use_rslora: bool = False,
+            use_dora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
+
+            if use_dora:
+                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
             self._active_adapter = adapter_name
             self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)

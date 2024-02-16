@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
-
+import pytest
 import torch
 from scipy import stats
 from torch import nn
@@ -22,7 +21,7 @@ from peft import LoraConfig, get_peft_model
 from peft.utils import infer_device
 
 
-class InitializationTest(unittest.TestCase):
+class TestInitialization:
     """Test class to check the initialization of adapters."""
 
     torch_device = infer_device()
@@ -47,9 +46,15 @@ class InitializationTest(unittest.TestCase):
                 self.conv2d = nn.Conv2d(100, 100, 3)
 
             def forward(self, x):
-                return self.linear(x)
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
 
         return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
 
     def test_lora_linear_init_default(self):
         # default is True
@@ -315,3 +320,17 @@ class InitializationTest(unittest.TestCase):
         assert model.linear.scaling["default"] == expected_scaling["linear"]
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
+
+    def test_use_dora_linear(self, data):
+        # check that dora is a no-op when initialized
+        torch.manual_seed(0)
+        model = self.get_model()
+
+        # check scaling factor use_rslora=True
+        config = LoraConfig(target_modules=["linear"], use_dora=True)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_base, _, _ = model(data)
+        output_dora, _, _ = model(data)
+        assert torch.allclose(output_base, output_dora)
