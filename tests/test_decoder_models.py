@@ -82,7 +82,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_prompt_tuning_text_prepare_for_training(self, test_name, model_id, config_cls, config_kwargs):
         # Test that prompt tuning works with text init
         if config_cls != PromptTuningConfig:
-            return
+            return pytest.skip(f"This test does not apply to {config_cls}")
 
         config_kwargs = config_kwargs.copy()
         config_kwargs["prompt_tuning_init"] = PromptTuningInit.TEXT

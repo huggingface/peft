@@ -60,18 +60,16 @@ __all__ = [
 
 
 # Get current device name based on available devices
-def infer_device():
+def infer_device() -> str:
     if torch.cuda.is_available():
-        torch_device = "cuda"
+        return "cuda"
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        torch_device = torch.device("mps")
+        return "mps"
     elif is_xpu_available():
-        torch_device = "xpu"
+        return "xpu"
     elif is_npu_available():
-        torch_device = "npu"
-    else:
-        torch_device = "cpu"
-    return torch_device
+        return "npu"
+    return "cpu"
 
 
 def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, gradient_checkpointing_kwargs=None):
