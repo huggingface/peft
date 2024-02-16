@@ -1073,8 +1073,8 @@ class OffloadSaveTests(unittest.TestCase):
 
         # offload around half of all transformer modules to the disk
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
-        self.assertTrue("cpu" in device_map.values())
-        self.assertTrue("disk" in device_map.values())
+        assert "cpu" in device_map.values()
+        assert "disk" in device_map.values()
 
         config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
@@ -1088,10 +1088,10 @@ class OffloadSaveTests(unittest.TestCase):
 
             # load the model with device_map
             offloaded_model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map)
-            self.assertTrue(len({p.device for p in offloaded_model.parameters()}) == 2)  # 'cpu' and 'meta'
+            assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
             offloaded_lora_model = PeftModel.from_pretrained(offloaded_model, tmp_dir, max_memory=memory_limits).eval()
             offloaded_output = offloaded_lora_model(input_tokens)[0]
-        self.assertTrue(torch.allclose(output, offloaded_output, atol=1e-5))
+        assert torch.allclose(output, offloaded_output, atol=1e-5)
 
     @pytest.mark.single_gpu_tests
     @require_torch_gpu

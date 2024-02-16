@@ -344,7 +344,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         index = None
         for name, module in model.named_modules():
             if hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "original_devices"):
-                index = module._hf_hook.weights_map.dataset.index
+                if hasattr(module._hf_hook.weights_map, "dataset"):
+                    index = module._hf_hook.weights_map.dataset.index
                 for key in module._hf_hook.original_devices.keys():
                     if module._hf_hook.original_devices[key] == torch.device("meta"):
                         disk_modules.add(str(name) + "." + str(key))
@@ -677,7 +678,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return hf_hub_download_kwargs, other_kwargs
 
-    def _update_offload(self, offload_index: Dict[Dict[str:str]], adapters_weights: Dict[str : torch.tensor]):
+    def _update_offload(self, offload_index: dict[dict[str:str]], adapters_weights: dict[str : torch.tensor]):
         """
         Update the offload_index and safetensors files for loading and mergine PeftModels with disk-offloaded modules.
 
