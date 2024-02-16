@@ -1458,11 +1458,11 @@ class PeftAwqGPUTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
@@ -1477,7 +1477,6 @@ class PeftAwqGPUTests(unittest.TestCase):
                 self.causal_lm_model_id,
                 torch_dtype=torch.float16,
                 device_map="auto",
-                quantization_config=self.quantization_config,
             )
 
             self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
@@ -1521,8 +1520,8 @@ class PeftAwqGPUTests(unittest.TestCase):
 
             model.cpu().save_pretrained(tmp_dir)
 
-            self.assertTrue("adapter_config.json" in os.listdir(tmp_dir))
-            self.assertTrue(SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir))
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
 
             # assert loss is not None
-            self.assertIsNotNone(trainer.state.log_history[-1]["train_loss"])
+            assert trainer.state.log_history[-1]["train_loss"] is not None
