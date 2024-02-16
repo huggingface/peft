@@ -67,8 +67,7 @@ def is_torch_tpu_available(check_device=True):
 
 def is_auto_awq_available():
     if importlib.util.find_spec("awq") is not None:
-        # TODO: to change it to 0.2.0 after the AutoAWQ release
-        AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.1.7")
+        AUTOAWQ_MINIMUM_VERSION = packaging.version.parse("0.2.0")
         version_autoawq = packaging.version.parse(importlib_metadata.version("autoawq"))
 
         if AUTOAWQ_MINIMUM_VERSION <= version_autoawq:
