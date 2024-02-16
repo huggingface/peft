@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,7 +19,7 @@ import bitsandbytes as bnb
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
 from .layer import LoraLayer
@@ -60,14 +59,10 @@ if is_bnb_available():
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
-            if self.merged:
-                warnings.warn(
-                    f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                    f"You are now additionally merging {','.join(self.active_adapters)}."
-                )
-
-            if adapter_names is None:
-                adapter_names = self.active_adapters
+            adapter_names = check_adapters_to_merge(self, adapter_names)
+            if not adapter_names:
+                # no adapter to merge
+                return
 
             for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
@@ -176,7 +171,7 @@ if is_bnb_available():
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
-                    result += output
+                    result = result + output
 
             return result
 
@@ -242,14 +237,10 @@ if is_bnb_4bit_available():
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
-            if self.merged:
-                warnings.warn(
-                    f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                    f"You are now additionally merging {','.join(self.active_adapters)}."
-                )
-
-            if adapter_names is None:
-                adapter_names = self.active_adapters
+            adapter_names = check_adapters_to_merge(self, adapter_names)
+            if not adapter_names:
+                # no adapter to merge
+                return
 
             for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
@@ -341,7 +332,7 @@ if is_bnb_4bit_available():
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
-                    result += output
+                    result = result + output
 
             return result
 
