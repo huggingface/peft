@@ -1405,7 +1405,7 @@ class PeftAwqGPUTests(unittest.TestCase):
         training = model.training
         model.eval()
         output = model(**batch.to(model.device))
-        self.assertTrue(torch.isfinite(output.logits).all())
+        assert torch.isfinite(output.logits).all()
         model.train(training)
 
     @pytest.mark.single_gpu_tests
