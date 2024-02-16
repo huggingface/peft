@@ -1417,7 +1417,6 @@ class PeftAwqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
                 device_map="auto",
             )
 
@@ -1447,7 +1446,6 @@ class PeftAwqGPUTests(unittest.TestCase):
                     warmup_steps=2,
                     max_steps=3,
                     learning_rate=2e-4,
-                    fp16=True,
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
@@ -1475,11 +1473,10 @@ class PeftAwqGPUTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                torch_dtype=torch.float16,
                 device_map="auto",
             )
 
-            self.assertEqual(set(model.hf_device_map.values()), set(range(torch.cuda.device_count())))
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             model = prepare_model_for_kbit_training(model)
 
@@ -1509,7 +1506,6 @@ class PeftAwqGPUTests(unittest.TestCase):
                     warmup_steps=2,
                     max_steps=3,
                     learning_rate=2e-4,
-                    fp16=True,
                     logging_steps=1,
                     output_dir=tmp_dir,
                 ),
