@@ -30,11 +30,13 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
+
+from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LAYER_NORMS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
-from peft.utils import INCLUDE_LAYER_NORMS_SHORTHAND
-from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
+
 
 logger = logging.getLogger(__name__)
 
