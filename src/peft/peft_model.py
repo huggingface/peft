@@ -36,6 +36,8 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
+from peft.xlora.classifier import xLoRAClassifier
+
 from . import __version__
 from .config import PeftConfig
 from .tuners import (
@@ -70,6 +72,10 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
+from .xlora import _get_file_path_dir as xlora_get_file_path_dir
+from .xlora import _load_classifier_weights as xlora_load_classifier_weights
+from .xlora.config import xLoRAConfig
+from .xlora.model import xLoRAModel
 
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
@@ -385,7 +391,35 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = cls(model, config, adapter_name)
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
-        model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+
+        if isinstance(model, xLoRAModel):
+            assert isinstance(model, PreTrainedModel)
+            assert isinstance(config, xLoRAConfig)
+
+            device = infer_device()  # As inn PeftModel.load_adapter, torch_device = infer_device(
+            config.device = torch.device(device)
+
+            # If we are passed adapters in the kwargs, it is already in the config.
+            # If no adapters are passed, config.adapters is None
+            if config.adapters is None or config.use_trainable_adapters:
+                adapters_real: dict[str, str] = {
+                    name: xlora_get_file_path_dir(
+                        model_id,
+                        name,
+                        "adapters",
+                    )
+                    for name in config.adapters
+                }
+            else:
+                assert isinstance(config.adapters, dict)
+                adapters_real = config.adapters
+            config.adapters = adapters_real
+
+            classifier: xLoRAClassifier = model.internal_xlora_classifier  # type: ignore
+            classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
+        else:
+            model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+
         return model
 
     def _setup_prompt_encoder(self, adapter_name: str):
