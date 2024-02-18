@@ -49,8 +49,10 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    xLoRAConfig,
 )
 from .utils import _prepare_prompt_learning_config
+from .xlora import xLoRAModel
 
 
 if TYPE_CHECKING:
@@ -64,6 +66,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, PeftModel] = {
     "TOKEN_CLS": PeftModelForTokenClassification,
     "QUESTION_ANS": PeftModelForQuestionAnswering,
     "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
+    "XLORA": xLoRAModel,
 }
 
 PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
@@ -79,6 +82,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
     "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
     "OFT": OFTConfig,
     "POLY": PolyConfig,
+    "XLORA": xLoRAConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {
