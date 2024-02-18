@@ -35,6 +35,7 @@ class PeftType(str, enum.Enum):
     - LOHA
     - LOKR
     - OFT
+    - DORA
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"
@@ -49,6 +50,7 @@ class PeftType(str, enum.Enum):
     LOKR = "LOKR"
     OFT = "OFT"
     POLY = "POLY"
+    DORA = "DORA"
 
 
 class TaskType(str, enum.Enum):
