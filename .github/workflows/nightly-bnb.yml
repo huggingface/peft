@@ -1,9 +1,8 @@
 name: BNB from source self-hosted runner with slow tests (scheduled)
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * *"
+  push:
+    branches: [younesbelkada-patch-3]
 
 env:
   RUN_SLOW: "yes"
