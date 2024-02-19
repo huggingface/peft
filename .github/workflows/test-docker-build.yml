@@ -3,7 +3,7 @@ name: Test Docker images (scheduled)
 on:
   pull_request:
   paths:
-    # Run only when python files are modified
+    # Run only when DockerFile files are modified
     - "docker/**"
 
 concurrency:
