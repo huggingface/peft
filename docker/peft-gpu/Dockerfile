@@ -40,6 +40,12 @@ SHELL ["/bin/bash", "-c"]
 RUN source activate peft && \ 
     python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
 
+# Add autoawq for quantization testing
+RUN source activate peft && \
+    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.1/autoawq-0.2.1-cp38-cp38-linux_x86_64.whl
+RUN source activate peft && \
+    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.4/autoawq_kernels-0.0.4-cp38-cp38-linux_x86_64.whl
+
 # Install apt libs
 RUN apt-get update && \
     apt-get install -y curl git wget && \
