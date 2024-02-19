@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -243,6 +242,15 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         in which they are passed to this function. Instead, the order during the forward pass is determined by the
         order in which the adapters were loaded into the model. The active adapters only determine which adapters are
         active during the forward pass, but not the order in which they are applied.
+
+        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
 
         Args:
             adapter_name (`str` or `List[str]`):

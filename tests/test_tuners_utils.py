@@ -17,6 +17,7 @@
 import unittest
 from copy import deepcopy
 
+import pytest
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
@@ -175,7 +176,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
             layers_to_transform=layers_to_transform,
         )
         actual_result = bool(check_target_module_exists(config, key))
-        self.assertEqual(actual_result, expected_result)
+        assert actual_result == expected_result
 
     def test_module_matching_lora(self):
         # peft models that have a module matching method to inspect the matching modules to allow
@@ -197,12 +198,12 @@ class PeftCustomKwargsTester(unittest.TestCase):
             "h.3.self_attention.query_key_value",
             "h.4.self_attention.query_key_value",
         ]
-        self.assertEqual(matched, expected)  # module lists should match exactly
+        assert matched == expected  # module lists should match exactly
 
         # no overlap with matched modules
         unmatched = output["unmatched"]
         for key in expected:
-            self.assertFalse(key in unmatched)
+            assert key not in unmatched
 
     def test_feedforward_matching_ia3(self):
         model_id = "hf-internal-testing/tiny-random-T5ForConditionalGeneration"
@@ -227,14 +228,14 @@ class PeftCustomKwargsTester(unittest.TestCase):
             "encoder.block.0.layer.1.DenseReluDense.wi",
             "encoder.block.0.layer.1.DenseReluDense.wo",
         ]
-        self.assertEqual(matched, expected)  # not required since we do similar checks above, but just to be sure
+        assert matched == expected  # not required since we do similar checks above, but just to be sure
         module_dict = dict(model.named_modules())
         for key in matched:
             module = module_dict[key]
             if key in expected_feedforward:
-                self.assertTrue(module.is_feedforward)
+                assert module.is_feedforward
             else:  # other IA3 modules should not be marked as feedforward
-                self.assertFalse(module.is_feedforward)
+                assert not module.is_feedforward
 
     @parameterized.expand(MAYBE_INCLUDE_ALL_LINEAR_LAYERS_TEST_CASES)
     def test_maybe_include_all_linear_layers_lora(
@@ -277,7 +278,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # compare the two models and assert that all layers are of the same type
         for name, actual_module in actual_model.named_modules():
             expected_module = expected_model_module_dict[name]
-            self.assertEqual(type(actual_module), type(expected_module))
+            assert type(actual_module) == type(expected_module)
 
     def test_maybe_include_all_linear_layers_ia3_loha(self):
         model_id, initial_target_modules, expected_target_modules = (
@@ -302,17 +303,17 @@ class PeftCustomKwargsTester(unittest.TestCase):
         new_config = _maybe_include_all_linear_layers(config, model)
         if isinstance(expected_target_modules, list):
             # assert that expected and actual target_modules have the same items
-            self.assertCountEqual(new_config.target_modules, expected_target_modules)
+            assert set(new_config.target_modules) == set(expected_target_modules)
         else:
-            self.assertEqual(new_config.target_modules, expected_target_modules)
+            assert new_config.target_modules == expected_target_modules
 
     def test_maybe_include_all_linear_layers_diffusion(self):
         model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
         model = StableDiffusionPipeline.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
-        with self.assertRaisesRegex(
+        with pytest.raises(
             ValueError,
-            "Only instances of PreTrainedModel support `target_modules='all-linear'`",
+            match="Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
 
@@ -336,32 +337,32 @@ class TestTargetedModuleNames(unittest.TestCase):
     def test_one_targeted_module_regex(self):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules="lin0"))
-        self.assertEqual(model.targeted_module_names, ["lin0"])
+        assert model.targeted_module_names == ["lin0"]
 
     def test_two_targeted_module_regex(self):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules="lin.*"))
-        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+        assert model.targeted_module_names == ["lin0", "lin1"]
 
     def test_one_targeted_module_list(self):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0"]))
-        self.assertEqual(model.targeted_module_names, ["lin0"])
+        assert model.targeted_module_names == ["lin0"]
 
     def test_two_targeted_module_list(self):
         model = MLP()
         model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"]))
-        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+        assert model.targeted_module_names == ["lin0", "lin1"]
 
     def test_ia3_targeted_module_regex(self):
         model = MLP()
         model = get_peft_model(model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*"))
-        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+        assert model.targeted_module_names == ["lin0", "lin1"]
 
     def test_ia3_targeted_module_list(self):
         model = MLP()
         model = get_peft_model(model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=["lin0", "lin1"]))
-        self.assertEqual(model.targeted_module_names, ["lin0", "lin1"])
+        assert model.targeted_module_names == ["lin0", "lin1"]
 
     def test_realistic_example(self):
         model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
@@ -370,4 +371,4 @@ class TestTargetedModuleNames(unittest.TestCase):
         expected = [
             f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
         ]
-        self.assertEqual(model.targeted_module_names, expected)
+        assert model.targeted_module_names == expected

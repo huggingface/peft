@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,10 +17,16 @@ from typing import Optional
 
 import torch
 from huggingface_hub import file_exists, hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError, HFValidationError
+from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
-from .other import EMBEDDING_LAYER_NAMES, SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
+from .other import (
+    EMBEDDING_LAYER_NAMES,
+    SAFETENSORS_WEIGHTS_NAME,
+    WEIGHTS_NAME,
+    check_file_exists_on_hf_hub,
+    infer_device,
+)
 from .peft_types import PeftType
 
 
@@ -141,14 +146,17 @@ def get_peft_model_state_dict(
         # we need to make sure we can download that config.
         has_remote_config = False
 
+        # ensure that this check is not performed in HF offline mode, see #1452
         if model_id is not None:
-            try:
-                has_remote_config = file_exists(model_id, "config.json")
-            except (HFValidationError, EntryNotFoundError):
+            exists = check_file_exists_on_hf_hub(model_id, "config.json")
+            if exists is None:
+                # check failed, could not determine if it exists or not
                 warnings.warn(
                     f"Could not find a config file in {model_id} - will assume that the vocabulary was not modified."
                 )
                 has_remote_config = False
+            else:
+                has_remote_config = exists
 
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
         if (
