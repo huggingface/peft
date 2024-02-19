@@ -3,6 +3,8 @@ name: tests on transformers main
 on:
   push:
     branches: [main]
+    paths-ignore:
+        - 'docs/**'
 
 jobs:
   tests:
