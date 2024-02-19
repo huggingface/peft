@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from torch import nn
 from torch.nn.modules import Module
@@ -153,7 +152,7 @@ class LNTuningModel(BaseTuner):
         merge=True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
         self._unloading_checks(adapter_names)
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
@@ -176,6 +175,6 @@ class LNTuningModel(BaseTuner):
         return self._unload_and_optionally_merge(merge=False)
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> nn.Module:
         return self._unload_and_optionally_merge(merge=True)

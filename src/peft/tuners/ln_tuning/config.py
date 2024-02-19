@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,7 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -34,7 +33,7 @@ class LNTuningConfig(PeftConfig):
             the target modules manually.
     """
 
-    target_modules: Optional[Union[List[str], str]] = field(
+    target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": (
@@ -45,7 +44,7 @@ class LNTuningConfig(PeftConfig):
             ),
         },
     )
-    modules_to_save: Optional[Union[List[str], str]] = field(
+    modules_to_save: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
             "help": "List of modules to be set as trainable and saved in the final checkpoint. "
