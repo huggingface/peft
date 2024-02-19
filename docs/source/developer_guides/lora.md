@@ -69,6 +69,14 @@ from peft import LoraConfig
 config = LoraConfig(use_rslora=True, ...)
 ```
 
+### QLoRA-style training
+
+The default LoRA settings in PEFT add trainable weights to the query and value layers of each attention block. But [QLoRA](https://hf.co/papers/2305.14314), which adds trainable weights to all the linear layers of a transformer model, can provide performance equal to a fully finetuned model. To apply LoRA to all the linear layers, like in QLoRA, set `target_modules="all-linear"` (easier than specifying individual modules by name which can vary depending on the architecture).
+
+```py
+config = LoraConfig(target_modules="all-linear", ...)
+```
+
 ## Merge adapters
 
 While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA adapter. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model. This allows you to use the newly merged model as a standalone model. The [`~LoraModel.merge_and_unload`] function doesn't keep the adapter weights in memory.
@@ -122,13 +130,15 @@ model = PeftModel.from_pretrained(base_model, peft_model_id, adapter_name="sft")
 Then load a different adapter and merge it with the first one:
 
 ```python
+weighted_adapter_name = "sft-dpo"
 model.load_adapter("alignment-handbook/zephyr-7b-dpo-lora", adapter_name="dpo")
 model.add_weighted_adapter(
     adapters=["sft", "dpo"],
     weights=[0.7, 0.3],
-    adapter_name="sft-dpo",
+    adapter_name=weighted_adapter_name,
     combination_type="linear"
 )
+model.set_adapter(weighted_adapter_name)
 ```
 
 <Tip>
@@ -179,12 +189,4 @@ model.unload()
 
 # delete adapter
 model.delete_adapter("dpo")
-```
-
-## QLoRA-style training
-
-The default LoRA settings in 🤗PEFT follow the [original paper](https://hf.co/papers/2106.09685) and add trainable weights to the query and value layers of each attention block. However, in [QLoRA](https://hf.co/papers/2305.14314), it was found that adding trainable weights to all the linear layers of a transformer model is beneficial to match full-finetuning performance. Since the list of modules to add will vary depending on the architecture, we provided a convenient shorthand : simple specify `target_modules='all-linear'` and let 🤗PEFT handle the rest: 
-
-```py
-config = LoraConfig(target_modules="all-linear", ...) # adds LoRA to all linear layers like in QLoRA
 ```

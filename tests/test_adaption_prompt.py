@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +18,7 @@ import tempfile
 import unittest
 from unittest import TestCase
 
+import pytest
 import torch
 from torch.testing import assert_close
 
@@ -103,9 +103,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
         model = get_peft_model(model, config)
 
-        self.assertTrue(hasattr(model, "save_pretrained"))
-        self.assertTrue(hasattr(model, "from_pretrained"))
-        self.assertTrue(hasattr(model, "push_to_hub"))
+        assert hasattr(model, "save_pretrained")
+        assert hasattr(model, "from_pretrained")
+        assert hasattr(model, "push_to_hub")
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_attributes_mistral(self) -> None:
@@ -113,9 +113,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         config_mistral = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
         model_mistral = get_peft_model(model_mistral, config_mistral)
 
-        self.assertTrue(hasattr(model_mistral, "save_pretrained"))
-        self.assertTrue(hasattr(model_mistral, "from_pretrained"))
-        self.assertTrue(hasattr(model_mistral, "push_to_hub"))
+        assert hasattr(model_mistral, "save_pretrained")
+        assert hasattr(model_mistral, "from_pretrained")
+        assert hasattr(model_mistral, "push_to_hub")
 
     def test_prepare_for_training(self) -> None:
         # Test Llama
@@ -127,7 +127,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
 
-        self.assertTrue(not dummy_output.requires_grad)
+        assert not dummy_output.requires_grad
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_prepare_for_training_mistral(self) -> None:
@@ -139,7 +139,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model_mistral.get_input_embeddings()(dummy_input)
 
-        self.assertTrue(not dummy_output.requires_grad)
+        assert not dummy_output.requires_grad
 
     def test_prepare_for_int8_training(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
@@ -147,7 +147,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         model = model.to(self.torch_device)
 
         for param in model.parameters():
-            self.assertTrue(not param.requires_grad)
+            assert not param.requires_grad
 
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
         model = get_peft_model(model, config)
@@ -165,7 +165,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
 
-        self.assertTrue(dummy_output.requires_grad)
+        assert dummy_output.requires_grad
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_prepare_model_for_int8_training_mistral(self) -> None:
@@ -192,7 +192,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model_mistral.get_input_embeddings()(dummy_input)
 
-        self.assertTrue(dummy_output.requires_grad)
+        assert dummy_output.requires_grad
 
     def test_save_pretrained_regression(self) -> None:
         seed = 420
@@ -214,30 +214,28 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 4)
+            assert len(state_dict) == 4
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
             # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `model.safetensors` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_save_pretrained_regression_mistral(self) -> None:
@@ -260,75 +258,71 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained_mistral)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 4)
+            assert len(state_dict) == 4
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
             # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `model.safetensors` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     def test_save_pretrained(self) -> None:
-        seed = 420
-        torch.manual_seed(seed)
-        model = LlamaForCausalLM(self._create_test_llama_config())
-        config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
-        model = get_peft_model(model, config)
-        model = model.to(self.torch_device)
-
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
-
+            seed = 420
             torch.manual_seed(seed)
-            model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
-            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+            model = LlamaForCausalLM(self._create_test_llama_config())
+            config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+            model = get_peft_model(model, config)
+            model = model.to(self.torch_device)
 
-            # check if the state dicts are equal
-            state_dict = get_peft_model_state_dict(model)
-            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+            with tempfile.TemporaryDirectory() as tmp_dirname:
+                model.save_pretrained(tmp_dirname)
 
-            # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+                torch.manual_seed(seed)
+                model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
+                model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
-            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 4)
+                # check if the state dicts are equal
+                state_dict = get_peft_model_state_dict(model)
+                state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
-            # check if tensors equal
-            for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
+                # check if same keys
+                assert state_dict.keys() == state_dict_from_pretrained.keys()
+
+                # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+                assert len(state_dict) == 4
+
+                # check if tensors equal
+                for key in state_dict.keys():
+                    assert torch.allclose(
                         state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                     )
-                )
 
-            # check if `adapter_model.safetensors` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
+                # check if `adapter_model.bin` is present
+                assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
 
-            # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+                # check if `adapter_config.json` is present
+                assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
-            # check if `model.safetensors` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+                # check if `model.safetensors` is not present
+                assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
-            # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+                # check if `config.json` is not present
+                assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_save_pretrained_mistral(self) -> None:
@@ -351,30 +345,28 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained_mistral)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 4)
+            assert len(state_dict) == 4
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
             # check if `adapter_model.bin` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `model.safetensors` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     def test_save_pretrained_selected_adapters(self) -> None:
         seed = 420
@@ -401,30 +393,28 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 4)
+            assert len(state_dict) == 4
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
-            # check if `adapter_model.safetensors` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
+            # check if `adapter_model.bin` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `model.safetensors` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_save_pretrained_selected_adapters_mistral(self) -> None:
@@ -452,30 +442,28 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained_mistral)
 
             # check if same keys
-            self.assertEqual(state_dict.keys(), state_dict_from_pretrained.keys())
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
             # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-            self.assertEqual(len(list(state_dict.keys())), 4)
+            assert len(state_dict) == 4
 
             # check if tensors equal
             for key in state_dict.keys():
-                self.assertTrue(
-                    torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
                 )
 
-            # check if `adapter_model.safetensors` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors")))
+            # check if `adapter_model.bin` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
 
             # check if `adapter_config.json` is present
-            self.assertTrue(os.path.exists(os.path.join(tmp_dirname, "adapter_config.json")))
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
             # check if `model.safetensors` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "model.safetensors")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
             # check if `config.json` is not present
-            self.assertFalse(os.path.exists(os.path.join(tmp_dirname, "config.json")))
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     def test_generate(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
@@ -538,10 +526,10 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # Test that the output changed.
         default_after = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
-        self.assertFalse(torch.allclose(default_before.logits, default_after.logits))
+        assert not torch.allclose(default_before.logits, default_after.logits)
 
         with adapted.disable_adapter():
-            # Test that the output is the same as the original ouput.
+            # Test that the output is the same as the original output.
             default_disabled = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
             assert_close(original_before.logits, default_disabled.logits, rtol=0, atol=0)
 
@@ -559,9 +547,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # Test that adapter 1 output changed.
         adapter_1_after = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
-        self.assertFalse(torch.allclose(adapter_1_before.logits, adapter_1_after.logits))
-        self.assertFalse(torch.allclose(original_before.logits, adapter_1_after.logits))
-        self.assertFalse(torch.allclose(default_after.logits, adapter_1_after.logits))
+        assert not torch.allclose(adapter_1_before.logits, adapter_1_after.logits)
+        assert not torch.allclose(original_before.logits, adapter_1_after.logits)
+        assert not torch.allclose(default_after.logits, adapter_1_after.logits)
 
         with adapted.disable_adapter():
             # Test that the output is the same as the original output.
@@ -574,8 +562,8 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         # Test that the output is the same as the default output after training.
         default_after_set = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
         assert_close(default_after.logits, default_after_set.logits, rtol=0, atol=0)
-        self.assertFalse(torch.allclose(original_before.logits, default_after_set.logits))
-        self.assertFalse(torch.allclose(adapter_1_after.logits, default_after_set.logits))
+        assert not torch.allclose(original_before.logits, default_after_set.logits)
+        assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_sequence_adapter_ops_mistral(self) -> None:
@@ -607,7 +595,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # Test that the output changed.
         default_after = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
-        self.assertFalse(torch.allclose(default_before.logits, default_after.logits))
+        assert not torch.allclose(default_before.logits, default_after.logits)
 
         with adapted_mistral.disable_adapter():
             # Test that the output is the same as the original output.
@@ -630,9 +618,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # Test that adapter 1 output changed.
         adapter_1_after = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
-        self.assertFalse(torch.allclose(adapter_1_before.logits, adapter_1_after.logits))
-        self.assertFalse(torch.allclose(original_before.logits, adapter_1_after.logits))
-        self.assertFalse(torch.allclose(default_after.logits, adapter_1_after.logits))
+        assert not torch.allclose(adapter_1_before.logits, adapter_1_after.logits)
+        assert not torch.allclose(original_before.logits, adapter_1_after.logits)
+        assert not torch.allclose(default_after.logits, adapter_1_after.logits)
 
         with adapted_mistral.disable_adapter():
             # Test that the output is the same as the original output.
@@ -645,8 +633,8 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         # Test that the output is the same as the default output after training.
         default_after_set = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
         assert_close(default_after.logits, default_after_set.logits, rtol=0, atol=0)
-        self.assertFalse(torch.allclose(original_before.logits, default_after_set.logits))
-        self.assertFalse(torch.allclose(adapter_1_after.logits, default_after_set.logits))
+        assert not torch.allclose(original_before.logits, default_after_set.logits)
+        assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
 
     def test_add_and_set_while_disabled(self):
         """Test that adding and setting adapters while disabled works as intended."""
@@ -683,7 +671,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # Test that adapter 1 output changed.
         adapter_1_after = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
-        self.assertFalse(torch.allclose(original_before.logits, adapter_1_after.logits))
+        assert not torch.allclose(original_before.logits, adapter_1_after.logits)
 
         adapted.set_adapter("default")
         with adapted.disable_adapter():
@@ -728,7 +716,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # Test that adapter 1 output changed.
         adapter_1_after = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
-        self.assertFalse(torch.allclose(original_before.logits, adapter_1_after.logits))
+        assert not torch.allclose(original_before.logits, adapter_1_after.logits)
 
         adapted_mistral.set_adapter("default")
         with adapted_mistral.disable_adapter():
@@ -790,6 +778,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         assert_close(expected, actual, rtol=0, atol=0)
 
     def test_bf16_inference(self) -> None:
+        if self.torch_device == "mps":
+            return pytest.skip("Skipping bf16 test on MPS")
+
         """Test that AdaptionPrompt works when Llama using a half-precision model."""
         input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
         original = LlamaForCausalLM.from_pretrained(
@@ -815,8 +806,8 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         # https://github.com/huggingface/peft/blob/062d95a09eb5d1de35c0e5e23d4387daba99e2db/src/peft/tuners/adaption_prompt.py#L303
         # This is fine for users but makes it difficult to test if anything happens. In the future, we will have a clean
         # way to control initialization. Until then, this test is expected to fail.
-        self.assertFalse(torch.allclose(output_before, output_peft))
+        assert not torch.allclose(output_before, output_peft)
 
         with model.disable_adapter():
             output_peft_disabled = model(dummy_input).logits
-        self.assertTrue(torch.allclose(output_before, output_peft_disabled))
+        assert torch.allclose(output_before, output_peft_disabled)
