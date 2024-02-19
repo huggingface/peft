@@ -1153,7 +1153,7 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             return outputs
 
-    def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
+    def prepare_inputs_for_generation(self, *args, task_ids: Optional[torch.Tensor] = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
 
