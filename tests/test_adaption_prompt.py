@@ -174,7 +174,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         model_mistral = model_mistral.to(self.torch_device)
 
         for param in model_mistral.parameters():
-            self.assertTrue(not param.requires_grad)
+            assert not param.requires_grad
 
         config_mistral = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
         model_mistral = get_peft_model(model_mistral, config_mistral)
