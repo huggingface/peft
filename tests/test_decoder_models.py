@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +14,7 @@
 import unittest
 from unittest.mock import Mock, call, patch
 
+import pytest
 import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -52,6 +52,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
+
     transformers_class = AutoModelForCausalLM
 
     def prepare_inputs_for_testing(self):
@@ -81,7 +82,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_prompt_tuning_text_prepare_for_training(self, test_name, model_id, config_cls, config_kwargs):
         # Test that prompt tuning works with text init
         if config_cls != PromptTuningConfig:
-            return
+            return pytest.skip(f"This test does not apply to {config_cls}")
 
         config_kwargs = config_kwargs.copy()
         config_kwargs["prompt_tuning_init"] = PromptTuningInit.TEXT
@@ -114,14 +115,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             model = get_peft_model(model, config)
 
         expected_call = call(model_id, trust_remote_code=True, foo="bar")
-        self.assertEqual(mock.call_args, expected_call)
+        assert mock.call_args == expected_call
 
     def test_prompt_tuning_config_invalid_args(self):
         # Raise an error when tokenizer_kwargs is used with prompt_tuning_init!='TEXT', because this argument has no
         # function in that case
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        msg = "tokenizer_kwargs only valid when using prompt_tuning_init='TEXT'."
-        with self.assertRaisesRegex(ValueError, expected_regex=msg):
+        with pytest.raises(ValueError, match="tokenizer_kwargs only valid when using prompt_tuning_init='TEXT'."):
             PromptTuningConfig(
                 base_model_name_or_path=model_id,
                 tokenizer_name_or_path=model_id,
@@ -194,6 +194,11 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
+        # positional args are supported for PeftModelForCausalLM
+        self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=False)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):

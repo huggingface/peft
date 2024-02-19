@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,6 +30,7 @@ from peft import (
     MultitaskPromptTuningConfig,
     OFTConfig,
     PeftConfig,
+    PeftType,
     PolyConfig,
     PrefixTuningConfig,
     PromptEncoder,
@@ -68,14 +68,26 @@ class PeftConfigTester(unittest.TestCase):
         """
         # test if all configs have the expected methods
         config = config_class()
-        self.assertTrue(hasattr(config, "to_dict"))
-        self.assertTrue(hasattr(config, "save_pretrained"))
-        self.assertTrue(hasattr(config, "from_pretrained"))
-        self.assertTrue(hasattr(config, "from_json_file"))
+        assert hasattr(config, "to_dict")
+        assert hasattr(config, "save_pretrained")
+        assert hasattr(config, "from_pretrained")
+        assert hasattr(config, "from_json_file")
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_task_type(self, config_class):
         config_class(task_type="test")
+
+    def test_from_peft_type(self):
+        r"""
+        Test if the config is correctly loaded using:
+        - from_peft_type
+        """
+        from peft.mapping import PEFT_TYPE_TO_CONFIG_MAPPING
+
+        for peft_type in PeftType:
+            expected_cls = PEFT_TYPE_TO_CONFIG_MAPPING[peft_type]
+            config = PeftConfig.from_peft_type(peft_type=peft_type)
+            assert type(config) is expected_cls
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_pretrained(self, config_class):
@@ -98,7 +110,7 @@ class PeftConfigTester(unittest.TestCase):
             config.save_pretrained(tmp_dirname)
 
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
-            self.assertEqual(config.to_dict(), config_from_pretrained.to_dict())
+            assert config.to_dict() == config_from_pretrained.to_dict()
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_json_file(self, config_class):
@@ -107,7 +119,7 @@ class PeftConfigTester(unittest.TestCase):
             config.save_pretrained(tmp_dirname)
 
             config_from_json = config_class.from_json_file(os.path.join(tmp_dirname, "adapter_config.json"))
-            self.assertEqual(config.to_dict(), config_from_json)
+            assert config.to_dict() == config_from_json
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_to_dict(self, config_class):
@@ -116,7 +128,7 @@ class PeftConfigTester(unittest.TestCase):
         - to_dict
         """
         config = config_class()
-        self.assertTrue(isinstance(config.to_dict(), dict))
+        assert isinstance(config.to_dict(), dict)
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_pretrained_cache_dir(self, config_class):
@@ -134,7 +146,7 @@ class PeftConfigTester(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as tmp_dirname:
             PeftConfig.from_pretrained("ybelkada/test-st-lora", cache_dir=tmp_dirname)
-            self.assertTrue("models--ybelkada--test-st-lora" in os.listdir(tmp_dirname))
+            assert "models--ybelkada--test-st-lora" in os.listdir(tmp_dirname)
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_set_attributes(self, config_class):
@@ -146,28 +158,28 @@ class PeftConfigTester(unittest.TestCase):
             config.save_pretrained(tmp_dirname)
 
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
-            self.assertEqual(config.to_dict(), config_from_pretrained.to_dict())
+            assert config.to_dict() == config_from_pretrained.to_dict()
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_config_copy(self, config_class):
         # see https://github.com/huggingface/peft/issues/424
         config = config_class()
         copied = copy.copy(config)
-        self.assertEqual(config.to_dict(), copied.to_dict())
+        assert config.to_dict() == copied.to_dict()
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_config_deepcopy(self, config_class):
         # see https://github.com/huggingface/peft/issues/424
         config = config_class()
         copied = copy.deepcopy(config)
-        self.assertEqual(config.to_dict(), copied.to_dict())
+        assert config.to_dict() == copied.to_dict()
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_config_pickle_roundtrip(self, config_class):
         # see https://github.com/huggingface/peft/issues/424
         config = config_class()
         copied = pickle.loads(pickle.dumps(config))
-        self.assertEqual(config.to_dict(), copied.to_dict())
+        assert config.to_dict() == copied.to_dict()
 
     def test_prompt_encoder_warning_num_layers(self):
         # This test checks that if a prompt encoder config is created with an argument that is ignored, there should be
@@ -199,9 +211,9 @@ class PeftConfigTester(unittest.TestCase):
             config.save_pretrained(tmp_dirname)
 
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
-            self.assertEqual(config.to_dict(), config_from_pretrained.to_dict())
+            assert config.to_dict() == config_from_pretrained.to_dict()
             # explicit test that target_modules should be converted to set
-            self.assertTrue(isinstance(config_from_pretrained.target_modules, set))
+            assert isinstance(config_from_pretrained.target_modules, set)
 
     def test_regex_with_layer_indexing_lora(self):
         # This test checks that an error is raised if `target_modules` is a regex expression and `layers_to_transform` or
@@ -212,15 +224,10 @@ class PeftConfigTester(unittest.TestCase):
 
         valid_config = {"target_modules": ["foo"], "layers_pattern": ["bar"], "layers_to_transform": [0]}
 
-        with self.assertRaisesRegex(
-            ValueError,
-            expected_regex="`layers_to_transform` cannot be used when `target_modules` is a str.",
-        ):
+        with pytest.raises(ValueError, match="`layers_to_transform` cannot be used when `target_modules` is a str."):
             LoraConfig(**invalid_config1)
 
-        with self.assertRaisesRegex(
-            ValueError, expected_regex="`layers_pattern` cannot be used when `target_modules` is a str."
-        ):
+        with pytest.raises(ValueError, match="`layers_pattern` cannot be used when `target_modules` is a str."):
             LoraConfig(**invalid_config2)
 
         # should run without errors
@@ -233,9 +240,7 @@ class PeftConfigTester(unittest.TestCase):
         # an example invalid config
         invalid_config = {"target_modules": ["k", "v"], "feedforward_modules": ["q"]}
 
-        with self.assertRaisesRegex(
-            ValueError, expected_regex="^`feedforward_modules` should be a subset of `target_modules`$"
-        ):
+        with pytest.raises(ValueError, match="^`feedforward_modules` should be a subset of `target_modules`$"):
             IA3Config(**invalid_config)
 
     def test_ia3_is_feedforward_subset_valid_config(self):

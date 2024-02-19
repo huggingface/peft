@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +20,13 @@ from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError
 from safetensors.torch import load_file as safe_load_file
 
-from .other import EMBEDDING_LAYER_NAMES, SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, infer_device
+from .other import (
+    EMBEDDING_LAYER_NAMES,
+    SAFETENSORS_WEIGHTS_NAME,
+    WEIGHTS_NAME,
+    check_file_exists_on_hf_hub,
+    infer_device,
+)
 from .peft_types import PeftType
 
 
@@ -136,8 +141,30 @@ def get_peft_model_state_dict(
     elif save_embedding_layers == "auto":
         vocab_size = getattr(getattr(model, "config", None), "vocab_size", None)
         model_id = getattr(config, "base_model_name_or_path", None)
+
+        # For some models e.g. diffusers the text config file is stored in a subfolder
+        # we need to make sure we can download that config.
+        has_remote_config = False
+
+        # ensure that this check is not performed in HF offline mode, see #1452
+        if model_id is not None:
+            exists = check_file_exists_on_hf_hub(model_id, "config.json")
+            if exists is None:
+                # check failed, could not determine if it exists or not
+                warnings.warn(
+                    f"Could not find a config file in {model_id} - will assume that the vocabulary was not modified."
+                )
+                has_remote_config = False
+            else:
+                has_remote_config = exists
+
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
-        if vocab_size and model_id and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size):
+        if (
+            vocab_size
+            and model_id
+            and has_remote_config
+            and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size)
+        ):
             warnings.warn(
                 "Setting `save_embedding_layers` to `True` as the embedding layer has been resized during finetuning."
             )
@@ -262,9 +289,14 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         if token is None:
             token = hf_hub_download_kwargs.get("use_auth_token", None)
 
+        hub_filename = (
+            os.path.join(hf_hub_download_kwargs["subfolder"], SAFETENSORS_WEIGHTS_NAME)
+            if hf_hub_download_kwargs.get("subfolder", None) is not None
+            else SAFETENSORS_WEIGHTS_NAME
+        )
         has_remote_safetensors_file = file_exists(
             repo_id=model_id,
-            filename=SAFETENSORS_WEIGHTS_NAME,
+            filename=hub_filename,
             revision=hf_hub_download_kwargs.get("revision", None),
             repo_type=hf_hub_download_kwargs.get("repo_type", None),
             token=token,

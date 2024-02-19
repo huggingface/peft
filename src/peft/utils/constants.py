@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -76,7 +75,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "mistral": ["q_proj", "v_proj"],
     "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
-    "phi": ["Wqkv", "out_proj", "fc1", "fc2"],
+    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
@@ -93,12 +92,14 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn", "mlp.c_proj"],
     "llama": ["k_proj", "v_proj", "down_proj"],
     "mistral": ["k_proj", "v_proj", "down_proj"],
+    "mixtral": ["k_proj", "v_proj", "w2"],
     "bert": ["key", "value", "output.dense"],
     "deberta-v2": ["key_proj", "value_proj", "output.dense"],
     "deberta": ["in_proj", "output.dense"],
     "RefinedWebModel": ["query_key_value", "dense_4h_to_h"],
     "RefinedWeb": ["query_key_value", "dense_4h_to_h"],
     "falcon": ["query_key_value", "dense_4h_to_h"],
+    "phi": ["q_proj", "v_proj", "fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -115,12 +116,14 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "gpt_bigcode": ["mlp.c_proj"],
     "llama": ["down_proj"],
     "mistral": ["down_proj"],
+    "mixtral": ["w2"],
     "bert": ["output.dense"],
     "deberta-v2": ["output.dense"],
     "deberta": ["output.dense"],
     "RefinedWeb": ["dense_4h_to_h"],
     "RefinedWebModel": ["dense_4h_to_h"],
     "falcon": ["dense_4h_to_h"],
+    "phi": ["fc2"],
 }
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
