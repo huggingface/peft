@@ -19,7 +19,7 @@ import re
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from accelerate.hooks import AlignDevicesHook
@@ -254,6 +254,13 @@ class BaseTuner(nn.Module, ABC):
 
         Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
 
+        """
+        pass
+
+    def _check_merge_allowed(self):
+        """Helper method to check whether the adapter can be merged.
+
+        Raise a ValueError if it is not possible to merge the adapter with the given configuration.
         """
         pass
 
@@ -697,16 +704,27 @@ def clone_module(module: nn.Module, share_weights=False):
     return clone
 
 
-def replicate_layers(model: nn.Module, layer_map: List[Tuple[int, int]]):
+def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
+    """Replicate layers in a transfomer model with weight sharing.
+    
+    This function looks for a module list attribute at model[(.model)*].layers 
+    and replicates the layers in the module list according to the layer map.
+    For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3, 4]`
+    and replace them with a module list containing `[0, 1, 2, 3, 2, 3, 4]`.
+    """
+    while hasattr(model, 'model'):
+        model = model.model
+    if not hasattr(model, 'layers'):
+        raise ValueError('Could not locate the layers attribute in the model.')
     new_layers = []
     for start, end in layer_map:
         for i in range(start, end):
             current_idx = len(new_layers)
-            new_layers.append(clone_module(model.base_model.layers[i], share_weights=True))
+            new_layers.append(clone_module(model.layers[i], share_weights=True))
             # This is a hack needed to work around the layer_idx introduced in HF transformers.
             for submodule in new_layers[-1].modules():
                 if hasattr(submodule, 'layer_idx'):
                     submodule.layer_idx = current_idx
-    model.base_model.layers = nn.ModuleList(new_layers)
+    model.layers = nn.ModuleList(new_layers)
     if hasattr(model.config, 'num_hidden_layers'):
         model.config.num_hidden_layers = len(new_layers)

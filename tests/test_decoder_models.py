@@ -316,8 +316,11 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
+        assert 2 == len(model.model.layers), 'Expected 2 layers in original model.'
         model = get_peft_model(model, config)
-        self.assertEquals(4, len(model.base_model.model.model.layers), 'Expected 4 layers in adapted model.')
-        self.assertEquals(8, len([n for n, _ in model.named_parameters() if '.lora_A.' in n]))
+        assert 4 == len(model.base_model.model.model.layers), 'Expected 4 layers in adapted model.'
+        assert 8 == len([n for n, _ in model.named_parameters() if '.lora_A.' in n]), (
+            'Expected 8 LoRA adapters since we are adding one each for up and down.'
+        )
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
         self._test_generate(model_id, LoraConfig, config_kwargs)
