@@ -386,10 +386,10 @@ class Linear(nn.Module, LoraLayer):
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
                 x = dropout(x)
-                BA = lora_B.weight @ lora_A.weight
+                lora_weight = lora_B.weight @ lora_A.weight
                 if self.use_dora[active_adapter]:
-                    BA = self.apply_dora(active_adapter, BA)
-                result = result + (x @ BA.T) * scaling
+                    lora_weight = self.apply_dora(active_adapter, lora_weight)
+                result = result + (x @ lora_weight.T) * scaling
 
             result = result.to(torch_result_dtype)
         return result
