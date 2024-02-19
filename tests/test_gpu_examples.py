@@ -1448,6 +1448,7 @@ class PeftAwqGPUTests(unittest.TestCase):
                     learning_rate=2e-4,
                     logging_steps=1,
                     output_dir=tmp_dir,
+                    fp16=True,
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
