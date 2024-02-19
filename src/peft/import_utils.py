@@ -63,3 +63,7 @@ def is_torch_tpu_available(check_device=True):
                 return False
         return True
     return False
+
+
+def is_auto_awq_available():
+    return importlib.util.find_spec("awq") is not None
