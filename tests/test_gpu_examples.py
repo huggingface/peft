@@ -1632,4 +1632,5 @@ class TestAutoCast(unittest.TestCase):
         # Forward pass with test precision
         with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
             outputs = model(input_ids)
-            self.assertEqual(outputs.dtype, precision)
+            assert outputs.dtype == precision
+
