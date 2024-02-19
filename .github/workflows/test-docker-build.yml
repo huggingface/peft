@@ -31,4 +31,12 @@ jobs:
         for file in ${CHANGED_FILES}; do
           echo "$file was changed"
         done
+    - name: Build Docker images
+      strategy:
+        matrix:
+          docker-file: ${{ steps.changed-files.outputs.all_changed_files}}
+      uses: docker/build-push-action@v4
+      with:
+        context: ${{ matrix.docker-file }}
+        push: False
 
