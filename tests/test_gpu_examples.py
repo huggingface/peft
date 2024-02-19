@@ -1633,4 +1633,3 @@ class TestAutoCast(unittest.TestCase):
         with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
             outputs = model(input_ids)
             assert outputs.dtype == precision
-
