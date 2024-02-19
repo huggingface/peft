@@ -282,47 +282,47 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     def test_save_pretrained(self) -> None:
-            seed = 420
+        seed = 420
+        torch.manual_seed(seed)
+        model = LlamaForCausalLM(self._create_test_llama_config())
+        config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
             torch.manual_seed(seed)
-            model = LlamaForCausalLM(self._create_test_llama_config())
-            config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
-            model = get_peft_model(model, config)
-            model = model.to(self.torch_device)
+            model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
+            model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
 
-            with tempfile.TemporaryDirectory() as tmp_dirname:
-                model.save_pretrained(tmp_dirname)
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
 
-                torch.manual_seed(seed)
-                model_from_pretrained = LlamaForCausalLM(self._create_test_llama_config())
-                model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname)
+            # check if same keys
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
 
-                # check if the state dicts are equal
-                state_dict = get_peft_model_state_dict(model)
-                state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+            assert len(state_dict) == 4
 
-                # check if same keys
-                assert state_dict.keys() == state_dict_from_pretrained.keys()
+            # check if tensors equal
+            for key in state_dict.keys():
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                )
 
-                # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
-                assert len(state_dict) == 4
+            # check if `adapter_model.bin` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
 
-                # check if tensors equal
-                for key in state_dict.keys():
-                    assert torch.allclose(
-                        state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
-                    )
+            # check if `adapter_config.json` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
 
-                # check if `adapter_model.bin` is present
-                assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            # check if `model.safetensors` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
 
-                # check if `adapter_config.json` is present
-                assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
-
-                # check if `model.safetensors` is not present
-                assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
-
-                # check if `config.json` is not present
-                assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
+            # check if `config.json` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
     def test_save_pretrained_mistral(self) -> None:
