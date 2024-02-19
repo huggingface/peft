@@ -27,12 +27,9 @@ from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
 from transformers import PreTrainedModel
-from transformers.pytorch_utils import Conv1D
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS, Conv1D
 
-from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
-
-from peft.utils import COMMON_LAYERS_PATTERN, INCLUDE_LAYER_NORMS_SHORTHAND
+from peft.utils import INCLUDE_LAYER_NORMS_SHORTHAND, INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -653,6 +650,7 @@ def inspect_matched_modules(tuner: BaseTuner, adapter_name: str = "default") -> 
             module_dict["unmatched"].append(key)
     return module_dict
 
+
 def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) -> PeftConfig:
     """
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
@@ -702,6 +700,7 @@ def _maybe_include_lm_layernorm_layers(peft_config: PeftConfig, model: nn.Module
         return peft_config
 
     from transformers import PreTrainedModel
+
     if not isinstance(model, PreTrainedModel):
         raise ValueError(
             f"Only instances of PreTrainedModel support `target_modules={INCLUDE_LAYER_NORMS_SHORTHAND!r}`"
@@ -719,6 +718,7 @@ def _maybe_include_lm_layernorm_layers(peft_config: PeftConfig, model: nn.Module
 
     peft_config.target_modules = layernorm_module_names
     return peft_config
+
 
 def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
     """

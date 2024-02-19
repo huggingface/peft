@@ -92,7 +92,7 @@ PEFT_TYPE_TO_TUNER_MAPPING = {
     "IA3": IA3Model,
     "OFT": OFTModel,
     "POLY": PolyModel,
-    'LN_TUNING': LNTuningModel,
+    "LN_TUNING": LNTuningModel,
 }
 
 
