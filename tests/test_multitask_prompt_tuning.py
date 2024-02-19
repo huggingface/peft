@@ -17,6 +17,7 @@ import os
 import tempfile
 from unittest import TestCase
 
+import pytest
 import torch
 from parameterized import parameterized
 from torch.testing import assert_close
@@ -260,7 +261,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         # check if `generate` works
         _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             # check if `generate` raises an error if task_ids are not passed
             _ = model.generate(input_ids, attention_mask=attention_mask)
 
@@ -298,6 +299,6 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
             # check if `generate` works
             _ = model.generate(input_ids=input_ids, attention_mask=attention_mask, task_ids=task_ids)
 
-            with self.assertRaises(ValueError):
+            with pytest.raises(ValueError):
                 # check if `generate` raises an error if task_ids are not passed
                 _ = model.generate(input_ids, attention_mask=attention_mask)
