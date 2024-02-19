@@ -36,6 +36,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
+          pip install "pytest>=7.2.0,<8.0.0" # see: https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/setup.py#L148C6-L148C26
           mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone # rename to transformers clone to avoid modules conflict
           if [ "${{ matrix.docker-image-name }}" == "huggingface/peft-gpu-bnb-latest:latest" ]; then
             cd transformers-clone
@@ -91,6 +92,7 @@ jobs:
           source activate peft
           pip install -e . --no-deps
           pip install pytest-reportlog pytest-cov parameterized datasets scipy einops
+          pip install "pytest>=7.2.0,<8.0.0" # see: https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/setup.py#L148C6-L148C26
           mkdir transformers-clone && git clone https://github.com/huggingface/transformers.git transformers-clone
           if [ "${{ matrix.docker-image-name }}" == "huggingface/peft-gpu-bnb-latest:latest" ]; then
             cd transformers-clone
