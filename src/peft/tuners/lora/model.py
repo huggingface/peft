@@ -158,7 +158,7 @@ class LoraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
-        quant_methods = ["gptq", "awq"]
+        quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
             quantization_config = get_quantization_config(self.model, method=quant_method)
             if quantization_config is not None:
