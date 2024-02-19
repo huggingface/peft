@@ -1205,8 +1205,8 @@ class PeftModelForCausalLM(PeftModel):
                     model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                     model_kwargs["input_ids"] = None
 
-        # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is 
-        # passed in the forward pass to keep track of the position ids of the cache. We have to 
+        # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
+        # passed in the forward pass to keep track of the position ids of the cache. We have to
         # pop that from `model_kwargs` as `cache_position` is properly created by the model, using the passed
         # `inputs_embeds`: https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
         _ = model_kwargs.pop("cache_position", None)
