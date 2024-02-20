@@ -393,7 +393,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
 
-        if isinstance(model, xLoRAModel):
+        if isinstance(model.base_model, xLoRAModel):
             assert isinstance(model, PreTrainedModel)
             assert isinstance(config, xLoRAConfig)
 
