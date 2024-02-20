@@ -14,8 +14,6 @@ jobs:
   get_changed_files:
     name: "Build all modified docker images"
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.docker-matrix }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
@@ -27,7 +25,6 @@ jobs:
         with:
           files: docker/**
       - name: Run step if only the files listed above change
-        id: set-matrix
         if: steps.changed-files.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files}}
@@ -35,15 +32,14 @@ jobs:
           for file in ${CHANGED_FILES}; do
             echo "$file was changed"
           done 
-          echo "docker-matrix=${CHANGED_FILES}" >> $GITHUB_OUTPUT
   build_modified_files:
     needs: get_changed_files
     name: Build Docker images on modified files
     runs-on: ubuntu-latest
-    if: needs.get_changed_files.outputs.docker-matrix != ''
+    if: env.CHANGED_FILES != ''
     strategy:
       matrix:
-        docker-file: ${{ fromJSON(needs.get_changed_files.outputs.docker-matrix) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
+        docker-file: ${{ fromJSON(env.CHANGED_FILES) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
     steps:
       - name: Build Docker image
         uses: docker/build-push-action@v4
