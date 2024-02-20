@@ -11,7 +11,7 @@ jobs:
     name: "Build all modified docker images"
     runs-on: ubuntu-latest
     outputs:
-      docker-matrix: ''
+      docker-matrix: ${{ steps.set-matrix.outputs.docker-matrix }}
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
@@ -24,7 +24,7 @@ jobs:
           files: docker/**
       - name: Run step if only the files listed above change
         if: steps.changed-files.outputs.any_changed == 'true'
-        id: set-variable
+        id: set-matrix
         env:
           CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files}}
         run: |
