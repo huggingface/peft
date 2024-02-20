@@ -132,7 +132,7 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
 
-    def __init__(self, model, config, adapter_name) -> None:
+    def __init__(self, model, config, adapter_name, _model_peft) -> None:
         super().__init__(model, config, adapter_name)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:

@@ -197,7 +197,7 @@ class LycorisTuner(BaseTuner):
     prefix: str
     layers_mapping: dict[type[torch.nn.Module], type[LycorisLayer]]
 
-    def __init__(self, model, config, adapter_name):
+    def __init__(self, model, config, adapter_name, _model_peft):
         super().__init__(model, config, adapter_name)
 
     def __getattr__(self, name: str):
