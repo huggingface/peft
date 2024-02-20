@@ -6,7 +6,9 @@ import torch.nn as nn
 from huggingface_hub import file_exists, hf_hub_download  # type: ignore
 from huggingface_hub.utils import EntryNotFoundError  # type: ignore
 from safetensors.torch import load_file as safe_load_file
-from transformers import PreTrainedModel  # type: ignore
+from transformers import PreTrainedModel
+
+from peft.tuners.lora.model import LoraModel
 
 from ...peft_model import PeftConfig, PeftModel
 from ...utils.other import (
@@ -71,12 +73,14 @@ def convert_layers_to_xlora(
     return total_swapped
 
 
-class xLoRAModel:
-    def __init__(self, model: nn.Module, peft_config: PeftConfig, model_peft: PeftModel) -> None:
-        # TODO(EricLBuehler): model_peft.base_model needs to be a LoraModel.
-
+class xLoRAModel(LoraModel):
+    def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str, model_peft: PeftModel) -> None:
         assert isinstance(model, PreTrainedModel)
         assert isinstance(peft_config, xLoRAConfig)
+
+        super().__init__(model, peft_config, adapter_name, model_peft)
+
+        # TODO(EricLBuehler): model_peft.base_model needs to be a LoraModel
 
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
@@ -86,7 +90,7 @@ class xLoRAModel:
         for adapter_name, model_id in adapters_items:
             model_peft.load_adapter(model_id, adapter_name, is_trainable=use_trainable_adapters)
 
-        model_peft.base_model.set_adapter(list(peft_config.adapters.keys()))
+        self.set_adapter(list(peft_config.adapters.keys()))
 
         def hook(module, *args, **kwargs) -> None:
             args_real = args[0]
@@ -116,15 +120,15 @@ class xLoRAModel:
 
         model.register_forward_pre_hook(hook, with_kwargs=True, prepend=True)
 
-        model_peft.base_model.eval()
+        self.eval()
         if not use_trainable_adapters:
             total_frozen = 0
-            for name, param in model_peft.base_model.named_parameters():
+            for name, param in self.named_parameters():
                 if "lora_" in name:
                     param.requires_grad = False
                     total_frozen += 1
 
-        assert isinstance(model_peft.base_model, lora.LoraModel)
+        assert isinstance(self, LoraModel)
 
         total_swapped = convert_layers_to_xlora(
             model_peft,
@@ -135,8 +139,8 @@ class xLoRAModel:
         xlora_classifier = xLoRAClassifier(model_peft, peft_config, n_classes, total_swapped)
 
         # Setup the internal state
-        base_model_wrapper = BaseTunerWrapper(model_peft.base_model, xlora_classifier)
-        model_peft.base_model.forward = base_model_wrapper.forward  # type: ignore[method-assign]
+        base_model_wrapper = BaseTunerWrapper(self, xlora_classifier)
+        self.forward = base_model_wrapper.forward  # type: ignore[method-assign]
 
         peft_model_wrapper = PeftModelWrapper(
             model_peft,
