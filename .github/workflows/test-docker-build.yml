@@ -31,6 +31,8 @@ jobs:
           for file in ${CHANGED_FILES}; do
             echo "$file was changed"
           done 
+          echo ${CHANGED_FILES}
+          echo ${{ steps.changed-files.outputs.all_changed_files}}
           echo "matrix=${{ steps.changed-files.outputs.all_changed_files}}" >> $GITHUB_OUTPUT
   build_modified_files:
     needs: get_changed_files
