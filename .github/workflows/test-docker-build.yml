@@ -13,8 +13,6 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v1
       - name: Check out code
         uses: actions/checkout@v3
       - name: Get changed files
@@ -37,8 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        docker-file: ${{ fromJSON(needs.get_changed_files.outputs.matrix) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
+        docker-file: ${{ needs.get_changed_files.outputs.matrix }}
     steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
       - name: Build Docker image
         uses: docker/build-push-action@v4
         with:
