@@ -146,7 +146,7 @@ Since the AQLM quantization process is computationally expensive, a use of prequ
 
 The models are fully compatible with lora adapter tuning:
 
-```
+```py
 quantized_model = AutoModelForCausalLM.from_pretrained(
     "BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf-test-dispatch",
     torch_dtype="auto", device_map="auto", low_cpu_mem_usage=True,
