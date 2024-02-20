@@ -144,7 +144,7 @@ Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.0611
 
 Since the AQLM quantization process is computationally expensive, a use of prequantized models is recommended. A partial list of available models can be found in the official aqlm [repository](https://github.com/Vahe1994/AQLM).
 
-The models are fully compatible with lora adapter tuning:
+The models support LoRA adapter tuning. To tune the quantized model you'll need to install the `aqlm` inference library: `pip install aqlm>=1.0.2`. Finetuned LoRA adapters shall be saved separately, as merging them with AQLM quantized weights is not possible.
 
 ```py
 quantized_model = AutoModelForCausalLM.from_pretrained(
