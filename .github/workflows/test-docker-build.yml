@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        docker-file: ${{ steps.changed-files.outputs.all_changed_files}}
+        docker-file: ${CHANGED_FILES}
     steps:
       - name: Build Docker image
         uses: docker/build-push-action@v4
