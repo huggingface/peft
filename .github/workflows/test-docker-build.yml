@@ -36,7 +36,6 @@ jobs:
     needs: get_changed_files
     name: Build Docker images on modified files
     runs-on: ubuntu-latest
-    if: ${{ fromJSON(needs.get_changed_files.outputs.docker-matrix) }} != ''
     strategy:
       matrix:
         docker-file: ${{ fromJSON(needs.get_changed_files.outputs.docker-matrix) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
