@@ -394,7 +394,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
 
         if isinstance(model.base_model, xLoRAModel):
-            assert isinstance(model, PreTrainedModel)
             assert isinstance(config, xLoRAConfig)
 
             device = infer_device()  # As inn PeftModel.load_adapter, torch_device = infer_device(
@@ -416,7 +415,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapters_real = config.adapters
             config.adapters = adapters_real
 
-            classifier: xLoRAClassifier = model.internal_xlora_classifier  # type: ignore
+            classifier: xLoRAClassifier = model.base_model.internal_xlora_classifier  # type: ignore
             classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
         else:
             model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
