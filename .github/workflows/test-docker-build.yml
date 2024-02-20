@@ -1,17 +1,11 @@
 name: Test Docker images (on PR)
-
 on:
   pull_request:
     paths:
       # Run only when DockerFile files are modified
       - "docker/**"
-
 env:
   CHANGED_FILES: ''
-
-concurrency:
-  group: docker-image-builds
-  cancel-in-progress: false
 
 jobs:
   get_changed_files:
@@ -39,7 +33,7 @@ jobs:
     needs: get_changed_files
     name: Build Docker images on modified files
     runs-on: ubuntu-latest
-    if: env.CHANGED_FILES != ''
+    if: ${{ fromJSON(env.CHANGED_FILES) }} != ''
     strategy:
       matrix:
         docker-file: ${{ fromJSON(env.CHANGED_FILES) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
