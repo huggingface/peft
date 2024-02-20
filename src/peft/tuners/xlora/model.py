@@ -71,7 +71,7 @@ def convert_layers_to_xlora(
     return total_swapped
 
 
-class xLoRAModel(PeftModel, PeftModelWrapper):
+class xLoRAModel(PeftModelWrapper):
     def __init__(self, model: nn.Module, peft_config: PeftConfig, model_peft: PeftModel) -> None:
         # TODO(EricLBuehler): model_peft.base_model needs to be a LoraModel.
 
