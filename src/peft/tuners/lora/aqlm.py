@@ -40,15 +40,12 @@ class QuantLinear(torch.nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        # self.base_layer and self.quant_linear_module are the same; we need the former for consistency and the latter
-        # for backwards compatibility
-        self.quant_linear_module = base_layer
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
 
     def forward(self, x: torch.Tensor):
         # note: logic differs from default Linear because merging is not supported
-        result = self.quant_linear_module(x)
+        result = self.base_layer(x)
 
         if self.disable_adapters:
             return result
