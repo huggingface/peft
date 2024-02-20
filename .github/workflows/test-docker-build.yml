@@ -4,8 +4,6 @@ on:
     paths:
       # Run only when DockerFile files are modified
       - "docker/**"
-env:
-  CHANGED_FILES: ${{ steps.set-variable.outputs.docker-matrix }}
 
 jobs:
   get_changed_files:
