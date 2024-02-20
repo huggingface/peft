@@ -44,5 +44,5 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           file: ${{ matrix.docker-file }}
-          context: $(dirname ${{ matrix.docker-file }})
+          context: .
           push: False
