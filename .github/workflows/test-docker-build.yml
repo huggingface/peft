@@ -27,7 +27,7 @@ jobs:
         with:
           files: docker/**
       - name: Run step if only the files listed above change
-        if: steps.changed-files.outputs.only_changed == 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         env:
           CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files}}
         run: |
