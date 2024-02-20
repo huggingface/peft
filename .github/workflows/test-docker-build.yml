@@ -14,6 +14,8 @@ jobs:
   get_changed_files:
     name: "Build all modified docker images"
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.docker-matrix }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
@@ -31,14 +33,15 @@ jobs:
         run: |
           for file in ${CHANGED_FILES}; do
             echo "$file was changed"
-          done
+          done 
+          echo "docker-matrix=${CHANGED_FILES}" >> $GITHUB_OUTPUT
   build_modified_files:
     needs: get_changed_files
     name: Build Docker images$
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        docker-file: ${CHANGED_FILES}
+        docker-file: ${{ fromJSON(needs.get_changed_files.outputs.matrix) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
     steps:
       - name: Build Docker image
         uses: docker/build-push-action@v4
