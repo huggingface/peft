@@ -72,7 +72,7 @@ class IA3Model(BaseTuner):
 
     prefix: str = "ia3_"
 
-    def __init__(self, model, config, adapter_name):
+    def __init__(self, model, config, adapter_name, _model_peft):
         super().__init__(model, config, adapter_name)
 
     @staticmethod

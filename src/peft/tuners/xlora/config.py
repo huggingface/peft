@@ -4,9 +4,11 @@ from typing import Dict, Optional
 
 import torch
 
+from peft.config import PeftConfig
+
 
 @dataclass
-class xLoRAConfig:
+class xLoRAConfig(PeftConfig):
     r"""
     This is the configuration class to store the configuration of a [`xLoRAClassifier`].
     When the config is reloaded, the paths of the `adapters` field is disregarded in favor of the saved adapters. As such, only the keys

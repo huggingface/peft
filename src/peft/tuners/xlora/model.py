@@ -8,11 +8,11 @@ from huggingface_hub.utils import EntryNotFoundError  # type: ignore
 from safetensors.torch import load_file as safe_load_file
 from transformers import PreTrainedModel  # type: ignore
 
-from ..peft_model import PeftConfig, PeftModel
-from ..tuners import lora
-from ..utils.other import (
+from ...peft_model import PeftConfig, PeftModel
+from ...utils.other import (
     infer_device,
 )
+from . import lora
 from .classifier import InhibitorFlagPayload, xLoRAClassifier
 from .config import xLoRAConfig
 from .insertion import BaseTunerWrapper, PeftModelWrapper, xLoRAConv2dLayer, xLoRAEmbeddingLayer, xLoRALinearLayer
@@ -72,7 +72,9 @@ def convert_layers_to_xlora(
 
 
 class xLoRAModel(PeftModel, PeftModelWrapper):
-    def __init__(self, model: nn.Module, peft_config: PeftConfig) -> None:
+    def __init__(self, model: nn.Module, peft_config: PeftConfig, model_peft: PeftModel) -> None:
+        # TODO(EricLBuehler): model_peft.base_model needs to be a LoraModel.
+
         assert isinstance(model, PreTrainedModel)
         assert isinstance(peft_config, xLoRAConfig)
 
@@ -81,11 +83,6 @@ class xLoRAModel(PeftModel, PeftModelWrapper):
 
         use_trainable_adapters = peft_config.use_trainable_adapters
         adapters_items = iter(peft_config.adapters.items())
-        first_item = next(adapters_items)
-        model_peft = PeftModel.from_pretrained(
-            model, first_item[1], first_item[0], is_trainable=use_trainable_adapters
-        )
-
         for adapter_name, model_id in adapters_items:
             model_peft.load_adapter(model_id, adapter_name, is_trainable=use_trainable_adapters)
 

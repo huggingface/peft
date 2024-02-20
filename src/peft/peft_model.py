@@ -53,6 +53,10 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
 )
+from .tuners.xlora import _get_file_path_dir as xlora_get_file_path_dir
+from .tuners.xlora import _load_classifier_weights as xlora_load_classifier_weights
+from .tuners.xlora.config import xLoRAConfig
+from .tuners.xlora.model import xLoRAModel
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -70,10 +74,6 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
-from .xlora import _get_file_path_dir as xlora_get_file_path_dir
-from .xlora import _load_classifier_weights as xlora_load_classifier_weights
-from .xlora.config import xLoRAConfig
-from .xlora.model import xLoRAModel
 
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
@@ -88,6 +88,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
+    PeftType.XLORA: xLoRAModel,
 }
 
 
