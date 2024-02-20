@@ -20,6 +20,7 @@ jobs:
         uses: tj-actions/changed-files@3f54ebb830831fc121d3263c1857cfbdc310cdb9 #v42
         with:
           files: docker/**
+          json: "true"
       - name: Run step if only the files listed above change
         if: steps.changed-files.outputs.any_changed == 'true'
         id: set-matrix
@@ -27,9 +28,7 @@ jobs:
           for file in ${{ steps.changed-files.outputs.all_changed_files}}; do
             echo "$file was changed"
           done 
-          echo ${{ steps.changed-files.outputs.all_changed_files}}
-          echo "[\"${{ steps.changed-files.outputs.all_changed_files}}\"] | sed 's/ /\", \"/g'" >> $MATRIX
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "matrix=${{ steps.changed-files.outputs.all_changed_files}}" >> $GITHUB_OUTPUT
   build_modified_files:
     needs: get_changed_files
     name: Build Docker images on modified files
