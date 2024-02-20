@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        docker-file: fromJSON( ${{ needs.get_changed_files.outputs.matrix }} )
+        docker-file: ${{ fromJson(needs.get_changed_files.outputs.matrix) }}
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
