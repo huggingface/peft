@@ -106,12 +106,6 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
-        if use_dora:
-            self.dora_init(adapter_name)
-            self.use_dora[adapter_name] = True
-        else:
-            self.use_dora[adapter_name] = False
-
         # check weight and qweight (for GPTQ)
         for weight_name in ("weight", "qweight"):
             weight = getattr(self.get_base_layer(), weight_name, None)
@@ -122,6 +116,13 @@ class LoraLayer(BaseTunerLayer):
                 else:
                     self.to(weight.device)
                 break
+
+        if use_dora:
+            self.dora_init(adapter_name)
+            self.use_dora[adapter_name] = True
+        else:
+            self.use_dora[adapter_name] = False
+
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
@@ -164,19 +165,24 @@ class LoraLayer(BaseTunerLayer):
             self.lora_embedding_B[adapter_name].weight.data = lora_B
         self.get_base_layer().weight.data = qweight
 
-    def _get_weight_norm(self) -> torch.Tensor:
+    def _get_weight_norm(self, lora_weight) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         base_layer = self.get_base_layer()
         if hasattr(base_layer, "weight"):
             weight = base_layer.weight
         else:
+            # Note: this will not work currently
             weight = base_layer.qweight
-        # FIXME check the dims, won't work with quantized
+
+        weight = weight + lora_weight
         weight_norm = torch.torch.linalg.vector_norm(weight, dim=0)
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
-        weight_norm = self._get_weight_norm()
+        lora_A = self.lora_A[adapter_name]
+        lora_B = self.lora_B[adapter_name]
+        lora_weight = lora_B.weight @ lora_A.weight
+        weight_norm = self._get_weight_norm(lora_weight)
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
         # add lora_magnitude_vector to the list of learnable parameters
         self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
@@ -188,9 +194,9 @@ class LoraLayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def apply_dora(self, adapter_name: str, x: torch.Tensor) -> torch.Tensor:
-        x = self.lora_magnitude_vector[adapter_name] * x
-        weight_norm = self._get_weight_norm()
+    def apply_dora(self, adapter_name: str, lora_weight: torch.Tensor) -> torch.Tensor:
+        weight_norm = self._get_weight_norm(lora_weight)
+        lora_weight = self.lora_magnitude_vector[adapter_name] * lora_weight
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
@@ -198,7 +204,7 @@ class LoraLayer(BaseTunerLayer):
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
         # TODO: is detach() enough?
-        return x / weight_norm.detach()
+        return lora_weight / weight_norm.detach()
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
@@ -296,7 +302,7 @@ class Linear(nn.Module, LoraLayer):
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
                     if self.use_dora[active_adapter]:
-                        weight_norm = self._get_weight_norm()
+                        weight_norm = self._get_weight_norm(delta_weight)
                         # We need to cache weight_norm because it has to be based on the original weights. We
                         # cannot calculate it on the fly based on the merged weights when unmerging because its a
                         # different value
@@ -313,7 +319,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if self.use_dora[active_adapter]:
-                        weight_norm = self._get_weight_norm()
+                        weight_norm = self._get_weight_norm(delta_weight)
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         delta_weight = self.lora_magnitude_vector[active_adapter] * delta_weight / weight_norm
                     base_layer.weight.data += delta_weight
