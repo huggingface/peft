@@ -34,6 +34,7 @@ jobs:
     name: Build Docker images on modified files
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         docker-file: ${{ fromJson(needs.get_changed_files.outputs.matrix) }}
     steps:
@@ -42,5 +43,6 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ${{ matrix.docker-file }}
+          file: ${{ matrix.docker-file }}
+          context: $(dirname ${{ matrix.docker-file }})
           push: False
