@@ -41,4 +41,4 @@ jobs:
     steps:
       - name: Print env variables
         run: |
-          echo ${{ fromJSON(needs.get_changed_files.outputs.matrix) }}
+          echo ${{ needs.get_changed_files.outputs.matrix }}
