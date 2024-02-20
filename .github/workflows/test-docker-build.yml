@@ -6,6 +6,9 @@ on:
       # Run only when DockerFile files are modified
       - "docker/**"
 
+env:
+  CHANGED_FILES: ''
+
 concurrency:
   group: docker-image-builds
   cancel-in-progress: false
