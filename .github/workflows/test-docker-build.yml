@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        docker-file: ${{ fromJSON(needs.get_changed_files.outputs.matrix) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
+        docker-file: ${{ fromJSON(needs.get_changed_files.outputs.docker-matrix) }} # https://docs.github.com/en/actions/learn-github-actions/expressions#example-returning-a-json-object
     steps:
       - name: Build Docker image
         uses: docker/build-push-action@v4
