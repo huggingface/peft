@@ -80,8 +80,6 @@ class xLoRAModel(LoraModel):
 
         super().__init__(model, peft_config, adapter_name, model_peft)
 
-        # TODO(EricLBuehler): model_peft.base_model needs to be a LoraModel
-
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
 
