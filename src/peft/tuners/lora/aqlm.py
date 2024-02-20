@@ -22,10 +22,10 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 
 
 if is_aqlm_available():
-    from aqlm import QuantizedLinear as AqlmQuantizedLinear
+    from aqlm import QuantizedLinear
 
 
-class QuantLinear(torch.nn.Module, LoraLayer):
+class AqlmLoraLinear(torch.nn.Module, LoraLayer):
     def __init__(
         self,
         base_layer,
@@ -93,8 +93,8 @@ def dispatch_aqlm(
     else:
         target_base_layer = target
 
-    if is_aqlm_available() and isinstance(target_base_layer, AqlmQuantizedLinear):
-        new_module = QuantLinear(target, adapter_name, **kwargs)
+    if is_aqlm_available() and isinstance(target_base_layer, QuantizedLinear):
+        new_module = AqlmLoraLinear(target, adapter_name, **kwargs)
         target.qweight = target_base_layer.codes
 
     return new_module
