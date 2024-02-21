@@ -82,6 +82,10 @@ class xLoRAModel(LoraModel):
 
         use_trainable_adapters = peft_config.use_trainable_adapters
         adapters_items = iter(peft_config.adapters.items())
+
+        # Because we call load_adapter, which requires base_model to be defined
+        model_peft.base_model = self
+
         for adapter_name, model_id in adapters_items:
             model_peft.load_adapter(model_id, adapter_name, is_trainable=use_trainable_adapters)
 
