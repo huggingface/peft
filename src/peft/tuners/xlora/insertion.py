@@ -4,8 +4,7 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 from safetensors.torch import save_model  # type: ignore
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 
 from peft.tuners import lora
 from peft.tuners.tuners_utils import BaseTuner  # type: ignore
