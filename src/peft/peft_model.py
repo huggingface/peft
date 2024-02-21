@@ -162,7 +162,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             adapters = self.active_adapter
             if isinstance(adapters, str):
                 adapters = [adapters]
-        return adapters
+        return list(filter(lambda x: len(x) > 0, adapters))
 
     @peft_config.setter
     def peft_config(self, value: dict[str, PeftConfig]):

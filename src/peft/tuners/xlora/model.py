@@ -88,7 +88,7 @@ class xLoRAModel(LoraModel):
         model_peft.base_model = self
         # For load_adapter to think we are a LoraModel
         model_peft.peft_type = PeftType.LORA
-        
+
         for adapter_name, model_id in adapters_items:
             model_peft.load_adapter(model_id, adapter_name, is_trainable=use_trainable_adapters)
 
