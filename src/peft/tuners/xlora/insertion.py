@@ -321,10 +321,11 @@ class PeftModelWrapper:
         model_trainable_params, model_all_param = self.base_model_get_nb_trainable_parameters()
 
         classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        xlora_trainable_params, xlora_all_param = classifier.get_nb_trainable_parameters()
+        # Ignoring xlora_trainable_params as it is already included in model_trainable_params
+        _xlora_trainable_params, xlora_all_param = classifier.get_nb_trainable_parameters()
 
         trainable_params, all_param = (
-            (model_trainable_params + xlora_trainable_params),
+            model_trainable_params,
             (model_all_param + xlora_all_param),
         )
 
