@@ -58,6 +58,8 @@ from .tuners.tuners_utils import BaseTunerLayer
 from .tuners.xlora import _get_file_path_dir as xlora_get_file_path_dir
 from .tuners.xlora import _load_classifier_weights as xlora_load_classifier_weights
 from .tuners.xlora.classifier import xLoRAClassifier
+from .tuners.xlora.util import _get_file_path_dir as xlora_get_file_path_dir
+from .tuners.xlora.util import _load_classifier_weights as xlora_load_classifier_weights
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
