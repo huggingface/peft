@@ -170,6 +170,8 @@ class BaseTuner(nn.Module, ABC):
         if not _disable_inject:
             self.active_adapter = adapter_name
             self.inject_adapter(self.model, adapter_name)
+        else:
+            self.active_adapter = ""
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
