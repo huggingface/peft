@@ -169,4 +169,6 @@ In the above example, the memory consumed per GPU is xx GB as seen in the screen
 You can also refer the [llama-recipes](https://github.com/facebookresearch/llama-recipes/?tab=readme-ov-file#fine-tuning) repo and [Getting started with Llama](https://llama.meta.com/get-started/#fine-tuning) guide on how to finetune using FSDP and PEFT.
 
 ## Caveats
-1. Passing `modules_to_save` config parameter to is untested at present.
+1. Merging when using PEFT and FSDP is currently unsupported and will raise error.
+2. Passing `modules_to_save` config parameter to is untested at present.
+3. GPU Memeory saving when using CPU Offloading is untested at present.

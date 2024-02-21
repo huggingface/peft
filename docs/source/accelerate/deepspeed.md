@@ -133,14 +133,6 @@ trainer = SFTTrainer(
     max_seq_length=data_args.max_seq_length,
 )
 trainer.accelerator.print(f"{trainer.model}")
-if model_args.use_peft_lora:
-    # handle PEFT+FSDP case
-    trainer.model.print_trainable_parameters()
-    if getattr(trainer.accelerator.state, "fsdp_plugin", None):
-        from peft.utils.other import fsdp_auto_wrap_policy
-
-        fsdp_plugin = trainer.accelerator.state.fsdp_plugin
-        fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
 
 # train
 checkpoint = None
@@ -149,8 +141,6 @@ if training_args.resume_from_checkpoint is not None:
 trainer.train(resume_from_checkpoint=checkpoint)
 
 # saving final model
-if trainer.is_fsdp_enabled:
-    trainer.accelerator.state.fsdp_plugin.set_state_dict_type("FULL_STATE_DICT")
 trainer.save_model()
 ```
 
@@ -158,6 +148,10 @@ trainer.save_model()
 
 In the above example, the memory consumed per GPU is xx GB as seen in the screenshot below:
 
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_deepspeed_mem_usage.png"/>
+</div>
+<small>GPU memory suage for the training run</small>
 
 ## More resources
 You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and DeepSpeed](https://medium.com/@sourabmangrulkar/falcon-180b-finetuning-using-peft-and-deepspeed-b92643091d99) on how to finetune 180B Falcon model on 16 A100 GPUs on 2 machines.
