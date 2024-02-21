@@ -10,11 +10,11 @@ from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
 
-from ...peft_model import PeftConfig, PeftModel
-from ...utils.other import (
+from peft.peft_model import PeftConfig, PeftModel
+from peft.utils.other import (
     infer_device,
 )
-from . import lora
+from .. import lora
 from .classifier import InhibitorFlagPayload, xLoRAClassifier
 from .config import xLoRAConfig
 from .insertion import BaseTunerWrapper, PeftModelWrapper, xLoRAConv2dLayer, xLoRAEmbeddingLayer, xLoRALinearLayer
