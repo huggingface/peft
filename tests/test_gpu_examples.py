@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import gc
+import importlib
 import os
 import tempfile
 import unittest
@@ -24,6 +25,7 @@ from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
+from packaging import version
 from parameterized import parameterized
 from transformers import (
     AutoModelForCausalLM,
@@ -1386,6 +1388,10 @@ class MixedPrecisionTests(unittest.TestCase):
 
 @require_torch_gpu
 @require_aqlm
+@unittest.skipUnless(
+    version.parse(importlib.metadata.version("transformers")) >= version.parse("4.38.0"),
+    "test requires `transformers>=4.38.0`",
+)
 class PeftAqlmGPUTests(unittest.TestCase):
     r"""
     AQLM + peft tests
