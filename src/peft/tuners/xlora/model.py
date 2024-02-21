@@ -5,6 +5,7 @@ import torch.nn as nn
 from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
+from peft.utils.peft_types import PeftType
 
 from .. import lora
 from .classifier import InhibitorFlagPayload, xLoRAClassifier
@@ -85,11 +86,14 @@ class xLoRAModel(LoraModel):
 
         # Because we call load_adapter, which requires base_model to be defined
         model_peft.base_model = self
-
+        # For load_adapter to think we are a LoraModel
+        model_peft.peft_type = PeftType.LORA
+        
         for adapter_name, model_id in adapters_items:
             model_peft.load_adapter(model_id, adapter_name, is_trainable=use_trainable_adapters)
 
         self.set_adapter(list(peft_config.adapters.keys()))
+        model_peft.peft_type = PeftType.XLORA
 
         def hook(module, *args, **kwargs) -> None:
             args_real = args[0]
