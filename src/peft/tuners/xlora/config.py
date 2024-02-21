@@ -51,8 +51,6 @@ class xLoRAConfig(PeftConfig):
             Weight to multiply output of each LoRA adapter by.
     """
 
-    model_type = "xlora"
-
     hidden_size: int
     device: torch.device
     adapters: Dict[str, str]
