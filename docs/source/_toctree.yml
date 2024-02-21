@@ -25,6 +25,8 @@
 
 - title: Developer guides
   sections:
+  - local: developer_guides/model_merging
+    title: Model merging
   - local: developer_guides/quantization
     title: Quantization
   - local: developer_guides/lora
@@ -97,5 +99,9 @@
     - local: package_reference/prompt_tuning
       title: Prompt tuning
     title: Adapters
+  - sections:
+    - local: package_reference/merge_utils
+      title: Model merge
+    title: Utilities
   title: API reference
 

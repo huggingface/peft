@@ -66,6 +66,9 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "input_size") and hasattr(base_layer, "output_size"):
             # Megatron ColumnParallelLinear,RowParallelLinear
             in_features, out_features = base_layer.input_size, base_layer.output_size
+        elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
+            # Awq layers
+            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
@@ -294,8 +297,6 @@ class Linear(nn.Module, LoraLayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -304,6 +305,7 @@ class Linear(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -314,7 +316,7 @@ class Linear(nn.Module, LoraLayer):
                 x = x.to(lora_A.weight.dtype)
                 result += lora_B(lora_A(dropout(x))) * scaling
 
-        result = result.to(previous_dtype)
+            result = result.to(torch_result_dtype)
         return result
 
     def __repr__(self) -> str:
@@ -480,6 +482,7 @@ class Embedding(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_embedding_A:
                     continue
@@ -488,6 +491,7 @@ class Embedding(nn.Module, LoraLayer):
                 scaling = self.scaling[active_adapter]
                 after_A = self._embed(x, embedding_A)
                 result += (after_A @ embedding_B) * scaling
+            result = result.to(torch_result_dtype)
 
         return result
 
@@ -647,8 +651,6 @@ class Conv2d(nn.Module, LoraLayer):
         return output_tensor
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -657,6 +659,8 @@ class Conv2d(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+            torch_result_dtype = result.dtype
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -667,7 +671,7 @@ class Conv2d(nn.Module, LoraLayer):
                 x = x.to(lora_A.weight.dtype)
                 result += lora_B(lora_A(dropout(x))) * scaling
 
-        result = result.to(previous_dtype)
+            result = result.to(torch_result_dtype)
         return result
 
     def __repr__(self) -> str:

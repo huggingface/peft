@@ -36,8 +36,9 @@ from peft.utils import (
     _get_submodules,
     get_quantization_config,
 )
-from peft.utils.merge_utils import dare_linear, dare_ties, task_arithmetic, ties
+from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 
+from .awq import dispatch_awq
 from .config import LoraConfig
 from .gptq import dispatch_gptq
 from .layer import Conv2d, LoraLayer, dispatch_default
@@ -156,9 +157,11 @@ class LoraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
-        quantization_config = get_quantization_config(self.model, method="gptq")
-        if quantization_config is not None:
-            kwargs["gptq_quantization_config"] = quantization_config
+        quant_methods = ["gptq", "awq"]
+        for quant_method in quant_methods:
+            quantization_config = get_quantization_config(self.model, method=quant_method)
+            if quantization_config is not None:
+                kwargs[f"{quant_method}_quantization_config"] = quantization_config
 
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from peft.tuners.adalora import AdaLoraLayer
@@ -244,7 +247,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
-        dispatchers.extend([dispatch_gptq, dispatch_megatron, dispatch_default])
+        dispatchers.extend([dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
 
         new_module = None
         for dispatcher in dispatchers:
@@ -362,7 +365,13 @@ class LoraModel(BaseTuner):
                     self._replace_module(parent, target_name, target.get_base_layer(), target)
                 elif isinstance(target, ModulesToSaveWrapper):
                     # save any additional trainable modules part of `modules_to_save`
-                    setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                    new_module = target.modules_to_save[target.active_adapter]
+                    if hasattr(new_module, "base_layer"):
+                        # check if the module is itself a tuner layer
+                        if merge:
+                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                        new_module = new_module.get_base_layer()
+                    setattr(parent, target_name, new_module)
 
         return self.model
 
@@ -395,9 +404,9 @@ class LoraModel(BaseTuner):
                 Name of the new adapter.
             combination_type (`str`):
                 The merging type can be one of [`svd`, `linear`, `cat`, `ties`, `ties_svd`, `dare_ties`, `dare_linear`,
-                `dare_ties_svd`, `dare_linear_svd`]. When using the `cat` combination_type, the rank of the resulting
-                adapter is equal to the sum of all adapters ranks (the mixed adapter may be too big and result in OOM
-                errors).
+                `dare_ties_svd`, `dare_linear_svd`, `magnitude_prune`, `magnitude_prune_svd`]. When using the `cat`
+                combination_type, the rank of the resulting adapter is equal to the sum of all adapters ranks (the
+                mixed adapter may be too big and result in OOM errors).
             svd_rank (`int`, *optional*):
                 Rank of output adapter for svd. If None provided, will use max rank of merging adapters.
             svd_clamp (`float`, *optional*):
@@ -412,7 +421,8 @@ class LoraModel(BaseTuner):
                 documentation. Defaults to None.
             density (`float`, *optional*):
                 Value between 0 and 1. 0 means all values are pruned and 1 means no values are pruned. Should be used
-                with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`, `dare_ties_svd`, `dare_linear_svd`]
+                with [`ties`, `ties_svd`, `dare_ties`, `dare_linear`, `dare_ties_svd`, `dare_linear_svd`,
+                `magnintude_prune`, `magnitude_prune_svd`]
             majority_sign_method (`str`):
                 The method, should be one of ["total", "frequency"], to use to get the magnitude of the sign values.
                 Should be used with [`ties`, `ties_svd`, `dare_ties`, `dare_ties_svd`]
@@ -428,7 +438,7 @@ class LoraModel(BaseTuner):
         combination_type = "linear" if len(adapters) == 1 else combination_type
 
         adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
-        if combination_type in ("linear", "ties", "dare_ties", "dare_linear"):
+        if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
             # all adapters ranks should be same, new rank is just this value
             if len(set(adapters_ranks)) != 1:
                 raise ValueError(
@@ -509,7 +519,13 @@ class LoraModel(BaseTuner):
                     loras_B = torch.cat(loras_B, dim=1)
                     target_lora_A.data[: loras_A.shape[0], :] = loras_A
                     target_lora_B.data[:, : loras_B.shape[1]] = loras_B
-                elif combination_type in ["svd", "ties_svd", "dare_linear_svd", "dare_ties_svd"]:
+                elif combination_type in [
+                    "svd",
+                    "ties_svd",
+                    "dare_linear_svd",
+                    "dare_ties_svd",
+                    "magnitude_prune_svd",
+                ]:
                     target_lora_A.data, target_lora_B.data = self._svd_generalized_task_arithmetic_weighted_adapter(
                         combination_type,
                         adapters,
@@ -524,7 +540,7 @@ class LoraModel(BaseTuner):
                         full_matrices=svd_full_matrices,
                         driver=svd_driver,
                     )
-                elif combination_type in ["linear", "ties", "dare_linear", "dare_ties"]:
+                elif combination_type in ["linear", "ties", "dare_linear", "dare_ties", "magnitude_prune"]:
                     target_lora_A.data, target_lora_B.data = self._generalized_task_arithmetic_weighted_adapter(
                         combination_type, adapters, weights, target, density, majority_sign_method
                     )
@@ -565,6 +581,8 @@ class LoraModel(BaseTuner):
             delta_weight = dare_linear(delta_weight, valid_weights, density)
         elif combination_type == "dare_ties_svd":
             delta_weight = dare_ties(delta_weight, valid_weights, density, majority_sign_method)
+        elif combination_type == "magnitude_prune_svd":
+            delta_weight = magnitude_prune(delta_weight, valid_weights, density)
         else:
             raise ValueError(f"Invalid value passed to combination type: {combination_type}")
 
@@ -632,6 +650,8 @@ class LoraModel(BaseTuner):
                 lora_deltas[i] = dare_linear(task_tensors, valid_weights, density)
             elif combination_type == "dare_ties":
                 lora_deltas[i] = dare_ties(task_tensors, valid_weights, density, majority_sign_method)
+            elif combination_type == "magnitude_prune":
+                lora_deltas[i] = magnitude_prune(task_tensors, valid_weights, density)
             else:
                 raise ValueError("Invalid combination type")
         lora_deltas = [delta.to(dtype) for delta in lora_deltas]

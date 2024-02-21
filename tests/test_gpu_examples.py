@@ -53,6 +53,7 @@ from peft import (
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 from .testing_utils import (
+    require_auto_awq,
     require_auto_gptq,
     require_bitsandbytes,
     require_optimum,
@@ -1380,3 +1381,255 @@ class MixedPrecisionTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
             trainer.train()
+
+
+@require_torch_gpu
+@require_auto_awq
+class PeftAwqGPUTests(unittest.TestCase):
+    r"""
+    Awq + peft tests
+    """
+
+    def setUp(self):
+        self.causal_lm_model_id = "peft-internal-testing/opt-125m-awq"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def _check_inference_finite(self, model, batch):
+        # try inference without Trainer class
+        training = model.training
+        model.eval()
+        output = model(**batch.to(model.device))
+        assert torch.isfinite(output.logits).all()
+        model.train(training)
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_awq(self):
+        r"""
+        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            # TODO: deal correctly with this case in transformers
+            model._is_quantized_training_enabled = True
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                    fp16=True,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_causal_lm_training_multi_gpu(self):
+        r"""
+        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+
+PRECISIONS = [(torch.float32), (torch.float16), (torch.bfloat16)]
+
+LORA_PARAMS = {
+    "r": 8,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+}
+
+
+class SimpleModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.embedding_layer = torch.nn.Embedding(1000, 768)
+        self.layer_norm = torch.nn.LayerNorm(768)
+        self.linear_transform = torch.nn.Linear(768, 256)
+
+    def forward(self, input_ids):
+        embedded_output = self.embedding_layer(input_ids)
+        norm_output = self.layer_norm(embedded_output)
+        linear_output = self.linear_transform(norm_output)
+
+        return linear_output
+
+
+class SimpleConv2DModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.embedding_layer = torch.nn.Embedding(1000, 768)
+        self.layer_norm = torch.nn.LayerNorm(768)
+        self.conv2d_transform = torch.nn.Conv2d(1, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+
+    def forward(self, input_ids):
+        # Additional layers for your custom model
+        embedded_output = self.embedding_layer(input_ids)
+        norm_output = self.layer_norm(embedded_output)
+
+        # Reshape for Conv2d input (add batch size dimension)
+        norm_output = norm_output.unsqueeze(1)
+        conv_output = self.conv2d_transform(norm_output)
+
+        # Remove batch size dimension
+        conv_output = conv_output.squeeze(1)
+
+        return conv_output
+
+
+@require_torch_gpu
+class TestAutoCast(unittest.TestCase):
+    # This test makes sure, that Lora dtypes are consistent with the types
+    # infered by torch.autocast under tested PRECISIONS
+    @parameterized.expand(PRECISIONS)
+    def test_simple_model(self, *args, **kwargs):
+        self._test_model(SimpleModel(), *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_lora_linear_model(self, *args, **kwargs):
+        simple_model = SimpleModel()
+        config = LoraConfig(
+            **LORA_PARAMS,
+            target_modules=["linear_transform"],
+        )
+
+        lora_model = get_peft_model(simple_model, config)
+
+        self._test_model(lora_model, *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_lora_embedding_model(self, *args, **kwargs):
+        simple_model = SimpleModel()
+        config = LoraConfig(
+            **LORA_PARAMS,
+            target_modules=["embedding_layer"],
+        )
+        lora_model = get_peft_model(simple_model, config)
+
+        self._test_model(lora_model, *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_conv2d_model(self, *args, **kwargs):
+        self._test_model(SimpleConv2DModel(), *args, **kwargs)
+
+    @parameterized.expand(PRECISIONS)
+    def test_simple_lora_conv2d_model(self, *args, **kwargs):
+        simple_model = SimpleConv2DModel()
+        config = LoraConfig(
+            **LORA_PARAMS,
+            target_modules=["conv2d_transform"],
+        )
+        lora_model = get_peft_model(simple_model, config)
+        self._test_model(lora_model, *args, **kwargs)
+
+    def _test_model(self, model, precision):
+        # Move model to GPU
+        model = model.cuda()
+
+        # Prepare dummy inputs
+        input_ids = torch.randint(0, 1000, (2, 10)).cuda()
+        if precision == torch.bfloat16:
+            if not torch.cuda.is_bf16_supported():
+                self.skipTest("Bfloat16 not supported on this device")
+
+        # Forward pass with test precision
+        with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
+            outputs = model(input_ids)
+            assert outputs.dtype == precision
