@@ -77,7 +77,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --evaluation_strategy "epoch" \
 --save_strategy "epoch" \
 --push_to_hub \
---hub_private_repo False \
+--hub_private_repo True \
 --hub_strategy "every_save" \
 --bf16 True \
 --packing True \
