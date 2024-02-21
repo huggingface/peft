@@ -364,7 +364,7 @@ class PeftModelWrapper:
         self,
         save_directory: str,
         safe_serialization: bool = True,
-        selected_adapters: Optional[List[str]] = None,
+        selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
         **kwargs: Any,

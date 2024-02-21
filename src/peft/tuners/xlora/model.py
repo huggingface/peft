@@ -147,7 +147,7 @@ class xLoRAModel(LoraModel):
             model_peft.get_nb_trainable_parameters,
             model_peft.generate,
         )
-        model_peft.save_pretrained = peft_model_wrapper.save_pretrained  # type: ignore[method-assign]
+        model_peft.save_pretrained = peft_model_wrapper.save_pretrained  # type: ignore
         model_peft.generate = peft_model_wrapper.generate  # type: ignore
 
         assert not hasattr(model_peft, "set_use_trainable_adapters")
