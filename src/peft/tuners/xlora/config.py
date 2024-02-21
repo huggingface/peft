@@ -51,9 +51,9 @@ class xLoRAConfig(PeftConfig):
             Weight to multiply output of each LoRA adapter by.
     """
 
-    hidden_size: int
-    device: torch.device
-    adapters: Dict[str, str]
+    hidden_size: int = None  # type: ignore
+    device: torch.device = None  # type: ignore
+    adapters: Dict[str, str] = None  # type: ignore
     enable_softmax: bool = True
     enable_softmax_topk: bool = False
     layerwise_scalings: bool = False
@@ -70,6 +70,10 @@ class xLoRAConfig(PeftConfig):
     global_scaling_weight: float = 1.0
 
     def __post_init__(self):
+        assert self.hidden_size is not None
+        assert self.device is not None
+        assert self.adapters is not None
+
         if self.enable_softmax_topk and self.top_k_lora is None:
             warnings.warn("`enable_softmax_topk` enabled `top_k_lora` is not set")
 
