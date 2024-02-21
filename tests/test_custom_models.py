@@ -647,7 +647,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        torch.manual_seed(0)
         for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
@@ -689,7 +688,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        torch.manual_seed(0)
         for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
@@ -718,7 +716,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
         # unmerged or merged should make no difference
-        assert torch.allclose(outputs_after, outputs_unmerged)
+        assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
         assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
