@@ -140,7 +140,13 @@ class BaseTuner(nn.Module, ABC):
             double-check that the `config.target_modules` where specified correctly.
     """
 
-    def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
+    def __init__(
+        self,
+        model,
+        peft_config: Union[PeftConfig, dict[str, PeftConfig]],
+        adapter_name: str,
+        _disable_inject: bool = False,
+    ) -> None:
         super().__init__()
 
         self.model = model
@@ -161,8 +167,9 @@ class BaseTuner(nn.Module, ABC):
                 # user is adding a dict of PeftConfigs
                 self.peft_config.update(peft_config)
 
-        self.active_adapter = adapter_name
-        self.inject_adapter(self.model, adapter_name)
+        if not _disable_inject:
+            self.active_adapter = adapter_name
+            self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config

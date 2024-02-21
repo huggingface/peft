@@ -75,7 +75,7 @@ class xLoRAModel(LoraModel):
         peft_config = config[adapter_name]
         assert isinstance(peft_config, xLoRAConfig)
 
-        super().__init__(model, config, adapter_name, model_peft)
+        super().__init__(model, config, adapter_name, model_peft, _disable_inject=True)
 
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
