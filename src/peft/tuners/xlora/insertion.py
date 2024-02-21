@@ -20,11 +20,11 @@ class xLoRALayer:
     xLoRA algorithm.
     """
 
-    __slots__ = {"model", "target_forward", "target", "layer_number", "disabled", "config"}
+    __slots__ = {"model", "target_forward", "target", "layer_number", "config"}
 
     def __init__(
         self,
-        model: nn.Module, # PeftModel
+        model: nn.Module,  # PeftModel
         target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -34,7 +34,6 @@ class xLoRALayer:
         self.target_forward = target_forward
         self.target = target
         self.layer_number = layer_number
-        self.disabled = False  # TODO(EricLBuehler): Pending removal following analysis
         self.config = config
 
     @staticmethod
@@ -69,7 +68,7 @@ class xLoRALayer:
 class xLoRALinearLayer(xLoRALayer):
     def __init__(
         self,
-        model: nn.Module, # PeftModel
+        model: nn.Module,  # PeftModel
         target: lora.Linear,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -113,7 +112,7 @@ class xLoRALinearLayer(xLoRALayer):
 class xLoRAEmbeddingLayer(xLoRALayer):
     def __init__(
         self,
-        model: nn.Module, # PeftModel
+        model: nn.Module,  # PeftModel
         target: lora.Embedding,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -154,7 +153,7 @@ class xLoRAEmbeddingLayer(xLoRALayer):
 class xLoRAConv2dLayer(xLoRALayer):
     def __init__(
         self,
-        model: nn.Module, # PeftModel
+        model: nn.Module,  # PeftModel
         target: lora.Conv2d,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -206,7 +205,7 @@ class BaseTunerWrapper:
 class PeftModelWrapper:
     def __init__(
         self,
-        base_model: nn.Module, # PeftModel
+        base_model: nn.Module,  # PeftModel
         base_model_save: Callable[..., None],
         config: xLoRAConfig,
         base_model_get_nb_trainable_parameters: Callable[..., Tuple[int, int]],
