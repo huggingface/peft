@@ -46,7 +46,7 @@ class LoKrConfig(LycorisConfig):
             of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
-            the target modules manually.
+            the target modules manually. Default is `all-linear`.
         init_weights (`bool`):
             Whether to perform initialization of adapter weights. This defaults to `True`, passing `False` is
             discouraged.
@@ -86,7 +86,7 @@ class LoKrConfig(LycorisConfig):
     )
     decompose_factor: int = field(default=-1, metadata={"help": "Kronecker product decomposition factor."})
     target_modules: Optional[Union[List[str], str]] = field(
-        default=None,
+        default="all-linear",
         metadata={
             "help": "List of module names or regex expression of the module names to replace with LoKr."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "

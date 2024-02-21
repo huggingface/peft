@@ -55,7 +55,7 @@ class LoraConfig(PeftConfig):
             of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
             excluding the output layer. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
-            the target modules manually.
+            the target modules manually. Default is `all-linear`.
         lora_alpha (`int`):
             The alpha parameter for Lora scaling.
         lora_dropout (`float`):
@@ -105,7 +105,7 @@ class LoraConfig(PeftConfig):
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
     target_modules: Optional[Union[list[str], str]] = field(
-        default=None,
+        default="all-linear",
         metadata={
             "help": (
                 "List of module names or regex expression of the module names to replace with LoRA."
