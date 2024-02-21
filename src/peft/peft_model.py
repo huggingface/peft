@@ -36,8 +36,6 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
-from peft.xlora.classifier import xLoRAClassifier
-
 from . import __version__
 from .config import PeftConfig
 from .tuners import (
@@ -53,12 +51,13 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    xLoRAConfig,
+    xLoRAModel,
 )
 from .tuners.tuners_utils import BaseTunerLayer
 from .tuners.xlora import _get_file_path_dir as xlora_get_file_path_dir
 from .tuners.xlora import _load_classifier_weights as xlora_load_classifier_weights
-from .tuners.xlora.config import xLoRAConfig
-from .tuners.xlora.model import xLoRAModel
+from .tuners.xlora.classifier import xLoRAClassifier
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
