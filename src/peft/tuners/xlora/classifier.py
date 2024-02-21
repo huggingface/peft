@@ -11,8 +11,6 @@ from transformers.modeling_outputs import (  # type: ignore
     ModelOutput,
 )
 
-from peft.peft_model import PeftModel
-
 from .config import xLoRAConfig
 
 
@@ -46,7 +44,7 @@ class xLoRAClassifier(nn.Module):
 
     def __init__(
         self,
-        model: PeftModel,
+        model: nn.Module,  # PeftModel
         config: xLoRAConfig,
         n_classes: int,
         n_layers: int,
@@ -138,7 +136,7 @@ class xLoRAClassifier(nn.Module):
             seq_len = typing.cast(torch.FloatTensor, inputs_embeds).shape[1]
 
         # For type checking
-        model: PeftModel = self.model  # type: ignore
+        model: nn.Module = self.model  # type: ignore
         with torch.no_grad():
             with model.disable_adapter():
                 # TODO(EricLBuehler): Pending removal following analysis

@@ -9,10 +9,10 @@ from safetensors.torch import load_file as safe_load_file
 from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
-
 from peft.utils.other import (
     infer_device,
 )
+
 from .. import lora
 from .classifier import InhibitorFlagPayload, xLoRAClassifier
 from .config import xLoRAConfig
@@ -20,7 +20,7 @@ from .insertion import BaseTunerWrapper, PeftModelWrapper, xLoRAConv2dLayer, xLo
 
 
 def convert_layers_to_xlora(
-    base: nn.Module, # PeftModel
+    base: nn.Module,  # PeftModel
     config: xLoRAConfig,
 ) -> int:
     """
