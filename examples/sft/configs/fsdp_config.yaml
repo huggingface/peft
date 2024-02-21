@@ -1,17 +1,17 @@
-compute_environment: LOCAL_MACHINE                                                                                                                                           
-debug: false                                                                                                                                                                 
+compute_environment: LOCAL_MACHINE
+debug: false
 distributed_type: FSDP
 downcast_bf16: 'no'
 fsdp_config:
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
-  fsdp_backward_prefetch_policy: BACKWARD_PRE
+  fsdp_backward_prefetch: BACKWARD_PRE
   fsdp_cpu_ram_efficient_loading: true
   fsdp_forward_prefetch: false
   fsdp_offload_params: false
-  fsdp_sharding_strategy: 1
+  fsdp_sharding_strategy: FULL_SHARD
   fsdp_state_dict_type: SHARDED_STATE_DICT
   fsdp_sync_module_states: true
-  fsdp_use_orig_params: true
+  fsdp_use_orig_params: false
 machine_rank: 0
 main_training_function: main
 mixed_precision: bf16

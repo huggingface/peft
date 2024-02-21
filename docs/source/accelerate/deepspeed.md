@@ -21,7 +21,7 @@ The configuration file is used to set the default options when you launch the tr
 accelerate config --config_file deepspeed_config.yaml
 ```
 
-You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 and ZeRO-Offload so make sure you pick those options.
+You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 so make sure you pick those options.
 
 ```bash
 `zero_stage`: [0] Disabled, [1] optimizer state partitioning, [2] optimizer+gradient state partitioning and [3] optimizer+gradient+parameter partitioning
@@ -64,7 +64,7 @@ use_cpu: false
 
 ## Launch command
 
-The launch command is available at [deepspeed_config.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_deepspeed.sh) and it is also shown below:
+The launch command is available at [run_peft_deepspeed.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_deepspeed.sh) and it is also shown below:
 ```bash
 accelerate launch --config_file "configs/deepspeed_config.yaml"  train.py \
 --seed 100 \
@@ -322,3 +322,7 @@ accuracy=100.0
 eval_preds[:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
 dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
 ```
+
+# Caveats
+1. Merging when using PEFT and DeepSpeed is currently unsupported and will raise error.
+2. When using CPU offloading, the major gains from using PEFT to shrink the optimizer states and gradients to that of the adapter weights would be realized on CPU RAM and there won't be savings with respect to GPU memory.
