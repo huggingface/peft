@@ -10,7 +10,6 @@ from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
 
-from peft.peft_model import PeftConfig, PeftModel
 from peft.utils.other import (
     infer_device,
 )
@@ -21,7 +20,7 @@ from .insertion import BaseTunerWrapper, PeftModelWrapper, xLoRAConv2dLayer, xLo
 
 
 def convert_layers_to_xlora(
-    base: PeftModel,
+    base: nn.Module, # PeftModel
     config: xLoRAConfig,
 ) -> int:
     """
@@ -75,6 +74,7 @@ def convert_layers_to_xlora(
 
 class xLoRAModel(LoraModel):
     def __init__(self, model: nn.Module, peft_config: xLoRAConfig, adapter_name: str, model_peft: nn.Module) -> None:
+        # model_peft: PeftModel
         assert isinstance(model, PreTrainedModel)
         assert isinstance(peft_config, xLoRAConfig)
 
