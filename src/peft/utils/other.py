@@ -178,6 +178,17 @@ class ModulesToSaveWrapper(torch.nn.Module):
         self._active_adapter = adapter_name
         self._disable_adapters = False
         self.update(adapter_name)
+        self.check_module()
+
+    def check_module(self):
+        """Perform some sanity checks on the module to ensure that it works"""
+        # Try to anticipate some modules that users could try to target that would not work.
+        # Note: It's not possible to check hasattr(module, "forward"), since that returns True for ModuleDict and
+        # ModuleList, even though their forward methods cannot be called
+        forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
+        if isinstance(self.original_module, forbidden_classes):
+            cls_name = self.original_module.__class__.__name__
+            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
 
     @property
     def disable_adapters(self) -> bool:
