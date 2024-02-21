@@ -121,8 +121,7 @@ class _BaseAutoPeftModel:
 
         if tokenizer_exists:
             tokenizer = AutoTokenizer.from_pretrained(
-                pretrained_model_name_or_path,
-                trust_remote_code=kwargs.get("trust_remote_code", False)
+                pretrained_model_name_or_path, trust_remote_code=kwargs.get("trust_remote_code", False)
             )
             base_model.resize_token_embeddings(len(tokenizer))
 
