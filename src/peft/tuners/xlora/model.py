@@ -66,9 +66,13 @@ def convert_layers_to_xlora(
 
 
 class xLoRAModel(LoraModel):
-    def __init__(self, model: nn.Module, peft_config: xLoRAConfig, adapter_name: str, model_peft: nn.Module) -> None:
+    def __init__(
+        self, model: nn.Module, config: dict[str, xLoRAConfig], adapter_name: str, model_peft: nn.Module
+    ) -> None:
         # model_peft: PeftModel
         assert isinstance(model, PreTrainedModel)
+        assert len(config) == 1
+        peft_config = config[adapter_name]
         assert isinstance(peft_config, xLoRAConfig)
 
         super().__init__(model, peft_config, adapter_name, model_peft)
