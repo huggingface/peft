@@ -5,8 +5,8 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 import torch
 from safetensors.torch import save_model  # type: ignore
 from torch import Tensor
+from torch import nn
 
-from peft.peft_model import PeftModel
 from peft.tuners import lora
 from peft.tuners.tuners_utils import BaseTuner  # type: ignore
 
@@ -25,7 +25,7 @@ class xLoRALayer:
 
     def __init__(
         self,
-        model: PeftModel,
+        model: nn.Module, # PeftModel
         target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -70,7 +70,7 @@ class xLoRALayer:
 class xLoRALinearLayer(xLoRALayer):
     def __init__(
         self,
-        model: PeftModel,
+        model: nn.Module, # PeftModel
         target: lora.Linear,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -114,7 +114,7 @@ class xLoRALinearLayer(xLoRALayer):
 class xLoRAEmbeddingLayer(xLoRALayer):
     def __init__(
         self,
-        model: PeftModel,
+        model: nn.Module, # PeftModel
         target: lora.Embedding,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -155,7 +155,7 @@ class xLoRAEmbeddingLayer(xLoRALayer):
 class xLoRAConv2dLayer(xLoRALayer):
     def __init__(
         self,
-        model: PeftModel,
+        model: nn.Module, # PeftModel
         target: lora.Conv2d,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -207,7 +207,7 @@ class BaseTunerWrapper:
 class PeftModelWrapper:
     def __init__(
         self,
-        base_model: PeftModel,
+        base_model: nn.Module, # PeftModel
         base_model_save: Callable[..., None],
         config: xLoRAConfig,
         base_model_get_nb_trainable_parameters: Callable[..., Tuple[int, int]],
