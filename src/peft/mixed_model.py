@@ -23,7 +23,7 @@ from accelerate.hooks import remove_hook_from_submodules
 from torch import nn
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.mixed import COMPATIBLE_TUNER_TYPES
+from .tuners.mixed import COMPATIBLE_TUNER_TYPES
 
 from .config import PeftConfig
 from .peft_model import PeftModel
