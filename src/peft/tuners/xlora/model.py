@@ -84,27 +84,6 @@ class xLoRAModel(LoraModel):
         `torch.nn.Module`: The X-LoRA model.
 
     Example:
-
-        ```py
-        >>> from transformers import AutoModelForSeq2SeqLM, AutoConfig
-        >>> from peft import LoraModel, LoraConfig
-
-        >>> model_config = AutoConfig.from_pretrained("t5-base")
-        >>> config = xLoRAConfig(
-        ...     task_type="SEQ_2_SEQ_LM",
-        ...     hidden_size=model_config.hidden_size,
-        ...     xlora_depth=3,
-        ...     adapters={
-        ...         "adapter_1": "./path/to/the/checkpoint/",
-        ...         "adapter_2": "./path/to/the/checkpoint/",
-        ...         "adapter_n": "./path/to/the/checkpoint/",
-        ...     },
-        ... )
-
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> xlora_model = xLoRAModel(model, config, "xlora")
-        ```
-
         ```py
         >>> from transformers import AutoModelForCausalLM, AutoConfig
         >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
