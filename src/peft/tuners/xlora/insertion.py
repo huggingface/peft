@@ -193,9 +193,8 @@ class xLoRAConv2dLayer(xLoRALayer):
 
 
 class BaseTunerWrapper:
-    def __init__(self, base_model: BaseTuner, classifier: xLoRAClassifier):
+    def __init__(self, base_model: BaseTuner):
         self.model = base_model.model
-        self.classifier = classifier
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)  # Important to *call* the model
