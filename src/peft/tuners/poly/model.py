@@ -33,7 +33,7 @@ from .layer import Linear, PolyLayer
 class PolyModel(BaseTuner):
     prefix: str = "poly_"
 
-    def __init__(self, model, config, adapter_name, _model_peft) -> None:
+    def __init__(self, model, config, adapter_name, _model_peft=None) -> None:
         super().__init__(model, config, adapter_name)
 
     @staticmethod
