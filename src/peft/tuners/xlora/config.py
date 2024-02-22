@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import torch
 
 from peft.config import PeftConfig
+from peft.utils.peft_types import PeftType
 
 
 @dataclass
@@ -73,6 +74,7 @@ class xLoRAConfig(PeftConfig):
         assert self.hidden_size is not None
         assert self.device is not None
         assert self.adapters is not None
+        self.peft_type = PeftType.XLORA
 
         if self.enable_softmax_topk and self.top_k_lora is None:
             warnings.warn("`enable_softmax_topk` enabled `top_k_lora` is not set")
