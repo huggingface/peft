@@ -91,7 +91,7 @@ accelerate launch --config_file "configs/deepspeed_config.yaml"  train.py \
 --weight_decay 1e-4 \
 --warmup_ratio 0.0 \
 --max_grad_norm 1.0 \
---output_dir "mistral-sft-lora-deepspeed" \
+--output_dir "llama-sft-lora-deepspeed" \
 --per_device_train_batch_size 8 \
 --per_device_eval_batch_size 8 \
 --gradient_accumulation_steps 4 \
@@ -146,12 +146,12 @@ trainer.save_model()
 
 ## Memory usage
 
-In the above example, the memory consumed per GPU is xx GB as seen in the screenshot below:
+In the above example, the memory consumed per GPU is 64 GB (80%) as seen in the screenshot below:
 
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_deepspeed_mem_usage.png"/>
 </div>
-<small>GPU memory suage for the training run</small>
+<small>GPU memory usage for the training run</small>
 
 ## More resources
 You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and DeepSpeed](https://medium.com/@sourabmangrulkar/falcon-180b-finetuning-using-peft-and-deepspeed-b92643091d99) on how to finetune 180B Falcon model on 16 A100 GPUs on 2 machines.

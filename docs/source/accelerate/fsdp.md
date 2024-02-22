@@ -86,7 +86,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --weight_decay 1e-4 \
 --warmup_ratio 0.0 \
 --max_grad_norm 1.0 \
---output_dir "mistral-sft-lora-fsdp" \
+--output_dir "llama-sft-lora-fsdp" \
 --per_device_train_batch_size 8 \
 --per_device_eval_batch_size 8 \
 --gradient_accumulation_steps 4 \
@@ -162,7 +162,12 @@ if getattr(trainer.accelerator.state, "fsdp_plugin", None):
 
 ## Memory usage
 
-In the above example, the memory consumed per GPU is xx GB as seen in the screenshot below:
+In the above example, the memory consumed per GPU is  72-80 GB (90-98%) as seen in the screenshot below. The slight increase in GPU memory at the end is when saving the model using `FULL_STATE_DICT` state dict type instead of the `SHARDED_STATE_DICT` so that the model has adapter weights that can be loaded normally with `from_pretrained` method during inference:
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_fsdp_mem_usage.png"/>
+</div>
+<small>GPU memory usage for the training run</small>
 
 
 ## More resources
@@ -171,4 +176,4 @@ You can also refer the [llama-recipes](https://github.com/facebookresearch/llama
 ## Caveats
 1. Merging when using PEFT and FSDP is currently unsupported and will raise error.
 2. Passing `modules_to_save` config parameter to is untested at present.
-3. GPU Memeory saving when using CPU Offloading is untested at present.
+3. GPU Memory saving when using CPU Offloading is untested at present.
