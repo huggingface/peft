@@ -395,7 +395,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
 
         if isinstance(model.base_model, xLoRAModel):
-            assert isinstance(config, xLoRAConfig)
+            if not isinstance(config, xLoRAConfig):
+                raise TypeError(f"Expected 'xLoRAConfig', got '{type(config)}' instead.")
 
             device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device(
             config.device = torch.device(device)
@@ -412,7 +413,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     for name in config.adapters
                 }
             else:
-                assert isinstance(config.adapters, dict)
                 adapters_real = config.adapters
             config.adapters = adapters_real
 
