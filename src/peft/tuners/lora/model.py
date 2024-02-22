@@ -38,6 +38,7 @@ from peft.utils import (
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 
+from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
 from .config import LoraConfig
 from .gptq import dispatch_gptq
@@ -157,7 +158,7 @@ class LoraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
-        quant_methods = ["gptq", "awq"]
+        quant_methods = ["gptq", "aqlm", "awq"]
         for quant_method in quant_methods:
             quantization_config = get_quantization_config(self.model, method=quant_method)
             if quantization_config is not None:
@@ -247,7 +248,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
-        dispatchers.extend([dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
+        dispatchers.extend([dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
 
         new_module = None
         for dispatcher in dispatchers:
