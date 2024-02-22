@@ -34,7 +34,7 @@ You'll be asked a few questions about your setup, and configure the following ar
 `mixed_precision`: `no` for FP32 training, `fp16` for FP16 mixed-precision training and `bf16` for BF16 mixed-precision training. Set this to `True`.
 ```
 
-To enable multiple machines, choose the corresponding options and choose `standard` for `deepspeed_multinode_launcher` to use with SLURM. Once this is done, the corresponding config should look like below and you can find it in config folder at [deepspeed_config.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config.yaml):
+Once this is done, the corresponding config should look like below and you can find it in config folder at [deepspeed_config.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE                                                                                                                                           
@@ -175,7 +175,7 @@ The configuration file is used to set the default options when you launch the tr
 accelerate config --config_file ds_zero3_cpu.yaml
 ```
 
-You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 and ZeRO-Offload so make sure you pick those options.
+You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 along with CPU-Offload so make sure you pick those options.
 
 ```bash
 `zero_stage`: [0] Disabled, [1] optimizer state partitioning, [2] optimizer+gradient state partitioning and [3] optimizer+gradient+parameter partitioning

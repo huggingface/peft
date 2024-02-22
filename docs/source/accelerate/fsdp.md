@@ -27,7 +27,7 @@ You'll be asked a few questions about your setup, and configure the following ar
 </div>
 <small>Creating Accelerate's config to use FSDP</small>
 
-To enable multiple machines, choose the corresponding options and choose `standard` for `deepspeed_multinode_launcher` to use with SLURM. Once this is done, the corresponding config should look like below and you can find it in config folder at [fsdp_config.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config.yaml):
+Once this is done, the corresponding config should look like below and you can find it in config folder at [fsdp_config.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE
