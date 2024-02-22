@@ -127,7 +127,6 @@ class BaseTuner(nn.Module, ABC):
         model,
         peft_config: Union[PeftConfig, dict[str, PeftConfig]],
         adapter_name: str,
-        _disable_inject: bool = False,
     ) -> None:
         super().__init__()
 
@@ -149,11 +148,8 @@ class BaseTuner(nn.Module, ABC):
                 # user is adding a dict of PeftConfigs
                 self.peft_config.update(peft_config)
 
-        if not _disable_inject:
-            self.active_adapter = adapter_name
-            self.inject_adapter(self.model, adapter_name)
-        else:
-            self.active_adapter = ""
+        self.active_adapter = adapter_name
+        self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
@@ -161,9 +157,9 @@ class BaseTuner(nn.Module, ABC):
     @property
     def active_adapters(self) -> list[str]:
         if isinstance(self.active_adapter, str):
-            return list(filter(lambda x: len(x) > 0, [self.active_adapter]))
+            return [self.active_adapter]
         # is already a list of str
-        return list(filter(lambda x: len(x) > 0, self.active_adapter))
+        return self.active_adapter
 
     def forward(self, *args: Any, **kwargs: Any):
         return self.model.forward(*args, **kwargs)
@@ -447,9 +443,9 @@ class BaseTunerLayer(ABC):
     @property
     def active_adapters(self):
         if isinstance(self.active_adapter, str):
-            return list(filter(lambda x: len(x) > 0, [self.active_adapter]))
+            return [self.active_adapter]
         # is already a list of str
-        return list(filter(lambda x: len(x) > 0, self.active_adapter))
+        return self.active_adapter
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
