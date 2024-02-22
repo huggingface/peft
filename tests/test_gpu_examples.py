@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import gc
+import importlib
 import os
 import tempfile
 import unittest
@@ -24,6 +25,7 @@ from accelerate import infer_auto_device_map
 from accelerate.test_utils.testing import run_command
 from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
+from packaging import version
 from parameterized import parameterized
 from transformers import (
     AutoModelForCausalLM,
@@ -53,6 +55,7 @@ from peft import (
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 from .testing_utils import (
+    require_aqlm,
     require_auto_awq,
     require_auto_gptq,
     require_bitsandbytes,
@@ -1381,6 +1384,91 @@ class MixedPrecisionTests(unittest.TestCase):
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
             trainer.train()
+
+
+@require_torch_gpu
+@require_aqlm
+@unittest.skipUnless(
+    version.parse(importlib.metadata.version("transformers")) >= version.parse("4.38.0"),
+    "test requires `transformers>=4.38.0`",
+)
+class PeftAqlmGPUTests(unittest.TestCase):
+    r"""
+    AQLM + peft tests
+    """
+
+    def setUp(self):
+        self.causal_lm_model_id = "BlackSamorez/TinyLlama-1_1B-Chat-v1_0-AQLM-2Bit-1x16-hf"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def _check_inference_finite(self, model, batch):
+        # try inference without Trainer class
+        training = model.training
+        model.eval()
+        output = model(**batch.to(model.device))
+        assert torch.isfinite(output.logits).all()
+        model.train(training)
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_aqlm(self):
+        r"""
+        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="cuda",
+                torch_dtype="auto",
+            )
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                    fp16=True,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
 
 
 @require_torch_gpu
