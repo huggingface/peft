@@ -21,8 +21,6 @@ class xLoRALayer:
     xLoRA algorithm.
     """
 
-    __slots__ = {"model", "target_forward", "target", "layer_number", "config"}
-
     def __init__(
         self,
         model: xLoRAModel,
