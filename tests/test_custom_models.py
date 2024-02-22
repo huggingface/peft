@@ -56,7 +56,12 @@ TEST_CASES = [
     ),
     ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
     ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
-    ("Vanilla MLP 9 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32}),
+    (
+        "Vanilla MLP 9 LoRA with DoRA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
+    ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
