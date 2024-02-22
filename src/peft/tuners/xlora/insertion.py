@@ -7,8 +7,6 @@ from safetensors.torch import save_model  # type: ignore
 from torch import Tensor, nn
 
 from peft.tuners import lora
-from peft.tuners.tuners_utils import BaseTuner
-from peft.tuners.xlora.model import XLoraModel  # type: ignore
 
 from .classifier import XLoraClassifier
 from .config import XLoraConfig
@@ -23,7 +21,7 @@ class XLoraLayer:
 
     def __init__(
         self,
-        model: XLoraModel,
+        model: nn.Module,  # PeftModel
         target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -55,7 +53,7 @@ class XLoraLayer:
 
             xlora_scalings = xlora_scalings * mask.to(xlora_scalings.dtype)
 
-        classifier: XLoraClassifier = self.model.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.model.base_model.internal_xlora_classifier  # type: ignore
         if classifier.config.enable_softmax_topk:
             nonzero_mask = xlora_scalings != 0
             softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
@@ -63,133 +61,8 @@ class XLoraLayer:
 
         return xlora_scalings
 
-
-class XLoraLinearLayer(XLoraLayer):
-    def __init__(
-        self,
-        model: nn.Module,  # PeftModel
-        target: lora.Linear,
-        target_forward: Callable[..., Any],
-        layer_number: int,
-        config: XLoraConfig,
-    ) -> None:
-        super().__init__(model, target, target_forward, layer_number, config)
-
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
-        """
-        This method is designed to be a drop-in-replacement for the peft LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the XLoraLayer class).
-        """
-
-        previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings()
-
-        if self.target.disable_adapters:
-            if self.target.merged:
-                self.target.unmerge()
-            result = self.target.base_layer(x, *args, **kwargs)
-        elif self.target.merged:
-            result = self.target.base_layer(x, *args, **kwargs)
-        else:
-            result = self.target.base_layer(x, *args, **kwargs)
-
-            for adapter_n, active_adapter in enumerate(self.target.active_adapters):
-                if active_adapter not in self.target.lora_A.keys():
-                    continue
-                lora_A = self.target.lora_A[active_adapter]
-                lora_B = self.target.lora_B[active_adapter]
-                dropout = self.target.lora_dropout[active_adapter]
-                scaling = self.target.scaling[active_adapter]
-                x = x.to(lora_A.weight.dtype)  # type: ignore
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
-                result += lora_B(lora_A(dropout(x_mod))) * scaling * self.config.global_scaling_weight
-
-        result = result.to(previous_dtype)
-        return result
-
-
-class XLoraEmbeddingLayer(XLoraLayer):
-    def __init__(
-        self,
-        model: nn.Module,  # PeftModel
-        target: lora.Embedding,
-        target_forward: Callable[..., Any],
-        layer_number: int,
-        config: XLoraConfig,
-    ) -> None:
-        super().__init__(model, target, target_forward, layer_number, config)
-
-    def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
-        """
-        This method is designed to be a drop-in-replacement for the peft LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the XLoraLayer class).
-        """
-
-        xlora_scalings = self.get_maybe_topk_scalings()
-
-        # TODO: no dtype conversion here, unlike in Linear, is that correct?
-        if self.target.disable_adapters:
-            if self.target.merged:
-                self.target.unmerge()
-            result = self.target.base_layer(x, *args, **kwargs)
-        elif self.target.merged:
-            result = self.target.base_layer(x, *args, **kwargs)
-        else:
-            result = self.target.base_layer(x, *args, **kwargs)
-            for adapter_n, active_adapter in enumerate(self.target.active_adapters):
-                if active_adapter not in self.target.lora_embedding_A:
-                    continue
-                embedding_A = self.target.lora_embedding_A[active_adapter].T
-                embedding_B = self.target.lora_embedding_B[active_adapter].T
-                scaling = self.target.scaling[active_adapter]
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
-                after_A = self.target._embed(x_mod, embedding_A)  # type: ignore
-                result += (after_A @ embedding_B) * scaling * self.config.global_scaling_weight
-
-        return result
-
-
-class XLoraConv2dLayer(XLoraLayer):
-    def __init__(
-        self,
-        model: nn.Module,  # PeftModel
-        target: lora.Conv2d,
-        target_forward: Callable[..., Any],
-        layer_number: int,
-        config: XLoraConfig,
-    ) -> None:
-        super().__init__(model, target, target_forward, layer_number, config)
-
-    def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
-        """
-        This method is designed to be a drop-in-replacement for the peft LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the XLoraLayer class).
-        """
-
-        previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings()
-
-        if self.target.disable_adapters:
-            if self.target.merged:
-                self.target.unmerge()
-            result = self.target.base_layer(x, *args, **kwargs)
-        elif self.target.merged:
-            result = self.target.base_layer(x, *args, **kwargs)
-        else:
-            result = self.target.base_layer(x, *args, **kwargs)
-            for adapter_n, active_adapter in enumerate(self.target.active_adapters):
-                if active_adapter not in self.target.lora_A.keys():
-                    continue
-                lora_A = self.target.lora_A[active_adapter]
-                lora_B = self.target.lora_B[active_adapter]
-                dropout = self.target.lora_dropout[active_adapter]
-                scaling = self.target.scaling[active_adapter]
-                x = x.to(lora_A.weight.dtype)  # type: ignore
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
-                result += lora_B(lora_A(dropout(x_mod))) * scaling * self.config.global_scaling_weight
-
-        result = result.to(previous_dtype)
-        return result
+        return self.target.forward(x, *args, **kwargs)
 
 
 class PeftModelWrapper:

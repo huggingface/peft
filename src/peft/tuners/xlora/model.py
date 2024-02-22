@@ -10,7 +10,7 @@ from peft.utils.peft_types import PeftType
 from .. import lora
 from .classifier import InhibitorFlagPayload, Number, XLoraClassifier
 from .config import XLoraConfig
-from .insertion import BaseTunerWrapper, PeftModelWrapper, XLoraConv2dLayer, XLoraEmbeddingLayer, XLoraLinearLayer
+from .insertion import PeftModelWrapper, XLoraLayer
 
 
 def convert_layers_to_xlora(
@@ -22,34 +22,9 @@ def convert_layers_to_xlora(
     """
     total_swapped = 0
 
-    scaling_keys = None
     for module in base.modules():
         if isinstance(module, lora.LoraLayer):
-            if not scaling_keys:
-                scaling_keys = list(module.scaling.keys())  # NOTE(EricLBuehler): Python 3.7: dicts are ordered!
-
-        if isinstance(module, lora.Linear):
-            new_layer: Union[XLoraLinearLayer, XLoraEmbeddingLayer, XLoraConv2dLayer] = XLoraLinearLayer(
-                model=base,
-                target=module,
-                target_forward=module.forward,
-                layer_number=total_swapped,
-                config=config,
-            )
-            module.forward = new_layer.forward  # type: ignore[method-assign]
-            total_swapped += 1
-        elif isinstance(module, lora.Embedding):
-            new_layer = XLoraEmbeddingLayer(
-                model=base,
-                target=module,
-                target_forward=module.forward,
-                layer_number=total_swapped,
-                config=config,
-            )
-            module.forward = new_layer.forward  # type: ignore[method-assign]
-            total_swapped += 1
-        elif isinstance(module, lora.Conv2d):
-            new_layer = XLoraConv2dLayer(
+            new_layer = XLoraLayer(
                 model=base,
                 target=module,
                 target_forward=module.forward,
@@ -118,7 +93,7 @@ class XLoraModel(LoraModel):
             raise TypeError(f"Expected model type to be 'PreTrainedModel', got '{type(model)}' instead.")
         if isinstance(config, dict):
             if len(config) != 1:
-                raise TypeError(f"Expected one config.")
+                raise TypeError("Expected one config.")
             peft_config = config[adapter_name]
         else:
             peft_config = config

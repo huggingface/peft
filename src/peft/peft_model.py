@@ -50,10 +50,10 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
-    XLoraConfig,
-    XLoraModel,
+    xLoRAConfig,
+    xLoRAModel,
 )
-from .tuners.xlora.classifier import XLoraClassifier
+from .tuners.xlora.classifier import xLoRAClassifier
 from .tuners.xlora.util import _get_file_path_dir as xlora_get_file_path_dir
 from .tuners.xlora.util import _load_classifier_weights as xlora_load_classifier_weights
 from .utils import (
@@ -87,7 +87,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
-    PeftType.XLORA: XLoraModel,
+    PeftType.XLORA: xLoRAModel,
 }
 
 
@@ -357,9 +357,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
 
-        if isinstance(model.base_model, XLoraModel):
-            if not isinstance(config, XLoraConfig):
-                raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
+        if isinstance(model.base_model, xLoRAModel):
+            if not isinstance(config, xLoRAConfig):
+                raise TypeError(f"Expected 'xLoRAConfig', got '{type(config)}' instead.")
 
             device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device(
             config.device = torch.device(device)
@@ -379,7 +379,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapters_real = config.adapters
             config.adapters = adapters_real
 
-            classifier: XLoraClassifier = model.base_model.internal_xlora_classifier  # type: ignore
+            classifier: xLoRAClassifier = model.base_model.internal_xlora_classifier  # type: ignore
             classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
         else:
             model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)

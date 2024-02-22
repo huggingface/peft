@@ -22,6 +22,8 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.xlora.classifier import Number
+from peft.tuners.xlora.insertion import XLoraLayer
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -293,7 +295,15 @@ class Linear(nn.Module, LoraLayer):
 
         return output_tensor
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        *args: Any,
+        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_scalings: Optional[torch.Tensor] = None,
+        _xlora_scaling_weight: Optional[Number] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
@@ -304,7 +314,7 @@ class Linear(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
-            for active_adapter in self.active_adapters:
+            for adapter_n, active_adapter in enumerate(self.active_adapters):
                 if active_adapter not in self.lora_A.keys():
                     continue
                 lora_A = self.lora_A[active_adapter]
@@ -312,7 +322,14 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+                if _xlora_layer is not None:
+                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                else:
+                    x_inp = x
+                res = lora_B(lora_A(dropout(x_inp))) * scaling
+                if _xlora_layer is not None:
+                    res = res * _xlora_scaling_weight
+                result += res
 
         result = result.to(previous_dtype)
         return result
@@ -470,7 +487,15 @@ class Embedding(nn.Module, LoraLayer):
             sparse=base_layer.sparse,
         )
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        *args: Any,
+        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_scalings: Optional[torch.Tensor] = None,
+        _xlora_scaling_weight: Optional[Number] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
         if self.disable_adapters:
             if self.merged:
@@ -480,14 +505,21 @@ class Embedding(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
-            for active_adapter in self.active_adapters:
+            for adapter_n, active_adapter in enumerate(self.active_adapters):
                 if active_adapter not in self.lora_embedding_A:
                     continue
                 embedding_A = self.lora_embedding_A[active_adapter].T
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
-                after_A = self._embed(x, embedding_A)
-                result += (after_A @ embedding_B) * scaling
+                if _xlora_layer is not None:
+                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                else:
+                    x_inp = x
+                after_A = self._embed(x_inp, embedding_A)
+                res = (after_A @ embedding_B) * scaling
+                if _xlora_layer is not None:
+                    res = res * _xlora_scaling_weight
+                result += res
 
         return result
 
@@ -646,7 +678,15 @@ class Conv2d(nn.Module, LoraLayer):
 
         return output_tensor
 
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        *args,
+        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_scalings: Optional[torch.Tensor] = None,
+        _xlora_scaling_weight: Optional[Number] = None,
+        **kwargs,
+    ) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
@@ -657,7 +697,7 @@ class Conv2d(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
-            for active_adapter in self.active_adapters:
+            for adapter_n, active_adapter in enumerate(self.active_adapters):
                 if active_adapter not in self.lora_A.keys():
                     continue
                 lora_A = self.lora_A[active_adapter]
@@ -665,7 +705,14 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+                if _xlora_layer is not None:
+                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                else:
+                    x_inp = x
+                res = lora_B(lora_A(dropout(x_inp))) * scaling
+                if _xlora_layer is not None:
+                    res = res * _xlora_scaling_weight
+                result += res
 
         result = result.to(previous_dtype)
         return result
