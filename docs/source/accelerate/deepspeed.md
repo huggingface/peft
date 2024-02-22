@@ -107,13 +107,13 @@ accelerate launch --config_file "configs/deepspeed_config.yaml"  train.py \
 --use_4bit_quantization False
 ```
 
-Notice that we are using LoRA with  rank=8, alpha=16 and targetting all linear layers. We are passing the deepspeed config file and finetuning 70B Llama model on a subset of ultrachat dataset.
+Notice that we are using LoRA with  rank=8, alpha=16 and targeting all linear layers. We are passing the deepspeed config file and finetuning 70B Llama model on a subset of the ultrachat dataset.
 
 ## The important parts
 
 Let's dive a little deeper into the script so you can see what's going on, and understand how it works.
 
-The first thing to know is that the script uses DeepSpeed for distributed training as the DeepSpeed config has been passed. The `SFTTrainer` class handles all the heavy lifting of creating PEFT model using the peft config that is passed. After that when you call `trainer.train()`, Trainer internally uses 🤗 Accelerate to prepare model, optimizer and trainer using the DeepSpeed config to create DeepSpeed engine which is then trained. in this way, PEFT with DeepSpeed finetuning works. The main code snippet is below:
+The first thing to know is that the script uses DeepSpeed for distributed training as the DeepSpeed config has been passed. The `SFTTrainer` class handles all the heavy lifting of creating the PEFT model using the peft config that is passed. After that, when you call `trainer.train()`, `SFTTrainer` internally uses 🤗 Accelerate to prepare the model, optimizer and trainer using the DeepSpeed config to create DeepSpeed engine which is then trained. The main code snippet is below:
 
 ```python
 # trainer
