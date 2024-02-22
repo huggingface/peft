@@ -191,10 +191,6 @@ class xLoRAModel(LoraModel):
         n_classes = len(peft_config.adapters)
         xlora_classifier = xLoRAClassifier(model_peft, peft_config, n_classes, total_swapped)
 
-        # Setup the internal state
-        base_model_wrapper = BaseTunerWrapper(self, xlora_classifier)
-        self.forward = base_model_wrapper.forward  # type: ignore[method-assign]
-
         peft_model_wrapper = PeftModelWrapper(
             model_peft,
             model_peft.save_pretrained,
@@ -209,6 +205,9 @@ class xLoRAModel(LoraModel):
         self.internal_xlora_classifier = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
         self.xlora_config = peft_config
+
+    def forward(self, *args, **kwargs):
+        return self.model(*args, **kwargs)  # Important to *call* the model
 
     def set_topk_lora(self, value: Optional[int]):
         """

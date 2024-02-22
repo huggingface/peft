@@ -192,14 +192,6 @@ class xLoRAConv2dLayer(xLoRALayer):
         return result
 
 
-class BaseTunerWrapper:
-    def __init__(self, base_model: BaseTuner):
-        self.model = base_model.model
-
-    def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)  # Important to *call* the model
-
-
 class PeftModelWrapper:
     def __init__(
         self,
