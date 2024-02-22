@@ -100,7 +100,7 @@ class XLoraModel(LoraModel):
         if not isinstance(peft_config, XLoraConfig):
             raise TypeError(f"Expected config type to be 'XLoraConfig', got '{type(model)}' instead.")
 
-        super().__init__(model, config, adapter_name, model_peft)
+        super().__init__(model, config, adapter_name)
 
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
