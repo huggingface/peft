@@ -481,9 +481,22 @@ class Linear(nn.Module, LoraLayer):
 
         return output_tensor
 
+<<<<<<< HEAD
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
+=======
+    def forward(
+        self,
+        x: torch.Tensor,
+        *args: Any,
+        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_scalings: Optional[torch.Tensor] = None,
+        _xlora_scaling_weight: Optional[Number] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        previous_dtype = x.dtype
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
         if self.disable_adapters:
             if self.merged:
@@ -495,8 +508,12 @@ class Linear(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+<<<<<<< HEAD
             torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
+=======
+            for adapter_n, active_adapter in enumerate(self.active_adapters):
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
                 if active_adapter not in self.lora_A.keys():
                     continue
                 lora_A = self.lora_A[active_adapter]
@@ -504,6 +521,17 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
+<<<<<<< HEAD
+=======
+                if _xlora_layer is not None:
+                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                else:
+                    x_inp = x
+                res = lora_B(lora_A(dropout(x_inp))) * scaling
+                if _xlora_layer is not None:
+                    res = res * _xlora_scaling_weight
+                result += res
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
@@ -711,7 +739,15 @@ class Embedding(nn.Module, LoraLayer):
             sparse=base_layer.sparse,
         )
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        *args: Any,
+        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_scalings: Optional[torch.Tensor] = None,
+        _xlora_scaling_weight: Optional[Number] = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         # TODO: no dtype conversion here, unlike in Linear, is that correct?
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
@@ -726,16 +762,32 @@ class Embedding(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+<<<<<<< HEAD
             torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
+=======
+            for adapter_n, active_adapter in enumerate(self.active_adapters):
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
                 if active_adapter not in self.lora_embedding_A:
                     continue
                 embedding_A = self.lora_embedding_A[active_adapter].T
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
+<<<<<<< HEAD
                 after_A = self._embed(x, embedding_A)
                 result = result + (after_A @ embedding_B) * scaling
             result = result.to(torch_result_dtype)
+=======
+                if _xlora_layer is not None:
+                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                else:
+                    x_inp = x
+                after_A = self._embed(x_inp, embedding_A)
+                res = (after_A @ embedding_B) * scaling
+                if _xlora_layer is not None:
+                    res = res * _xlora_scaling_weight
+                result += res
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
         return result
 
@@ -945,6 +997,7 @@ class Conv2d(nn.Module, LoraLayer):
 
         return output_tensor
 
+<<<<<<< HEAD
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, channel-wise
         weight = weight + scaling * lora_weight
@@ -988,6 +1041,18 @@ class Conv2d(nn.Module, LoraLayer):
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
+=======
+    def forward(
+        self,
+        x: torch.Tensor,
+        *args,
+        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_scalings: Optional[torch.Tensor] = None,
+        _xlora_scaling_weight: Optional[Number] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        previous_dtype = x.dtype
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
         if self.disable_adapters:
             if self.merged:
@@ -999,9 +1064,13 @@ class Conv2d(nn.Module, LoraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
+<<<<<<< HEAD
             torch_result_dtype = result.dtype
 
             for active_adapter in self.active_adapters:
+=======
+            for adapter_n, active_adapter in enumerate(self.active_adapters):
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
                 if active_adapter not in self.lora_A.keys():
                     continue
                 lora_A = self.lora_A[active_adapter]
@@ -1009,6 +1078,17 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
+<<<<<<< HEAD
+=======
+                if _xlora_layer is not None:
+                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                else:
+                    x_inp = x
+                res = lora_B(lora_A(dropout(x_inp))) * scaling
+                if _xlora_layer is not None:
+                    res = res * _xlora_scaling_weight
+                result += res
+>>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
