@@ -100,7 +100,7 @@ class XLoraModel(LoraModel):
         if not isinstance(peft_config, XLoraConfig):
             raise TypeError(f"Expected config type to be 'XLoraConfig', got '{type(model)}' instead.")
 
-        super().__init__(model, config, adapter_name, model_peft, _disable_inject=True)
+        super().__init__(model, config, adapter_name, model_peft)
 
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
@@ -115,6 +115,8 @@ class XLoraModel(LoraModel):
 
         for adapter_name, model_id in adapters_items:
             model_peft.load_adapter(model_id, adapter_name, is_trainable=use_trainable_adapters)
+
+        self.delete_adapter(adapter_name)
 
         self.set_adapter(list(peft_config.adapters.keys()))
         model_peft.peft_type = PeftType.XLORA

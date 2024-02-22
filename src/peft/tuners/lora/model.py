@@ -132,8 +132,8 @@ class LoraModel(BaseTuner):
 
     prefix: str = "lora_"
 
-    def __init__(self, model, config, adapter_name, _model_peft=None, _disable_inject: bool = False) -> None:
-        super().__init__(model, config, adapter_name, _disable_inject)
+    def __init__(self, model, config, adapter_name, _model_peft=None) -> None:
+        super().__init__(model, config, adapter_name)
 
     def _check_new_adapter_config(self, config: LoraConfig) -> None:
         """
