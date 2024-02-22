@@ -11,7 +11,7 @@ from transformers.modeling_outputs import (  # type: ignore
     ModelOutput,
 )
 
-from .config import xLoRAConfig
+from .config import XLoraConfig
 
 
 Number = Union[builtins.int, builtins.float, builtins.bool]
@@ -37,15 +37,15 @@ class InhibitorFlagPayload:
     override_scaling_pass_value: Number
 
 
-class xLoRAClassifier(nn.Module):
+class XLoraClassifier(nn.Module):
     """
-    A classifier to select LoRA layers for xLoRA.
+    A classifier to select LoRA layers for XLora.
     """
 
     def __init__(
         self,
         model: nn.Module,  # PeftModel
-        config: xLoRAConfig,
+        config: XLoraConfig,
         n_classes: int,
         n_layers: int,
     ):

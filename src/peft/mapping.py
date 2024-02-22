@@ -49,7 +49,7 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    xLoRAConfig,
+    XLoraConfig,
 )
 from .utils import _prepare_prompt_learning_config
 
@@ -80,7 +80,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
     "MULTITASK_PROMPT_TUNING": MultitaskPromptTuningConfig,
     "OFT": OFTConfig,
     "POLY": PolyConfig,
-    "XLORA": xLoRAConfig,
+    "XLORA": XLoraConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING = {

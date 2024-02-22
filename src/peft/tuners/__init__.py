@@ -30,4 +30,4 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 from .oft import OFTConfig, OFTModel
 from .mixed import MixedModel
 from .poly import PolyConfig, PolyModel
-from .xlora import xLoRAConfig, xLoRAModel
+from .xlora import XLoraConfig, XLoraModel
