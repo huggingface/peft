@@ -201,7 +201,7 @@ class LoraLayer(BaseTunerLayer):
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
         weight_norm = weight_norm.detach()
-        return (magnitude / weight_norm - 1) * x @ (weight + lora_weight).T
+        return (magnitude / weight_norm - 1) * x @ (weight + scaling * lora_weight).T
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
@@ -301,7 +301,9 @@ class Linear(nn.Module, LoraLayer):
                     if not self.use_dora[active_adapter]:
                         orig_weights += delta_weight
                     else:
-                        weight_norm = self._get_weight_norm(orig_weights, delta_weight, self.scaling[active_adapter])
+                        # handle dora
+                        # since delta_weight already includes scaling, set it to 1 here
+                        weight_norm = self._get_weight_norm(orig_weights, delta_weight, scaling=1).detach()
                         # We need to cache weight_norm because it has to be based on the original weights. We
                         # cannot calculate it on the fly based on the merged weights when unmerging because its a
                         # different value
@@ -321,13 +323,16 @@ class Linear(nn.Module, LoraLayer):
                         base_layer.weight.data += delta_weight
                     else:
                         # handle dora
-                        weight_norm = self._get_weight_norm(
-                            base_layer.weight, delta_weight, self.scaling[active_adapter]
-                        )
+                        # since delta_weight already includes scaling, set it to 1 here
+                        weight_norm = self._get_weight_norm(base_layer.weight, delta_weight, scaling=1).detach()
+                        # We need to cache weight_norm because it has to be based on the original weights. We
+                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                        # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
                         new_weight = dora_factor * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -402,13 +407,13 @@ class Linear(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                x = scaling * dropout(x)
-                lora_weight = lora_B.weight @ lora_A.weight
-                result = result + x @ lora_weight.T
 
-                if self.use_dora[active_adapter]:
-                    # note: this implementation might not be most efficient but most readable
-                    result = result + self.apply_dora(x, lora_weight, active_adapter)
+                if not self.use_dora[active_adapter]:
+                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                else:
+                    x = dropout(x)
+                    lora_weight = lora_B.weight @ lora_A.weight
+                    result = result + lora_B(lora_A(x)) * scaling + self.apply_dora(x, lora_weight, active_adapter)
 
             result = result.to(torch_result_dtype)
         return result
