@@ -20,7 +20,6 @@ def convert_layers_to_xlora(
     """
     Returns the number of swapped layers.
     """
-    assert isinstance(base.base_model, lora.LoraModel)
     total_swapped = 0
 
     scaling_keys = None
@@ -30,7 +29,6 @@ def convert_layers_to_xlora(
                 scaling_keys = list(module.scaling.keys())  # NOTE(EricLBuehler): Python 3.7: dicts are ordered!
 
         if isinstance(module, lora.Linear):
-            assert scaling_keys is not None
             new_layer: Union[xLoRALinearLayer, xLoRAEmbeddingLayer, xLoRAConv2dLayer] = xLoRALinearLayer(
                 model=base,
                 target=module,
@@ -41,7 +39,6 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Embedding):
-            assert scaling_keys is not None
             new_layer = xLoRAEmbeddingLayer(
                 model=base,
                 target=module,
@@ -52,7 +49,6 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Conv2d):
-            assert scaling_keys is not None
             new_layer = xLoRAConv2dLayer(
                 model=base,
                 target=module,
@@ -118,13 +114,16 @@ class xLoRAModel(LoraModel):
         model_peft: nn.Module,
     ) -> None:
         # model_peft: PeftModel
-        assert isinstance(model, PreTrainedModel)
+        if not isinstance(model, PreTrainedModel):
+            raise TypeError(f"Expected model type to be 'PreTrainedModel', got '{type(model)}' instead.")
         if isinstance(config, dict):
-            assert len(config) == 1
+            if len(config) != 1:
+                raise TypeError(f"Expected one config.")
             peft_config = config[adapter_name]
         else:
             peft_config = config
-        assert isinstance(peft_config, xLoRAConfig)
+        if not isinstance(peft_config, xLoRAConfig):
+            raise TypeError(f"Expected config type to be 'xLoRAConfig', got '{type(model)}' instead.")
 
         super().__init__(model, config, adapter_name, model_peft, _disable_inject=True)
 
@@ -180,8 +179,6 @@ class xLoRAModel(LoraModel):
                 if "lora_" in name:
                     param.requires_grad = False
                     total_frozen += 1
-
-        assert isinstance(self, LoraModel)
 
         total_swapped = convert_layers_to_xlora(
             model_peft,
