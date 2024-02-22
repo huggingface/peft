@@ -168,7 +168,7 @@ class LoraLayer(BaseTunerLayer):
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        weight_norm = torch.torch.linalg.vector_norm(weight, dim=0)
+        weight_norm = torch.linalg.norm(weight, dim=1)
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
@@ -201,7 +201,8 @@ class LoraLayer(BaseTunerLayer):
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
         weight_norm = weight_norm.detach()
-        return (magnitude / weight_norm - 1) * x @ (weight + scaling * lora_weight).T
+        dora_weight = transpose(weight + scaling * lora_weight, self.fan_in_fan_out)
+        return (magnitude / weight_norm - 1).view(1,  -1) * F.linear(x, dora_weight)
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
@@ -309,7 +310,7 @@ class Linear(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                        orig_weights = dora_factor * (orig_weights + delta_weight)
+                        orig_weights = dora_factor.view(-1, 1) * (orig_weights + delta_weight)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -330,7 +331,7 @@ class Linear(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
+                        new_weight = dora_factor.view(-1, 1) * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
 
                 self.merged_adapters.append(active_adapter)
@@ -352,7 +353,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
                     dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                    weight_orig = weight.data / dora_factor - delta_weight
+                    weight_orig = weight.data / dora_factor.view(-1, 1) - delta_weight
                     weight.data = weight_orig
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
