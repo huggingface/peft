@@ -72,10 +72,13 @@ class xLoRAModel(LoraModel):
 
     The method is described in detail in https://arxiv.org/abs/2402.07148.
 
+    The X-LoRA model modifies the methods of `model_peft` to inject its own API.
+
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`xLoRAConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, does not affect the LoRA adapter names.
+        model_peft (`PeftModel`): Base peft model.
 
     Returns:
         `torch.nn.Module`: The X-LoRA model.
