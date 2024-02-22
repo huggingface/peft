@@ -202,7 +202,7 @@ class LoraLayer(BaseTunerLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         dora_weight = transpose(weight + scaling * lora_weight, self.fan_in_fan_out)
-        return (magnitude / weight_norm - 1).view(1,  -1) * F.linear(x, dora_weight)
+        return (magnitude / weight_norm - 1).view(1, -1) * F.linear(x, dora_weight)
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
