@@ -310,8 +310,6 @@ class Linear(nn.Module, LoraLayer):
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
-        previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -696,8 +694,6 @@ class Conv2d(nn.Module, LoraLayer):
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs,
     ) -> torch.Tensor:
-        previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
