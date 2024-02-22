@@ -47,7 +47,6 @@ class XLoraModel(LoraModel):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`XLoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, does not affect the LoRA adapter names.
-        model_peft (`PeftModel`): Base peft model.
 
     Returns:
         `torch.nn.Module`: The X-LoRA model.
@@ -86,21 +85,21 @@ class XLoraModel(LoraModel):
         model: nn.Module,
         config: Union[dict[str, XLoraConfig], XLoraConfig],
         adapter_name: str,
+    ) -> None:
+        super().__init__(model, config, adapter_name)
+
+    def __xlora_post_init__(
+        self,
+        model: nn.Module,
+        peft_config: XLoraConfig,
+        adapter_name: str,
         model_peft: nn.Module,
     ) -> None:
         # model_peft: PeftModel
         if not isinstance(model, PreTrainedModel):
             raise TypeError(f"Expected model type to be 'PreTrainedModel', got '{type(model)}' instead.")
-        if isinstance(config, dict):
-            if len(config) != 1:
-                raise TypeError("Expected one config.")
-            peft_config = config[adapter_name]
-        else:
-            peft_config = config
         if not isinstance(peft_config, XLoraConfig):
             raise TypeError(f"Expected config type to be 'XLoraConfig', got '{type(model)}' instead.")
-
-        super().__init__(model, config, adapter_name)
 
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
@@ -108,8 +107,6 @@ class XLoraModel(LoraModel):
         use_trainable_adapters = peft_config.use_trainable_adapters
         adapters_items = iter(peft_config.adapters.items())
 
-        # Because we call load_adapter, which requires base_model to be defined
-        model_peft.base_model = self
         # For load_adapter to think we are a LoraModel
         model_peft.peft_type = PeftType.LORA
 

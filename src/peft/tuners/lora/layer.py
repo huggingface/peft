@@ -495,9 +495,12 @@ class Linear(nn.Module, LoraLayer):
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs: Any,
     ) -> torch.Tensor:
+<<<<<<< HEAD
         previous_dtype = x.dtype
 >>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
+=======
+>>>>>>> c5cdfc3 (Use post init fn to improve separation of concerns)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -1051,9 +1054,12 @@ class Conv2d(nn.Module, LoraLayer):
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs,
     ) -> torch.Tensor:
+<<<<<<< HEAD
         previous_dtype = x.dtype
 >>>>>>> 177f1b4 (Refactor Lora layers toreduce code repetion)
 
+=======
+>>>>>>> c5cdfc3 (Use post init fn to improve separation of concerns)
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
