@@ -96,6 +96,13 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
         position_ids = new_cache_positions.unsqueeze(0)
 
     cos, sin = model.rotary_emb(value_states, seq_len=q_len + past_seen_tokens, position_ids=position_ids)
+
+    # For batched inference unsqueeze it on the correct dim
+    # since: https://github.com/huggingface/transformers/pull/29109
+    if len(cos.shape) == 3:
+        cos = cos.unsqueeze(1)
+        sin = sin.unsqueeze(1)
+
     return (query_states * cos) + (llama_rotate_half(query_states) * sin)
 
 

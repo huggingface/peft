@@ -41,6 +41,14 @@ make quality  # just check
 make style  # check and fix
 ```
 
+You can also set up [`pre-commit`](https://pre-commit.com/) to run these fixes
+automatically as Git commit hooks.
+
+```bash
+$ pip install pre-commit
+$ pre-commit install
+```
+
 Running all the tests can take a couple of minutes, so during development it can be more efficient to only run tests specific to your change:
 
 ```sh

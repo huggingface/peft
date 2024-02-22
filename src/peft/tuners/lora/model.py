@@ -38,6 +38,8 @@ from peft.utils import (
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 
+from .aqlm import dispatch_aqlm
+from .awq import dispatch_awq
 from .config import LoraConfig
 from .gptq import dispatch_gptq
 from .layer import Conv2d, LoraLayer, dispatch_default
@@ -156,9 +158,11 @@ class LoraModel(BaseTuner):
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
 
-        quantization_config = get_quantization_config(self.model, method="gptq")
-        if quantization_config is not None:
-            kwargs["gptq_quantization_config"] = quantization_config
+        quant_methods = ["gptq", "aqlm", "awq"]
+        for quant_method in quant_methods:
+            quantization_config = get_quantization_config(self.model, method=quant_method)
+            if quantization_config is not None:
+                kwargs[f"{quant_method}_quantization_config"] = quantization_config
 
         # note: AdaLoraLayer is a subclass of LoraLayer, we need to exclude it
         from peft.tuners.adalora import AdaLoraLayer
@@ -244,7 +248,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
-        dispatchers.extend([dispatch_gptq, dispatch_megatron, dispatch_default])
+        dispatchers.extend([dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
 
         new_module = None
         for dispatcher in dispatchers:
@@ -362,7 +366,13 @@ class LoraModel(BaseTuner):
                     self._replace_module(parent, target_name, target.get_base_layer(), target)
                 elif isinstance(target, ModulesToSaveWrapper):
                     # save any additional trainable modules part of `modules_to_save`
-                    setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                    new_module = target.modules_to_save[target.active_adapter]
+                    if hasattr(new_module, "base_layer"):
+                        # check if the module is itself a tuner layer
+                        if merge:
+                            new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                        new_module = new_module.get_base_layer()
+                    setattr(parent, target_name, new_module)
 
         return self.model
 

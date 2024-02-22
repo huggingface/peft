@@ -66,9 +66,10 @@ class MultitaskPromptEmbedding(PromptEmbedding):
                     "init method"
                 )
 
+            # TODO: There should be an option for safetensors
             state_dict: dict = torch.load(
                 config.prompt_tuning_init_state_dict_path,
-                map_location=word_embeddings.device,
+                map_location=word_embeddings.weight.device,
             )
 
         if config.prompt_tuning_init in [

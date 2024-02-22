@@ -27,6 +27,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
 from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.utils import ModulesToSaveWrapper
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict
@@ -922,6 +923,29 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert not torch.allclose(output_base, output_custom2)
         assert torch.allclose(output_custom1, output_custom2)
         assert torch.allclose(output_default, output_custom1)
+
+    @parameterized.expand(["merge_and_unload", "unload"])
+    def test_double_wrapping_merge_and_unload(self, method):
+        # see issue #1485
+        from transformers import AutoModelForTokenClassification
+
+        model = AutoModelForTokenClassification.from_pretrained("hf-internal-testing/tiny-random-RobertaModel")
+        config = LoraConfig(task_type="TOKEN_CLS", target_modules="all-linear")
+        model = get_peft_model(model, config)
+
+        # first check that double-wrapping happened
+        # Note: this may get fixed in a future PR, in which case this test can be removed
+        assert isinstance(model.base_model.model.classifier, ModulesToSaveWrapper)
+        assert hasattr(model.base_model.model.classifier.original_module, "lora_A")
+        assert hasattr(model.base_model.model.classifier.modules_to_save.default, "lora_A")
+
+        # after unloading, despite double wrapping, the classifier module should be a normal nn.Linear layer
+        if method == "merge_and_unload":
+            unloaded = model.merge_and_unload()
+        else:
+            unloaded = model.unload()
+
+        assert isinstance(unloaded.classifier, nn.Linear)
 
 
 class TestMultiRankAdapter(unittest.TestCase):
