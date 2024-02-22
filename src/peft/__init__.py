@@ -73,8 +73,8 @@ from .tuners import (
     OFTModel,
     PolyConfig,
     PolyModel,
-    xLoRAConfig,
-    xLoRAModel,
+    XLoraConfig,
+    XLoraModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

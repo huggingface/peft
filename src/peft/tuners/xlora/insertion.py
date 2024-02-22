@@ -8,26 +8,26 @@ from torch import Tensor, nn
 
 from peft.tuners import lora
 from peft.tuners.tuners_utils import BaseTuner
-from peft.tuners.xlora.model import xLoRAModel  # type: ignore
+from peft.tuners.xlora.model import XLoraModel  # type: ignore
 
-from .classifier import xLoRAClassifier
-from .config import xLoRAConfig
+from .classifier import XLoraClassifier
+from .config import XLoraConfig
 
 
-class xLoRALayer:
+class XLoraLayer:
     """
-    A xLoRALayer wraps any LoraLayer and performs the xLoRA operation on the LoRA adaptors specified.
+    A XLoraLayer wraps any LoraLayer and performs the XLora operation on the LoRA adaptors specified.
     Its primary API is the forward method, which uses the scalings to execute the
-    xLoRA algorithm.
+    XLora algorithm.
     """
 
     def __init__(
         self,
-        model: xLoRAModel,
+        model: XLoraModel,
         target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,
-        config: xLoRAConfig,
+        config: XLoraConfig,
     ) -> None:
         self.model = model
         self.target_forward = target_forward
@@ -55,7 +55,7 @@ class xLoRALayer:
 
             xlora_scalings = xlora_scalings * mask.to(xlora_scalings.dtype)
 
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.model.internal_xlora_classifier  # type: ignore
         if classifier.config.enable_softmax_topk:
             nonzero_mask = xlora_scalings != 0
             softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
@@ -64,21 +64,21 @@ class xLoRALayer:
         return xlora_scalings
 
 
-class xLoRALinearLayer(xLoRALayer):
+class XLoraLinearLayer(XLoraLayer):
     def __init__(
         self,
         model: nn.Module,  # PeftModel
         target: lora.Linear,
         target_forward: Callable[..., Any],
         layer_number: int,
-        config: xLoRAConfig,
+        config: XLoraConfig,
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the peft LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the xLoRALayer class).
+        To use it, a bound method must be created (bound to an instance of the XLoraLayer class).
         """
 
         previous_dtype = x.dtype
@@ -108,21 +108,21 @@ class xLoRALinearLayer(xLoRALayer):
         return result
 
 
-class xLoRAEmbeddingLayer(xLoRALayer):
+class XLoraEmbeddingLayer(XLoraLayer):
     def __init__(
         self,
         model: nn.Module,  # PeftModel
         target: lora.Embedding,
         target_forward: Callable[..., Any],
         layer_number: int,
-        config: xLoRAConfig,
+        config: XLoraConfig,
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the peft LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the xLoRALayer class).
+        To use it, a bound method must be created (bound to an instance of the XLoraLayer class).
         """
 
         xlora_scalings = self.get_maybe_topk_scalings()
@@ -149,21 +149,21 @@ class xLoRAEmbeddingLayer(xLoRALayer):
         return result
 
 
-class xLoRAConv2dLayer(xLoRALayer):
+class XLoraConv2dLayer(XLoraLayer):
     def __init__(
         self,
         model: nn.Module,  # PeftModel
         target: lora.Conv2d,
         target_forward: Callable[..., Any],
         layer_number: int,
-        config: xLoRAConfig,
+        config: XLoraConfig,
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the peft LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the xLoRALayer class).
+        To use it, a bound method must be created (bound to an instance of the XLoraLayer class).
         """
 
         previous_dtype = x.dtype
@@ -197,7 +197,7 @@ class PeftModelWrapper:
         self,
         peft_model: nn.Module,  # PeftModel
         base_model_save: Callable[..., None],
-        config: xLoRAConfig,
+        config: XLoraConfig,
         base_model_get_nb_trainable_parameters: Callable[..., Tuple[int, int]],
         base_model_generate: Callable[..., Any],
     ):
@@ -245,7 +245,7 @@ class PeftModelWrapper:
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
 
-        classifier: xLoRAClassifier = self.peft_model.base_model.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.peft_model.base_model.internal_xlora_classifier  # type: ignore
 
         conf = classifier.config.__dict__.copy()
         del conf["device"]

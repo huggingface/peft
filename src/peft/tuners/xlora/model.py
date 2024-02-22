@@ -8,14 +8,14 @@ from peft.tuners.lora.model import LoraModel
 from peft.utils.peft_types import PeftType
 
 from .. import lora
-from .classifier import InhibitorFlagPayload, Number, xLoRAClassifier
-from .config import xLoRAConfig
-from .insertion import BaseTunerWrapper, PeftModelWrapper, xLoRAConv2dLayer, xLoRAEmbeddingLayer, xLoRALinearLayer
+from .classifier import InhibitorFlagPayload, Number, XLoraClassifier
+from .config import XLoraConfig
+from .insertion import BaseTunerWrapper, PeftModelWrapper, XLoraConv2dLayer, XLoraEmbeddingLayer, XLoraLinearLayer
 
 
 def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
-    config: xLoRAConfig,
+    config: XLoraConfig,
 ) -> int:
     """
     Returns the number of swapped layers.
@@ -29,7 +29,7 @@ def convert_layers_to_xlora(
                 scaling_keys = list(module.scaling.keys())  # NOTE(EricLBuehler): Python 3.7: dicts are ordered!
 
         if isinstance(module, lora.Linear):
-            new_layer: Union[xLoRALinearLayer, xLoRAEmbeddingLayer, xLoRAConv2dLayer] = xLoRALinearLayer(
+            new_layer: Union[XLoraLinearLayer, XLoraEmbeddingLayer, XLoraConv2dLayer] = XLoraLinearLayer(
                 model=base,
                 target=module,
                 target_forward=module.forward,
@@ -39,7 +39,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Embedding):
-            new_layer = xLoRAEmbeddingLayer(
+            new_layer = XLoraEmbeddingLayer(
                 model=base,
                 target=module,
                 target_forward=module.forward,
@@ -49,7 +49,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Conv2d):
-            new_layer = xLoRAConv2dLayer(
+            new_layer = XLoraConv2dLayer(
                 model=base,
                 target=module,
                 target_forward=module.forward,
@@ -62,7 +62,7 @@ def convert_layers_to_xlora(
     return total_swapped
 
 
-class xLoRAModel(LoraModel):
+class XLoraModel(LoraModel):
     """
     Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model.
 
@@ -70,7 +70,7 @@ class xLoRAModel(LoraModel):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`xLoRAConfig`]): The configuration of the Lora model.
+        config ([`XLoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, does not affect the LoRA adapter names.
         model_peft (`PeftModel`): Base peft model.
 
@@ -83,7 +83,7 @@ class xLoRAModel(LoraModel):
         >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
 
         >>> model_config = AutoConfig.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
-        >>> config = xLoRAConfig(
+        >>> config = XLoraConfig(
         ...     task_type="CAUSAL_LM",
         ...     hidden_size=model_config.hidden_size,
         ...     xlora_depth=4,
@@ -109,7 +109,7 @@ class xLoRAModel(LoraModel):
     def __init__(
         self,
         model: nn.Module,
-        config: Union[dict[str, xLoRAConfig], xLoRAConfig],
+        config: Union[dict[str, XLoraConfig], XLoraConfig],
         adapter_name: str,
         model_peft: nn.Module,
     ) -> None:
@@ -122,8 +122,8 @@ class xLoRAModel(LoraModel):
             peft_config = config[adapter_name]
         else:
             peft_config = config
-        if not isinstance(peft_config, xLoRAConfig):
-            raise TypeError(f"Expected config type to be 'xLoRAConfig', got '{type(model)}' instead.")
+        if not isinstance(peft_config, XLoraConfig):
+            raise TypeError(f"Expected config type to be 'XLoraConfig', got '{type(model)}' instead.")
 
         super().__init__(model, config, adapter_name, model_peft, _disable_inject=True)
 
@@ -149,7 +149,7 @@ class xLoRAModel(LoraModel):
             kwargs_real: dict = args[1]
             kwargs_real.update(kwargs)
 
-            xlora_classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+            xlora_classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
 
             if "_xlora_classifier_inhibitor_flag" in kwargs_real:
                 payload: InhibitorFlagPayload = kwargs_real["_xlora_classifier_inhibitor_flag"]
@@ -186,7 +186,7 @@ class xLoRAModel(LoraModel):
         )
 
         n_classes = len(peft_config.adapters)
-        xlora_classifier = xLoRAClassifier(model_peft, peft_config, n_classes, total_swapped)
+        xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped)
 
         peft_model_wrapper = PeftModelWrapper(
             model_peft,
@@ -210,28 +210,28 @@ class xLoRAModel(LoraModel):
         """
         Sparsely select the specified top_k LoRA experts instead of the default dense method. Set to None to use dense. This is reflected in the config.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.config.top_k_lora = value
 
     def get_topk_lora(self) -> Optional[int]:
         """
         Get the current top_k LoRA experts value.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier.config.top_k_lora
 
     def set_global_scaling_weight(self, weight: float):
         """
         Set the global LoRA weight, a scalar to multiply the output of each LoRA adapter by. This is by default 1. This is reflected in the config.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.config.global_scaling_weight = weight
 
     def get_global_scaling_weight(self) -> float:
         """
         Get the global LoRA weight.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier.config.global_scaling_weight
 
     def get_latest_scalings(self) -> Optional[torch.Tensor]:
@@ -245,7 +245,7 @@ class xLoRAModel(LoraModel):
         Returns a shallow (only copying the list itself not the tensors) copy of the list containing the scalings log. Editing the list does not change the underlying log.
         The tensors are of shape (batch_size, seq_len, n_layers, n_classes). The seq_len dim may vary with input dimension.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier.log_scalings.copy()
 
     def set_scaling_pass_value(self, value: Union[Number, None]):
@@ -255,28 +255,28 @@ class xLoRAModel(LoraModel):
 
         This is reflected in the config.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.set_override_scaling_pass_value(value)
 
     def print_scalings_predictions(self, n_predictions_lifetime: int):
         """
         Print the scaling states for the next n classifier predictions (i.e. forward, generate passes)
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.n_predictions_lifetime = n_predictions_lifetime
 
     def enable_scalings_logging(self):
         """
         Enable scalings logging.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.scalings_logging = True
 
     def disable_scalings_logging(self):
         """
         Disable scalings logging, clearing the log.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.scalings_logging = False
         classifier.log_scalings = []
 
@@ -290,7 +290,7 @@ class xLoRAModel(LoraModel):
 
         The file specified should not contain an extension.
         """
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.flush_log_scalings(path)
 
     def get_nb_trainable_parameters(self) -> Tuple[int, int]:
@@ -299,7 +299,7 @@ class xLoRAModel(LoraModel):
         """
         model_trainable_params, model_all_param = self.base_model_get_nb_trainable_parameters()
 
-        classifier: xLoRAClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         # Ignoring xlora_trainable_params as it is already included in model_trainable_params
         _xlora_trainable_params, xlora_all_param = classifier.get_nb_trainable_parameters()
 
@@ -312,7 +312,7 @@ class xLoRAModel(LoraModel):
 
     def print_trainable_parameters(self):
         """
-        Prints the number of trainable parameters in the model, including of the xLoRA classifier.
+        Prints the number of trainable parameters in the model, including of the XLora classifier.
         """
         trainable_params, all_param = self.get_nb_trainable_parameters()
 

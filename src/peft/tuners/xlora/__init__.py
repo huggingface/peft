@@ -1,5 +1,5 @@
-from .config import xLoRAConfig
-from .model import xLoRAModel
+from .config import XLoraConfig
+from .model import XLoraModel
 
 
-__all__ = ["xLoRAConfig", "xLoRAModel"]
+__all__ = ["XLoraConfig", "XLoraModel"]
