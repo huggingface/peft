@@ -1,15 +1,16 @@
 import json
 import os
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Tuple, Union
 
 import torch
 from safetensors.torch import save_model  # type: ignore
 from torch import Tensor, nn
 
 from peft.tuners import lora
-from peft.tuners.tuners_utils import BaseTuner  # type: ignore
+from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.xlora.model import xLoRAModel  # type: ignore
 
-from .classifier import Number, xLoRAClassifier
+from .classifier import xLoRAClassifier
 from .config import xLoRAConfig
 
 
@@ -24,7 +25,7 @@ class xLoRALayer:
 
     def __init__(
         self,
-        model: nn.Module,  # PeftModel
+        model: xLoRAModel,
         target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,
@@ -205,13 +206,13 @@ class BaseTunerWrapper:
 class PeftModelWrapper:
     def __init__(
         self,
-        base_model: nn.Module,  # PeftModel
+        peft_model: nn.Module,  # PeftModel
         base_model_save: Callable[..., None],
         config: xLoRAConfig,
         base_model_get_nb_trainable_parameters: Callable[..., Tuple[int, int]],
         base_model_generate: Callable[..., Any],
     ):
-        self.model = base_model
+        self.peft_model = peft_model
         self.base_model_save = base_model_save
         self.config = config
         self.base_model_get_nb_trainable_parameters = base_model_get_nb_trainable_parameters
@@ -220,146 +221,12 @@ class PeftModelWrapper:
     def generate(self, *args, **kwargs):
         res = self.base_model_generate(*args, **kwargs)  # type: ignore
         # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
-        self.model.base_model.eval()
+        self.peft_model.base_model.eval()
         if not self.config.use_trainable_adapters:
-            for name, param in self.model.base_model.named_parameters():
+            for name, param in self.peft_model.base_model.named_parameters():
                 if "lora_" in name:
                     param.requires_grad = False
         return res
-
-    def set_topk_lora(self, value: Optional[int]):
-        """
-        Sparsely select the specified top_k LoRA experts instead of the default dense method. Set to None to use dense. This is reflected in the config.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.config.top_k_lora = value
-
-    def get_topk_lora(self) -> Optional[int]:
-        """
-        Get the current top_k LoRA experts value.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        return classifier.config.top_k_lora
-
-    def set_global_scaling_weight(self, weight: float):
-        """
-        Set the global LoRA weight, a scalar to multiply the output of each LoRA adapter by. This is by default 1. This is reflected in the config.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.config.global_scaling_weight = weight
-
-    def get_global_scaling_weight(self) -> float:
-        """
-        Get the global LoRA weight.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        return classifier.config.global_scaling_weight
-
-    def get_latest_scalings(self) -> Optional[Tensor]:
-        """
-        Returns the latest scalings prediction, or None if no scalings have been predicted. The tensor is of shape (batch_size, seq_len, n_layers, n_classes).
-        """
-        return self.model.internal_xlora_scalings
-
-    def get_scalings_log(self) -> List[Tensor]:
-        """
-        Returns a shallow (only copying the list itself not the tensors) copy of the list containing the scalings log. Editing the list does not change the underlying log.
-        The tensors are of shape (batch_size, seq_len, n_layers, n_classes). The seq_len dim may vary with input dimension.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        return classifier.log_scalings.copy()
-
-    def set_scaling_pass_value(self, value: Union[Number, None]):
-        """
-        Manually set the scalings to a specific value during the scaling pass, forever. Call this function with None to enable the default
-        scalings.
-
-        This is reflected in the config.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.set_override_scaling_pass_value(value)
-
-    def print_scalings_predictions(self, n_predictions_lifetime: int):
-        """
-        Print the scaling states for the next n classifier predictions (i.e. forward, generate passes)
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.n_predictions_lifetime = n_predictions_lifetime
-
-    def enable_scalings_logging(self):
-        """
-        Enable scalings logging.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.scalings_logging = True
-
-    def disable_scalings_logging(self):
-        """
-        Disable scalings logging, clearing the log.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.scalings_logging = False
-        classifier.log_scalings = []
-
-    def flush_log_scalings(self, path: str):
-        """
-        Write the scalings log (a tensor of shape (num_logged, batch_size, seq_len, n_layers, n_classes)) to the specified path.
-        If the tensor cannot be constructed, multiple files are written containing tensors of shape
-        (num_logged, batch_size, seq_len, n_layers, n_classes) such that each file contains one sequence length. Additionally a JSON
-        file is outputted containing the mapping from each sequence log file to the index of the contained tensor so that one may reconstruct
-        the log order.
-
-        The file specified should not contain an extension.
-        """
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        classifier.flush_log_scalings(path)
-
-    def get_nb_trainable_parameters(self) -> Tuple[int, int]:
-        """
-        Returns the number of trainable parameters and number of all parameters in the model.
-        """
-        model_trainable_params, model_all_param = self.base_model_get_nb_trainable_parameters()
-
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
-        # Ignoring xlora_trainable_params as it is already included in model_trainable_params
-        _xlora_trainable_params, xlora_all_param = classifier.get_nb_trainable_parameters()
-
-        trainable_params, all_param = (
-            model_trainable_params,
-            (model_all_param + xlora_all_param),
-        )
-
-        return trainable_params, all_param
-
-    def print_trainable_parameters(self):
-        """
-        Prints the number of trainable parameters in the model, including of the xLoRA classifier.
-        """
-        trainable_params, all_param = self.get_nb_trainable_parameters()
-
-        print(
-            f"trainable params: {trainable_params:,d} || "
-            f"all params: {all_param:,d} || "
-            f"trainable%: {100 * trainable_params / all_param:.4f}"
-        )
-
-    def set_use_trainable_adapters(self, use_trainable_adapters: bool):
-        """
-        Set the adapters to trainable or not trainable.
-
-        This is reflected in the config.
-        """
-        for name, param in self.model.base_model.named_parameters():
-            if "lora_" in name:
-                param.requires_grad = use_trainable_adapters
-
-        self.config.use_trainable_adapters = use_trainable_adapters
-
-    def get_use_trainable_adapters(self) -> bool:
-        """
-        Get the trainable or not trainable state of the adapters.
-        """
-        return self.config.use_trainable_adapters
 
     def save_pretrained(
         self,
@@ -389,7 +256,7 @@ class PeftModelWrapper:
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
 
-        classifier: xLoRAClassifier = self.model.internal_xlora_classifier  # type: ignore
+        classifier: xLoRAClassifier = self.peft_model.base_model.internal_xlora_classifier  # type: ignore
 
         conf = classifier.config.__dict__.copy()
         del conf["device"]

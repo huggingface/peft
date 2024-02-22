@@ -397,7 +397,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if isinstance(model.base_model, xLoRAModel):
             assert isinstance(config, xLoRAConfig)
 
-            device = infer_device()  # As inn PeftModel.load_adapter, torch_device = infer_device(
+            device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device(
             config.device = torch.device(device)
 
             # If we are passed adapters in the kwargs, it is already in the config.
