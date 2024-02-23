@@ -57,7 +57,6 @@ from .tuners import (
 
 from .tuners.tuners_utils import BaseTunerLayer
 from .tuners.xlora.classifier import XLoraClassifier
-from .tuners.xlora.util import _get_file_path_dir as xlora_get_file_path_dir
 from .tuners.xlora.util import _load_classifier_weights as xlora_load_classifier_weights
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
@@ -404,18 +403,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
             # If we are passed adapters in the kwargs, it is already in the config.
             # If no adapters are passed, config.adapters is None
-            if config.adapters is None or config.use_trainable_adapters:
-                adapters_real: dict[str, str] = {
-                    name: xlora_get_file_path_dir(
-                        model_id,
-                        name,
-                        "adapters",
-                    )
-                    for name in config.adapters
-                }
-            else:
-                adapters_real = config.adapters
-            config.adapters = adapters_real
 
             classifier: XLoraClassifier = model.base_model.internal_xlora_classifier  # type: ignore
             classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
