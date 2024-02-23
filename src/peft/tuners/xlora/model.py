@@ -272,7 +272,7 @@ class XLoraModel(LoraModel):
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.scalings_logging = False
-        classifier.log_scalings = []
+        classifier.log_scalings.clear()
 
     def flush_log_scalings(self, path: str):
         """

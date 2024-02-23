@@ -242,7 +242,7 @@ class XLoraClassifier(nn.Module):
             with open(f"{path}-mapping.json", "w") as f:
                 f.write(json.dumps(indices_map))
 
-        self.log_scalings = []
+        self.log_scalings.clear()
 
     def set_override_scaling_pass_value(self, value: Union[Number, None]):
         if value is None:
