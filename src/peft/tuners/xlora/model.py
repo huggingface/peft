@@ -257,7 +257,7 @@ class XLoraModel(LoraModel):
         This is reflected in the config.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        classifier.set_override_scaling_pass_value(value)
+        classifier._set_override_scaling_pass_value(value)
 
     def enable_scalings_logging(self):
         """
@@ -291,7 +291,7 @@ class XLoraModel(LoraModel):
         The file specified should not contain an extension.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        classifier.flush_log_scalings(path)
+        classifier._flush_log_scalings(path)
 
     def get_nb_trainable_parameters(self) -> Tuple[int, int]:
         """
