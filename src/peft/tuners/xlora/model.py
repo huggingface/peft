@@ -268,10 +268,16 @@ class XLoraModel(LoraModel):
 
     def disable_scalings_logging(self):
         """
-        Disable scalings logging, clearing the log.
+        Disable scalings logging, without clearing the log.
         """
-        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.model.internal_xlora_classifier  # type: ignore
         classifier.scalings_logging = False
+
+    def clear_scalings_log(self):
+        """
+        Clear the scalings log.
+        """
+        classifier: XLoraClassifier = self.model.internal_xlora_classifier  # type: ignore
         classifier.log_scalings.clear()
 
     def flush_log_scalings(self, path: str):
