@@ -107,10 +107,8 @@ class PeftModelWrapper:
         conf = classifier.config.__dict__.copy()
         del conf["device"]
 
-        if is_main_process:
-            os.makedirs(os.path.join(save_directory, "adapters"), exist_ok=True)
         self.base_model_save(
-            save_directory=os.path.join(save_directory, "adapters"),
+            save_directory=save_directory,
             safe_serialization=safe_serialization,
             is_main_process=is_main_process,
             selected_adapters=selected_adapters,
