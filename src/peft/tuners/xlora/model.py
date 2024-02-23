@@ -232,13 +232,6 @@ class XLoraModel(LoraModel):
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.set_override_scaling_pass_value(value)
 
-    def print_scalings_predictions(self, n_predictions_lifetime: int):
-        """
-        Print the scaling states for the next n classifier predictions (i.e. forward, generate passes)
-        """
-        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        classifier.n_predictions_lifetime = n_predictions_lifetime
-
     def enable_scalings_logging(self):
         """
         Enable scalings logging.

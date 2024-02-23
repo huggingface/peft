@@ -60,7 +60,6 @@ class XLoraClassifier(nn.Module):
         self.softmax = TemperatureScaledSoftmax(temperature=self.config.softmax_temperature)
         self.override_scaling_pass_value: Number = config.scaling_pass_value
 
-        self.n_predictions_lifetime = 0
         self.scalings_logging = False
 
         dtype = next(model.parameters()).dtype
@@ -178,10 +177,6 @@ class XLoraClassifier(nn.Module):
 
         if self.config.enable_softmax:
             scalings = self.softmax(scalings)
-
-        if self.n_predictions_lifetime > 0:
-            print(f"Scaling predictions: {scalings}")
-            self.n_predictions_lifetime -= 1
 
         if self.scalings_logging:
             self.log_scalings.append(scalings)
