@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -292,35 +292,6 @@ class XLoraModel(LoraModel):
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier._flush_log_scalings(path)
-
-    def get_nb_trainable_parameters(self) -> Tuple[int, int]:
-        """
-        Returns the number of trainable parameters and number of all parameters in the model.
-        """
-        model_trainable_params, model_all_param = self.base_model_get_nb_trainable_parameters()
-
-        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        # Ignoring xlora_trainable_params as it is already included in model_trainable_params
-        _xlora_trainable_params, xlora_all_param = classifier.get_nb_trainable_parameters()
-
-        trainable_params, all_param = (
-            model_trainable_params,
-            (model_all_param + xlora_all_param),
-        )
-
-        return trainable_params, all_param
-
-    def print_trainable_parameters(self):
-        """
-        Prints the number of trainable parameters in the model, including of the XLora classifier.
-        """
-        trainable_params, all_param = self.get_nb_trainable_parameters()
-
-        print(
-            f"trainable params: {trainable_params:,d} || "
-            f"all params: {all_param:,d} || "
-            f"trainable%: {100 * trainable_params / all_param:.4f}"
-        )
 
     def set_use_trainable_adapters(self, use_trainable_adapters: bool):
         """
