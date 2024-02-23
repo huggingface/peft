@@ -40,7 +40,7 @@ class AdaptionPromptModel(nn.Module):
     - Disabling the adapter would also result in the modules being removed from the model.
     """
 
-    def __init__(self, model, configs: Dict, adapter_name: str, _model_peft=None):
+    def __init__(self, model, configs: Dict, adapter_name: str):
         super().__init__()
         self.model = model
         # Store adapter configs by name.
