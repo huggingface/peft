@@ -102,7 +102,7 @@ accelerate launch --config_file "configs/fsdp_config.yaml"  train.py \
 --use_4bit_quantization False
 ```
 
-Notice that we are using LoRA with  rank=8, alpha=16 and targeting all linear layers. We are passing the FSDP config file and finetuning 70B Llama model on a subset of ultrachat dataset.
+Notice that we are using LoRA with  rank=8, alpha=16 and targeting all linear layers. We are passing the FSDP config file and finetuning the 70B Llama model on a subset of the [ultrachat dataset](https://huggingface.co/datasets/HuggingFaceH4/ultrachat_200k).
 
 ## The important parts
 
