@@ -33,7 +33,7 @@ jobs:
     needs: get_changed_files
     name: Build Docker images on modified files
     runs-on: ubuntu-latest
-    if: ${{ needs.get_changed_files.outputs.matri }} != ''
+    if: ${{ needs.get_changed_files.outputs.matrix }} != ''
     strategy:
       fail-fast: false
       matrix:
