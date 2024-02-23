@@ -48,7 +48,7 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
-        self.lora_magnitude_vector: torch.nn.ParameterDict = torch.nn.ParameterDict({})  # for DoRA
+        self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
         self._caches: dict[str, Any] = {}
         self.kwargs = kwargs
 
@@ -178,6 +178,7 @@ class LoraLayer(BaseTunerLayer):
         weight = self.get_base_layer().weight
         lora_weight = lora_B.weight @ lora_A.weight
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
+        self.lora_magnitude_vector = nn.ParameterDict()
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
         # add lora_magnitude_vector to the list of learnable parameters
         self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
