@@ -62,6 +62,10 @@ RUN source activate peft && \
     git+https://github.com/huggingface/accelerate \
     peft[test]@git+https://github.com/huggingface/peft
 
+# Add aqlm for quantization testing
+RUN source activate peft && \
+    pip install aqlm[gpu]>=1.0.2
+
 RUN source activate peft && \ 
     pip freeze | grep transformers
 

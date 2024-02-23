@@ -92,6 +92,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     """
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
+    is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
     if gradient_checkpointing_kwargs is None:
         gradient_checkpointing_kwargs = {}
 
@@ -99,13 +100,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # freeze base model's layers
         param.requires_grad = False
 
-    if not is_gptq_quantized:
+    if not is_gptq_quantized and not is_aqlm_quantized:
         # cast all non INT8 parameters to fp32
         for param in model.parameters():
             if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
                 param.data = param.data.to(torch.float32)
 
-    if (loaded_in_kbit or is_gptq_quantized) and use_gradient_checkpointing:
+    if (loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized) and use_gradient_checkpointing:
         # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
         if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
             # For backward compatibility
