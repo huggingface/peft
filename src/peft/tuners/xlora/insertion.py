@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Callable, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from safetensors.torch import save_model  # type: ignore
@@ -70,25 +70,9 @@ class PeftModelWrapper:
         self,
         peft_model: nn.Module,  # PeftModel
         base_model_save: Callable[..., None],
-        config: XLoraConfig,
-        base_model_get_nb_trainable_parameters: Callable[..., Tuple[int, int]],
-        base_model_generate: Callable[..., Any],
     ):
         self.peft_model = peft_model
         self.base_model_save = base_model_save
-        self.config = config
-        self.base_model_get_nb_trainable_parameters = base_model_get_nb_trainable_parameters
-        self.base_model_generate = base_model_generate
-
-    def generate(self, *args, **kwargs):
-        res = self.base_model_generate(*args, **kwargs)  # type: ignore
-        # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
-        self.peft_model.base_model.eval()
-        if not self.config.use_trainable_adapters:
-            for name, param in self.peft_model.base_model.named_parameters():
-                if "lora_" in name:
-                    param.requires_grad = False
-        return res
 
     def save_pretrained(
         self,
