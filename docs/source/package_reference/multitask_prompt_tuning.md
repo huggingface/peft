@@ -14,9 +14,9 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# Multitask Prompt Tuning
+# Multitask prompt tuning
 
-[Multitask Prompt Tuning](https://huggingface.co/papers/2303.02861)  decomposes the soft prompts of each task into a single learned transferable prompt instead of a separate prompt for each task. The single learned prompt can be adapted for each task by multiplicative low rank updates.
+[Multitask prompt tuning](https://huggingface.co/papers/2303.02861)  decomposes the soft prompts of each task into a single learned transferable prompt instead of a separate prompt for each task. The single learned prompt can be adapted for each task by multiplicative low rank updates.
 
 The abstract from the paper is:
 

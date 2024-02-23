@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,7 +18,7 @@ import numpy as np
 import pytest
 import torch
 
-from peft.import_utils import is_auto_gptq_available, is_optimum_available
+from peft.import_utils import is_aqlm_available, is_auto_awq_available, is_auto_gptq_available, is_optimum_available
 
 
 def require_torch_gpu(test_case):
@@ -60,6 +59,20 @@ def require_auto_gptq(test_case):
     Decorator marking a test that requires auto-gptq. These tests are skipped when auto-gptq isn't installed.
     """
     return unittest.skipUnless(is_auto_gptq_available(), "test requires auto-gptq")(test_case)
+
+
+def require_aqlm(test_case):
+    """
+    Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.
+    """
+    return unittest.skipUnless(is_aqlm_available(), "test requires aqlm")(test_case)
+
+
+def require_auto_awq(test_case):
+    """
+    Decorator marking a test that requires auto-awq. These tests are skipped when auto-awq isn't installed.
+    """
+    return unittest.skipUnless(is_auto_awq_available(), "test requires auto-awq")(test_case)
 
 
 def require_optimum(test_case):
