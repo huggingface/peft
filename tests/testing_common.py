@@ -1282,6 +1282,11 @@ class PeftCommonTester:
                 output_peft_disabled = get_output(peft_model)
             assert torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6)
 
+            # after leaving the disable_adapter context, the output should be the same as with enabled adapter again
+            # see #1501
+            output_peft_after_disabled = get_output(peft_model)
+            assert torch.allclose(output_peft, output_peft_after_disabled, atol=1e-6, rtol=1e-6)
+
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
 
     def _test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
