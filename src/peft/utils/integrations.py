@@ -19,7 +19,7 @@ from transformers.integrations import is_deepspeed_zero3_enabled
 
 
 @contextmanager
-def gather_params_ctx(module: torch.nn.Module):
+def gather_params_ctx(module: torch.nn.Module, modifier_rank: int = 0):
     """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
     if not is_deepspeed_zero3_enabled():
         yield
@@ -28,6 +28,6 @@ def gather_params_ctx(module: torch.nn.Module):
     import deepspeed
 
     params_to_gather = module.parameters()
-    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
+    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=modifier_rank):
         yield
     return

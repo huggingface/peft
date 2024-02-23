@@ -176,7 +176,7 @@ class LoraLayer(BaseTunerLayer):
         lora_A = self.lora_A[adapter_name]
         lora_B = self.lora_B[adapter_name]
         scaling = self.scaling[adapter_name]
-        with gather_params_ctx():
+        with gather_params_ctx(self.get_base_layer()):
             weight = self.get_base_layer().weight
             lora_weight = lora_B.weight @ lora_A.weight
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
