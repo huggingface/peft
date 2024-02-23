@@ -88,7 +88,7 @@ class XLoraModel(LoraModel):
     ) -> None:
         super().__init__(model, config, adapter_name)
 
-    def __xlora_post_init__(
+    def _xlora_post_init(
         self,
         model: nn.Module,
         peft_config: XLoraConfig,
