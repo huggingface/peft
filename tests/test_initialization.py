@@ -325,12 +325,32 @@ class TestInitialization:
         # check that dora is a no-op when initialized
         torch.manual_seed(0)
         model = self.get_model()
+        output_base, _, _ = model(data)
 
         # check scaling factor use_rslora=True
         config = LoraConfig(target_modules=["linear"], use_dora=True)
         model = get_peft_model(model, config)
 
         with model.disable_adapter():
-            output_base, _, _ = model(data)
+            output_disabled, _, _ = model(data)
         output_dora, _, _ = model(data)
+
+        assert torch.allclose(output_base, output_disabled)
         assert torch.allclose(output_base, output_dora)
+
+    def test_use_dora_linear_init_false(self, data):
+        # with init_lora_weights=False, dora should not be a no-op
+        torch.manual_seed(0)
+        model = self.get_model()
+        output_base, _, _ = model(data)
+
+        # check scaling factor use_rslora=True
+        config = LoraConfig(target_modules=["linear"], use_dora=True, init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_disabled, _, _ = model(data)
+        output_dora, _, _ = model(data)
+
+        assert torch.allclose(output_base, output_disabled)
+        assert not torch.allclose(output_base, output_dora)
