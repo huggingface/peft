@@ -173,6 +173,7 @@ class XLoraModel(LoraModel):
                     param.requires_grad = False
 
     def generate(self, *args, **kwargs):
+        # Rely on LoraModel.__getattr__
         res = super().generate(*args, **kwargs)  # type: ignore
         # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
         self._freeze_all_adapters()
