@@ -1,7 +1,10 @@
-from typing import List, Optional, Tuple, Union
+import json
+import os
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from safetensors.torch import save_model  # type: ignore
 from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
@@ -10,7 +13,7 @@ from peft.utils.peft_types import PeftType
 from .. import lora
 from .classifier import InhibitorFlagPayload, Number, XLoraClassifier
 from .config import XLoraConfig
-from .insertion import PeftModelWrapper, XLoraLayer
+from .insertion import XLoraLayer
 
 
 def convert_layers_to_xlora(
@@ -158,12 +161,6 @@ class XLoraModel(LoraModel):
         n_classes = len(peft_config.adapters)
         xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped)
 
-        peft_model_wrapper = PeftModelWrapper(
-            model_peft,
-            model_peft.save_pretrained,
-        )
-        model_peft.save_pretrained = peft_model_wrapper.save_pretrained  # type: ignore
-
         # Setup the model internal state
         self.internal_xlora_classifier = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
@@ -180,6 +177,31 @@ class XLoraModel(LoraModel):
         # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
         self._freeze_all_adapters()
         return res
+
+    def _save_pretrained_hook(
+        self,
+        save_directory: str,
+        adapters: Dict[str, str],
+        safe_serialization: bool = True,
+        is_main_process: bool = True,
+        **kwargs: Any,
+    ) -> None:
+        classifier: XLoraClassifier = self.internal_xlora_classifier
+
+        conf = self.xlora_config.__dict__.copy()
+        del conf["device"]
+
+        conf["adapters"] = adapters
+        with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
+            json.dump(conf, f)
+
+        if safe_serialization:
+            # https://github.com/huggingface/peft/blob/main/src/peft/peft_model.py#L223
+            if is_main_process and safe_serialization:
+                save_model(classifier, os.path.join(save_directory, "xlora_classifier.safetensors"))
+        elif is_main_process:
+            state_dict = classifier.state_dict()
+            torch.save(state_dict, os.path.join(save_directory, "xlora_classifier.pt"))
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)  # Important to *call* the model
