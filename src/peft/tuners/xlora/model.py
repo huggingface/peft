@@ -101,6 +101,8 @@ class XLoraModel(LoraModel):
         if not isinstance(peft_config, XLoraConfig):
             raise TypeError(f"Expected config type to be 'XLoraConfig', got '{type(model)}' instead.")
 
+        self.xlora_config = peft_config
+
         if hasattr(model.config, "use_cache"):
             assert not model.config.use_cache, "`use_cache` must be False"
 
@@ -146,13 +148,7 @@ class XLoraModel(LoraModel):
 
         model.register_forward_pre_hook(hook, with_kwargs=True, prepend=True)
 
-        self.eval()
-        if not use_trainable_adapters:
-            total_frozen = 0
-            for name, param in self.named_parameters():
-                if "lora_" in name:
-                    param.requires_grad = False
-                    total_frozen += 1
+        self._freeze_all_adapters()
 
         total_swapped = convert_layers_to_xlora(
             model_peft,
@@ -165,17 +161,25 @@ class XLoraModel(LoraModel):
         peft_model_wrapper = PeftModelWrapper(
             model_peft,
             model_peft.save_pretrained,
-            peft_config,
-            model_peft.get_nb_trainable_parameters,
-            model_peft.generate,
         )
         model_peft.save_pretrained = peft_model_wrapper.save_pretrained  # type: ignore
-        model_peft.generate = peft_model_wrapper.generate  # type: ignore
 
         # Setup the model internal state
         self.internal_xlora_classifier = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
-        self.xlora_config = peft_config
+
+    def _freeze_all_adapters(self):
+        self.eval()
+        if not self.xlora_config.use_trainable_adapters:
+            for name, param in self.named_parameters():
+                if "lora_" in name:
+                    param.requires_grad = False
+
+    def generate(self, *args, **kwargs):
+        res = super().generate(*args, **kwargs)  # type: ignore
+        # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
+        self._freeze_all_adapters()
+        return res
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)  # Important to *call* the model
