@@ -214,7 +214,7 @@ class XLoraClassifier(nn.Module):
         npy = result.numpy()
         numpy.save(file, npy)
 
-    def flush_log_scalings(self, path: str):
+    def _flush_log_scalings(self, path: str):
         if not self.scalings_logging:
             raise Exception("Scalings logging is disabled!")
 
@@ -244,7 +244,7 @@ class XLoraClassifier(nn.Module):
 
         self.log_scalings.clear()
 
-    def set_override_scaling_pass_value(self, value: Union[Number, None]):
+    def _set_override_scaling_pass_value(self, value: Union[Number, None]):
         if value is None:
             self.override_scaling_pass_value = 1 / self.n_classes
         else:
