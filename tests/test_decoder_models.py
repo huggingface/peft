@@ -306,21 +306,21 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     def test_lora_layer_replication(self):
         model_id = "HuggingFaceM4/tiny-random-LlamaForCausalLM"
         config_kwargs = {
-            "target_modules": ['down_proj', 'up_proj'],
+            "target_modules": ["down_proj", "up_proj"],
             "task_type": "CAUSAL_LM",
             "lora_dropout": 0.0,
-            "layer_replication": [[0, 1], [0, 2], [1, 2]]
+            "layer_replication": [[0, 1], [0, 2], [1, 2]],
         }
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = LoraConfig(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        assert 2 == len(model.model.layers), 'Expected 2 layers in original model.'
+        assert len(model.model.layers), "Expected 2 layers in original model." == 2
         model = get_peft_model(model, config)
-        assert 4 == len(model.base_model.model.model.layers), 'Expected 4 layers in adapted model.'
-        assert 8 == len([n for n, _ in model.named_parameters() if '.lora_A.' in n]), (
-            'Expected 8 LoRA adapters since we are adding one each for up and down.'
-        )
+        assert len(model.base_model.model.model.layers) == 4, "Expected 4 layers in adapted model."
+        assert (
+            len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8
+        ), "Expected 8 LoRA adapters since we are adding one each for up and down."
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
         self._test_generate(model_id, LoraConfig, config_kwargs)

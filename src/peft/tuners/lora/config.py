@@ -255,13 +255,17 @@ class LoraConfig(PeftConfig):
             "help": (
                 "This enables using LoRA to effectively expand a transformer model to a larger size by repeating some layers. "
                 "The transformation expects a `layers` module list in the model which it modifies to expand the number of modules. "
-                "Base weights are shared so the memory usage is close to the original model."
+                "Base weights are shared so the memory usage is close to the original model. The inteneded use is these base weights "
+                "remain fixed during finetuning but each layer has a separate LoRA adapter so the layers can be specialed via "
+                "the adapter layers fit during fine tuning."
                 "The format is a list of [start, end) pairs which specify the layer ranges to stack. For example:\n"
-                "   original: `[0, 1, 2, 3, 4]`\n"
+                "   Original model has 5 layers labelled by their position in the model: `[0, 1, 2, 3, 4]`\n"
                 "   layer_replication: `[[0, 4], [2, 5]]`\n"
-                "   final: `[0, 1, 2, 3, 2, 3, 4]`"
+                "   Final model will have this arrangement of original layers: `[0, 1, 2, 3, 2, 3, 4]`\n"
+                "This format is based on what is used for pass-through merges in mergekit. It makes it simple to select sequential "
+                "ranges of a model and stack them while reusing layers at either end of each sequence."
             )
-        }
+        },
     )
 
     def __post_init__(self):

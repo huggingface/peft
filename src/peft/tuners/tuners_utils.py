@@ -691,6 +691,12 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
 
 
 def clone_module(module: nn.Module, share_weights=False):
+    """Clone a module in a pytorch model.
+
+    Clones a module of a model, optionally sharing all the parameters between
+    the original and the clone. Simplifies reusing a module when manipulating the
+    architecture of a model.
+    """
     clone = copy.deepcopy(module)
 
     def _share_weights(src: nn.Module, dst: nn.Module):
@@ -706,25 +712,49 @@ def clone_module(module: nn.Module, share_weights=False):
 
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
     """Replicate layers in a transfomer model with weight sharing.
-    
-    This function looks for a module list attribute at model[(.model)*].layers 
+
+    This function looks for a module list attribute at model[(.model)*].layers
     and replicates the layers in the module list according to the layer map.
     For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3, 4]`
     and replace them with a module list containing `[0, 1, 2, 3, 2, 3, 4]`.
     """
-    while hasattr(model, 'model'):
+    while hasattr(model, "model"):
         model = model.model
-    if not hasattr(model, 'layers'):
-        raise ValueError('Could not locate the layers attribute in the model.')
+    # Some variants of the bert model nest the main model under the bert attribute.
+    if hasattr(model, "bert"):
+        model = model.bert
+
+    model_type = None
+    layers: nn.ModuleList = None
+    if hasattr(model, "layers"):
+        model_type = "llama"
+        layers = model.layers
+    elif hasattr(model, "encoder") and hasattr(model.encoder, "layer"):
+        model_type = "bert"
+        layers = model.encoder.layer
+    elif hasattr(model, "h"):
+        model_type = "falcon"
+        layers = model.h
+    if not model_type or not isinstance(layers, nn.ModuleList):
+        raise ValueError("Could not locate the layers attribute in the model.")
+
     new_layers = []
     for start, end in layer_map:
         for i in range(start, end):
             current_idx = len(new_layers)
-            new_layers.append(clone_module(model.layers[i], share_weights=True))
+            new_layers.append(clone_module(layers[i], share_weights=True))
             # This is a hack needed to work around the layer_idx introduced in HF transformers.
             for submodule in new_layers[-1].modules():
-                if hasattr(submodule, 'layer_idx'):
+                if hasattr(submodule, "layer_idx"):
                     submodule.layer_idx = current_idx
-    model.layers = nn.ModuleList(new_layers)
-    if hasattr(model.config, 'num_hidden_layers'):
+    layers = nn.ModuleList(new_layers)
+    if model_type == "llama":
+        model.layers = layers
+    elif model_type == "bert":
+        model.encoder.layer = layers
+    elif model_type == "falcon":
+        model.h = layers
+    else:
+        raise AssertionError("Unexpected model type.")
+    if hasattr(model.config, "num_hidden_layers"):  # Common to Llama, Bert, Falcon.
         model.config.num_hidden_layers = len(new_layers)

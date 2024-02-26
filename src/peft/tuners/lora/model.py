@@ -33,7 +33,7 @@ from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     check_target_module_exists,
     onload_layer,
-    replicate_layers
+    replicate_layers,
 )
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
@@ -359,7 +359,7 @@ class LoraModel(BaseTuner):
         """
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
-        if self.peft_config.get('layer_replication'):
+        if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge LORA layers when base model layers are replicated")
 
     def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
