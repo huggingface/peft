@@ -209,10 +209,9 @@ class LoraLayer(BaseTunerLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
-        result_dora = (
-            (mag_norm_scale - 1) * (F.linear(x, transpose(weight, self.fan_in_fan_out))) +
-            mag_norm_scale * lora_B(lora_A(x)) * scaling
-        )
+        result_dora = (mag_norm_scale - 1) * (
+            F.linear(x, transpose(weight, self.fan_in_fan_out))
+        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
 
         # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again:
         # bias = self.get_base_layer().bias
