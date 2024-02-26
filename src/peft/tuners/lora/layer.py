@@ -764,27 +764,29 @@ class MultiheadAttention(nn.Module, LoraLayer):
             if active_adapter in self.lora_A.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:
-                    # merging in_proj
                     # TODO: work with separate weights
-                    orig_weights = base_layer.in_proj_weight.data.detach().clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
-
-                    if not torch.isfinite(orig_weights).all():
+                    # merging in_proj
+                    orig_weights_in = base_layer.in_proj_weight.data.detach().clone()
+                    orig_weights_in += self.get_delta_weight(active_adapter)
+                    if not torch.isfinite(orig_weights_in).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-                    del base_layer.in_proj_weight
-                    base_layer.in_proj_weight = orig_weights
 
                     # merging out_proj
-                    orig_weights = base_layer.out_proj.weight.data.detach().clone()
-                    orig_weights += base_layer.out_proj.get_delta_weight(active_adapter)
-                    if not torch.isfinite(orig_weights).all():
+                    orig_weights_out = base_layer.out_proj.weight.data.detach().clone()
+                    orig_weights_out += base_layer.out_proj.get_delta_weight(active_adapter)
+                    if not torch.isfinite(orig_weights_out).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
+
+                    del base_layer.in_proj_weight
+                    base_layer.in_proj_weight = orig_weights_in
+
                     del base_layer.out_proj.get_base_layer().weight
-                    base_layer.out_proj.get_base_layer().weight = orig_weights
+                    base_layer.out_proj.get_base_layer().weight = orig_weights_out
+                    base_layer.out_proj.merge(adapter_names=[active_adapter])
                 else:
                     # merging in_proj
                     # TODO: work with separate weights
