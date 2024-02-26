@@ -259,6 +259,15 @@ class IA3Model(BaseTuner):
     def set_adapter(self, adapter_name: str | list[str]) -> None:
         """Set the active adapter(s).
 
+        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
+
         Args:
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
@@ -318,7 +327,13 @@ class IA3Model(BaseTuner):
                 self._replace_module(parent, target_name, target.get_base_layer(), target)
             elif isinstance(target, ModulesToSaveWrapper):
                 # save any additional trainable modules part of `modules_to_save`
-                setattr(parent, target_name, target.modules_to_save[target.active_adapter])
+                new_module = target.modules_to_save[target.active_adapter]
+                if hasattr(new_module, "base_layer"):
+                    # check if the module is itself a tuner layer
+                    if merge:
+                        new_module.merge(safe_merge=safe_merge, adapter_names=adapter_names)
+                    new_module = new_module.get_base_layer()
+                setattr(parent, target_name, new_module)
 
         return self.model
 

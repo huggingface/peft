@@ -138,14 +138,7 @@ PEFT can also be applied to training LLMs with RLHF components such as the ranke
 
 ## Model support
 
-Use the Space below to find which models officially support a PEFT method out of the box. Even if you don't see a model listed below, you can manually configure the model config to enable PEFT for a model. Read the [New transformers architecture](https://huggingface.co/docs/peft/main/en/developer_guides/custom_models#new-transformers-architectures) guide to learn how.
-
-<iframe
-  src="https://stevhliu-peft-methods.hf.space"
-  frameborder="0"
-  width="850"
-  height="620"
-></iframe>
+Use this [Space](https://stevhliu-peft-methods.hf.space) or check out the [docs](https://huggingface.co/docs/peft/main/en/index) to find which models officially support a PEFT method out of the box. Even if you don't see a model listed below, you can manually configure the model config to enable PEFT for a model. Read the [New transformers architecture](https://huggingface.co/docs/peft/main/en/developer_guides/custom_models#new-transformers-architectures) guide to learn how.
 
 ## Contribute
 

@@ -18,7 +18,6 @@ import importlib
 import os
 from typing import Optional
 
-from huggingface_hub import file_exists
 from transformers import (
     AutoModel,
     AutoModelForCausalLM,
@@ -41,6 +40,7 @@ from .peft_model import (
     PeftModelForTokenClassification,
 )
 from .utils.constants import TOKENIZER_CONFIG_NAME
+from .utils.other import check_file_exists_on_hf_hub
 
 
 class _BaseAutoPeftModel:
@@ -111,7 +111,7 @@ class _BaseAutoPeftModel:
             if token is None:
                 token = kwargs.get("use_auth_token", None)
 
-            tokenizer_exists = file_exists(
+            tokenizer_exists = check_file_exists_on_hf_hub(
                 repo_id=pretrained_model_name_or_path,
                 filename=TOKENIZER_CONFIG_NAME,
                 revision=kwargs.get("revision", None),
@@ -120,7 +120,9 @@ class _BaseAutoPeftModel:
             )
 
         if tokenizer_exists:
-            tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path)
+            tokenizer = AutoTokenizer.from_pretrained(
+                pretrained_model_name_or_path, trust_remote_code=kwargs.get("trust_remote_code", False)
+            )
             base_model.resize_token_embeddings(len(tokenizer))
 
         return cls._target_peft_class.from_pretrained(

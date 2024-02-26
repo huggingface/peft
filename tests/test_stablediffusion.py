@@ -152,7 +152,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Images are in uint8 drange, so use large atol
-        self.assertTrue(np.allclose(peft_output, merged_output, atol=1.0))
+        assert np.allclose(peft_output, merged_output, atol=1.0)
 
     @parameterized.expand(
         PeftStableDiffusionTestConfigManager.get_grid_parameters(
@@ -184,7 +184,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
             merged_output = np.array(model(**dummy_input).images[0]).astype(np.float32)
 
         # Images are in uint8 drange, so use large atol
-        self.assertTrue(np.allclose(peft_output, merged_output, atol=1.0))
+        assert np.allclose(peft_output, merged_output, atol=1.0)
 
     @parameterized.expand(
         PeftStableDiffusionTestConfigManager.get_grid_parameters(
@@ -210,10 +210,8 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
         model.unet.add_weighted_adapter([unet_adapter_name], [0.5], "weighted_adapter_test")
 
         # Assert that base adapters config did not change
-        self.assertTrue(
-            asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name])
-        )
-        self.assertTrue(asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name]))
+        assert asdict(text_encoder_adapter_config) == asdict(model.text_encoder.peft_config[text_encoder_adapter_name])
+        assert asdict(unet_adapter_config) == asdict(model.unet.peft_config[unet_adapter_name])
 
     @parameterized.expand(
         PeftStableDiffusionTestConfigManager.get_grid_parameters(

@@ -64,15 +64,15 @@ class InitializationTest(unittest.TestCase):
         # use statistical test to check if weight A is from a uniform distribution
         unif = self.get_uniform(weight_A.min().item(), weight_A.max().item())
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), unif.flatten().cpu().numpy())
-        self.assertGreater(p_value, 0.5)
+        assert p_value > 0.5
 
         # check that weight A is *not* from a normal distribution
         normal = self.get_normal(weight_A.mean().item(), weight_A.std().item())
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-        self.assertLess(p_value, 0.05)
+        assert p_value < 0.05
 
         # check that weight B is zero
-        self.assertTrue((weight_B == 0.0).all())
+        assert (weight_B == 0.0).all()
 
     def test_lora_linear_init_gaussian(self):
         # use gaussian init
@@ -88,15 +88,15 @@ class InitializationTest(unittest.TestCase):
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
 
-        self.assertGreater(p_value, 0.5)
+        assert p_value > 0.5
 
         # check that weight A is *not* from a uniform distribution
         unif = self.get_uniform(weight_A.min().item(), weight_A.max().item())
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), unif.flatten().cpu().numpy())
-        self.assertLess(p_value, 0.05)
+        assert p_value < 0.05
 
         # check that weight B is zero
-        self.assertTrue((weight_B == 0.0).all())
+        assert (weight_B == 0.0).all()
 
     def test_lora_linear_false(self):
         torch.manual_seed(0)
@@ -108,7 +108,7 @@ class InitializationTest(unittest.TestCase):
 
         # with init_lora_weights=False, weight B should *not* be zero. We don't care so much about the actual values
         # as long as they are not zero, in order to avoid identity transformation.
-        self.assertFalse(torch.allclose(weight_B, torch.zeros_like(weight_B)))
+        assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
 
     def test_lora_embedding_default(self):
         # embedding is initialized as a normal distribution, not kaiming uniform
@@ -123,15 +123,15 @@ class InitializationTest(unittest.TestCase):
         # use statistical test to check if weight B is from a normal distribution
         normal = self.get_normal(0.0, 1.0)
         _, p_value = stats.kstest(weight_B.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-        self.assertGreater(p_value, 0.5)
+        assert p_value > 0.5
 
         # check that weight B is *not* from a uniform distribution
         unif = self.get_uniform(weight_B.min().item(), weight_B.max().item())
         _, p_value = stats.kstest(weight_B.detach().flatten().cpu().numpy(), unif.flatten().cpu().numpy())
-        self.assertLess(p_value, 0.05)
+        assert p_value < 0.05
 
         # check that weight A is zero
-        self.assertTrue((weight_A == 0.0).all())
+        assert (weight_A == 0.0).all()
 
     def test_lora_embedding_gaussian(self):
         # embedding does not change with init_lora_weights="gaussian" vs True
@@ -146,15 +146,15 @@ class InitializationTest(unittest.TestCase):
         # use statistical test to check if weight B is from a normal distribution
         normal = self.get_normal(0.0, 1.0)
         _, p_value = stats.kstest(weight_B.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-        self.assertGreater(p_value, 0.5)
+        assert p_value > 0.5
 
         # check that weight B is *not* from a uniform distribution
         unif = self.get_uniform(weight_B.min().item(), weight_B.max().item())
         _, p_value = stats.kstest(weight_B.detach().flatten().cpu().numpy(), unif.flatten().cpu().numpy())
-        self.assertLess(p_value, 0.05)
+        assert p_value < 0.05
 
         # check that weight A is zero
-        self.assertTrue((weight_A == 0.0).all())
+        assert (weight_A == 0.0).all()
 
     def test_lora_embedding_false(self):
         torch.manual_seed(0)
@@ -166,7 +166,7 @@ class InitializationTest(unittest.TestCase):
 
         # with init_lora_weights=False, weight A should *not* be zero. We don't care so much about the actual values
         # as long as they are not zero, in order to avoid identity transformation.
-        self.assertFalse(torch.allclose(weight_A, torch.zeros_like(weight_A)))
+        assert not torch.allclose(weight_A, torch.zeros_like(weight_A))
 
     def test_lora_conv2d_default(self):
         # default is True
@@ -181,15 +181,15 @@ class InitializationTest(unittest.TestCase):
         # use statistical test to check if weight A is from a uniform distribution
         unif = self.get_uniform(weight_A.min().item(), weight_A.max().item())
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), unif.flatten().cpu().numpy())
-        self.assertGreater(p_value, 0.5)
+        assert p_value > 0.5
 
         # check that weight A is *not* from a normal distribution
         normal = self.get_normal(weight_A.mean().item(), weight_A.std().item())
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-        self.assertLess(p_value, 0.05)
+        assert p_value < 0.05
 
         # check that weight B is zero
-        self.assertTrue((weight_B == 0.0).all())
+        assert (weight_B == 0.0).all()
 
     def test_lora_conv2d_init_gaussian(self):
         # use gaussian init
@@ -204,15 +204,15 @@ class InitializationTest(unittest.TestCase):
         # use statistical test to check if weight A is from a normal distribution
         normal = self.get_normal(0.0, 1 / config.r)
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), normal.flatten().cpu().numpy())
-        self.assertGreater(p_value, 0.5)
+        assert p_value > 0.5
 
         # check that weight A is *not* from a uniform distribution
         unif = self.get_uniform(weight_A.min().item(), weight_A.max().item())
         _, p_value = stats.kstest(weight_A.detach().flatten().cpu().numpy(), unif.flatten().cpu().numpy())
-        self.assertLess(p_value, 0.05)
+        assert p_value < 0.05
 
         # check that weight B is zero
-        self.assertTrue((weight_B == 0.0).all())
+        assert (weight_B == 0.0).all()
 
     def test_lora_conv2d_false(self):
         torch.manual_seed(0)
@@ -224,7 +224,7 @@ class InitializationTest(unittest.TestCase):
 
         # with init_lora_weights=False, weight B should *not* be zero. We don't care so much about the actual values
         # as long as they are not zero, in order to avoid identity transformation.
-        self.assertFalse(torch.allclose(weight_B, torch.zeros_like(weight_B)))
+        assert not torch.allclose(weight_B, torch.zeros_like(weight_B))
 
     def test_lora_scaling_default(self):
         # default is True
@@ -238,9 +238,9 @@ class InitializationTest(unittest.TestCase):
 
         expected_scaling = config.lora_alpha / config.r
 
-        self.assertTrue(model.linear.scaling["default"] == expected_scaling)
-        self.assertTrue(model.embed.scaling["default"] == expected_scaling)
-        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling)
+        assert model.linear.scaling["default"] == expected_scaling
+        assert model.embed.scaling["default"] == expected_scaling
+        assert model.conv2d.scaling["default"] == expected_scaling
 
     def test_rslora_scaling(self):
         # default is True
@@ -254,9 +254,9 @@ class InitializationTest(unittest.TestCase):
 
         expected_scaling = config.lora_alpha / (config.r**0.5)
 
-        self.assertTrue(model.linear.scaling["default"] == expected_scaling)
-        self.assertTrue(model.embed.scaling["default"] == expected_scaling)
-        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling)
+        assert model.linear.scaling["default"] == expected_scaling
+        assert model.embed.scaling["default"] == expected_scaling
+        assert model.conv2d.scaling["default"] == expected_scaling
 
     def test_lora_default_scaling_pattern(self):
         # default is True
@@ -281,9 +281,9 @@ class InitializationTest(unittest.TestCase):
             "conv2d": config.alpha_pattern["conv2d"] / config.rank_pattern["conv2d"],
         }
 
-        self.assertTrue(model.linear.scaling["default"] == expected_scaling["linear"])
-        self.assertTrue(model.embed.scaling["default"] == expected_scaling["embed"])
-        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling["conv2d"])
+        assert model.linear.scaling["default"] == expected_scaling["linear"]
+        assert model.embed.scaling["default"] == expected_scaling["embed"]
+        assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
     def test_rslora_scaling_pattern(self):
         # default is True
@@ -308,6 +308,6 @@ class InitializationTest(unittest.TestCase):
             "conv2d": config.alpha_pattern["conv2d"] / (config.rank_pattern["conv2d"] ** 0.5),
         }
 
-        self.assertTrue(model.linear.scaling["default"] == expected_scaling["linear"])
-        self.assertTrue(model.embed.scaling["default"] == expected_scaling["embed"])
-        self.assertTrue(model.conv2d.scaling["default"] == expected_scaling["conv2d"])
+        assert model.linear.scaling["default"] == expected_scaling["linear"]
+        assert model.embed.scaling["default"] == expected_scaling["embed"]
+        assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]

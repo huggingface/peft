@@ -34,4 +34,4 @@ class PeftHubFeaturesTester(unittest.TestCase):
             )
             model = PeftModel.from_pretrained(model, model_id, subfolder=subfolder)
 
-            self.assertTrue(isinstance(model, PeftModel))
+            assert isinstance(model, PeftModel)
