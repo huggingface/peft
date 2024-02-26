@@ -192,8 +192,12 @@ class LoraLayer(BaseTunerLayer):
         value = self._caches.pop(key)
         return value
 
-    def apply_dora(self, x, lora_weight, active_adapter):
-        scaling = self.scaling[active_adapter]
+    def _apply_dora(self, x, lora_A, lora_B, scaling, active_adapter):
+        """
+        For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
+        output.
+        """
+        lora_weight = lora_B.weight @ lora_A.weight
         magnitude = self.lora_magnitude_vector[active_adapter]
         weight = self.get_base_layer().weight
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
@@ -204,8 +208,21 @@ class LoraLayer(BaseTunerLayer):
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
         weight_norm = weight_norm.detach()
-        dora_weight = transpose(weight + scaling * lora_weight, self.fan_in_fan_out)
-        return (magnitude / weight_norm - 1).view(1, -1) * F.linear(x, dora_weight)
+        mag_norm_scale = (magnitude / weight_norm).view(1, -1)
+        result_dora = (
+            (mag_norm_scale - 1) * (F.linear(x, transpose(weight, self.fan_in_fan_out))) +
+            mag_norm_scale * lora_B(lora_A(x)) * scaling
+        )
+
+        # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again:
+        # bias = self.get_base_layer().bias
+        # if bias is not None:
+        #     result = result - bias
+        # result = mag_norm_scale * result + mag_norm_scale * lora_B(lora_A(x)) * scaling
+        # if bias is not None:
+        #     result = result + bias
+
+        return result_dora
 
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
@@ -416,8 +433,7 @@ class Linear(nn.Module, LoraLayer):
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     x = dropout(x)
-                    lora_weight = lora_B.weight @ lora_A.weight
-                    result = result + lora_B(lora_A(x)) * scaling + self.apply_dora(x, lora_weight, active_adapter)
+                    result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
             result = result.to(torch_result_dtype)
         return result
