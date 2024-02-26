@@ -213,7 +213,9 @@ class LoraLayer(BaseTunerLayer):
             F.linear(x, transpose(weight, self.fan_in_fan_out))
         ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
 
-        # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again:
+        # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again.
+        # This is only correct if dropout=0, otherwise results will differ:
+        # https://github.com/huggingface/peft/pull/1474#issuecomment-1964682771
         # bias = self.get_base_layer().bias
         # if bias is not None:
         #     result = result - bias
