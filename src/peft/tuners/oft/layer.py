@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -72,7 +71,7 @@ class OFTLayer(nn.Module, LycorisLayer):
             r (`int`): Rank for the added adapter.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
-            coft (`bool`): Whether to use the constrainted variant of OFT or not.
+            coft (`bool`): Whether to use the constrained variant of OFT or not.
             eps (`float`):
                 The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
             block_share (`bool`): Whether to share the OFT parameters between blocks or not.
@@ -244,7 +243,7 @@ class OFTLayer(nn.Module, LycorisLayer):
         b, r, c = data.shape
         # Ensure the input matrix is skew-symmetric
         skew = 0.5 * (data - data.transpose(1, 2))
-        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
+        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)  # noqa: E741
 
         # Perform the Cayley parametrization
         Q = torch.bmm(I - skew, torch.inverse(I + skew))
@@ -268,7 +267,7 @@ class OFTLayer(nn.Module, LycorisLayer):
     def _project_batch(self, oft_r, eps=1e-5):
         # scaling factor for each of the smaller block matrix
         eps = eps * 1 / torch.sqrt(torch.tensor(oft_r.shape[0]))
-        I = (
+        I = (  # noqa: E741
             torch.zeros((oft_r.size(1), oft_r.size(1)), device=oft_r.device, dtype=oft_r.dtype)
             .unsqueeze(0)
             .expand_as(oft_r)

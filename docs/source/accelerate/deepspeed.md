@@ -6,7 +6,158 @@ rendered properly in your Markdown viewer.
 
 [DeepSpeed](https://www.deepspeed.ai/) is a library designed for speed and scale for distributed training of large models with billions of parameters. At its core is the Zero Redundancy Optimizer (ZeRO) that shards optimizer states (ZeRO-1), gradients (ZeRO-2), and parameters (ZeRO-3) across data parallel processes. This drastically reduces memory usage, allowing you to scale your training to billion parameter models. To unlock even more memory efficiency, ZeRO-Offload reduces GPU compute and memory by leveraging CPU resources during optimization.
 
-Both of these features are supported in 🤗 Accelerate, and you can use them with 🤗 PEFT. This guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You'll configure the script to train a large model for conditional generation with ZeRO-3 and ZeRO-Offload.
+Both of these features are supported in 🤗 Accelerate, and you can use them with 🤗 PEFT. 
+
+# Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple machines and multiple nodes
+This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) for performing SFT. You'll configure the script to do SFT (supervised fine-tuning) of Llama-70B model with LoRA and ZeRO-3 on 8xH100 80GB GPUs on a single machine. You can configure it to scale to multiple machines by changing the accelerate config.
+
+## Configuration
+
+Start by running the following command to [create a DeepSpeed configuration file](https://huggingface.co/docs/accelerate/quicktour#launching-your-distributed-script) with 🤗 Accelerate. The `--config_file` flag allows you to save the configuration file to a specific location, otherwise it is saved as a `default_config.yaml` file in the 🤗 Accelerate cache.
+
+The configuration file is used to set the default options when you launch the training script.
+
+```bash
+accelerate config --config_file deepspeed_config.yaml
+```
+
+You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 so make sure you pick those options.
+
+```bash
+`zero_stage`: [0] Disabled, [1] optimizer state partitioning, [2] optimizer+gradient state partitioning and [3] optimizer+gradient+parameter partitioning
+`gradient_accumulation_steps`: Number of training steps to accumulate gradients before averaging and applying them. Pass the same value as you would pass via cmd argument else you will encounter mismatch error.
+`gradient_clipping`: Enable gradient clipping with value. Don't set this as you will be passing it via cmd arguments.
+`offload_optimizer_device`: [none] Disable optimizer offloading, [cpu] offload optimizer to CPU, [nvme] offload optimizer to NVMe SSD. Only applicable with ZeRO >= Stage-2. Set this as `none` as don't want to enable offloading.
+`offload_param_device`: [none] Disable parameter offloading, [cpu] offload parameters to CPU, [nvme] offload parameters to NVMe SSD. Only applicable with ZeRO Stage-3. Set this as `none` as don't want to enable offloading.
+`zero3_init_flag`: Decides whether to enable `deepspeed.zero.Init` for constructing massive models. Only applicable with ZeRO Stage-3. Set this to `True`.
+`zero3_save_16bit_model`: Decides whether to save 16-bit model weights when using ZeRO Stage-3. Set this to `True`.
+`mixed_precision`: `no` for FP32 training, `fp16` for FP16 mixed-precision training and `bf16` for BF16 mixed-precision training. Set this to `True`.
+```
+
+Once this is done, the corresponding config should look like below and you can find it in config folder at [deepspeed_config.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config.yaml):
+
+```yml
+compute_environment: LOCAL_MACHINE                                                                                                                                           
+debug: false
+deepspeed_config:
+  deepspeed_multinode_launcher: standard
+  gradient_accumulation_steps: 4
+  offload_optimizer_device: none
+  offload_param_device: none
+  zero3_init_flag: true
+  zero3_save_16bit_model: true
+  zero_stage: 3
+distributed_type: DEEPSPEED
+downcast_bf16: 'no'
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false
+```
+
+## Launch command
+
+The launch command is available at [run_peft_deepspeed.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_deepspeed.sh) and it is also shown below:
+```bash
+accelerate launch --config_file "configs/deepspeed_config.yaml"  train.py \
+--seed 100 \
+--model_name_or_path "meta-llama/Llama-2-70b-hf" \
+--dataset_name "smangrul/ultrachat-10k-chatml" \
+--chat_template_format "chatml" \
+--add_special_tokens False \
+--append_concat_token False \
+--splits "train,test" \
+--max_seq_len 2048 \
+--num_train_epochs 1 \
+--logging_steps 5 \
+--log_level "info" \
+--logging_strategy "steps" \
+--evaluation_strategy "epoch" \
+--save_strategy "epoch" \
+--push_to_hub \
+--hub_private_repo True \
+--hub_strategy "every_save" \
+--bf16 True \
+--packing True \
+--learning_rate 1e-4 \
+--lr_scheduler_type "cosine" \
+--weight_decay 1e-4 \
+--warmup_ratio 0.0 \
+--max_grad_norm 1.0 \
+--output_dir "llama-sft-lora-deepspeed" \
+--per_device_train_batch_size 8 \
+--per_device_eval_batch_size 8 \
+--gradient_accumulation_steps 4 \
+--gradient_checkpointing True \
+--use_reentrant False \
+--dataset_text_field "content" \
+--use_flash_attn True \
+--use_peft_lora True \
+--lora_r 8 \
+--lora_alpha 16 \
+--lora_dropout 0.1 \
+--lora_target_modules "all-linear" \
+--use_4bit_quantization False
+```
+
+Notice that we are using LoRA with  rank=8, alpha=16 and targeting all linear layers. We are passing the deepspeed config file and finetuning 70B Llama model on a subset of the ultrachat dataset.
+
+## The important parts
+
+Let's dive a little deeper into the script so you can see what's going on, and understand how it works.
+
+The first thing to know is that the script uses DeepSpeed for distributed training as the DeepSpeed config has been passed. The `SFTTrainer` class handles all the heavy lifting of creating the PEFT model using the peft config that is passed. After that, when you call `trainer.train()`, `SFTTrainer` internally uses 🤗 Accelerate to prepare the model, optimizer and trainer using the DeepSpeed config to create DeepSpeed engine which is then trained. The main code snippet is below:
+
+```python
+# trainer
+trainer = SFTTrainer(
+    model=model,
+    tokenizer=tokenizer,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    peft_config=peft_config,
+    packing=data_args.packing,
+    dataset_kwargs={
+        "append_concat_token": data_args.append_concat_token,
+        "add_special_tokens": data_args.add_special_tokens,
+    },
+    dataset_text_field=data_args.dataset_text_field,
+    max_seq_length=data_args.max_seq_length,
+)
+trainer.accelerator.print(f"{trainer.model}")
+
+# train
+checkpoint = None
+if training_args.resume_from_checkpoint is not None:
+    checkpoint = training_args.resume_from_checkpoint
+trainer.train(resume_from_checkpoint=checkpoint)
+
+# saving final model
+trainer.save_model()
+```
+
+## Memory usage
+
+In the above example, the memory consumed per GPU is 64 GB (80%) as seen in the screenshot below:
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/peft_deepspeed_mem_usage.png"/>
+</div>
+<small>GPU memory usage for the training run</small>
+
+## More resources
+You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and DeepSpeed](https://medium.com/@sourabmangrulkar/falcon-180b-finetuning-using-peft-and-deepspeed-b92643091d99) on how to finetune 180B Falcon model on 16 A100 GPUs on 2 machines.
+
+# Use PEFT and DeepSpeed with ZeRO3 and CPU Offloading for finetuning large models on a single GPU
+This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You'll configure the script to train a large model for conditional generation with ZeRO-3 and CPU Offload.
 
 <Tip>
 
@@ -24,7 +175,7 @@ The configuration file is used to set the default options when you launch the tr
 accelerate config --config_file ds_zero3_cpu.yaml
 ```
 
-You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 and ZeRO-Offload so make sure you pick those options.
+You'll be asked a few questions about your setup, and configure the following arguments. In this example, you'll use ZeRO-3 along with CPU-Offload so make sure you pick those options.
 
 ```bash
 `zero_stage`: [0] Disabled, [1] optimizer state partitioning, [2] optimizer+gradient state partitioning and [3] optimizer+gradient+parameter partitioning
@@ -105,7 +256,7 @@ model, train_dataloader, eval_dataloader, test_dataloader, optimizer, lr_schedul
 )
 ```
 
-The next bit of code checks whether the DeepSpeed plugin is used in the `Accelerator`, and if the plugin exists, then the `Accelerator` uses ZeRO-3 as specified in the configuration file:
+The next bit of code checks whether the DeepSpeed plugin is used in the `Accelerator`, and if the plugin exists, then we check if we are using ZeRO-3. This conditional flag is used when calling `generate` function call during inference for syncing GPUs when the model parameters are sharded:
 
 ```py
 is_ds_zero_3 = False
@@ -165,3 +316,7 @@ accuracy=100.0
 eval_preds[:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
 dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint', 'no complaint', 'no complaint', 'complaint', 'complaint', 'no complaint']
 ```
+
+# Caveats
+1. Merging when using PEFT and DeepSpeed is currently unsupported and will raise error.
+2. When using CPU offloading, the major gains from using PEFT to shrink the optimizer states and gradients to that of the adapter weights would be realized on CPU RAM and there won't be savings with respect to GPU memory.

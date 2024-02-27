@@ -500,7 +500,6 @@ class Linear(nn.Module, BOFTLayer):
 
         # Perform the Cayley parametrization
         Q = torch.bmm(I - skew, torch.inverse(I + skew))
-        # Q = torch.linalg.solve(I + skew, I - skew, left=False)
 
         return Q
 

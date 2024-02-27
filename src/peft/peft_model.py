@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +20,7 @@ import os
 import warnings
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import packaging.version
 import torch
@@ -139,7 +138,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model.config.pretraining_tp = 1
 
     @property
-    def peft_config(self) -> Dict[str, PeftConfig]:
+    def peft_config(self) -> dict[str, PeftConfig]:
         if self._is_prompt_learning:
             return self._peft_config
         return self.base_model.peft_config
@@ -155,7 +154,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         return adapters
 
     @peft_config.setter
-    def peft_config(self, value: Dict[str, PeftConfig]):
+    def peft_config(self, value: dict[str, PeftConfig]):
         if self._is_prompt_learning:
             self._peft_config = value
         else:
@@ -165,7 +164,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self,
         save_directory: str,
         safe_serialization: bool = True,
-        selected_adapters: Optional[List[str]] = None,
+        selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
         **kwargs: Any,
@@ -292,7 +291,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
         **kwargs: Any,
-    ) -> "PeftModel":
+    ) -> PeftModel:
         r"""
         Instantiate a PEFT model from a pretrained model and loaded PEFT weights.
 
@@ -314,7 +313,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and can only be
                 used for inference.
             config ([`~peft.PeftConfig`], *optional*):
-                The configuration object to use instead of an automatically loaded configuation. This configuration
+                The configuration object to use instead of an automatically loaded configuration. This configuration
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
             kwargs: (`optional`):
@@ -562,7 +561,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         try:
             if self.peft_config[self.active_adapter].is_prompt_learning:
                 # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
-                # letting the underyling methods deal with it, same as how LoRA does it.
+                # letting the underlying methods deal with it, same as how LoRA does it.
                 old_forward = self.forward
                 self.forward = self.base_model.forward
                 old_prepare_inputs_for_generation = self.prepare_inputs_for_generation
@@ -573,7 +572,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         finally:
             if self.peft_config[self.active_adapter].is_prompt_learning:
                 self.forward = old_forward
-                self.old_prepare_inputs_for_generation = old_prepare_inputs_for_generation
+                self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
             else:
                 self.base_model.enable_adapter_layers()
 
@@ -623,7 +622,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else:
                 self.peft_config[adapter_name] = peft_config
                 self.base_model.inject_adapter(self.base_model.model, adapter_name)
-        except Exception:  # somthing went wrong, roll back
+        except Exception:  # something went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
             raise
@@ -639,7 +638,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             _set_trainable(self, adapter_name)
 
     @classmethod
-    def _split_kwargs(cls, kwargs: Dict[str, Any]):
+    def _split_kwargs(cls, kwargs: dict[str, Any]):
         _kwargs_not_in_hf_hub_download_signature = ("use_auth_token",)
         hf_hub_download_kwargs = {}
         other_kwargs = {}
@@ -749,6 +748,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         Only one adapter can be active at a time.
 
+        Additionally, this function will set the specified adapter to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
+
         Args:
             adapter_name (`str`):
                 The name of the adapter to be set as active. The adapter must be loaded first.
@@ -786,7 +794,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model_config = getattr(self, "config", None)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
-        if model_config is not None:
+        if model_config is not None and "_name_or_path" in model_config:
             card.data["base_model"] = model_config["_name_or_path"]
 
         lines = card.text.splitlines()
@@ -1147,7 +1155,7 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             return outputs
 
-    def prepare_inputs_for_generation(self, *args, task_ids: torch.Tensor = None, **kwargs):
+    def prepare_inputs_for_generation(self, *args, task_ids: Optional[torch.Tensor] = None, **kwargs):
         peft_config = self.active_peft_config
         model_kwargs = self.base_model_prepare_inputs_for_generation(*args, **kwargs)
 
@@ -1198,6 +1206,12 @@ class PeftModelForCausalLM(PeftModel):
                     prompts = prompts.to(inputs_embeds.dtype)
                     model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                     model_kwargs["input_ids"] = None
+
+        # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
+        # passed in the forward pass to keep track of the position ids of the cache. We have to
+        # pop that from `model_kwargs` as `cache_position` is properly created by the model, using the passed
+        # `inputs_embeds`: https://github.com/huggingface/transformers/blob/593230f0a1150ea9c0477b9d859f25daf73c8c33/src/transformers/models/llama/modeling_llama.py#L956
+        _ = model_kwargs.pop("cache_position", None)
 
         return model_kwargs
 
@@ -1402,7 +1416,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                     kwargs = deepcopy(kwargs)
 
                     if "encoder_outputs" in kwargs:
-                        del kwargs["encoder_ouputs"]
+                        del kwargs["encoder_outputs"]
                         warnings.warn(
                             "`encoder_outputs` should not be passed to `generate` when using prompt tuning. Ignoring it."
                         )
