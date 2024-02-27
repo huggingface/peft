@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CI_SLACK_CHANNEL: "C06L7KU9WQ4"
+  CI_SLACK_CHANNEL: ${{ secrets.CI_DOCKER_CHANNEL }}
 
 jobs:
   latest-cpu:
