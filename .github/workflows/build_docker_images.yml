@@ -1,14 +1,15 @@
 name: Build Docker images (scheduled)
 
 on:
-  workflow_dispatch:
-  workflow_call:
-  schedule:
-    - cron: "0 1 * * *"
+  push:
+    branches: [younesbelkada-patch-1]
 
 concurrency:
   group: docker-image-builds
   cancel-in-progress: false
+
+env:
+  CI_SLACK_CHANNEL: "C06L7KU9WQ4"
 
 jobs:
   latest-cpu:
@@ -49,7 +50,7 @@ jobs:
         with:
           # Slack channel id, channel name, or user id to post message.
           # See also: https://api.slack.com/methods/chat.postMessage#channels
-          channel-id: 'C06L7KU9WQ4'
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
           # For posting a rich message using Block Kit
           payload: |
             {
@@ -95,7 +96,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./docker/peft-gpu
-          push: true
+          push: false
           tags: huggingface/peft-gpu
 
       - name: Post to a Slack channel
@@ -105,7 +106,7 @@ jobs:
         with:
           # Slack channel id, channel name, or user id to post message.
           # See also: https://api.slack.com/methods/chat.postMessage#channels
-          channel-id: 'C06L7KU9WQ4'
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
           # For posting a rich message using Block Kit
           payload: |
             {
@@ -151,7 +152,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./docker/peft-gpu-bnb-source
-          push: true
+          push: false
           tags: huggingface/peft-gpu-bnb-source
 
 
@@ -162,7 +163,7 @@ jobs:
         with:
           # Slack channel id, channel name, or user id to post message.
           # See also: https://api.slack.com/methods/chat.postMessage#channels
-          channel-id: 'C06L7KU9WQ4'
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
           # For posting a rich message using Block Kit
           payload: |
             {
@@ -209,7 +210,7 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./docker/peft-gpu-bnb-latest
-          push: true
+          push: false
           tags: huggingface/peft-gpu-bnb-latest
 
       - name: Post to a Slack channel
@@ -219,7 +220,7 @@ jobs:
         with:
           # Slack channel id, channel name, or user id to post message.
           # See also: https://api.slack.com/methods/chat.postMessage#channels
-          channel-id: 'C06L7KU9WQ4'
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
           # For posting a rich message using Block Kit
           payload: |
             {
