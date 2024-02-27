@@ -430,7 +430,6 @@ if is_bnb_4bit_available():
                 self.set_compute_type(input)
                 self.compute_type_is_set = True
             
-            inp_dtype = input.dtype
             if self.compute_dtype is not None:
                 input = input.to(self.compute_dtype)
         
