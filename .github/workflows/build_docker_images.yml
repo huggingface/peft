@@ -10,6 +10,9 @@ concurrency:
   group: docker-image-builds
   cancel-in-progress: false
 
+env:
+  CI_SLACK_CHANNEL: ${{ secrets.CI_DOCKER_CHANNEL }}
+
 jobs:
   latest-cpu:
     name: "Latest Peft CPU [dev]"
@@ -42,6 +45,31 @@ jobs:
           push: true
           tags: huggingface/peft-cpu
 
+      - name: Post to a Slack channel
+        id: slack
+        #uses: slackapi/slack-github-action@v1.25.0
+        uses: slackapi/slack-github-action@6c661ce58804a1a20f6dc5fbee7f0381b469e001
+        with:
+          # Slack channel id, channel name, or user id to post message.
+          # See also: https://api.slack.com/methods/chat.postMessage#channels
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
+          # For posting a rich message using Block Kit
+          payload: |
+            {
+              "text": "peft-cpu Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "peft-cpu Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+
   latest-cuda:
     name: "Latest Peft GPU [dev]"
     runs-on: ubuntu-latest
@@ -72,6 +100,31 @@ jobs:
           context: ./docker/peft-gpu
           push: true
           tags: huggingface/peft-gpu
+
+      - name: Post to a Slack channel
+        id: slack
+        #uses: slackapi/slack-github-action@v1.25.0
+        uses: slackapi/slack-github-action@6c661ce58804a1a20f6dc5fbee7f0381b469e001
+        with:
+          # Slack channel id, channel name, or user id to post message.
+          # See also: https://api.slack.com/methods/chat.postMessage#channels
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
+          # For posting a rich message using Block Kit
+          payload: |
+            {
+              "text": "peft-gpu Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "peft-gpu Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
   latest-cuda-bnb-source:
     name: "Latest Peft GPU + bnb source [dev]"
@@ -105,6 +158,32 @@ jobs:
           tags: huggingface/peft-gpu-bnb-source
 
 
+      - name: Post to a Slack channel
+        id: slack
+        #uses: slackapi/slack-github-action@v1.25.0
+        uses: slackapi/slack-github-action@6c661ce58804a1a20f6dc5fbee7f0381b469e001
+        with:
+          # Slack channel id, channel name, or user id to post message.
+          # See also: https://api.slack.com/methods/chat.postMessage#channels
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
+          # For posting a rich message using Block Kit
+          payload: |
+            {
+              "text": "peft-gpu + bnb-source (source) Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "peft-gpu + bnb-source (source) Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+
+
   latest-cuda-bnb-source-latest:
     name: "Latest Peft GPU + bnb source [accelerate / peft / transformers latest]"
     runs-on: ubuntu-latest
@@ -135,3 +214,28 @@ jobs:
           context: ./docker/peft-gpu-bnb-latest
           push: true
           tags: huggingface/peft-gpu-bnb-latest
+
+      - name: Post to a Slack channel
+        id: slack
+        #uses: slackapi/slack-github-action@v1.25.0
+        uses: slackapi/slack-github-action@6c661ce58804a1a20f6dc5fbee7f0381b469e001
+        with:
+          # Slack channel id, channel name, or user id to post message.
+          # See also: https://api.slack.com/methods/chat.postMessage#channels
+          channel-id: ${{ env.CI_SLACK_CHANNEL }}
+          # For posting a rich message using Block Kit
+          payload: |
+            {
+              "text": "peft-gpu + bnb-source (latest) Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "peft-gpu + bnb-source (latest) Docker Image build result: ${{ job.status }}\n${{ github.event.pull_request.html_url || github.event.head_commit.url }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
