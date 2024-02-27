@@ -1,0 +1,25 @@
+git+https://github.com/huggingface/transformers
+git+https://github.com/huggingface/accelerate
+git+https://github.com/huggingface/peft
+git+https://github.com/huggingface/trl
+unsloth[colab_ampere] @ git+https://github.com/unslothai/unsloth.git
+datasets
+deepspeed
+PyGithub
+flash-attn
+huggingface-hub
+evaluate
+bitsandbytes
+einops
+wandb
+tensorboard
+tiktoken
+pandas
+numpy
+scipy
+matplotlib
+sentencepiece
+nltk
+xformers
+git+https://github.com/huggingface/datatrove.git
+hf_transfer

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -64,6 +63,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
 
     We use parametrized.expand for debugging purposes to test each model individually.
     """
+
     transformers_class = AutoModel
 
     def prepare_inputs_for_testing(self):

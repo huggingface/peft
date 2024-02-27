@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -157,7 +156,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        # TODO: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -176,6 +174,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 scaling = self.scaling[active_adapter]
                 ranknum = self.ranknum[active_adapter] + 1e-5
 
+                x = x.to(lora_A.dtype)
                 result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
         return result
