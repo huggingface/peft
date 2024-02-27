@@ -16,8 +16,10 @@ import warnings
 from typing import Any, List, Optional, Union
 
 import bitsandbytes as bnb
+from bitsandbytes.nn import Params4bit
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -368,6 +370,7 @@ if is_bnb_4bit_available():
     class bnbEmbedding4bit(torch.nn.Embedding):
         def __init__(self):
             raise NotImplementedError
+
         def reset_parameters(self) -> None:
             torch.nn.init.xavier_uniform_(self.weight)
             self._fill_padding_idx_with_zero()
@@ -378,6 +381,7 @@ if is_bnb_4bit_available():
                 which is cumbersome. However, with this we can ensure compatibility with previous
                 PyTorch releases.
             """
+
         def _fill_padding_idx_with_zero(self) -> None:
             if self.padding_idx is not None:
                 with torch.no_grad():
@@ -410,7 +414,6 @@ if is_bnb_4bit_available():
                 for k, v in self.weight.quant_state.as_dict(packed=True).items():
                     destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
-
         def forward(self, input: Tensor) -> Tensor:
             if getattr(self.weight, 'quant_state', None) is None:
                 if getattr(self, 'quant_state', None) is not None:
@@ -427,9 +430,9 @@ if is_bnb_4bit_available():
                 self.set_compute_type(input)
                 self.compute_type_is_set = True
             
-            inp_dtype = x.dtype
+            inp_dtype = input.dtype
             if self.compute_dtype is not None:
-                x = x.to(self.compute_dtype)
+                input = input.to(self.compute_dtype)
         
             emb = F.embedding(
                 input,
