@@ -29,8 +29,8 @@ from torch import nn
 from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
-from peft.tuners.xlora.config import XLoraConfig
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils.peft_types import PeftType
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -168,7 +168,7 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-        if isinstance(peft_config[adapter_name], XLoraConfig):
+        if peft_config[adapter_name].peft_type == PeftType.XLORA:
             self.inject_adapter(self.model, adapter_name, has_target_modules=False)
         else:
             self.inject_adapter(self.model, adapter_name)
