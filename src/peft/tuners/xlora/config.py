@@ -75,7 +75,6 @@ class XLoraConfig(PeftConfig):
         assert self.device is not None
         assert self.adapters is not None
         self.peft_type = PeftType.XLORA
-        self.target_modules = None
 
         if self.enable_softmax_topk and self.top_k_lora is None:
             warnings.warn("`enable_softmax_topk` enabled `top_k_lora` is not set")
