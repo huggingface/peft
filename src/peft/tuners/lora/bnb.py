@@ -367,7 +367,7 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "lora." + rep
 
-    class bnbEmbedding4bit(torch.nn.Embedding):
+    class bnbEmbedding4bit(torch.nn.Embedding): # WORK IN PROGRESS
         def __init__(self):
             raise NotImplementedError
 
@@ -445,7 +445,7 @@ if is_bnb_4bit_available():
 
             return emb
 
-    def quantize_embedding(model, target_module: Union[str, List[str]]):
+    def quantize_embedding(model, target_module: Union[str, List[str]]): # WORK IN PROGRESS
         """
         Helper function to quantize the target embedding module of type nn.Embedding using helper class bnbEmbedding4bit
 
