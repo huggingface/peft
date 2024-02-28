@@ -464,7 +464,8 @@ if is_bnb_4bit_available():
                 if target_name == name:
                     if not isinstance(module, torch.nn.Embedding):
                         raise TypeError(f"Target module name {target_name} is of type {type(module)}. Expected torch.nn.Embedding.")  
-                    quant_emb_layer = bnbEmbedding4bit(module.num_embeddings, module.embedding_dim) # initialize with bnbEmbedding4bit
+                    # initialize with bnbEmbedding4bit
+                    quant_emb_layer = bnbEmbedding4bit(module.num_embeddings, module.embedding_dim)
                     # now, set the weights of the embedding layer to pretrained ones
                     quant_emb_layer.weights = Params4bit(module.weight, requires_grad=False)  # TODO: Should requires_grad be False or True? Depends on original model grad setting, right?
                     setattr(model, name, quant_emb_layer)
