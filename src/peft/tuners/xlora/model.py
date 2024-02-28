@@ -178,17 +178,17 @@ class XLoraModel(LoraModel):
         # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
         self._freeze_all_adapters()
         return res
-    
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         active_adapters = []
         copy = self.active_adapters.copy()
         for name in self.active_adapters:
             if not isinstance(self.peft_config[name], XLoraConfig):
                 active_adapters.append(name)
-
+        self.active_adapter = active_adapters
         super()._mark_only_adapters_as_trainable(model)
 
-        self.active_adapters = copy
+        self.active_adapter = copy
 
     def _save_pretrained_hook(
         self,
