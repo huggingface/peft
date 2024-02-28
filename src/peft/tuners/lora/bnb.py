@@ -393,10 +393,10 @@ if is_bnb_4bit_available():
                 # to this type for speed and stability
                 self.compute_dtype = x.dtype
             elif x.dtype == torch.float16:
-                # we take the compoute dtype passed into the layer
+                # we take the compute dtype passed into the layer
                 if self.compute_dtype == torch.float32 and (x.numel() == x.shape[-1]):
-                    # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
-                    # warn the user about this
+                    # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference 
+                    # when it could be fast warn the user about this
                     warnings.warn('Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.')
                     warnings.filterwarnings('ignore', message='.*inference.')
                 if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
@@ -445,6 +445,40 @@ if is_bnb_4bit_available():
 
             return emb
 
+    def quantize_embedding(model, target_module: Union[str, List[str]]):
+        """
+        Helper function to quantize the target embedding module of type nn.Embedding using helper class bnbEmbedding4bit
+
+        Args:
+            model:
+                The base transformers model whose Embedding layer will be quantized
+            target_emb_module (`Union[str, List[str]]):
+                Names of the target modules in the model - can be a single name or list of names
+        """
+        if isinstance(target_module, str):
+            target_module = [target_module]
+        
+        def replace_layer(model, target_name): # recursive search and replace
+            nonlocal module_found
+            for name, module in model.named_children():
+                if target_name == name:
+                    if not isinstance(module, torch.nn.Embedding):
+                        raise TypeError(f"Target module name {target_name} is of type {type(module)}. Expected torch.nn.Embedding.")  
+                    quant_emb_layer = bnbEmbedding4bit(module.num_embeddings, module.embedding_dim) # initialize with bnbEmbedding4bit
+                    # now, set the weights of the embedding layer to pretrained ones
+                    quant_emb_layer.weights = Params4bit(module.weight, requires_grad=False)  # TODO: Should requires_grad be False or True? Depends on original model grad setting, right?
+                    setattr(model, name, quant_emb_layer)
+                    module_found = True
+                else:
+                    replace_layer(module, target_name) # recurse into model
+
+        for idx, target_module_name in enumerate(target_module):
+            module_found = False # tracks if a replacement for this target happened or not
+            if not isinstance(target_module_name, str): # check name is of type string 
+                raise TypeError(f"Target module name at position {idx} is of type {type(target_module_name)}. Expected str.")
+            replace_layer(model, target_module_name)
+            if not module_found:
+                raise NameError(f"Target module name {target_module_name} was not found in the model.")
 
 
     class Embedding4bit(torch.nn.Module, LoraLayer):  # WORK IN PROGRESS
