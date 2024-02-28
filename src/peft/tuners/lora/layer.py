@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import builtins
 import math
 import warnings
 from typing import Any, List, Optional, Union
@@ -22,11 +23,12 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.tuners.xlora.classifier import Number
-from peft.tuners.xlora.insertion import XLoraLayer
 from peft.utils.other import transpose
 
 from .config import LoraConfig
+
+
+Number = Union[builtins.int, builtins.float, builtins.bool]
 
 
 class LoraLayer(BaseTunerLayer):
@@ -305,7 +307,7 @@ class Linear(nn.Module, LoraLayer):
         self,
         x: torch.Tensor,
         *args: Any,
-        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_layer=None,
         _xlora_scalings: Optional[torch.Tensor] = None,
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs: Any,
@@ -496,7 +498,7 @@ class Embedding(nn.Module, LoraLayer):
         self,
         x: torch.Tensor,
         *args: Any,
-        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_layer=None,
         _xlora_scalings: Optional[torch.Tensor] = None,
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs: Any,
@@ -689,7 +691,7 @@ class Conv2d(nn.Module, LoraLayer):
         self,
         x: torch.Tensor,
         *args,
-        _xlora_layer: Optional[XLoraLayer] = None,
+        _xlora_layer=None,
         _xlora_scalings: Optional[torch.Tensor] = None,
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs,
