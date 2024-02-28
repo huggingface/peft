@@ -662,7 +662,7 @@ if is_bnb_4bit_available():
                 }
             )
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
-        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnb.nn.Embedding):
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnbEmbedding4bit):
             fourbit_kwargs = kwargs.copy()
             fourbit_kwargs.update(
                 {
