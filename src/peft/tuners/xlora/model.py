@@ -172,6 +172,10 @@ class XLoraModel(LoraModel):
                 if "lora_" in name:
                     param.requires_grad = False
 
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        return peft_config
+
     def generate(self, *args, **kwargs):
         # Rely on LoraModel.__getattr__
         res = super().generate(*args, **kwargs)  # type: ignore
