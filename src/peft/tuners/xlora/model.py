@@ -29,7 +29,6 @@ def convert_layers_to_xlora(
         if isinstance(module, lora.LoraLayer):
             new_layer = XLoraLayer(
                 model=base,
-                target=module,
                 target_forward=module.forward,
                 layer_number=total_swapped,
                 config=config,

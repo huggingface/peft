@@ -3,8 +3,6 @@ from typing import Any, Callable
 import torch
 from torch import Tensor, nn
 
-from peft.tuners import lora
-
 from .classifier import XLoraClassifier
 from .config import XLoraConfig
 
@@ -19,14 +17,12 @@ class XLoraLayer:
     def __init__(
         self,
         model: nn.Module,  # PeftModel
-        target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,
         config: XLoraConfig,
     ) -> None:
         self.model = model
         self.target_forward = target_forward
-        self.target = target
         self.layer_number = layer_number
         self.config = config
 
@@ -59,4 +55,4 @@ class XLoraLayer:
         return xlora_scalings
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
-        return self.target.forward(x, *args, **kwargs)
+        return self.target_forward(x, *args, **kwargs)
