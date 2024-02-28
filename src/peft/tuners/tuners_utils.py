@@ -30,7 +30,6 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.peft_types import PeftType
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -168,10 +167,7 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-        if peft_config[adapter_name].peft_type == PeftType.XLORA:
-            self.inject_adapter(self.model, adapter_name, has_target_modules=False)
-        else:
-            self.inject_adapter(self.model, adapter_name)
+        self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
@@ -283,6 +279,7 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
+<<<<<<< HEAD
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
 
@@ -290,6 +287,8 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
+=======
+>>>>>>> cddc00f (Make a nicer check for having target_modules)
     def inject_adapter(self, model: nn.Module, adapter_name: str):
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
@@ -323,7 +322,7 @@ class BaseTuner(nn.Module, ABC):
         key_list = [key for key, _ in model.named_modules()]
 
         # update peft_config.target_modules if required
-        if has_target_modules:
+        if hasattr(peft_config, "target_modules"):
             peft_config = _maybe_include_all_linear_layers(peft_config, model)
 
         for key in key_list:
@@ -351,7 +350,7 @@ class BaseTuner(nn.Module, ABC):
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        if not is_target_modules_in_base_model:
+        if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
             raise ValueError(
                 f"Target modules {peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
