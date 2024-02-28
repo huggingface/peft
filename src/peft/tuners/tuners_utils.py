@@ -167,7 +167,8 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-        self.inject_adapter(self.model, adapter_name)
+        if hasattr(peft_config, "target_modules"):
+            self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
@@ -322,8 +323,7 @@ class BaseTuner(nn.Module, ABC):
         key_list = [key for key, _ in model.named_modules()]
 
         # update peft_config.target_modules if required
-        if hasattr(peft_config, "target_modules"):
-            peft_config = _maybe_include_all_linear_layers(peft_config, model)
+        peft_config = _maybe_include_all_linear_layers(peft_config, model)
 
         for key in key_list:
             # Check for modules_to_save in case
@@ -350,7 +350,7 @@ class BaseTuner(nn.Module, ABC):
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
+        if not is_target_modules_in_base_model:
             raise ValueError(
                 f"Target modules {peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
