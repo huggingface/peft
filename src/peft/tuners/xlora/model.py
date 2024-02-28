@@ -176,7 +176,7 @@ class XLoraModel(LoraModel):
     def _prepare_adapter_config(peft_config, model_config):
         return peft_config
 
-    def check_target_module_exists(config, key: str) -> bool:
+    def _check_target_module_exists(config, key: str) -> bool:
         return False
 
     def generate(self, *args, **kwargs):
