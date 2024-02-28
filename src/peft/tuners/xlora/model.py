@@ -121,6 +121,7 @@ class XLoraModel(LoraModel):
         self.delete_adapter(adapter_name)
 
         self.set_adapter(list(peft_config.adapters.keys()))
+        model_peft.active_adapter = name
         model_peft.peft_type = PeftType.XLORA
 
         def hook(module, *args, **kwargs) -> None:
