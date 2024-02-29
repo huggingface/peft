@@ -167,7 +167,7 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-        if hasattr(peft_config, "target_modules"):
+        if hasattr(peft_config[adapter_name], "target_modules"):
             self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
