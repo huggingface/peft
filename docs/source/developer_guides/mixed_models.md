@@ -10,13 +10,11 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# Working with mixed adapter types
+# Mixed adapter types
 
-Normally, it is not possible to mix different adapter types in 🤗 PEFT. For example, even though it is possible to create a PEFT model that has two different LoRA adapters (that can have different config options), it is not possible to combine a LoRA adapter with a LoHa adapter. However, by using a mixed model, this works as long as the adapter types are compatible.
+Normally, it isn't possible to mix different adapter types in 🤗 PEFT. You can create a PEFT model with two different LoRA adapters (which can have different config options), but it is not possible to combine a LoRA and LoHa adapter. With [`PeftMixedModel`] however, this works as long as the adapter types are compatible. The main purpose of allowing mixed adapter types is to combine trained adapters for inference. While it is possible to train a mixed adapter model, this has not been tested and is not recommended.
 
-## Loading different adapter types into a PEFT model
-
-To load different adapter types into a PEFT model, proceed the same as if you were loading two adapters of the same type, but use `PeftMixedModel` instead of `PeftModel`:
+To load different adapter types into a PEFT model, use [`PeftMixedModel`] instead of [`PeftModel`]:
 
 ```py
 from peft import PeftMixedModel
@@ -28,12 +26,12 @@ peft_model.load_adapter(<path_to_adapter2>, adapter_name="other")
 peft_model.set_adapter(["default", "other"])
 ```
 
-The last line is necessary if you want to activate both adapters, otherwise, only the first adapter would be active. Of course, you can add more different adapters by calling `add_adapter` repeatedly.
+The [`~PeftMixedModel.set_adapter`] method is necessary to activate both adapters, otherwise only the first adapter would be active. You can keep adding more adapters by calling [`~PeftModel.add_adapter`] repeatedly.
 
-Currently, the main purpose of mixed adapter types is to combine trained adapters for inference. Although it is technically also possible to train a mixed adapter model, this has not been tested and is not recommended.
+[`PeftMixedModel`] does not support saving and loading mixed adapters. The adapters should already be trained, and loading the model requires a script to be run each time.
 
 ## Tips
 
-- Not all adapter types can be combined. See `peft.tuners.mixed.COMPATIBLE_TUNER_TYPES` for a list of compatible types. An error will be raised if you are trying to combine incompatible adapter types.
-- It is possible to mix multiple adapters of the same type. This can be useful to combine adapters with very different configs.
-- If you want to combine a lot of different adapters, it is most performant to add the same types of adapters consecutively. E.g., add LoRA1, LoRA2, LoHa1, LoHa2 in this order, instead of LoRA1, LoHa1, LoRA2, LoHa2. The order will make a difference for the outcome in most cases, but since no order is better a priori, it is best to choose the order that is most performant.
+- Not all adapter types can be combined. See [`peft.tuners.mixed.COMPATIBLE_TUNER_TYPES`](https://github.com/huggingface/peft/blob/1c1c7fdaa6e6abaa53939b865dee1eded82ad032/src/peft/tuners/mixed/model.py#L35) for a list of compatible types. An error will be raised if you try to combine incompatible adapter types.
+- It is possible to mix multiple adapters of the same type which can be useful for combining adapters with very different configs.
+- If you want to combine a lot of different adapters, the most performant way to do it is to consecutively add the same adapter types. For example, add LoRA1, LoRA2, LoHa1, LoHa2 in this order, instead of LoRA1, LoHa1, LoRA2, and LoHa2. While the order can affect the output, there is no inherently *best* order, so it is best to choose the fastest one.

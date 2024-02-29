@@ -54,7 +54,7 @@ class TestPoly(unittest.TestCase):
 
         # generate some dummy data
         text = os.__doc__.splitlines()
-        self.assertTrue(len(text) > 10)
+        assert len(text) > 10
         inputs = tokenizer(text, return_tensors="pt", padding=True)
         inputs["task_ids"] = torch.arange(len(text)) % n_tasks
         inputs["labels"] = tokenizer((["A", "B"] * 100)[: len(text)], return_tensors="pt")["input_ids"]
@@ -72,7 +72,7 @@ class TestPoly(unittest.TestCase):
             losses.append(loss.item())
 
         # loss improved by at least 50%
-        self.assertLess(losses[-1], 0.5 * losses[0])
+        assert losses[-1] < (0.5 * losses[0])
 
         # check that saving and loading works
         torch.manual_seed(0)
@@ -84,8 +84,8 @@ class TestPoly(unittest.TestCase):
             logits_disabled = model(**inputs).logits
             tokens_disabled = model.generate(**inputs)
 
-        self.assertFalse(torch.allclose(logits_before, logits_disabled, atol=atol, rtol=rtol))
-        self.assertFalse(torch.allclose(tokens_before, tokens_disabled, atol=atol, rtol=rtol))
+        assert not torch.allclose(logits_before, logits_disabled, atol=atol, rtol=rtol)
+        assert not torch.allclose(tokens_before, tokens_disabled, atol=atol, rtol=rtol)
 
         # saving and loading
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -96,5 +96,5 @@ class TestPoly(unittest.TestCase):
         torch.manual_seed(0)
         output_after = loaded(**inputs).logits
         tokens_after = loaded.generate(**inputs)
-        self.assertTrue(torch.allclose(logits_before, output_after, atol=atol, rtol=rtol))
-        self.assertTrue(torch.allclose(tokens_before, tokens_after, atol=atol, rtol=rtol))
+        assert torch.allclose(logits_before, output_after, atol=atol, rtol=rtol)
+        assert torch.allclose(tokens_before, tokens_after, atol=atol, rtol=rtol)
