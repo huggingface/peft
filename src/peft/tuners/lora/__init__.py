@@ -39,6 +39,11 @@ def __getattr__(name):
 
         return Embedding4bit
     
+    if (name == "bnbEmbedding4bit") and is_bnb_4bit_available():
+        from .bnb import bnbEmbedding4bit
+
+        return bnbEmbedding4bit
+
     if (name == "quantize_embedding") and is_bnb_4bit_available():
         from .bnb import quantize_embedding
 
