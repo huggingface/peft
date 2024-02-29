@@ -38,5 +38,10 @@ def __getattr__(name):
         from .bnb import Embedding4bit
 
         return Embedding4bit
+    
+    if (name == "quantize_embedding") and is_bnb_4bit_available():
+        from .bnb import quantize_embedding
+
+        return quantize_embedding
 
     raise AttributeError(f"module {__name__} has no attribute {name}")
