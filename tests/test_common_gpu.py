@@ -751,3 +751,80 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir, safe_serialization=True)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_dora(self):
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+
+        torch.manual_seed(0)
+        config_lora = LoraConfig(r=8, init_lora_weights=False, use_dora=False)
+        model = get_peft_model(model, config_lora)
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        out_lora = model(random_input).logits
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        torch.manual_seed(0)
+        config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
+        model = get_peft_model(model, config_dora)
+
+        out_dora = model(random_input).logits
+
+        # tolerances are pretty high because some deviations are expected with quantization
+        atol = 1e-6
+        rtol = 1e-6
+        assert torch.allclose(out_lora, out_dora, atol=atol, rtol=rtol)
+        # sanity check
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_dora(self):
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_8bit=True,
+            torch_dtype=torch.float32,
+        )
+
+        torch.manual_seed(0)
+        config_lora = LoraConfig(r=8, init_lora_weights=False, use_dora=False)
+        model = get_peft_model(model, config_lora)
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        out_lora = model(random_input).logits
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_8bit=True,
+            torch_dtype=torch.float32,
+        )
+        torch.manual_seed(0)
+        config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
+        model = get_peft_model(model, config_dora)
+
+        out_dora = model(random_input).logits
+
+        # tolerances are pretty high because some deviations are expected with quantization
+        atol = 1e-6
+        rtol = 1e-6
+        assert torch.allclose(out_lora, out_dora, atol=atol, rtol=rtol)
+        # sanity check
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
