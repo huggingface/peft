@@ -368,10 +368,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         quantize_embedding(opt_4bit, ["embed_tokens"])
         quantize_embedding(whisper_4bit, ["embed_tokens"])
 
-        # Embedding4bit: Have to specify embed_tokens again in quantize_embeddings
-        # This arises from the fact that get_peft_model only dispatches for `target_modules` in the LoraConfig
-        # So unless "embed_tokens" is a target, the bnbEmbedding4bit (quantized embeddings) won't be converted
-        # to Embedding4bit
+        # Embedding4bit: Have to specify embed_tokens again in quantize_embedding. This is because
+        # `get_peft_model` only dispatches for `target_modules` in the LoraConfig. So unless "embed_tokens"
+        # is a target, the bnbEmbedding4bit (quantized embeddings) won't be converted to Embedding4bit
 
         flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
         assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear4bit)
