@@ -364,7 +364,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             lora_dropout=0.05, 
             bias="none")
 
-        quantize_embedding(flan_4bit, ["embed_tokens"])
+        quantize_embedding(flan_4bit, ["embed_tokens"]) # should be used before get_peft_model
         quantize_embedding(opt_4bit, ["embed_tokens"])
         quantize_embedding(whisper_4bit, ["embed_tokens"])
 

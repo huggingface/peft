@@ -497,6 +497,7 @@ if is_bnb_4bit_available():
                     quant_emb_layer = bnbEmbedding4bit(module.num_embeddings, module.embedding_dim)
                     # now, set the weights of the embedding layer to pretrained ones
                     quant_emb_layer.weights = Params4bit(module.weight, requires_grad=False)  # TODO: Should requires_grad be False or True? Depends on original model grad setting, right?
+                    quant_emb_layer.to(model.device.type)
                     setattr(model, name, quant_emb_layer)
                     module_found = True
                 else:
