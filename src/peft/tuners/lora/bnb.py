@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -172,7 +171,7 @@ if is_bnb_available():
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
-                    result += output
+                    result = result + output
 
             return result
 
@@ -333,7 +332,7 @@ if is_bnb_4bit_available():
                     if requires_conversion:
                         output = output.to(expected_dtype)
                     output = output * scaling
-                    result += output
+                    result = result + output
 
             return result
 

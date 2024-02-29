@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,7 +48,7 @@ def is_optimum_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
 
 
-@lru_cache()
+@lru_cache
 def is_torch_tpu_available(check_device=True):
     "Checks if `torch_xla` is installed and potentially if a TPU is in the environment"
     if importlib.util.find_spec("torch_xla") is not None:
@@ -64,3 +63,11 @@ def is_torch_tpu_available(check_device=True):
                 return False
         return True
     return False
+
+
+def is_aqlm_available():
+    return importlib.util.find_spec("aqlm") is not None
+
+
+def is_auto_awq_available():
+    return importlib.util.find_spec("awq") is not None

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -50,7 +49,7 @@ class OFTConfig(LycorisConfig):
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         coft (`bool`):
-            Whether to use the constrainted variant of OFT or not, off by default.
+            Whether to use the constrained variant of OFT or not, off by default.
         eps (`float`):
             The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
         block_share (`bool`):
@@ -100,7 +99,7 @@ class OFTConfig(LycorisConfig):
     )
     coft: bool = field(
         default=False,
-        metadata={"help": "Whether to use the constrainted variant of OFT or not."},
+        metadata={"help": "Whether to use the constrained variant of OFT or not."},
     )
     eps: float = field(
         default=6e-5,
