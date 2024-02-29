@@ -487,21 +487,18 @@ if is_bnb_4bit_available():
         if isinstance(target_module, str):
             target_module = [target_module]
         
-        def replace_layer(model, target_name, device=None): # recursive search and replace
+        def replace_layer(parent_module, target_name): # recursive search and replace
             nonlocal module_found
-            if not device:
-                device = model.parameters().__next__().device # get device of model
-                
-            for name, module in model.named_children():
+            for name, module in parent_module.named_children():
                 if target_name == name:
                     if not isinstance(module, torch.nn.Embedding):
                         raise TypeError(f"Target module name {target_name} is of type {type(module)}. Expected torch.nn.Embedding.")  
                     # initialize with bnbEmbedding4bit
                     quant_emb_layer = bnbEmbedding4bit(module.num_embeddings, module.embedding_dim)
                     # now, set the weights of the embedding layer to pretrained ones
-                    quant_emb_layer.weights = Params4bit(module.weight, requires_grad=False)  # TODO: Should requires_grad be False or True? Depends on original model grad setting, right?
-                    quant_emb_layer.to(device)
-                    setattr(model, name, quant_emb_layer)
+                    quant_emb_layer.weights = Params4bit(module.weight, requires_grad=False)  # TODO: Should requires_grad be False or True? Depends on parent_module's grad setting, right?
+                    quant_emb_layer.to(torch.device('cuda')) # since quantization can only be done with GPU for now
+                    setattr(parent_module, name, quant_emb_layer)
                     module_found = True
                 else:
                     replace_layer(module, target_name) # recurse into model
