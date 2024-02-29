@@ -55,6 +55,7 @@ if is_bnb_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
         from peft.tuners.lora import Embedding4bit as LoraEmbedding4bit
+        from peft.tuners.lora import bnbEmbedding4bit, quantize_embedding
 
 
 @require_torch_gpu
