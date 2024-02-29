@@ -321,7 +321,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     def test_lora_bnb_4bit_quantization(self):
         r"""
-        Test that tests if the 4bit quantization for Linear and Embedding using LoRA works as expected
+        Tests if the 4bit quantization for Linear and Embedding using LoRA works as expected
         """
         whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
             self.audio_model_id,
