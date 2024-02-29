@@ -368,6 +368,7 @@ if is_bnb_4bit_available():
             return "lora." + rep
 
     class bnbEmbedding4bit(torch.nn.Embedding): # WORK IN PROGRESS
+        # Adapted from bnb.nn.Linear4bit
         def __init__(
                 self,
                 num_embeddings: int,
@@ -473,7 +474,7 @@ if is_bnb_4bit_available():
 
             return emb
 
-    def quantize_embedding(model, target_module: Union[str, List[str]]): # WORK IN PROGRESS
+    def quantize_embedding(model, target_module: Union[str, List[str]]) -> None: # WORK IN PROGRESS
         """
         Helper function to quantize the target embedding module of type nn.Embedding using helper class bnbEmbedding4bit
 
@@ -521,12 +522,24 @@ if is_bnb_4bit_available():
             lora_dropout: float = 0.0,
             init_lora_weights: Union[bool, str] = True,
             use_rslora: bool = False,
+            use_dora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer, **kwargs)
+            
+            if use_dora:
+                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+            self.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                use_dora=use_dora,
+            )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
