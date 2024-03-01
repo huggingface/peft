@@ -2,7 +2,6 @@
 # Only used by `hf-doc-builder´.
 line-length = 119
 target-version = ['py38']
-experimental-string-processing = true
 
 [tool.ruff]
 target-version = "py38"
