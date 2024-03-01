@@ -44,7 +44,7 @@
 
 - title: 🤗 Accelerate integrations
   sections:
-  - local: accelerate/deepspeed-zero3-offload
+  - local: accelerate/deepspeed
     title: DeepSpeed
   - local: accelerate/fsdp
     title: Fully Sharded Data Parallel

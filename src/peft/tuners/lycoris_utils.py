@@ -128,9 +128,8 @@ class LycorisLayer(BaseTunerLayer):
         for active_adapter in adapter_names:
             if active_adapter in self._available_adapters:
                 base_layer = self.get_base_layer()
-
                 if safe_merge:
-                    orig_weights = base_layer.weight.data
+                    orig_weights = base_layer.weight.data.clone()
                     orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():

@@ -28,6 +28,8 @@ from diffusers import StableDiffusionPipeline
 from peft import (
     AdaLoraConfig,
     IA3Config,
+    LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     PeftModel,
     PeftType,
@@ -431,7 +433,7 @@ class PeftCommonTester:
             assert model_from_pretrained.peft_config["default"] is config
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig):
             # Merge layers only supported for LoRA and IA³
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -452,7 +454,7 @@ class PeftCommonTester:
         _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig):
             # Merge layers only supported for LoRA and IA³
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -647,6 +649,30 @@ class PeftCommonTester:
         logits_1 = model(**self.prepare_inputs_for_testing())[0]
 
         assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
+
+    def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = model.to(self.torch_device).eval()
+
+        inputs = self.prepare_inputs_for_testing()
+        logits_base = model(**inputs)[0]
+
+        model = get_peft_model(model, config).eval()
+        logits_peft = model(**inputs)[0]
+
+        # sanity check that the logits are different
+        assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
+
+        model_unloaded = model.merge_and_unload(safe_merge=True)
+        logits_unloaded = model_unloaded(**inputs)[0]
+
+        # check that the logits are the same after unloading
+        assert torch.allclose(logits_peft, logits_unloaded, atol=1e-6, rtol=1e-6)
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
@@ -1281,6 +1307,11 @@ class PeftCommonTester:
             with peft_model.disable_adapter():
                 output_peft_disabled = get_output(peft_model)
             assert torch.allclose(output_before, output_peft_disabled, atol=1e-6, rtol=1e-6)
+
+            # after leaving the disable_adapter context, the output should be the same as with enabled adapter again
+            # see #1501
+            output_peft_after_disabled = get_output(peft_model)
+            assert torch.allclose(output_peft, output_peft_after_disabled, atol=1e-6, rtol=1e-6)
 
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
 
