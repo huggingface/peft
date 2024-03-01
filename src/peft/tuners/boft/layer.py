@@ -23,7 +23,7 @@ import torch.nn.functional as F
 from torch.utils.cpp_extension import load, CUDA_HOME
 from torch.autograd import Function
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
 import os
@@ -401,16 +401,12 @@ class Linear(nn.Module, BOFTLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
-        if adapter_names is None:
-            adapter_names = self.active_adapters
-
-        for active_adapter in self.active_adapters:
+        for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:
@@ -499,8 +495,15 @@ class Linear(nn.Module, BOFTLayer):
         I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
         # Perform the Cayley parametrization
+<<<<<<< HEAD
+        Q = torch.linalg.solve(I + skew, I - skew, left=False)
+=======
+<<<<<<< HEAD
+        Q = torch.linalg.solve(I + skew, I - skew, left=False)
+=======
         Q = torch.bmm(I - skew, torch.inverse(I + skew))
-        # Q = torch.linalg.solve(I + skew, I - skew, left=False)
+>>>>>>> c89892eb00a5a9fa5cd1f482f60e03ce85dbf468
+>>>>>>> 1963f6f36df37da7fd5f568acee6c52299c011fa
 
         return Q
 
@@ -736,16 +739,12 @@ class Conv2d(nn.Module, BOFTLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
-        if adapter_names is None:
-            adapter_names = self.active_adapters
-
-        for active_adapter in self.active_adapters:
+        for active_adapter in adapter_names:
             if active_adapter in self.boft_R.keys():
                 base_layer = self.get_base_layer()
                 if safe_merge:
@@ -839,8 +838,7 @@ class Conv2d(nn.Module, BOFTLayer):
         I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
         # Perform the Cayley parametrization
-        Q = torch.bmm(I - skew, torch.inverse(I + skew))
-        # Q = torch.linalg.solve(I + skew, I - skew, left=False)
+        Q = torch.linalg.solve(I + skew, I - skew, left=False)
 
         return Q
 
