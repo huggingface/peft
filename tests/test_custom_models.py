@@ -562,6 +562,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
+        elif issubclass(config_cls, BOFTConfig):
+            config_kwargs["init_boft_weights"] = False
         else:
             config_kwargs["init_weights"] = False
         self._test_safe_merge(model_id, config_cls, config_kwargs)
