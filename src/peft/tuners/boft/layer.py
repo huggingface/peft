@@ -495,7 +495,15 @@ class Linear(nn.Module, BOFTLayer):
         I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
         # Perform the Cayley parametrization
+<<<<<<< HEAD
         Q = torch.linalg.solve(I + skew, I - skew, left=False)
+=======
+<<<<<<< HEAD
+        Q = torch.linalg.solve(I + skew, I - skew, left=False)
+=======
+        Q = torch.bmm(I - skew, torch.inverse(I + skew))
+>>>>>>> c89892eb00a5a9fa5cd1f482f60e03ce85dbf468
+>>>>>>> 1963f6f36df37da7fd5f568acee6c52299c011fa
 
         return Q
 
