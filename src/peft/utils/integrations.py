@@ -39,12 +39,15 @@ def gather_params_ctx(module: torch.nn.Module, modifier_rank: int = 0):
     return
 
 
-def dequantize_bnb_weight(weight, state=None):
+def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     """
     Helper functin to dequantize 4bit or 8bit weights.
 
     If the weight is not a bnb quantized weight, it will be returned as is.
     """
+    if not isinstance(weight, torch.nn.Parameter):
+        raise TypeError(f"Input weight should be of type nn.Parameter, got {type(weight)} instead")
+
     cls_name = weight.__class__.__name__
     if cls_name not in ("Params4bit", "Int8Params"):
         return weight

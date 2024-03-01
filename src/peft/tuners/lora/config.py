@@ -258,8 +258,8 @@ class LoraConfig(PeftConfig):
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
 
-        if self.use_dora and (self.megatron_config or self.init_lora_weights == "loftq"):
-            raise ValueError("DoRA does not support megatron_core or LoftQ. Please set `use_dora=False`.")
+        if self.use_dora and self.megatron_config:
+            raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":

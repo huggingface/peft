@@ -79,11 +79,6 @@ if is_bnb_available():
                 if active_adapter not in self.lora_A.keys():
                     continue
 
-                if self.use_dora[active_adapter]:
-                    raise ValueError(
-                        f"{self.__class__.__name__} does not support merging with use_dora=True yet, please set it to False"
-                    )
-
                 warnings.warn(
                     "Merge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
@@ -97,7 +92,19 @@ if is_bnb_available():
                 # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
                 # dequantization directly
                 output = dequantize_bnb_weight(weight, state=state)
-                w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
+                if not self.use_dora[active_adapter]:
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
+                else:
+                    # handle dora
+                    # since output already includes scaling, set it to 1 here
+                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    # We need to cache weight_norm because it has to be based on the original weights. We
+                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                    # different value
+                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
+
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -132,7 +139,13 @@ if is_bnb_available():
                     state.SCB = weight.SCB
                 output = dequantize_bnb_weight(weight, state=state)
 
-                w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
+                if not self.use_dora[active_adapter]:
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
+
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
@@ -263,11 +276,6 @@ if is_bnb_4bit_available():
                 if active_adapter not in self.lora_A.keys():
                     continue
 
-                if self.use_dora[active_adapter]:
-                    raise ValueError(
-                        f"{self.__class__.__name__} does not support merging with use_dora=True yet, please set it to False"
-                    )
-
                 warnings.warn(
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
@@ -276,7 +284,20 @@ if is_bnb_4bit_available():
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
 
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                output = dequantize_bnb_weight(weight, state=weight.quant_state)
+                if not self.use_dora[active_adapter]:
+                    w_data = output + lora_data
+                else:
+                    # handle dora
+                    # since output already includes scaling, set it to 1 here
+                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    # We need to cache weight_norm because it has to be based on the original weights. We
+                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                    # different value
+                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
+
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -303,10 +324,19 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
+
+                lora_data = self.get_delta_weight(active_adapter)
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
-                lora_data = self.get_delta_weight(active_adapter)
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                output = dequantize_bnb_weight(weight, state=weight.quant_state)
+
+                if not self.use_dora[active_adapter]:
+                    w_data = output - lora_data
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
+
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
