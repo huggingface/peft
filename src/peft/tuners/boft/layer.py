@@ -180,7 +180,7 @@ class BOFTLayer(BaseTunerLayer):
         pass
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
+        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
     ):
         """
         Update the linear layer with trainable BOFT weights. Override for other layer types.
@@ -268,7 +268,7 @@ class BOFTLayer(BaseTunerLayer):
         )
         self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
 
-        self.reset_boft_parameters(adapter_name, init_boft_weights)
+        self.reset_boft_parameters(adapter_name, init_weights)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
@@ -283,22 +283,22 @@ class BOFTLayer(BaseTunerLayer):
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
 
-    def reset_boft_parameters(self, adapter_name, init_boft_weights):
+    def reset_boft_parameters(self, adapter_name, init_weights):
         """
         Reset the BOFT parameters.
         """
-        if init_boft_weights is False:
+        if init_weights is False:
             nn.init.normal_(self.boft_R[adapter_name], mean=0.0, std=0.1)
             nn.init.normal_(self.boft_s[adapter_name], mean=1.0, std=0.1)
             return
 
         if adapter_name in self.boft_R.keys():
-            if init_boft_weights is True:
+            if init_weights is True:
                 # initialize R to zero
                 nn.init.zeros_(self.boft_R[adapter_name])
                 nn.init.ones_(self.boft_s[adapter_name])
             else:
-                raise ValueError(f"Unknown initialization {init_boft_weights=}") 
+                raise ValueError(f"Unknown initialization {init_weights=}") 
 
     def perm2mat(self, indices):
         """
@@ -373,7 +373,7 @@ class Linear(nn.Module, BOFTLayer):
         boft_n_butterfly_factor: int = 0,
         boft_dropout: float = 0.1,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_boft_weights: Union[bool, str] = True,
+        init_weights: Union[bool, str] = True,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
     ) -> None:
@@ -384,7 +384,7 @@ class Linear(nn.Module, BOFTLayer):
         self._active_adapter = adapter_name
 
         self.update_layer(
-            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
+            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -454,7 +454,7 @@ class Linear(nn.Module, BOFTLayer):
 
                 self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
 
-    def get_delta_weight(self, adapter) -> torch.Tensor:
+    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 
@@ -495,15 +495,7 @@ class Linear(nn.Module, BOFTLayer):
         I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
 
         # Perform the Cayley parametrization
-<<<<<<< HEAD
         Q = torch.linalg.solve(I + skew, I - skew, left=False)
-=======
-<<<<<<< HEAD
-        Q = torch.linalg.solve(I + skew, I - skew, left=False)
-=======
-        Q = torch.bmm(I - skew, torch.inverse(I + skew))
->>>>>>> c89892eb00a5a9fa5cd1f482f60e03ce85dbf468
->>>>>>> 1963f6f36df37da7fd5f568acee6c52299c011fa
 
         return Q
 
@@ -607,7 +599,7 @@ class Conv2d(nn.Module, BOFTLayer):
         boft_block_num: int = 0,
         boft_n_butterfly_factor: int = 0,
         boft_dropout: float = 0.1,
-        init_boft_weights: Union[bool, str] = True,
+        init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -615,11 +607,11 @@ class Conv2d(nn.Module, BOFTLayer):
 
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
+            adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_boft_weights
+        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
     ):
         """
         Update the linear layer with trainable BOFT weights.
@@ -711,7 +703,7 @@ class Conv2d(nn.Module, BOFTLayer):
         )
         self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
 
-        self.reset_boft_parameters(adapter_name, init_boft_weights)
+        self.reset_boft_parameters(adapter_name, init_weights)
 
         weight = getattr(self, "weight", None)
         if weight is not None:
@@ -796,7 +788,7 @@ class Conv2d(nn.Module, BOFTLayer):
                 self.get_base_layer().weight.data = orig_weight
 
 
-    def get_delta_weight(self, adapter) -> torch.Tensor:
+    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 

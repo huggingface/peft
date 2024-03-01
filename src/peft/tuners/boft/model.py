@@ -128,7 +128,7 @@ class BOFTModel(BaseTuner):
             "boft_n_butterfly_factor": boft_config.boft_n_butterfly_factor,
             "boft_dropout": boft_config.boft_dropout,
             "fan_in_fan_out": boft_config.fan_in_fan_out,
-            "init_boft_weights": boft_config.init_boft_weights,
+            "init_weights": boft_config.init_weights,
         }
         kwargs["bias"] = bias
 
@@ -146,7 +146,7 @@ class BOFTModel(BaseTuner):
                 boft_config.boft_block_num,
                 boft_config.boft_n_butterfly_factor,
                 boft_config.boft_dropout,
-                boft_config.init_boft_weights,
+                boft_config.init_weights,
             )
 
     def _replace_module(self, parent, child_name, new_module, child):

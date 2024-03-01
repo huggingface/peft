@@ -95,7 +95,7 @@ class BOFTConfig(PeftConfig):
             ),
         },
     )
-    init_boft_weights: bool = field(
+    init_weights: bool = field(
         default=True,
         metadata={
             "help": (
