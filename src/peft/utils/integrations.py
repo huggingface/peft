@@ -41,7 +41,7 @@ def gather_params_ctx(module: torch.nn.Module, modifier_rank: int = 0):
 
 def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     """
-    Helper functin to dequantize 4bit or 8bit weights.
+    Helper function to dequantize 4bit or 8bit bnb weights.
 
     If the weight is not a bnb quantized weight, it will be returned as is.
     """
