@@ -55,4 +55,12 @@ class XLoraLayer:
         return xlora_scalings
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
-        return self.target_forward(x, *args, **kwargs)
+        scalings = self.get_maybe_topk_scalings()
+        return self.target_forward(
+            x,
+            *args,
+            _xlora_layer=self,
+            _xlora_scalings=scalings,
+            _xlora_scaling_weight=self.config.global_scaling_weight,
+            **kwargs,
+        )
