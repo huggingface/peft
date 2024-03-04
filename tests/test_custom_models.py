@@ -805,6 +805,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
+    def test_weight_bias_attributes(self):
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+        assert hasattr(model.base_model.model.lin0, "weight")
+        assert hasattr(model.base_model.model.lin0, "bias")
+
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
         model = MLP()
