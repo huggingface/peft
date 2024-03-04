@@ -415,6 +415,11 @@ class BaseTunerLayer(ABC):
             weight = base_layer.weight
         return weight
 
+    @property
+    def bias(self) -> torch.Tensor:
+        base_layer = self.get_base_layer()
+        return base_layer.bias
+
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         raise NotImplementedError
 
