@@ -42,16 +42,7 @@ config = LoraConfig(init_lora_weights=False, ...)
 
 ### LoftQ
 
-When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. If you're using LoftQ, *do not* quantize the base model. You should set up a [`LoftQConfig`] instead:
-
-```python
-from peft import LoftQConfig, LoraConfig, get_peft_model
-
-base_model = AutoModelForCausalLM.from_pretrained(...)  # don't quantize here
-loftq_config = LoftQConfig(loftq_bits=4, ...)           # set 4bit quantization
-lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_config)
-peft_model = get_peft_model(base_model, lora_config)
-```
+When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. To use LoftQ, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
 
 <Tip>
 

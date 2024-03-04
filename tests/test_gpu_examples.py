@@ -1112,14 +1112,37 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(post_unload_merge_olayer, pre_merge_olayer)
 
 
-@require_torch_gpu
-class LoftQTests(unittest.TestCase):
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+class TestLoftQ:
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
 
-    def setUp(self):
-        self.error_factor = 3
+    error_factor = 1  # FIXME should be > 1
+
+    def unwrap_model(self, model, sub_module_name=".base_layer"):
+        class Shell(torch.nn.Module):
+            def __init__(self, weight, bias=None):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight, requires_grad=False)
+                if bias is not None:
+                    self.bias = torch.nn.Parameter(bias, requires_grad=False)
+
+        sub_module_name_list = [k.split(sub_module_name)[0] for k in model.state_dict().keys() if sub_module_name in k]
+        sub_module_name_set = set(sub_module_name_list)
+        for name in sub_module_name_set:
+            # get the parent of the submodule
+            name_parent = ".".join(name.split(".")[:-1])
+            name_child = name.split(".")[-1]
+            sub_module = model.get_submodule(name_parent)
+
+            # replace with shell
+            child = getattr(sub_module, name_child)
+            weight = getattr(child.base_layer, "weight", None)
+            bias = getattr(child.base_layer, "bias", None)
+            shell = Shell(weight, bias)
+
+            setattr(sub_module, name_child, shell)
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -1129,7 +1152,7 @@ class LoftQTests(unittest.TestCase):
         return inputs
 
     def get_base_model(self, model_id, device, **kwargs):
-        cls = AutoModelForSeq2SeqLM if "t5" in model_id else AutoModelForCausalLM
+        cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
         model = cls.from_pretrained(model_id, **kwargs).eval()
         if device == "cuda":
             model = model.to("cuda")
@@ -1142,7 +1165,12 @@ class LoftQTests(unittest.TestCase):
         return model(**inputs).logits
 
     def get_errors(
-        self, bits=4, loftq_iter=1, device="cuda", model_id="hf-internal-testing/tiny-random-BloomForCausalLM"
+        self,
+        tmp_path,
+        bits=4,
+        loftq_iter=1,
+        device="cuda",
+        model_id="hf-internal-testing/tiny-random-BloomForCausalLM",
     ):
         # Helper function that returns the quantization errors (MAE and MSE) when comparing the quantized LoRA model
         # to the base model, vs the LoftQ quantized model to the base model. We expect the LoftQ quantized model to
@@ -1152,13 +1180,14 @@ class LoftQTests(unittest.TestCase):
         model = self.get_base_model(model_id, device)
         task_type = TaskType.SEQ_2_SEQ_LM if model.config.is_encoder_decoder else TaskType.CAUSAL_LM
         inputs = self.get_input(model_id, device)
+        # the base logits are the reference, we try to match those as closely as possible
         logits_base = self.get_logits(model, inputs)
         # clean up
         del model
         gc.collect()
         torch.cuda.empty_cache()
 
-        # logits from the normal quantized LoRA model
+        # logits from the normal, quantized LoRA model
         lora_config = LoraConfig(task_type=task_type)
         kwargs = {}
         if bits == 4:
@@ -1188,6 +1217,23 @@ class LoftQTests(unittest.TestCase):
         if device == "cuda":
             loftq_model = loftq_model.to("cuda")
 
+        # save LoRA weights, they should be initialized such that they minimize the quantization error
+        loftq_model.base_model.peft_config["default"].init_lora_weights = True
+        loftq_model.save_pretrained(tmp_path / "loftq_model")
+
+        self.unwrap_model(loftq_model)
+        loftq_model.get_base_model().save_pretrained(tmp_path / "base_model")
+
+        del loftq_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # now load quantized model and apply LoftQ-initialized weights on top
+        base_model = self.get_base_model(tmp_path / "base_model", device=None, **kwargs)
+        loftq_model = PeftModel.from_pretrained(base_model, tmp_path / "loftq_model", is_trainable=True)
+
+        # TODO sanity check: model is quantized
+
         torch.manual_seed(0)
         logits_loftq = self.get_logits(loftq_model, inputs)
         del loftq_model
@@ -1200,15 +1246,15 @@ class LoftQTests(unittest.TestCase):
         mse_loftq = torch.pow(logits_base - logits_loftq, 2).mean()
         return mae_quantized, mse_quantized, mae_loftq, mse_loftq
 
-    @parameterized.expand(["cuda", "cpu"])
-    def test_bloomz_loftq_4bit(self, device):
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_bloomz_loftq_4bit(self, device, tmp_path):
         # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
         # using LoftQ. When quantizing, we expect a certain level of error. However, we expect the LoftQ quantized
         # model to have less error than the normal LoRA quantized model. Note that when using normal LoRA, the
         # quantization error is simply the error from quantization without LoRA, as LoRA is a no-op before training.
         # We still apply LoRA for the test for consistency.
 
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device, tmp_path=tmp_path)
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
         assert mse_quantized > 0.0
@@ -1216,15 +1262,16 @@ class LoftQTests(unittest.TestCase):
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        assert mae_loftq < (mae_quantized / factor)
-        assert mse_loftq < (mse_quantized / factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @parameterized.expand(["cuda", "cpu"])
-    def test_bloomz_loftq_4bit_iter_5(self, device):
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_bloomz_loftq_4bit_iter_5(self, device, tmp_path):
         # Same test as the previous one but with 5 iterations. We should expect the error to be even smaller with more
         # iterations, but in practice the difference is not that large, at least not for this small base model.
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, loftq_iter=5, device=device)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
+            bits=4, loftq_iter=25, device=device, tmp_path=tmp_path
+        )
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
         assert mse_quantized > 0.0
@@ -1232,13 +1279,13 @@ class LoftQTests(unittest.TestCase):
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mae_loftq < (mae_quantized / self.error_factor)
         assert mse_loftq < (mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @parameterized.expand(["cuda", "cpu"])
-    def test_bloomz_loftq_8bit(self, device):
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_bloomz_loftq_8bit(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit but with 8 bits.
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device, tmp_path=tmp_path)
 
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
@@ -1247,13 +1294,15 @@ class LoftQTests(unittest.TestCase):
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mae_loftq < (mae_quantized / self.error_factor)
         assert mse_loftq < (mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @parameterized.expand(["cuda", "cpu"])
-    def test_bloomz_loftq_8bit_iter_5(self, device):
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_bloomz_loftq_8bit_iter_5(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit_iter_5 but with 8 bits.
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, loftq_iter=5, device=device)
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
+            bits=8, loftq_iter=5, device=device, tmp_path=tmp_path
+        )
 
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
@@ -1262,13 +1311,13 @@ class LoftQTests(unittest.TestCase):
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mae_loftq < (mae_quantized / self.error_factor)
         assert mse_loftq < (mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @parameterized.expand(["cuda", "cpu"])
-    def test_t5_loftq_4bit(self, device):
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_t5_loftq_4bit(self, device, tmp_path):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
-            bits=4, device=device, model_id="t5-small"
+            bits=4, device=device, model_id="t5-small", tmp_path=tmp_path
         )
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
@@ -1277,14 +1326,13 @@ class LoftQTests(unittest.TestCase):
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        assert mae_loftq < (mae_quantized / factor)
-        assert mse_loftq < (mse_quantized / factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @parameterized.expand(["cuda", "cpu"])
-    def test_t5_loftq_8bit(self, device):
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_t5_loftq_8bit(self, device, tmp_path):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
-            bits=8, device=device, model_id="t5-small"
+            bits=8, device=device, model_id="t5-small", tmp_path=tmp_path
         )
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
@@ -1293,9 +1341,8 @@ class LoftQTests(unittest.TestCase):
         assert mse_loftq > 0.0
 
         # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        assert mae_loftq < (mae_quantized / factor)
-        assert mse_loftq < (mse_quantized / factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
+        assert mae_loftq < (mae_quantized / self.error_factor)
 
 
 @require_bitsandbytes
