@@ -82,7 +82,7 @@ CONFIG_TESTING_KWARGS = (
             "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
             "boft_dropout": 0.0,
         },
-    },
+    }
 )
 CLASSES_MAPPING = {
     "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
@@ -175,6 +175,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "loha_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
+                "boft_kwargs": {"init_weights": [False]},
             },
         )
     )

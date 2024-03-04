@@ -175,9 +175,29 @@ class BOFTLayer(BaseTunerLayer):
         # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
         import fbd_cuda
 
+    def set_scale(self, adapter, scale):
+        if adapter not in self.scaling:
+            # Ignore the case where the adapter is not in the layer
+            return
+        
+        warnings.warn("Scaling operation for BOFT not supported! Automatically set scale to 1.")
+
+    def scale_layer(self, scale: float) -> None:
+        if scale == 1:
+            return
+
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.boft_R.keys():
+                continue
+
+            warnings.warn("Scaling operation for BOFT not supported! Automatically set scale to 1.")
+
     def unscale_layer(self, scale=None) -> None:
-        # scale is not used
-        pass
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.boft_R.keys():
+                continue
+
+            warnings.warn("Unscaling operation for BOFT not supported! Keeping scale to 1.")
 
     def update_layer(
         self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
@@ -277,11 +297,12 @@ class BOFTLayer(BaseTunerLayer):
                 self.to(weight.device, dtype=weight.dtype)
             else:
                 self.to(weight.device)
-        self.set_adapter(self.active_adapters)
 
         # set the boft block size and number
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
+
+        self.set_adapter(self.active_adapters)
 
     def reset_boft_parameters(self, adapter_name, init_weights):
         """
