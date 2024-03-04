@@ -109,9 +109,9 @@ class LoraConfig(PeftConfig):
             pure LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
         layer_replication(`List[Tuple[int, int]]):
-            Build a new stack of layers by stacking the original model layers according to the ranges specified.
-            This allows expanding (or shrinking) the model without duplicating the base model weights.
-            The new layers will all have separate LoRA adapters attached to them.
+            Build a new stack of layers by stacking the original model layers according to the ranges specified. This
+            allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
+            all have separate LoRA adapters attached to them.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -254,8 +254,9 @@ class LoraConfig(PeftConfig):
         metadata={
             "help": (
                 "This enables using LoRA to effectively expand a transformer model to a larger size by repeating some layers. "
-                "The transformation expects a `layers` module list in the model which it modifies to expand the number of modules. "
-                "Base weights are shared so the memory usage is close to the original model. The inteneded use is these base weights "
+                "The transformation handles models (currently Llama, Bert or Falcon compatible architecutres) with "
+                "a module list in the model which it modifies to expand the number of modules. "
+                "Base weights are shared so the memory usage is close to the original model. The intended use is these base weights "
                 "remain fixed during finetuning but each layer has a separate LoRA adapter so the layers can be specialed via "
                 "the adapter layers fit during fine tuning."
                 "The format is a list of [start, end) pairs which specify the layer ranges to stack. For example:\n"

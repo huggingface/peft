@@ -360,6 +360,7 @@ class BaseTuner(nn.Module, ABC):
                 The list of adapter names that should be merged. If `None`, all active adapters will be merged.
                 Defaults to `None`.
         """
+        self._check_merge_allowed()
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
@@ -693,9 +694,8 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
 def clone_module(module: nn.Module, share_weights=False):
     """Clone a module in a pytorch model.
 
-    Clones a module of a model, optionally sharing all the parameters between
-    the original and the clone. Simplifies reusing a module when manipulating the
-    architecture of a model.
+    Clones a module of a model, optionally sharing all the parameters between the original and the clone. Simplifies
+    reusing a module when manipulating the architecture of a model.
     """
     clone = copy.deepcopy(module)
 
@@ -713,10 +713,9 @@ def clone_module(module: nn.Module, share_weights=False):
 def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
     """Replicate layers in a transfomer model with weight sharing.
 
-    This function looks for a module list attribute at model[(.model)*].layers
-    and replicates the layers in the module list according to the layer map.
-    For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3, 4]`
-    and replace them with a module list containing `[0, 1, 2, 3, 2, 3, 4]`.
+    This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
+    list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,
+    4]` and replace them with a module list containing `[0, 1, 2, 3, 2, 3, 4]`.
     """
     while hasattr(model, "model"):
         model = model.model
@@ -736,7 +735,10 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
         model_type = "falcon"
         layers = model.h
     if not model_type or not isinstance(layers, nn.ModuleList):
-        raise ValueError("Could not locate the layers attribute in the model.")
+        raise ValueError(
+            "Could not locate the layers attribute in the model. "
+            "Expected Llama, Bert or Falcon compatible architectures."
+        )
 
     new_layers = []
     for start, end in layer_map:
@@ -755,6 +757,6 @@ def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
     elif model_type == "falcon":
         model.h = layers
     else:
-        raise AssertionError("Unexpected model type.")
+        raise ValueError("Unexpected model type, need to handle post-processing of layers.")
     if hasattr(model.config, "num_hidden_layers"):  # Common to Llama, Bert, Falcon.
         model.config.num_hidden_layers = len(new_layers)

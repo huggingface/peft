@@ -362,10 +362,6 @@ class LoraModel(BaseTuner):
         if self.peft_config.get("layer_replication"):
             raise ValueError("Cannot merge LORA layers when base model layers are replicated")
 
-    def merge_adapter(self, adapter_names: Optional[list[str]] = None) -> None:
-        self._check_merge_allowed()
-        super().merge_adapter(adapter_names=adapter_names)
-
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
