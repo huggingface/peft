@@ -8,9 +8,9 @@ rendered properly in your Markdown viewer.
 
 Both of these features are supported in 🤗 Accelerate, and you can use them with 🤗 PEFT. 
 
-# Compatibility with `bitsandbytes` quantization
+## Compatibility with `bitsandbytes` quantization + LoRA
 
-Below is a table that summarizes the compatibility between PEFT, [`bitsandbytes`](https://github.com/TimDettmers/bitsandbytes) library and DeepSpeed Zero stages:
+Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsandbytes`](https://github.com/TimDettmers/bitsandbytes) library and DeepSpeed Zero stages:
 
 | DeepSpeed stage   | Is compatible? |
 |---|---|
