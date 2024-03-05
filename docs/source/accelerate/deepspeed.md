@@ -10,7 +10,7 @@ Both of these features are supported in 🤗 Accelerate, and you can use them wi
 
 ## Compatibility with `bitsandbytes` quantization + LoRA
 
-Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsandbytes`](https://github.com/TimDettmers/bitsandbytes) library and DeepSpeed Zero stages with respect to fine-tuning, some features such as merging the adapter weights might not be supported out of the box:
+Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsandbytes`](https://github.com/TimDettmers/bitsandbytes) library and DeepSpeed Zero stages with respect to fine-tuning. DeepSpeed Zero-1 and 2 will have no effect at inference as stage 1 shards the optimizer states and stage 2 shards the optimizer states and gradients:
 
 | DeepSpeed stage   | Is compatible? |
 |---|---|
