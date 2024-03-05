@@ -365,7 +365,7 @@ class TestInitialization:
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
     def test_use_prompt_tuning_init_text_raises(self):
-        with pytest.raises(ValueError, match="when prompt_tuning_init='TEXT', tokenizer_name_or_path can't be None"):
+        with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', tokenizer_name_or_path can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", prompt_tuning_init_text="prompt tuning init text")
-        with pytest.raises(ValueError, match="when prompt_tuning_init='TEXT', prompt_tuning_init_text can't be None"):
+        with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', prompt_tuning_init_text can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", tokenizer_name_or_path="t5-base")

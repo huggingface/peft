@@ -75,9 +75,9 @@ class PromptTuningConfig(PromptLearningConfig):
                 f"When prompt_tuning_init='{PromptTuningInit.TEXT.value}', "
                 f"tokenizer_name_or_path can't be {self.tokenizer_name_or_path}."
             )
-        if (self.prompt_tuning_init == PromptTuningInit.TEXT) and not self.prompt_tuning_init_text:
+        if (self.prompt_tuning_init == PromptTuningInit.TEXT) and self.prompt_tuning_init_text is None:
             raise ValueError(
-                f"when prompt_tuning_init='{PromptTuningInit.TEXT.value}', "
+                f"When prompt_tuning_init='{PromptTuningInit.TEXT.value}', "
                 f"prompt_tuning_init_text can't be {self.prompt_tuning_init_text}."
             )
         if self.tokenizer_kwargs and (self.prompt_tuning_init != PromptTuningInit.TEXT):
