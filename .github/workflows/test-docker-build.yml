@@ -1,10 +1,8 @@
 name: Test Docker images (on PR)
 
 on:
-  pull_request:
-    paths:
-      # Run only when DockerFile files are modified
-      - "docker/**"
+  push:
+    branches: [younesbelkada-fix-workflow]
 
 jobs:
   get_changed_files:
