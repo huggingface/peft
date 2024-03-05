@@ -172,7 +172,7 @@ class LoraLayer(BaseTunerLayer):
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        weight_norm = torch.linalg.norm(weight, dim=1)
+        weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
