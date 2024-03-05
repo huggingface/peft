@@ -72,7 +72,7 @@ class PromptTuningConfig(PromptLearningConfig):
         self.peft_type = PeftType.PROMPT_TUNING
         if (self.prompt_tuning_init == PromptTuningInit.TEXT) and not self.tokenizer_name_or_path:
             raise ValueError(
-                f"when prompt_tuning_init='{PromptTuningInit.TEXT.value}', "
+                f"When prompt_tuning_init='{PromptTuningInit.TEXT.value}', "
                 f"tokenizer_name_or_path can't be {self.tokenizer_name_or_path}."
             )
         if (self.prompt_tuning_init == PromptTuningInit.TEXT) and not self.prompt_tuning_init_text:
