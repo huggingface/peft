@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
@@ -151,7 +149,7 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool | Literal["gaussian", "loftq"] = field(
+    init_lora_weights: Union[bool, Literal["gaussian", "loftq"]] = field(
         default=True,
         metadata={
             "help": (
