@@ -42,8 +42,6 @@ class XLoraConfig(PeftConfig):
             Enable bias in X-LoRA classifier.
         xlora_dropout_p (`float`, *optional*, defaults to 0.2):
             Dropout probability of the X-LoRA classifier, irrelevant if `xlora_depth=1` or `enable_relu_and_dropout=True`.
-        stop_token_id (`int`, *optional*):
-            The id of the stop token for the input. If this is None, the sequence length is calculated using the attention mask.
         use_trainable_adapters (`bool`, *optional*, defaults to False):
             Make the adapters trainable.
         scaling_pass_value (`float`, *optional*, defaults to 0):
@@ -63,7 +61,6 @@ class XLoraConfig(PeftConfig):
     enable_relu_and_dropout: bool = False
     use_bias: bool = True
     xlora_dropout_p: float = 0.2
-    stop_token_id: Optional[int] = None
     use_trainable_adapters: bool = False
     softmax_temperature: float = 1.0
     top_k_lora: Optional[int] = None
