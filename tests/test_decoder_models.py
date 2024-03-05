@@ -318,7 +318,24 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         )
         assert len(model.model.layers), "Expected 2 layers in original model." == 2
         model = get_peft_model(model, config)
-        assert len(model.base_model.model.model.layers) == 4, "Expected 4 layers in adapted model."
+        layers = model.base_model.model.model.layers
+        assert len(layers) == 4, "Expected 4 layers in adapted model."
+        assert (
+            layers[0].mlp.up_proj.base_layer.weight.data.storage().data_ptr()
+            == layers[1].mlp.up_proj.base_layer.weight.data.storage().data_ptr()
+            and layers[2].mlp.up_proj.base_layer.weight.data.storage().data_ptr()
+            == layers[3].mlp.up_proj.base_layer.weight.data.storage().data_ptr()
+        ), "Expected layers 0-1 and 2-3 to share weights"
+        assert (
+            layers[0].mlp.up_proj.base_layer.weight.data.storage().data_ptr()
+            != layers[2].mlp.up_proj.base_layer.weight.data.storage().data_ptr()
+        ), "Expected layers 0 and 2 to have different weights"
+        assert (
+            layers[0].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
+            != layers[1].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
+            and layers[2].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
+            != layers[3].mlp.up_proj.lora_A.default.weight.data.storage().data_ptr()
+        ), "Expected all LoRA adapters to have distinct weights"
         assert (
             len([n for n, _ in model.named_parameters() if ".lora_A." in n]) == 8
         ), "Expected 8 LoRA adapters since we are adding one each for up and down."

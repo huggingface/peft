@@ -142,7 +142,7 @@ class LoraModel(BaseTuner):
         Args:
             peft_config (`PeftConfig`):
                 The prepared adapter config.
-            model_config (`nn.Module`):
+            model (`nn.Module`):
                 The model that is going to be adapted.
         """
         if peft_config.layer_replication:
