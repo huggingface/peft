@@ -8,7 +8,22 @@ rendered properly in your Markdown viewer.
 
 Both of these features are supported in 🤗 Accelerate, and you can use them with 🤗 PEFT. 
 
+## Compatibility with `bitsandbytes` quantization + LoRA
+
+Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsandbytes`](https://github.com/TimDettmers/bitsandbytes) library and DeepSpeed Zero stages with respect to fine-tuning. DeepSpeed Zero-1 and 2 will have no effect at inference as stage 1 shards the optimizer states and stage 2 shards the optimizer states and gradients:
+
+| DeepSpeed stage   | Is compatible? |
+|---|---|
+| Zero-1 |  🟢 |
+| Zero-2   |  🟢 |
+| Zero-3  |  🔴 |
+
+For confirming these observations, we ran the SFT (Supervised Fine-tuning) [offical example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
+
+Note DeepSpeed-Zero3 and `bitsandbytes` are currently **not** compatible.
+
 # Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple machines and multiple nodes
+
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) for performing SFT. You'll configure the script to do SFT (supervised fine-tuning) of Llama-70B model with LoRA and ZeRO-3 on 8xH100 80GB GPUs on a single machine. You can configure it to scale to multiple machines by changing the accelerate config.
 
 ## Configuration
