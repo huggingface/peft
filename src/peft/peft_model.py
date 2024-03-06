@@ -136,7 +136,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             if isinstance(self.base_model, XLoraModel):
-                self.base_model._xlora_post_init(model, peft_config, adapter_name, self)
+                self.base_model.post_init_lora(model, peft_config, adapter_name, self)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if getattr(model, "is_gradient_checkpointing", True):
@@ -403,7 +403,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if not isinstance(config, XLoraConfig):
                 raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
 
-            device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device(
+            device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device()
             config.device = torch.device(device)
 
             # If we are passed adapters in the kwargs, it is already in the config.

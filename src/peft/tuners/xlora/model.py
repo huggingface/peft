@@ -13,11 +13,17 @@ from peft.utils.peft_types import PeftType
 from .. import lora
 from .classifier import InhibitorFlagPayload, Number, XLoraClassifier
 from .config import XLoraConfig
-from .insertion import XLoraLayer
 
+@staticmethod
+def apply_scalings_to_x(x: torch.Tensor, scalings_layer: torch.Tensor, adapter: int) -> torch.Tensor:
+    # scalings_layer = [batch_size, seq_len, n_classes]
+    scalings = scalings_layer[:, :, adapter].unsqueeze(-1)
+    # scalings_layer = [batch_size, seq_len, 1]
+    return x * scalings
 
 def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
+    xloramodel: nn.Module, # XLoraModel
     config: XLoraConfig,
 ) -> int:
     """
@@ -27,13 +33,36 @@ def convert_layers_to_xlora(
 
     for module in base.modules():
         if isinstance(module, lora.LoraLayer):
-            new_layer = XLoraLayer(
-                model=base,
-                target_forward=module.forward,
-                layer_number=total_swapped,
-                config=config,
-            )
             module.forward = new_layer.forward  # type: ignore[method-assign]
+
+            def hook(module, *args, **kwargs) -> None:
+                kwargs_real: dict = args[1]
+                kwargs_real.update(kwargs)
+
+                # xlora_scalings = [batch_size, seq_len, n_classes]
+                xlora_scalings: Tensor = xloramodel.internal_xlora_scalings[:, :, total_swapped, :]  # type: ignore
+
+                if config.top_k_lora is not None:
+                    _, topk_indices = torch.topk(xlora_scalings, k=config.top_k_lora, dim=1)
+
+                    # Mask the topk to True, the rest to False
+                    mask = torch.zeros_like(xlora_scalings, dtype=torch.bool)
+                    mask.scatter_(1, topk_indices, True)
+
+                    xlora_scalings = xlora_scalings * mask.to(xlora_scalings.dtype)
+
+                if config.enable_softmax_topk:
+                    nonzero_mask = xlora_scalings != 0
+                    softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
+                    xlora_scalings[nonzero_mask] = softmax_res_nonzero
+
+                kwargs_real["_xlora_apply"] = apply_scalings_to_x
+                kwargs_real["_xlora_scalings"] = xlora_scalings
+                kwargs_real["_xlora_scaling_weight"] = config.global_scaling_weight
+
+                return (args[0], kwargs_real)
+
+            module.register_forward_pre_hook(hook, with_kwargs=True, prepend=True)
             total_swapped += 1
 
     return total_swapped
@@ -90,7 +119,7 @@ class XLoraModel(LoraModel):
     ) -> None:
         super().__init__(model, config, adapter_name)
 
-    def _xlora_post_init(
+    def post_init_lora(
         self,
         model: nn.Module,
         peft_config: XLoraConfig,
@@ -155,6 +184,7 @@ class XLoraModel(LoraModel):
 
         total_swapped = convert_layers_to_xlora(
             model_peft,
+            self,
             peft_config,
         )
 

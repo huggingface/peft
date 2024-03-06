@@ -12,8 +12,8 @@ from peft.utils.peft_types import PeftType
 class XLoraConfig(PeftConfig):
     r"""
     This is the configuration class to store the configuration of a [`XLoraClassifier`].
-    When the config is reloaded, the paths of the `adapters` field is disregarded in favor of the saved adapters. As such, only the keys
-    matter during loading.
+    When the config is reloaded, the paths of the `adapters` field is disregarded in favor of the 
+    saved adapters. As such, only the keys matter during loading.
 
     Args:
         hidden_size (`int`):
@@ -21,11 +21,13 @@ class XLoraConfig(PeftConfig):
         device (`torch.device`):
             Device for the X-LoRA classifier.
         adapters (`dict`):
-            Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter. *They will be automatically loaded*, to use as LoRA experts.
+            Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter. 
+            *They will be automatically loaded*, to use as LoRA experts.
         enable_softmax (`bool`, *optional*, defaults to `True`):
             Enable softmax application for the X-LoRA classifier.
         enable_softmax_topk (`bool`, *optional*, defaults to `False`):
-            Enable softmax application for the top-k LoRA adapters. Mutually exclusive to `enable_softmax` and must only be set if `top_k_lora` is.
+            Enable softmax application for the top-k LoRA adapters. Mutually exclusive to
+            `enable_softmax` and must only be set if `top_k_lora` is.
         softmax_temperature (`float`, *optional*, defaults to 1.0):
             Softmax temperature, lower yields sharper predictions
         layerwise_scalings (`bool`, *optional*, defaults to `False`):
@@ -41,7 +43,8 @@ class XLoraConfig(PeftConfig):
         use_bias (`bool`, *optional*, defaults to `True`):
             Enable bias in X-LoRA classifier.
         xlora_dropout_p (`float`, *optional*, defaults to 0.2):
-            Dropout probability of the X-LoRA classifier, irrelevant if `xlora_depth=1` or `enable_relu_and_dropout=True`.
+            Dropout probability of the X-LoRA classifier, irrelevant if `xlora_depth=1` or
+            `enable_relu_and_dropout=True`.
         use_trainable_adapters (`bool`, *optional*, defaults to False):
             Make the adapters trainable.
         scaling_pass_value (`float`, *optional*, defaults to 0):

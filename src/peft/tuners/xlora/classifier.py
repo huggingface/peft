@@ -51,8 +51,7 @@ class XLoraClassifier(nn.Module):
     ):
         super().__init__()
 
-        # To avoid registering this with nn.Module
-        self.__dict__["model"] = model
+        self.model = model
         self.n_classes = n_classes
         self.n_layers = n_layers
         self.config = config
@@ -89,7 +88,9 @@ class XLoraClassifier(nn.Module):
             else:
                 self.last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
         else:
-            assert self.config.xlora_depth > 0
+            if self.config.xlora_depth <= 0 :
+                raise ValueError("X-LoRA depth must be strictly positive.")
+            
             self.inner.append(
                 nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype)
             )
