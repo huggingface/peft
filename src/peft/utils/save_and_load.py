@@ -99,6 +99,9 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
 
+    elif config.peft_type == PeftType.CUSTOM_TOKENS:
+        to_return = {k: state_dict[k] for k in state_dict if "custom_tokens" in k}
+
     elif config.peft_type == PeftType.LOKR:
         to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
 
@@ -215,6 +218,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         PeftType.IA3,
         PeftType.OFT,
         PeftType.POLY,
+        PeftType.CUSTOM_TOKENS
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -225,6 +229,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
+            PeftType.CUSTOM_TOKENS: "custom_tokens",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
