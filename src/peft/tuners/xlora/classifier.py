@@ -69,7 +69,7 @@ class XLoraClassifier(nn.Module):
         self.n_classes = n_classes
         self.n_layers = n_layers
         self.config = config
-        self.log_scalings: List[torch.Tensor] = []
+        self.log_scalings = []
         self.softmax = TemperatureScaledSoftmax(temperature=self.config.softmax_temperature)
         self.override_scaling_pass_value: Number = config.scaling_pass_value
 
@@ -78,7 +78,7 @@ class XLoraClassifier(nn.Module):
         dtype = next(model.parameters()).dtype
         bias_flag = config.use_bias
 
-        self.inner: nn.ModuleList = nn.ModuleList([])
+        self.inner = nn.ModuleList([])
         if self.config.xlora_depth == 1:
             if config.layerwise_scalings:  # bias=False if we have just one layer
                 self.last = (
@@ -150,7 +150,7 @@ class XLoraClassifier(nn.Module):
             seq_len = typing.cast(torch.FloatTensor, inputs_embeds).shape[1]
 
         # For type checking
-        model: nn.Module = self.model  # type: ignore
+        model = self.model
         with torch.no_grad():
             with model.disable_adapter():
                 kwargs["output_hidden_states"] = True
