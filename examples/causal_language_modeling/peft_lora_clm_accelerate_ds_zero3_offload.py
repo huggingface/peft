@@ -28,7 +28,7 @@ def levenshtein_distance(str1, str2):
         return 0
     num_rows = len(str1) + 1
     num_cols = len(str2) + 1
-    dp_matrix = [i for i in range(num_cols)]
+    dp_matrix = list(range(num_cols))
     for i in range(1, num_rows):
         prev = dp_matrix[0]
         dp_matrix[0] = i
