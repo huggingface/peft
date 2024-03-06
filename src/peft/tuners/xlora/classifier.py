@@ -142,12 +142,12 @@ class XLoraClassifier(nn.Module):
         if input_ids is not None:
             batch_size = input_ids.shape[0]
         else:
-            batch_size = typing.cast(torch.FloatTensor, inputs_embeds).shape[0]
+            batch_size = inputs_embeds.shape[0]
 
         if input_ids is not None:
             seq_len = input_ids.shape[1]
         else:
-            seq_len = typing.cast(torch.FloatTensor, inputs_embeds).shape[1]
+            seq_len = inputs_embeds.shape[1]
 
         # For type checking
         model = self.model
