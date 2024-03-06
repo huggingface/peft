@@ -3,7 +3,6 @@ import os
 import sys
 import threading
 
-import numpy as np
 import psutil
 import torch
 from accelerate import Accelerator
