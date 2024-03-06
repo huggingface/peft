@@ -422,7 +422,7 @@ class Linear(nn.Module, LoraLayer):
         self,
         x: torch.Tensor,
         *args: Any,
-        _xlora_layer=None,
+        _xlora_apply=None,
         _xlora_scalings: Optional[torch.Tensor] = None,
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs: Any,
@@ -446,12 +446,12 @@ class Linear(nn.Module, LoraLayer):
                 x = x.to(lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    if _xlora_layer is not None:
-                        x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                    if _xlora_apply is not None:
+                        x_inp = _xlora_apply(x, _xlora_scalings, adapter_n)
                     else:
                         x_inp = x
                     res = lora_B(lora_A(dropout(x_inp))) * scaling
-                    if _xlora_layer is not None:
+                    if _xlora_apply is not None:
                         res = res * _xlora_scaling_weight
                     result += res
                 else:
@@ -630,7 +630,7 @@ class Embedding(nn.Module, LoraLayer):
         self,
         x: torch.Tensor,
         *args: Any,
-        _xlora_layer=None,
+        _xlora_apply=None,
         _xlora_scalings: Optional[torch.Tensor] = None,
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs: Any,
@@ -651,13 +651,13 @@ class Embedding(nn.Module, LoraLayer):
                 embedding_A = self.lora_embedding_A[active_adapter].T
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
-                if _xlora_layer is not None:
-                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                if _xlora_apply is not None:
+                    x_inp = _xlora_apply(x, _xlora_scalings, adapter_n)
                 else:
                     x_inp = x
                 after_A = self._embed(x_inp, embedding_A)
                 res = (after_A @ embedding_B) * scaling
-                if _xlora_layer is not None:
+                if _xlora_apply is not None:
                     res = res * _xlora_scaling_weight
                 result += res
             result = result.to(torch_result_dtype)
@@ -835,7 +835,7 @@ class Conv2d(nn.Module, LoraLayer):
         self,
         x: torch.Tensor,
         *args,
-        _xlora_layer=None,
+        _xlora_apply=None,
         _xlora_scalings: Optional[torch.Tensor] = None,
         _xlora_scaling_weight: Optional[Number] = None,
         **kwargs,
@@ -858,12 +858,12 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                if _xlora_layer is not None:
-                    x_inp = _xlora_layer.apply_scalings_to_x(x, _xlora_scalings, adapter_n)
+                if _xlora_apply is not None:
+                    x_inp = _xlora_apply(x, _xlora_scalings, adapter_n)
                 else:
                     x_inp = x
                 res = lora_B(lora_A(dropout(x_inp))) * scaling
-                if _xlora_layer is not None:
+                if _xlora_apply is not None:
                     res = res * _xlora_scaling_weight
                 result += res
 
