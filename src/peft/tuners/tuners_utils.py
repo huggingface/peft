@@ -187,7 +187,7 @@ class BaseTuner(nn.Module, ABC):
         Args:
             peft_config (`PeftConfig`):
                 The prepared adapter config.
-            model_config (`nn.Module`):
+            model (`nn.Module`):
                 The model that is going to be adapted.
         """
         pass
