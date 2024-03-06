@@ -84,7 +84,8 @@ def convert_layers_to_xlora(
 
 class XLoraModel(LoraModel):
     """
-    Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model.
+    Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently,
+    this X-LoRA implementation only works with models with a transformer architecture.
 
     The method is described in detail in https://arxiv.org/abs/2402.07148.
 
