@@ -31,6 +31,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
@@ -51,6 +52,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
+    replace_lora_weights_loftq,
 )
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
@@ -1296,6 +1298,73 @@ class LoftQTests(unittest.TestCase):
         factor = 3
         assert mae_loftq < (mae_quantized / factor)
         assert mse_loftq < (mse_quantized / factor)
+
+    def test_replace_lora_weights_with_loftq_using_callable(self):
+        """
+        Test replacing LoRa weights with LoFTQ using a callable.
+
+        Using the replace_lora_weights_loftq function, we replace the LoRa weights of a bnb-quantized model with LoRA
+        weights initialized by LoftQ on the fly. We use a callable to decide whether to replace the weights or not.
+        This callable checks, for each weight, if replacing it would actually result in logits that are closer to the
+        original logits of the non-quantized model.
+
+        """
+        torch.manual_seed(0)
+        model_id = "bigscience/bloomz-560m"
+        device = "cuda"
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        inputs = tokenizer("The dog was", padding=True, return_tensors="pt").to(device)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
+            logits_base = model(**inputs).logits
+            model.save_pretrained(tmp_dir)
+
+            # load in 4bit
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+            )
+            model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
+            model = get_peft_model(model, LoraConfig(task_type="CAUSAL_LM"))
+            logits_lora = model(**inputs).logits
+
+            current_mse = float("inf")
+            logs = []
+
+            def my_callback(model):
+                """Callable to replace weights with LoFTQ if the mse is lower than the current best one."""
+                nonlocal current_mse
+
+                logits = model(**inputs).logits
+                mse = ((logits_base - logits) ** 2).mean()
+                if mse < current_mse:
+                    current_mse = mse
+                    logs.append(True)
+                    return True
+                logs.append(False)
+                return False
+
+            replace_lora_weights_loftq(model, model_path=tmp_dir, callback=my_callback)
+            logits_loftq = model(**inputs).logits
+
+            mae_lora = (logits_base - logits_lora).abs().mean()
+            mae_loftq = (logits_base - logits_loftq).abs().mean()
+            mse_lora = ((logits_base - logits_lora) ** 2).mean()
+            mse_loftq = ((logits_base - logits_loftq) ** 2).mean()
+
+            # check that the error was reduced by a certain margin
+            assert mae_loftq * 1.1 < mae_lora
+            assert mse_loftq * 1.3 < mse_lora
+
+            # check that the callback has returned some True and some False values
+            assert any(logs)
+            assert not all(logs)
+
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
 
 @require_bitsandbytes
