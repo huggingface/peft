@@ -653,9 +653,6 @@ class Conv2d(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        # if use_dora:
-        #     raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
-
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
@@ -856,7 +853,12 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result = result + lora_B(lora_A(dropout(x))) * scaling
+
+                if not self.use_dora[active_adapter]:
+                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                else:
+                    x = dropout(x)
+                    result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
             result = result.to(torch_result_dtype)
         return result
