@@ -305,14 +305,14 @@ def replace_lora_weights_loftq(
         adapter_name (`str`):
             The name of the adapter to replace the weights of. The default adapter name is "default".
         callback (`Optional[Callable[[PeftModel, str], bool]]`):
-            A callback function that will be called after each module is replaced. The callback function should take the
-            model and the name of the current module as input and return a boolean indicating whether the replacement
-            should be kept. If the callback returns False, the replacement will be rolled back. This can be very useful
-            to confirm that the LoftQ initialization actually decreases the quantization error of the model. As an
-            example, this callback could generate logits for given input and compare it with the logits from the
-            original, non-quanitzed model with the same input, and only return `True` if there is an improvement. As
-            this is a greedy optimization, it's possible that calling this function multiple times yields incremental
-            improvements.
+            A callback function that will be called after each module is replaced. The callback function should take
+            the model and the name of the current module as input and return a boolean indicating whether the
+            replacement should be kept. If the callback returns False, the replacement will be rolled back. This can be
+            very useful to confirm that the LoftQ initialization actually decreases the quantization error of the
+            model. As an example, this callback could generate logits for given input and compare it with the logits
+            from the original, non-quanitzed model with the same input, and only return `True` if there is an
+            improvement. As this is a greedy optimization, it's possible that calling this function multiple times
+            yields incremental improvements.
     """
     if not is_bnb_4bit_available():
         raise ValueError("bitsandbytes must be installed and the model must be quantized in 4bits.")
