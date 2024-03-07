@@ -24,7 +24,7 @@ from typing import Callable, Optional, Union
 import torch
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import LocalEntryNotFoundError
-from safetensors import safe_open
+from safetensors import SafetensorError, safe_open
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
@@ -283,7 +283,7 @@ def replace_lora_weights_loftq(
     peft_model,
     model_path: Optional[str] = None,
     adapter_name: str = "default",
-    callback: Optional[Callable[[torch.nn.Module], bool]] = None,
+    callback: Optional[Callable[[torch.nn.Module, str], bool]] = None,
 ):
     """
     Replace the LoRA weights of a model quantized with bitsandbytes, using the LoftQ technique.
@@ -294,6 +294,8 @@ def replace_lora_weights_loftq(
 
     As lazy loading is not possible with pickle, normal PyTorch checkpoint files cannot be supported.
 
+    Depending on the model size, calling this function may take some time to finish.
+
     Args:
         peft_model (`PeftModel`):
             The model to replace the weights of. Must be a quantized PEFT model with LoRA layers.
@@ -302,14 +304,15 @@ def replace_lora_weights_loftq(
             the model's config. Otherwise, it must be provided.
         adapter_name (`str`):
             The name of the adapter to replace the weights of. The default adapter name is "default".
-        callback (`Optional[Callable[[PeftModel], bool]]`):
-            A callback function that will be called after each module is replaced. The callback function should take
-            the model as input and return a boolean indicating whether the replacement should be kept. If the callback
-            returns False, the replacement will be rolled back. This can be very useful to confirm that the LoftQ
-            initialization actually decreases the quantization error of the model. As an example, this callback could
-            generate logits for given input and compare it with the logits from the original, non-quanitzed model with
-            the same input.
-
+        callback (`Optional[Callable[[PeftModel, str], bool]]`):
+            A callback function that will be called after each module is replaced. The callback function should take the
+            model and the name of the current module as input and return a boolean indicating whether the replacement
+            should be kept. If the callback returns False, the replacement will be rolled back. This can be very useful
+            to confirm that the LoftQ initialization actually decreases the quantization error of the model. As an
+            example, this callback could generate logits for given input and compare it with the logits from the
+            original, non-quanitzed model with the same input, and only return `True` if there is an improvement. As
+            this is a greedy optimization, it's possible that calling this function multiple times yields incremental
+            improvements.
     """
     if not is_bnb_4bit_available():
         raise ValueError("bitsandbytes must be installed and the model must be quantized in 4bits.")
@@ -331,10 +334,19 @@ def replace_lora_weights_loftq(
 
             any_match = True
             name = name[len(prefix) :]
-            # if name.startswith("transformer."):
-            #     name = name[len("transformer."):]  # FIXME why does bloomz have that??
+            base_model_prefix = getattr(peft_model.get_base_model(), "base_model_prefix", None)
 
-            tensor = f.get_tensor(name + ".weight")
+            try:
+                tensor = f.get_tensor(name + ".weight")
+            except SafetensorError as exc:
+                # no matching key found, we probably need to remove the base model prefix
+                if base_model_prefix:
+                    # remove 1 extra character for "."
+                    name = name[len(base_model_prefix) + 1 :]
+                    tensor = f.get_tensor(name + ".weight")
+                else:
+                    raise exc
+
             reduced_rank = module.r[adapter_name]
             lora_A, lora_B = _loftq_init_new(module.weight, tensor, num_bits=4, reduced_rank=reduced_rank)
             if not callback:
@@ -347,12 +359,11 @@ def replace_lora_weights_loftq(
 
             module.lora_A[adapter_name].weight.data = lora_A
             module.lora_B[adapter_name].weight.data = lora_B
-            should_replace = callback(peft_model)
+            should_replace = callback(peft_model, name)
             if not should_replace:
                 # roll back
                 module.lora_A[adapter_name].weight.data = lora_A_before
                 module.lora_B[adapter_name].weight.data = lora_B_before
-                print("no improvement, skipping module", name)
 
             del lora_A_before, lora_B_before
 

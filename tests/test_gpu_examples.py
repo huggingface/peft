@@ -1332,7 +1332,7 @@ class LoftQTests(unittest.TestCase):
             current_mse = float("inf")
             logs = []
 
-            def my_callback(model):
+            def my_callback(model, module_name):
                 """Callable to replace weights with LoFTQ if the mse is lower than the current best one."""
                 nonlocal current_mse
 

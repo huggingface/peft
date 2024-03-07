@@ -53,6 +53,26 @@ lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_conf
 peft_model = get_peft_model(base_model, lora_config)
 ```
 
+An easier way to apply LoftQ initialization is to use the convenience function `replace_lora_weights_loftq` from PEFT. This takes the quantized PEFT model as input and replaces the LoRA weights in-place with their LoftQ-initialized counterparts.
+
+```python
+from peft import replace_lora_weights_loftq
+
+bnb_config = BitsAndBytesConfig(load_in_4bit, ...)
+base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
+# note: don't pass init_lora_weights="loftq" or loftq_config!
+lora_config = LoraConfig(task_type="CAUSAL_LM")
+peft_model = get_peft_model(base_model, lora_config)
+replace_lora_weights_loft(peft_model)
+```
+
+`replace_lora_weights_loftq` also allows to pass the argument `callback` to give you more fine-grained control on which layers should be modified or not. To see a more elaborate example of this, check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb).
+
+At the moment, using this convenience function has the following restrictions:
+
+- The model file must be stored as a `safetensors` file.
+- Only bitsandbytes 4bit quantization is supported.
+
 <Tip>
 
 Learn more about how PEFT works with quantization in the [Quantization](quantization) guide.
