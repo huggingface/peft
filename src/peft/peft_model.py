@@ -222,7 +222,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             os.makedirs(save_directory, exist_ok=True)
             self.create_or_update_model_card(save_directory)
 
-        adapters = {}
         for adapter_name in selected_adapters:
             peft_config = self.peft_config[adapter_name]
             # save only the trainable weights
@@ -234,7 +233,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             )
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
-            adapters[adapter_name] = output_dir
 
             if is_main_process and safe_serialization:
                 # Section copied from: https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_utils.py#L2111-L2134
@@ -296,7 +294,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             peft_config.inference_mode = inference_mode
 
         if hasattr(self.base_model, "_save_pretrained_hook"):
-            self.base_model._save_pretrained_hook(save_directory, adapters, safe_serialization, is_main_process)
+            self.base_model._save_pretrained_hook(save_directory, safe_serialization, is_main_process)
 
     @classmethod
     def from_pretrained(
