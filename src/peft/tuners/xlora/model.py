@@ -238,7 +238,6 @@ class XLoraModel(LoraModel):
     def _save_pretrained_hook(
         self,
         save_directory: str,
-        adapters: Dict[str, str],
         safe_serialization: bool = True,
         is_main_process: bool = True,
         **kwargs: Any,
@@ -248,7 +247,7 @@ class XLoraModel(LoraModel):
         conf = self.xlora_config.__dict__.copy()
         del conf["device"]
 
-        conf["adapters"] = adapters
+        conf["adapters"] = list(conf["adapters"].keys())
         with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
             json.dump(conf, f)
 
