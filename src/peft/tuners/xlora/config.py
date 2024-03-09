@@ -32,6 +32,8 @@ class XLoraConfig(PeftConfig):
     Args:
         hidden_size (`int`):
             Hidden size of the base model.
+        base_model_id (`str`):
+            Base model HF id.
         device (`torch.device`):
             Device for the X-LoRA classifier.
         adapters (`dict`):
@@ -68,6 +70,7 @@ class XLoraConfig(PeftConfig):
     """
 
     hidden_size: int = None  # type: ignore
+    base_model_id: str
     device: torch.device = None  # type: ignore
     adapters: Dict[str, str] = None  # type: ignore
     enable_softmax: bool = True
