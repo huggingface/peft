@@ -31,6 +31,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
     DataCollatorForLanguageModeling,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
@@ -155,7 +156,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                load_in_8bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="auto",
             )
 
@@ -213,7 +214,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                load_in_4bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
                 device_map="auto",
             )
 
@@ -271,7 +272,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="auto",
-                load_in_4bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
@@ -330,7 +331,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model_id = "facebook/opt-350m"
 
         # for >3 GPUs, might need: device_map={"": "cuda:0"}
-        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=BitsAndBytesConfig(load_in_4bit=True))
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
         model.gradient_checkpointing_enable()
@@ -393,7 +394,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         """
         model_id = "facebook/opt-350m"
 
-        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_8bit=True)
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
         model.gradient_checkpointing_enable()
@@ -460,7 +461,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                load_in_8bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="auto",
             )
 
@@ -523,7 +524,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForSeq2SeqLM.from_pretrained(
                 self.seq2seq_model_id,
-                load_in_8bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map={"": 0},
             )
 
@@ -584,7 +585,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForSeq2SeqLM.from_pretrained(
                 self.seq2seq_model_id,
-                load_in_8bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="balanced",
             )
 
@@ -676,7 +677,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
             model = WhisperForConditionalGeneration.from_pretrained(
-                self.audio_model_id, load_in_8bit=True, device_map="auto"
+                self.audio_model_id, quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map="auto"
             )
 
             model.config.forced_decoder_ids = None
@@ -745,7 +746,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, config)
@@ -755,7 +756,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, config, adapter_name="other")
@@ -780,7 +781,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, config)
@@ -790,7 +791,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, config, adapter_name="other")
@@ -1162,9 +1163,9 @@ class LoftQTests(unittest.TestCase):
         lora_config = LoraConfig(task_type=task_type)
         kwargs = {}
         if bits == 4:
-            kwargs["load_in_4bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
         elif bits == 8:
-            kwargs["load_in_8bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
         else:
             raise ValueError("bits must be 4 or 8")
 
