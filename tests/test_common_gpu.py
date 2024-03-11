@@ -54,6 +54,8 @@ if is_bnb_available():
     if is_bnb_4bit_available():
         from peft.tuners.ia3 import Linear4bit as IA3Linear4bit
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
+        from peft.tuners.lora import Embedding4bit as LoraEmbedding4bit
+        from peft.tuners.lora import bnbEmbedding4bit, quantize_embedding
 
 
 @require_torch_gpu
@@ -319,7 +321,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     def test_lora_bnb_4bit_quantization(self):
         r"""
-        Test that tests if the 4bit quantization using LoRA works as expected
+        Tests if the 4bit quantization for Linear and Embedding using LoRA works as expected
         """
         whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
             self.audio_model_id,
@@ -340,28 +342,47 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
 
         flan_lora_config = LoraConfig(
-            r=16, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
+            r=16, lora_alpha=32, target_modules=["q", "v", "embed_tokens"], 
+            lora_dropout=0.05, 
+            bias="none", 
+            task_type="SEQ_2_SEQ_LM"
         )
 
         opt_lora_config = LoraConfig(
             r=16,
             lora_alpha=32,
-            target_modules=["q_proj", "v_proj"],
+            target_modules=["q_proj", "v_proj", "embed_tokens"],
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM",
         )
 
-        config = LoraConfig(r=32, lora_alpha=64, target_modules=["q_proj", "v_proj"], lora_dropout=0.05, bias="none")
+        whisper_lora_config = LoraConfig(
+            r=32, 
+            lora_alpha=64, 
+            target_modules=["q_proj", "v_proj", "embed_tokens"], 
+            lora_dropout=0.05, 
+            bias="none")
+
+        quantize_embedding(flan_4bit, ["embed_tokens"]) # should be used before get_peft_model
+        quantize_embedding(opt_4bit, ["embed_tokens"])
+        quantize_embedding(whisper_4bit, ["embed_tokens"])
+
+        # Embedding4bit: Have to specify embed_tokens again in quantize_embedding. This is because
+        # `get_peft_model` only dispatches for `target_modules` in the LoraConfig. So unless "embed_tokens"
+        # is a target, the bnbEmbedding4bit (quantized embeddings) won't be converted to Embedding4bit
 
         flan_4bit = get_peft_model(flan_4bit, flan_lora_config)
         assert isinstance(flan_4bit.base_model.model.encoder.block[0].layer[0].SelfAttention.q, LoraLinear4bit)
+        assert isinstance(flan_4bit.base_model.encoder.embed_tokens, LoraEmbedding4bit)
 
         opt_4bit = get_peft_model(opt_4bit, opt_lora_config)
         assert isinstance(opt_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+        assert isinstance(opt_4bit.base_model.model.model.decoder.embed_tokens, LoraEmbedding4bit)
 
-        whisper_4bit = get_peft_model(whisper_4bit, config)
+        whisper_4bit = get_peft_model(whisper_4bit, whisper_lora_config)
         assert isinstance(whisper_4bit.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+        assert isinstance(whisper_4bit.base_model.model.model.decoder.embed_tokens, LoraEmbedding4bit)
 
     @require_bitsandbytes
     @pytest.mark.multi_gpu_tests

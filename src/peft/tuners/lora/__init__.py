@@ -34,4 +34,19 @@ def __getattr__(name):
 
         return Linear4bit
 
+    if (name == "Embedding4bit") and is_bnb_4bit_available():
+        from .bnb import Embedding4bit
+
+        return Embedding4bit
+    
+    if (name == "bnbEmbedding4bit") and is_bnb_4bit_available():
+        from .bnb import bnbEmbedding4bit
+
+        return bnbEmbedding4bit
+
+    if (name == "quantize_embedding") and is_bnb_4bit_available():
+        from .bnb import quantize_embedding
+
+        return quantize_embedding
+
     raise AttributeError(f"module {__name__} has no attribute {name}")

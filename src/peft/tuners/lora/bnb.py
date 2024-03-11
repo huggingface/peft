@@ -13,10 +13,13 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional
+from typing import Any, List, Optional, Union
 
 import bitsandbytes as bnb
+from bitsandbytes.nn import Params4bit
 import torch
+import torch.nn.functional as F
+from torch import Tensor, device
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -42,7 +45,7 @@ if is_bnb_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, base_layer)
+            LoraLayer.__init__(self, base_layer, **kwargs)
 
             if use_dora:
                 raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
@@ -232,7 +235,7 @@ if is_bnb_4bit_available():
             **kwargs,
         ) -> None:
             super().__init__()
-            LoraLayer.__init__(self, base_layer)
+            LoraLayer.__init__(self, base_layer, **kwargs)
 
             if use_dora:
                 raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
@@ -364,7 +367,297 @@ if is_bnb_4bit_available():
             rep = super().__repr__()
             return "lora." + rep
 
+    class bnbEmbedding4bit(torch.nn.Embedding): # WORK IN PROGRESS
+        # Adapted from bnb.nn.Linear4bit
+        def __init__(
+                self,
+                num_embeddings: int,
+                embedding_dim: int,
+                padding_idx: Optional[int] = None,
+                max_norm: Optional[float] = None,
+                norm_type: float = 2.0,
+                scale_grad_by_freq: bool = False,
+                sparse: bool = False,
+                _weight: Optional[Tensor] = None,
+                device: Optional[device] = None,
+                compute_dtype=None,
+                compress_statistics=True,
+                quant_type='fp4' #
+            ) -> None:
+                super().__init__(
+                    num_embeddings,
+                    embedding_dim,
+                    padding_idx,
+                    max_norm,
+                    norm_type,
+                    scale_grad_by_freq,
+                    sparse,
+                    _weight,
+                    device=device
+                )
+                self.weight = Params4bit(self.weight.data, requires_grad=False, compress_statistics=compress_statistics, quant_type=quant_type) #
+                self.compute_dtype = compute_dtype #
+                self.compute_type_is_set = False #
+                self.quant_state = None #
+
+        def reset_parameters(self) -> None:
+            torch.nn.init.xavier_uniform_(self.weight)
+            self._fill_padding_idx_with_zero()
+
+            """ !!! This is a redefinition of _fill_padding_idx_with_zero in torch.nn.Embedding
+                to make the Layer compatible with Pytorch < 1.9.
+                This means that if this changes in future PyTorch releases this need to change too
+                which is cumbersome. However, with this we can ensure compatibility with previous
+                PyTorch releases.
+            """
+
+        def _fill_padding_idx_with_zero(self) -> None:
+            if self.padding_idx is not None:
+                with torch.no_grad():
+                    self.weight[self.padding_idx].fill_(0)
+        
+        def set_compute_type(self, x):
+            if x.dtype in [torch.float32, torch.bfloat16]:
+                # the input is in a dtype that is safe to compute in, we switch
+                # to this type for speed and stability
+                self.compute_dtype = x.dtype
+            elif x.dtype == torch.float16:
+                # we take the compute dtype passed into the layer
+                if self.compute_dtype == torch.float32 and (x.numel() == x.shape[-1]):
+                    # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference 
+                    # when it could be fast warn the user about this
+                    warnings.warn('Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference.')
+                    warnings.filterwarnings('ignore', message='.*inference.')
+                if self.compute_dtype == torch.float32 and (x.numel() != x.shape[-1]):
+                    warnings.warn('Input type into Linear4bit is torch.float16, but bnb_4bit_compute_dtype=torch.float32 (default). This will lead to slow inference or training speed.')
+                    warnings.filterwarnings('ignore', message='.*inference or training')
+
+        def _save_to_state_dict(self, destination, prefix, keep_vars):
+            """
+            save weight and bias,
+            then fill state_dict with components of quant_state
+            """
+            super()._save_to_state_dict(destination, prefix, keep_vars)  # saving weight and bias
+
+            if getattr(self.weight, "quant_state", None) is not None:
+                for k, v in self.weight.quant_state.as_dict(packed=True).items():
+                    destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+
+        def forward(self, input: Tensor) -> Tensor:
+            if getattr(self.weight, 'quant_state', None) is None:
+                if getattr(self, 'quant_state', None) is not None:
+                    # the quant state got lost when the parameter got converted. This happens for example for fsdp
+                    # since we registered the module, we can recover the state here
+                    assert self.weight.shape[1] == 1
+                    if not isinstance(self.weight, Params4bit):
+                        self.weight = Params4bit(self.weight)
+                    self.weight.quant_state = self.quant_state
+                else:
+                    print('FP4 quantization state not initialized. Please call .cuda() or .to(device) on the LinearFP4 layer first.')
+        
+            if not self.compute_type_is_set:
+                self.set_compute_type(input)
+                self.compute_type_is_set = True
+            
+            if self.compute_dtype is not None:
+                input = input.to(self.compute_dtype)
+        
+            emb = F.embedding(
+                input,
+                self.weight,
+                self.padding_idx,
+                self.max_norm,
+                self.norm_type,
+                self.scale_grad_by_freq,
+                self.sparse,
+            )
+
+            return emb
+
+    def quantize_embedding(model, target_module: Union[str, List[str]]) -> None: # WORK IN PROGRESS
+        """
+        Helper function to quantize the target embedding module of type nn.Embedding using helper class bnbEmbedding4bit
+
+        Args:
+            model:
+                The base transformers model whose Embedding layer will be quantized
+            target_emb_module (`Union[str, List[str]]):
+                Names of the target modules in the model - can be a single name or list of names
+        """
+        if isinstance(target_module, str):
+            target_module = [target_module]
+        
+        def replace_layer(parent_module, target_name): # recursive search and replace
+            nonlocal module_found
+            for name, module in parent_module.named_children():
+                if target_name == name:
+                    if not isinstance(module, torch.nn.Embedding):
+                        raise TypeError(f"Target module name {target_name} is of type {type(module)}. Expected torch.nn.Embedding.")  
+                    # initialize with bnbEmbedding4bit
+                    quant_emb_layer = bnbEmbedding4bit(module.num_embeddings, module.embedding_dim)
+                    # now, set the weights of the embedding layer to pretrained ones
+                    quant_emb_layer.weights = Params4bit(module.weight, requires_grad=False)  # TODO: Should requires_grad be False or True? Depends on parent_module's grad setting, right?
+                    quant_emb_layer.to(torch.device('cuda')) # since quantization can only be done with GPU for now
+                    setattr(parent_module, name, quant_emb_layer)
+                    module_found = True
+                else:
+                    replace_layer(module, target_name) # recurse into model
+
+        for idx, target_module_name in enumerate(target_module):
+            module_found = False # tracks if a replacement for this target happened or not
+            if not isinstance(target_module_name, str): # check name is of type string 
+                raise TypeError(f"Target module name at position {idx} is of type {type(target_module_name)}. Expected str.")
+            replace_layer(model, target_module_name)
+            if not module_found:
+                raise NameError(f"Target module name {target_module_name} was not found in the model.")
+
+
+    class Embedding4bit(torch.nn.Module, LoraLayer):  # WORK IN PROGRESS
+        # LoRA implemented in an Embedding layer
+        def __init__(
+            self,
+            base_layer: torch.nn.Module,
+            adapter_name: str,
+            r: int = 0,
+            lora_alpha: int = 1,
+            lora_dropout: float = 0.0,
+            init_lora_weights: Union[bool, str] = True,
+            use_rslora: bool = False,
+            use_dora: bool = False,
+            **kwargs,
+        ) -> None:
+            super().__init__()
+            LoraLayer.__init__(self, base_layer, **kwargs)
+            
+            if use_dora:
+                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+            self._active_adapter = adapter_name
+            self.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                use_dora=use_dora,
+            )
+
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+            """
+            Merge the active adapter weights into the base weights
+
+            Args:
+                safe_merge (`bool`, *optional*):
+                    If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                    before merging the weights. This is useful if you want to check if the merge operation will produce
+                    NaNs. Defaults to `False`.
+                adapter_names (`List[str]`, *optional*):
+                    The list of adapter names that should be merged. If None, all active adapters will be merged.
+                    Defaults to `None`.
+            """
+            adapter_names = check_adapters_to_merge(self, adapter_names)
+            if not adapter_names:
+                return # no adapter to merge
+            
+            for active_adapter in adapter_names:
+                if active_adapter in self.lora_embedding_A.keys():
+                    # TODO: Test if warning is needed here for rounding error as in Linear
+                    base_layer = self.get_base_layer()
+                    weight = base_layer.weight
+                    lora_data = self.get_delta_weight(active_adapter)
+                    kwargs = weight.__dict__
+                    if safe_merge:
+                        # Note that safe_merge will be slower than the normal merge
+                        # because of the copy operation.
+                        orig_weights = weight.data.clone()
+
+                        w_data = bnb.functional.dequantize_4bit(orig_weights, weight.quant_state) + lora_data
+                        if not torch.isfinite(w_data).all():
+                            raise ValueError(
+                                f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken."
+                            )
+                        self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                            weight.device
+                        )
+                    else:
+                        w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                        self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad = False, **kwargs).to(
+                            weight.device
+                        )
+                    self.merged_adapters.append(active_adapter)
+
+        def unmerge(self) -> None:
+            """
+            This method unmerges all merged adapter layers from the base weights.
+            """
+            if not self.merged:
+                warnings.warn("Already unmerged. Nothing to do.")
+                return
+            while len(self.merged_adapters) > 0:
+                active_adapter = self.merged_adapters.pop()
+                if active_adapter in self.lora_embedding_A.keys():
+                    # TODO: Test if warning is needed here for rounding error as in Linear
+                    weight = self.get_base_layer().weight
+                    kwargs = weight.__dict__
+                    lora_data = self.get_delta_weight(active_adapter)
+                    w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                    if "bnb_quantized" in kwargs:
+                        kwargs["bnb_quantized"] = False
+                    self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
+                    weight.device
+                )
+
+        def get_delta_weight(self, adapter) -> torch.Tensor:
+            """
+            Compute the delta weight for the given adapter.
+
+            Args:
+                adapter (str):
+                    The name of the adapter for which the delta weight should be computed.
+            """
+            return self.lora_embedding_B[adapter].weight @ self.lora_embedding_A[adapter].weight * self.scaling[adapter]
+
+        def _embed(self, input: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            base_layer = self.get_base_layer()
+            return F.embedding(
+            input,
+            weight,
+            padding_idx=base_layer.padding_idx,
+            max_norm=base_layer.max_norm,
+            norm_type=base_layer.norm_type,
+            scale_grad_by_freq=base_layer.scale_grad_by_freq,
+            sparse=base_layer.sparse,
+        )
+
+        def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+            # No dtype conversion
+            if self.disable_adapters:
+                if self.merged:
+                    self.unmerge()
+                result = self.base_layer(x, *args, **kwargs)
+            elif self.merged:
+                result = self.base_layer(x, *args, **kwargs)
+            else:
+                result = self.base_layer(x, *args, **kwargs)
+                # Defensively clone as done for Linear4bit
+                result = result.clone()
+                for active_adapter in self.active_adapters:
+                    if active_adapter not in self.lora_embedding_A:
+                        continue
+                    embedding_A = self.lora_embedding_A[active_adapter].T
+                    embedding_B = self.lora_embedding_B[active_adapter].T
+                    scaling = self.scaling[active_adapter]
+                    after_A = self._embed(x, embedding_A)
+                    result += (after_A @ embedding_B) * scaling
+
+            return result
+
+        def __repr__(self) -> str:
+            rep = super().__repr__()
+            return "lora." + rep
+
     def dispatch_bnb_4bit(target: torch.nn.Module, adapter_name: str, **kwargs):
+        # TODO: Check for correctness when handling Embedding instances
         new_module = None
 
         if isinstance(target, BaseTunerLayer):
@@ -383,5 +676,15 @@ if is_bnb_4bit_available():
                 }
             )
             new_module = Linear4bit(target, adapter_name, **fourbit_kwargs)
+        elif loaded_in_4bit and is_bnb_4bit_available() and isinstance(target_base_layer, bnbEmbedding4bit):
+            fourbit_kwargs = kwargs.copy()
+            fourbit_kwargs.update(
+                {
+                    "compute_dtype": target_base_layer.compute_dtype,
+                    "compress_statistics": target_base_layer.weight.compress_statistics,
+                    "quant_type": target_base_layer.weight.quant_type,
+                }
+            )
+            new_module = Embedding4bit(target, adapter_name, **fourbit_kwargs)
 
         return new_module
