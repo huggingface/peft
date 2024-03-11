@@ -96,7 +96,7 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
         position_ids = new_cache_positions.unsqueeze(0)
 
     rotary_emb_kwargs = {"position_ids": position_ids}
-    # The `seq_len` argument has been officially deprecated in trasformers >= 4.39.0
+    # The `seq_len` argument has been officially removed in transformers >= 4.39.0
     if "seq_len" in inspect.signature(model.rotary_emb.forward).parameters:
         rotary_emb_kwargs["seq_len"] = q_len + past_seen_tokens
 
