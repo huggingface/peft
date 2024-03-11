@@ -877,8 +877,6 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 use_rslora=use_rslora,
                 **kwargs,
             )
-            # bias is accessed directly by nn.MultiheadAttention
-            self.base_layer.out_proj.bias = self.base_layer.out_proj.get_base_layer().bias
         else:
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
