@@ -69,6 +69,16 @@ from peft import LoraConfig
 config = LoraConfig(use_rslora=True, ...)
 ```
 
+### Weight-Decomposed Low-Rank Adaptation (DoRA)
+
+This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. Right now, DoRA only supports non-quantized linear layers. DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. For more information on DoRA, see  https://arxiv.org/abs/2402.09353.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(use_dora=True, ...)
+```
+
 ### QLoRA-style training
 
 The default LoRA settings in PEFT add trainable weights to the query and value layers of each attention block. But [QLoRA](https://hf.co/papers/2305.14314), which adds trainable weights to all the linear layers of a transformer model, can provide performance equal to a fully finetuned model. To apply LoRA to all the linear layers, like in QLoRA, set `target_modules="all-linear"` (easier than specifying individual modules by name which can vary depending on the architecture).
