@@ -86,8 +86,6 @@ def create_and_prepare_model(args, data_args, training_args):
         from unsloth import FastLanguageModel
     device_map = None
     bnb_config = None
-    load_in_8bit = args.use_8bit_qunatization
-    load_in_4bit = args.use_4bit_quantization
 
     if (
         torch.distributed.is_available()
@@ -113,8 +111,10 @@ def create_and_prepare_model(args, data_args, training_args):
                 print("=" * 80)
                 print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
+        elif args.use_8bit_quantization:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
 
-    if args.use_4bit_quantization or args.use_8bit_qunatization:
+    if args.use_4bit_quantization or args.use_8bit_quantization:
         device_map = (
             int(os.environ.get("LOCAL_RANK", -1))
             if torch.distributed.is_available() and torch.distributed.is_initialized()
@@ -127,12 +127,11 @@ def create_and_prepare_model(args, data_args, training_args):
             model_name=args.model_name_or_path,
             max_seq_length=data_args.max_seq_length,
             dtype=None,
-            load_in_4bit=load_in_4bit,
+            load_in_4bit=args.use_4bit_quantization,
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
-            load_in_8bit=load_in_8bit,
             quantization_config=bnb_config,
             device_map=device_map,
             trust_remote_code=True,
