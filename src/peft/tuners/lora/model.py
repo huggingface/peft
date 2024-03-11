@@ -91,8 +91,13 @@ class LoraModel(BaseTuner):
         >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
 
         >>> tokenizer = transformers.AutoTokenizer.from_pretrained(
-        ...    'kakaobrain/kogpt', revision='KoGPT6B-ryan1.5b-float16',  # or float32 version: revision=KoGPT6B-ryan1.5b
-        ...    bos_token='[BOS]', eos_token='[EOS]', unk_token='[UNK]', pad_token='[PAD]', mask_token='[MASK]'
+        ...     "kakaobrain/kogpt",
+        ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
+        ...     bos_token="[BOS]",
+        ...     eos_token="[EOS]",
+        ...     unk_token="[UNK]",
+        ...     pad_token="[PAD]",
+        ...     mask_token="[MASK]",
         ... )
         >>> model = transformers.GPTJForCausalLM.from_pretrained(
         ...     "kakaobrain/kogpt",

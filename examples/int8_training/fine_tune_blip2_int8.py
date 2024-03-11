@@ -28,7 +28,9 @@ config = LoraConfig(
 )
 
 # We load our model and processor using `transformers`
-model = AutoModelForVision2Seq.from_pretrained("Salesforce/blip2-opt-2.7b", quantization_config=BitsAndBytesConfig(load_in_8bit=True))
+model = AutoModelForVision2Seq.from_pretrained(
+    "Salesforce/blip2-opt-2.7b", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+)
 processor = AutoProcessor.from_pretrained("Salesforce/blip2-opt-2.7b")
 
 # Get our peft model and print the number of trainable parameters

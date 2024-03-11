@@ -331,7 +331,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         model_id = "facebook/opt-350m"
 
         # for >3 GPUs, might need: device_map={"": "cuda:0"}
-        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=BitsAndBytesConfig(load_in_4bit=True))
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, quantization_config=BitsAndBytesConfig(load_in_4bit=True)
+        )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
         model.gradient_checkpointing_enable()
@@ -394,7 +396,9 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         """
         model_id = "facebook/opt-350m"
 
-        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+        )
         tokenizer = AutoTokenizer.from_pretrained(model_id)
 
         model.gradient_checkpointing_enable()

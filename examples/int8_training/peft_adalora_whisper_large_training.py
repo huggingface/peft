@@ -534,7 +534,9 @@ def main():
     metric = evaluate.load("wer")
 
     # model
-    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
+    model = WhisperForConditionalGeneration.from_pretrained(
+        args.model_name_or_path, quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+    )
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
     if len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:

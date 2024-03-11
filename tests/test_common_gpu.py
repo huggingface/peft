@@ -447,7 +447,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=16, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
         )
 
-        model = AutoModelForSeq2SeqLM.from_pretrained(self.seq2seq_model_id, device_map="balanced", quantization_config=BitsAndBytesConfig(load_in_8bit=True))
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id, device_map="balanced", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+        )
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
         assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
