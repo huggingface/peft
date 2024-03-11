@@ -505,7 +505,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # one needs to multiply the number of parameters by 2 to get
             # the correct number of parameters
             if param.__class__.__name__ == "Params4bit":
-                num_params = num_params * 2
+                dtype2bytes = {}
+                dtype2bytes[torch.float32] = 4
+                dtype2bytes[torch.float16] = 2
+                dtype2bytes[torch.bfloat16] = 2
+                dtype2bytes[torch.uint8] = 1
+                dtype2bytes[torch.int8] = 1
+
+                num_params = num_params * 2 * dtype2bytes[param.quant_storage]
 
             all_param += num_params
             if param.requires_grad:
