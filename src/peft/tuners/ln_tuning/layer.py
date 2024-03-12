@@ -19,7 +19,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
 class SelectLayer(nn.Module, BaseTunerLayer):
@@ -42,13 +42,10 @@ class SelectLayer(nn.Module, BaseTunerLayer):
         self.select_new_layers[adapter_name] = deepcopy(layer)
 
     def merge(self, adapter_names: Optional[List[str]] = None):
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged: {','.join(self.merged_adapters)}."
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
         assert (
             len(adapter_names) == 1
