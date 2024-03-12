@@ -38,10 +38,23 @@ def is_llama_available() -> bool:
         return False
 
 
+def is_mistral_available() -> bool:
+    """Check if mistral is available in the transformers library (it's not in earlier versions)."""
+    try:
+        return importlib.util.find_spec("transformers.models.mistral.modeling_mistral") is not None
+    except ModuleNotFoundError:
+        return False
+
+
 if is_llama_available():
     # We guard the import statement so that our unit tests will pass in CI environments
     # that don't have a transformers package with Llama.
     from transformers import LlamaConfig, LlamaForCausalLM, LlamaModel
+
+if is_mistral_available():
+    # We guard the import statement so that our unit tests will pass in CI environments
+    # that don't have a transformers package with Mistral.
+    from transformers import MistralConfig, MistralForCausalLM, MistralModel
 
 
 class AdaptionPromptTester(TestCase, PeftCommonTester):
@@ -55,7 +68,10 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
     def setUp(self):
         # Check that llama is available in transformers package before running each test.
         if not is_llama_available():
-            self.skipTest("Llama not available in transformers. Skipping test.")
+            self.skipTest("Llama not available in transformers. Skipping all tests.")
+        else:
+            # Check for Mistral's availability. It might or might not be available.
+            self.mistral_available = is_mistral_available()
 
     @staticmethod
     def _create_test_llama_config():
@@ -69,6 +85,19 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             use_cache=False,
         )
 
+    @staticmethod
+    def _create_test_mistral_config():
+        """Create a test config for a small Mistral model for testing."""
+        return MistralConfig(
+            vocab_size=16,
+            hidden_size=8,
+            intermediate_size=8,
+            num_hidden_layers=8,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            use_cache=False,
+        )
+
     def test_attributes(self) -> None:
         model = LlamaModel(self._create_test_llama_config())
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
@@ -78,7 +107,18 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         assert hasattr(model, "from_pretrained")
         assert hasattr(model, "push_to_hub")
 
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_attributes_mistral(self) -> None:
+        model_mistral = MistralModel(self._create_test_mistral_config())
+        config_mistral = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+
+        assert hasattr(model_mistral, "save_pretrained")
+        assert hasattr(model_mistral, "from_pretrained")
+        assert hasattr(model_mistral, "push_to_hub")
+
     def test_prepare_for_training(self) -> None:
+        # Test Llama
         model = LlamaForCausalLM(self._create_test_llama_config())
         config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
         model = get_peft_model(model, config)
@@ -86,6 +126,18 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
+
+        assert not dummy_output.requires_grad
+
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_prepare_for_training_mistral(self) -> None:
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        config_mistral = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+        model_mistral = model_mistral.to(self.torch_device)
+
+        dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
+        dummy_output = model_mistral.get_input_embeddings()(dummy_input)
 
         assert not dummy_output.requires_grad
 
@@ -112,6 +164,33 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
         dummy_output = model.get_input_embeddings()(dummy_input)
+
+        assert dummy_output.requires_grad
+
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_prepare_model_for_int8_training_mistral(self) -> None:
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        model_mistral = prepare_model_for_int8_training(model_mistral)
+        model_mistral = model_mistral.to(self.torch_device)
+
+        for param in model_mistral.parameters():
+            assert not param.requires_grad
+
+        config_mistral = AdaptionPromptConfig(adapter_layers=1, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+
+        # For backward compatibility
+        if hasattr(model_mistral, "enable_input_require_grads"):
+            model_mistral.enable_input_require_grads()
+        else:
+
+            def make_inputs_require_grad(module, input, output):
+                output.requires_grad_(True)
+
+            model_mistral.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
+
+        dummy_input = torch.LongTensor([[1, 1, 1]]).to(self.torch_device)
+        dummy_output = model_mistral.get_input_embeddings()(dummy_input)
 
         assert dummy_output.requires_grad
 
@@ -158,6 +237,50 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             # check if `config.json` is not present
             assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_save_pretrained_regression_mistral(self) -> None:
+        seed = 420
+        torch.manual_seed(seed)
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        config_mistral = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+        model_mistral = model_mistral.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model_mistral.save_pretrained(tmp_dirname, safe_serialization=False)
+
+            torch.manual_seed(seed)
+            model_from_pretrained_mistral = MistralForCausalLM(self._create_test_mistral_config())
+            model_from_pretrained_mistral = PeftModel.from_pretrained(model_from_pretrained_mistral, tmp_dirname)
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model_mistral)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained_mistral)
+
+            # check if same keys
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
+
+            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+            assert len(state_dict) == 4
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                )
+
+            # check if `adapter_model.bin` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.bin"))
+
+            # check if `adapter_config.json` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
+
+            # check if `model.safetensors` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
+
+            # check if `config.json` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
+
     def test_save_pretrained(self) -> None:
         seed = 420
         torch.manual_seed(seed)
@@ -176,6 +299,50 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             # check if the state dicts are equal
             state_dict = get_peft_model_state_dict(model)
             state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained)
+
+            # check if same keys
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
+
+            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+            assert len(state_dict) == 4
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                )
+
+            # check if `adapter_model.bin` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+
+            # check if `adapter_config.json` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
+
+            # check if `model.safetensors` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
+
+            # check if `config.json` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
+
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_save_pretrained_mistral(self) -> None:
+        seed = 420
+        torch.manual_seed(seed)
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        config_mistral = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+        model_mistral = model_mistral.to(self.torch_device)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model_mistral.save_pretrained(tmp_dirname)
+
+            torch.manual_seed(seed)
+            model_from_pretrained_mistral = MistralForCausalLM(self._create_test_mistral_config())
+            model_from_pretrained_mistral = PeftModel.from_pretrained(model_from_pretrained_mistral, tmp_dirname)
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model_mistral)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained_mistral)
 
             # check if same keys
             assert state_dict.keys() == state_dict_from_pretrained.keys()
@@ -249,6 +416,55 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
             # check if `config.json` is not present
             assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
 
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_save_pretrained_selected_adapters_mistral(self) -> None:
+        seed = 420
+        torch.manual_seed(seed)
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        config_mistral = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+        model_mistral = model_mistral.to(self.torch_device)
+
+        new_adapter_config_mistral = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral.add_adapter("new_adapter", new_adapter_config_mistral)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model_mistral.save_pretrained(tmp_dirname)
+
+            torch.manual_seed(seed)
+            model_from_pretrained_mistral = MistralForCausalLM(self._create_test_mistral_config())
+            model_from_pretrained_mistral = PeftModel.from_pretrained(model_from_pretrained_mistral, tmp_dirname)
+
+            model_from_pretrained_mistral.load_adapter(tmp_dirname, "new_adapter")
+
+            # check if the state dicts are equal
+            state_dict = get_peft_model_state_dict(model_mistral)
+            state_dict_from_pretrained = get_peft_model_state_dict(model_from_pretrained_mistral)
+
+            # check if same keys
+            assert state_dict.keys() == state_dict_from_pretrained.keys()
+
+            # Check that the number of saved parameters is 4 -- 2 layers of (tokens and gate).
+            assert len(state_dict) == 4
+
+            # check if tensors equal
+            for key in state_dict.keys():
+                assert torch.allclose(
+                    state_dict[key].to(self.torch_device), state_dict_from_pretrained[key].to(self.torch_device)
+                )
+
+            # check if `adapter_model.bin` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+
+            # check if `adapter_config.json` is present
+            assert os.path.exists(os.path.join(tmp_dirname, "adapter_config.json"))
+
+            # check if `model.safetensors` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "model.safetensors"))
+
+            # check if `config.json` is not present
+            assert not os.path.exists(os.path.join(tmp_dirname, "config.json"))
+
     def test_generate(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
         config = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
@@ -263,6 +479,22 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
         # check if `generate` works if positional arguments are passed
         _ = model.generate(input_ids, attention_mask=attention_mask)
+
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_generate_mistral(self) -> None:
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        config_mistral = AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        model_mistral = get_peft_model(model_mistral, config_mistral)
+        model_mistral = model_mistral.to(self.torch_device)
+
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # check if `generate` works
+        _ = model_mistral.generate(input_ids=input_ids, attention_mask=attention_mask)
+
+        # check if `generate` works if positional arguments are passed
+        _ = model_mistral.generate(input_ids, attention_mask=attention_mask)
 
     def test_sequence_adapter_ops(self) -> None:
         """Test sequence of adapter operations."""
@@ -333,6 +565,77 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         assert not torch.allclose(original_before.logits, default_after_set.logits)
         assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
 
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_sequence_adapter_ops_mistral(self) -> None:
+        # Test input data.
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        target_ids = torch.LongTensor([[0, 0, 0], [0, 0, 0]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # Create original mistral model.
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        model_mistral = model_mistral.to(self.torch_device)
+        original_before = model_mistral(input_ids=input_ids, attention_mask=attention_mask)
+
+        # Get AdaptionPrompt model.
+        adapted_mistral = get_peft_model(
+            model_mistral, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted_mistral = adapted_mistral.to(self.torch_device)
+        default_before = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+
+        # Test zero-init: The logits should be exactly the same.
+        assert_close(original_before.logits, default_before.logits, rtol=0, atol=0)
+
+        # Single fine-tuning step on "default" adapter.
+        optimizer = torch.optim.SGD(adapted_mistral.parameters(), lr=1)
+        optimizer.zero_grad()
+        default_before.loss.backward()
+        optimizer.step()
+
+        # Test that the output changed.
+        default_after = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert not torch.allclose(default_before.logits, default_after.logits)
+
+        with adapted_mistral.disable_adapter():
+            # Test that the output is the same as the original output.
+            default_disabled = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+            assert_close(original_before.logits, default_disabled.logits, rtol=0, atol=0)
+
+        # Add new adapter 1.
+        adapted_mistral.add_adapter(
+            "adapter 1", AdaptionPromptConfig(adapter_layers=3, adapter_len=8, task_type="CAUSAL_LM")
+        )
+        # Test zero-init
+        adapter_1_before = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(original_before.logits, adapter_1_before.logits, rtol=0, atol=0)
+
+        # Single fine-tuning step on adapter 1.
+        optimizer = torch.optim.SGD(adapted_mistral.parameters(), lr=1)
+        optimizer.zero_grad()
+        adapter_1_before.loss.backward()
+        optimizer.step()
+
+        # Test that adapter 1 output changed.
+        adapter_1_after = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert not torch.allclose(adapter_1_before.logits, adapter_1_after.logits)
+        assert not torch.allclose(original_before.logits, adapter_1_after.logits)
+        assert not torch.allclose(default_after.logits, adapter_1_after.logits)
+
+        with adapted_mistral.disable_adapter():
+            # Test that the output is the same as the original output.
+            adapter_1_disabled = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+            assert_close(original_before.logits, adapter_1_disabled.logits, rtol=0, atol=0)
+
+        # Set adapter back to default.
+        adapted_mistral.set_adapter("default")
+
+        # Test that the output is the same as the default output after training.
+        default_after_set = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(default_after.logits, default_after_set.logits, rtol=0, atol=0)
+        assert not torch.allclose(original_before.logits, default_after_set.logits)
+        assert not torch.allclose(adapter_1_after.logits, default_after_set.logits)
+
     def test_add_and_set_while_disabled(self):
         """Test that adding and setting adapters while disabled works as intended."""
         # Test input data.
@@ -378,6 +681,51 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         adapter_1_after_set = adapted(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
         assert_close(adapter_1_after.logits, adapter_1_after_set.logits, rtol=0, atol=0)
 
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_add_and_set_while_disabled_mistral(self):
+        # Test input data.
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        target_ids = torch.LongTensor([[0, 0, 0], [0, 0, 0]]).to(self.torch_device)
+        attention_mask = torch.LongTensor([[1, 1, 1], [1, 0, 1]]).to(self.torch_device)
+
+        # Create original mistral model.
+        model_mistral = MistralForCausalLM(self._create_test_mistral_config())
+        model_mistral = model_mistral.to(self.torch_device)
+        original_before = model_mistral(input_ids=input_ids, attention_mask=attention_mask)
+
+        # Get AdaptionPrompt model.
+        adapted_mistral = get_peft_model(
+            model_mistral, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted_mistral = adapted_mistral.to(self.torch_device)
+
+        with adapted_mistral.disable_adapter():
+            adapted_mistral.add_adapter(
+                "adapter 1", AdaptionPromptConfig(adapter_layers=3, adapter_len=8, task_type="CAUSAL_LM")
+            )
+
+        # Test that the output is the same as the original output.
+        adapter_1_before = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(original_before.logits, adapter_1_before.logits, rtol=0, atol=0)
+
+        # Single fine-tuning step on adapter 1.
+        optimizer = torch.optim.SGD(adapted_mistral.parameters(), lr=1)
+        optimizer.zero_grad()
+        adapter_1_before.loss.backward()
+        optimizer.step()
+
+        # Test that adapter 1 output changed.
+        adapter_1_after = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert not torch.allclose(original_before.logits, adapter_1_after.logits)
+
+        adapted_mistral.set_adapter("default")
+        with adapted_mistral.disable_adapter():
+            adapted_mistral.set_adapter("adapter 1")
+
+        # Test that adapter 1 is active again.
+        adapter_1_after_set = adapted_mistral(input_ids=input_ids, attention_mask=attention_mask, labels=target_ids)
+        assert_close(adapter_1_after.logits, adapter_1_after_set.logits, rtol=0, atol=0)
+
     def test_use_cache(self) -> None:
         """Test that AdaptionPrompt works when Llama config use_cache=True."""
         torch.manual_seed(0)
@@ -389,6 +737,32 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
                 intermediate_size=8,
                 num_hidden_layers=8,
                 num_attention_heads=4,
+                use_cache=False,
+            )
+        ).eval()
+        adapted = get_peft_model(
+            original, AdaptionPromptConfig(adapter_layers=2, adapter_len=4, task_type="CAUSAL_LM")
+        )
+        adapted = adapted.to(self.torch_device)
+        expected = adapted.generate(input_ids=input_ids, max_length=8)
+
+        # Set use_cache = True and generate output again.
+        adapted.base_model.config.use_cache = True
+        actual = adapted.generate(input_ids=input_ids, max_length=8)
+        assert_close(expected, actual, rtol=0, atol=0)
+
+    @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
+    def test_use_cache_mistral(self) -> None:
+        torch.manual_seed(0)
+        input_ids = torch.LongTensor([[1, 1, 1], [2, 1, 2]]).to(self.torch_device)
+        original = MistralForCausalLM(
+            MistralConfig(
+                vocab_size=16,
+                hidden_size=8,
+                intermediate_size=8,
+                num_hidden_layers=8,
+                num_attention_heads=4,
+                num_key_value_heads=2,
                 use_cache=False,
             )
         ).eval()
