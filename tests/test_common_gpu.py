@@ -752,3 +752,185 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir, safe_serialization=True)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_dora_inference(self):
+        # check for same result with and without DoRA when initializing with init_lora_weights=False
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+
+        torch.manual_seed(0)
+        config_lora = LoraConfig(r=8, init_lora_weights=False, use_dora=False)
+        model = get_peft_model(model, config_lora).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        logits_lora = model(random_input).logits
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        )
+        torch.manual_seed(0)
+        config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
+        model = get_peft_model(model, config_dora)
+
+        logits_dora = model(random_input).logits
+
+        assert torch.allclose(logits_lora, logits_dora)
+        # sanity check
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_dora_inference(self):
+        # check for same result with and without DoRA when initializing with init_lora_weights=False
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_8bit=True,
+            torch_dtype=torch.float32,
+        ).eval()
+
+        torch.manual_seed(0)
+        config_lora = LoraConfig(r=8, init_lora_weights=False, use_dora=False)
+        model = get_peft_model(model, config_lora).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        logits_lora = model(random_input).logits
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_8bit=True,
+            torch_dtype=torch.float32,
+        )
+        torch.manual_seed(0)
+        config_dora = LoraConfig(r=8, init_lora_weights=False, use_dora=True)
+        model = get_peft_model(model, config_dora)
+
+        logits_dora = model(random_input).logits
+
+        assert torch.allclose(logits_lora, logits_dora)
+        # sanity check
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear8bitLt)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear8bitLt)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_dora_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        ).eval()
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_dora=True,
+        )
+        model = get_peft_model(model, config).eval()
+
+        # Note: By default, DoRA is a no-op before training, even if we set init_lora_weights=False. In order to
+        # measure any differences, we need to change the magnitude vector.
+        for name, module in model.named_modules():
+            if isinstance(module, LoraLinear4bit):
+                module.lora_magnitude_vector["default"] = torch.nn.Parameter(
+                    10 * torch.rand_like(module.lora_magnitude_vector["default"])
+                )
+
+        with torch.inference_mode():
+            out_dora = F.softmax(model(random_input).logits, dim=-1)
+
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-5
+        rtol = 1e-3
+        # sanity check that using DoRA changes the results
+        assert not torch.allclose(out_base, out_dora, atol=atol, rtol=rtol)
+        assert torch.allclose(out_dora, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_dora_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            load_in_8bit=True,
+            torch_dtype=torch.float32,
+        ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_dora=True,
+        )
+        model = get_peft_model(model, config).eval()
+
+        # Note: By default, DoRA is a no-op before training, even if we set init_lora_weights=False. In order to
+        # measure any differences, we need to change the magnitude vector.
+        for name, module in model.named_modules():
+            if isinstance(module, LoraLinear8bitLt):
+                module.lora_magnitude_vector["default"] = torch.nn.Parameter(
+                    10 * torch.rand_like(module.lora_magnitude_vector["default"])
+                )
+
+        with torch.inference_mode():
+            out_dora = F.softmax(model(random_input).logits, dim=-1)
+
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        # 8bit merging less precise than 4bit
+        atol = 0.01
+        rtol = 10
+        # sanity check that using DoRA changes the results
+        assert not torch.allclose(out_base, out_dora, atol=atol, rtol=rtol)
+        assert torch.allclose(out_dora, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)

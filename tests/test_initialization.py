@@ -355,13 +355,9 @@ class TestInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert not torch.allclose(output_base, output_dora)
 
-    def test_use_dora_with_loftq_raises(self):
-        with pytest.raises(ValueError, match="DoRA does not support megatron_core or LoftQ"):
-            LoraConfig(target_modules=["linear"], use_dora=True, init_lora_weights="loftq")
-
     def test_use_dora_with_megatron_core_raises(self):
         megatron_config = {"does-not": "matter-here"}
-        with pytest.raises(ValueError, match="DoRA does not support megatron_core or LoftQ"):
+        with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
     def test_use_prompt_tuning_init_text_raises(self):
