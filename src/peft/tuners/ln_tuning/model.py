@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import warnings
 from torch import nn
 from torch.nn.modules import Module
 from tqdm import tqdm
@@ -146,6 +147,22 @@ class LNTuningModel(BaseTuner):
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
+
+    def enable_adapter_layers(self) -> None:
+        """Enable adapter layers placeholder for LNTuning.
+        """
+        msg = (
+            "LNTuning method does not need to enable adapter layers."
+        )
+        warnings.warn(msg)
+
+    def disable_adapter_layers(self) -> None:
+        """Disable adapter layers placeholder for LNTuning.
+        """
+        msg = (
+            "LNTuning method does not need to disable adapter layers."
+        )
+        warnings.warn(msg)
 
     def _unload_and_optionally_merge(
         self,
