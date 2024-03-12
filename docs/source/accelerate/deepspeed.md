@@ -18,7 +18,7 @@ Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsan
 | Zero-2   |  🟢 |
 | Zero-3  |  🟢 |
 
-For using DeepSpeed Stage 3 + QLoRA, please share to the section [Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs](# Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs) below:
+For using DeepSpeed Stage 3 + QLoRA, please share to the section [Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs](#use-peft-qlora-and-deepspeed-with-zero3-for-finetuning-large-models-on-multiple-gpus) below:
 
 For confirming these observations, we ran the SFT (Supervised Fine-tuning) [offical example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
 
