@@ -68,7 +68,12 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     past_key_value = kwargs.get("past_key_value")
     bsz, q_len, _ = hidden_states.size()
     query_states = model.q_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
-    value_states = model.v_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
+
+    factor = model.k_proj.in_features // model.k_proj.out_features
+    value_states = (
+        model.v_proj(hidden_states).view(bsz, q_len, (model.num_heads // factor), model.head_dim).transpose(1, 2)
+    )
+
     seq_len = q_len
 
     if past_key_value is not None:
