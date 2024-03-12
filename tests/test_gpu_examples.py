@@ -806,6 +806,240 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         assert n_trainable_default == n_trainable_other
         assert n_total_default == n_total_other
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_4bit_dora(self):
+        r"""
+        Same as test_causal_lm_training_4bit but with DoRA
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                load_in_4bit=True,
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_4bit_dora(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu_4bit but with DoRA
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                load_in_4bit=True,
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_8bit_dora(self):
+        r"""
+        Same as test_causal_lm_training_4bit_dora but with 8bit
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                load_in_8bit=True,
+                device_map="auto",
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.multi_gpu_tests
+    def test_causal_lm_training_multi_gpu_8bit_dora(self):
+        r"""
+        Same as test_causal_lm_training_multi_gpu_4bit_dora but with 8bit
+        """
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map="auto",
+                load_in_8bit=True,
+            )
+
+            assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+            model = prepare_model_for_kbit_training(model)
+
+            setattr(model, "model_parallel", True)
+            setattr(model, "is_parallelizable", True)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("Abirate/english_quotes")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
 
 @require_torch_gpu
 @require_auto_gptq
@@ -1147,7 +1381,12 @@ class LoftQTests(unittest.TestCase):
         return model(**inputs).logits
 
     def get_errors(
-        self, bits=4, loftq_iter=1, device="cuda", model_id="hf-internal-testing/tiny-random-BloomForCausalLM"
+        self,
+        bits=4,
+        loftq_iter=1,
+        device="cuda",
+        model_id="hf-internal-testing/tiny-random-BloomForCausalLM",
+        use_dora=False,
     ):
         # Helper function that returns the quantization errors (MAE and MSE) when comparing the quantized LoRA model
         # to the base model, vs the LoftQ quantized model to the base model. We expect the LoftQ quantized model to
@@ -1164,7 +1403,7 @@ class LoftQTests(unittest.TestCase):
         torch.cuda.empty_cache()
 
         # logits from the normal quantized LoRA model
-        lora_config = LoraConfig(task_type=task_type)
+        lora_config = LoraConfig(task_type=task_type, use_dora=use_dora)
         kwargs = {}
         if bits == 4:
             kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
@@ -1185,7 +1424,9 @@ class LoftQTests(unittest.TestCase):
 
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
-        lora_config = LoraConfig(task_type=TaskType.CAUSAL_LM, init_lora_weights="loftq", loftq_config=loftq_config)
+        lora_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM, init_lora_weights="loftq", loftq_config=loftq_config, use_dora=use_dora
+        )
         model = self.get_base_model(model_id, device)
         if device == "cuda":
             model = model.to("cuda")
@@ -1301,6 +1542,36 @@ class LoftQTests(unittest.TestCase):
         factor = 3
         assert mae_loftq < (mae_quantized / factor)
         assert mse_loftq < (mse_quantized / factor)
+
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_4bit_dora(self, device):
+        # same as test_bloomz_loftq_4bit but with DoRA
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device, use_dora=True)
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
+
+        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
+        factor = 3
+        assert mae_loftq < (mae_quantized / factor)
+        assert mse_loftq < (mse_quantized / factor)
+
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_8bit_dora(self, device):
+        # same as test_bloomz_loftq_8bit but with DoRA
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device, use_dora=True)
+
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
+
+        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
+        assert mae_loftq < (mae_quantized / self.error_factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
 
 
 @require_bitsandbytes

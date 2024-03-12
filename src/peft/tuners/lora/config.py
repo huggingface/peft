@@ -105,9 +105,6 @@ class LoraConfig(PeftConfig):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
             handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low
-            ranks. Right now, DoRA only supports non-quantized linear layers. DoRA introduces a bigger overhead than
-            pure LoRA, so it is recommended to merge weights for inference. For more information, see
-            https://arxiv.org/abs/2402.09353.
         layer_replication(`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -242,9 +239,9 @@ class LoraConfig(PeftConfig):
                 "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
                 "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
-                "especially at low ranks. Right now, DoRA only supports non-quantized linear layers. DoRA introduces "
-                "a bigger overhead than pure LoRA, so it is recommended to merge weights for inference. For more "
-                "information, see  https://arxiv.org/abs/2402.09353."
+                "especially at low ranks. Right now, DoRA only supports linear layers. DoRA introduces a bigger"
+                "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
+                "see  https://arxiv.org/abs/2402.09353."
             )
         },
     )
@@ -282,8 +279,8 @@ class LoraConfig(PeftConfig):
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
 
-        if self.use_dora and (self.megatron_config or self.init_lora_weights == "loftq"):
-            raise ValueError("DoRA does not support megatron_core or LoftQ. Please set `use_dora=False`.")
+        if self.use_dora and self.megatron_config:
+            raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":
