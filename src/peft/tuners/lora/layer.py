@@ -865,7 +865,15 @@ class Conv2d(nn.Module, LoraLayer):
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
         result_dora = (mag_norm_scale - 1) * (
-            F.conv2d(x, weight, None, base_layer.stride, base_layer.padding, base_layer.dilation, base_layer.groups)
+            F.conv2d(
+                x,
+                weight,
+                bias=None,
+                stride=base_layer.stride,
+                padding=base_layer.padding,
+                dilation=base_layer.dilation,
+                groups=base_layer.groups,
+            )
         ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
 
         return result_dora

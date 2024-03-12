@@ -105,8 +105,8 @@ class LoraConfig(PeftConfig):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
             handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low
-            ranks. Right now, DoRA only supports non-quantized linear and Conv2D layers. DoRA introduces a bigger overhead than
-            pure LoRA, so it is recommended to merge weights for inference. For more information, see
+            ranks. Right now, DoRA only supports non-quantized linear and Conv2D layers. DoRA introduces a bigger
+            overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
     """
 
