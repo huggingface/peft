@@ -183,8 +183,9 @@ class LoraLayer(BaseTunerLayer):
             weight = self.get_base_layer().weight
             quant_state = getattr(self.get_base_layer(), "state", None)
             weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
-            if lora_A.weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
+            if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
                 lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+                lora_weight = lora_weight.reshape(weight.shape)
             else:
                 lora_weight = lora_B.weight @ lora_A.weight
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
@@ -848,8 +849,8 @@ class Conv2d(nn.Module, LoraLayer):
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, channel-wise
         weight = weight + scaling * lora_weight
-        weight_norm = weight.norm(p=2, dim=(1, 2, 3))
-        weight_norm = weight_norm.reshape((1, self.get_base_layer().out_channels, 1, 1))
+        # the following is needed to have compatibility with the 4D weight tensors of Conv2D
+        weight_norm = weight.norm(p=2, dim=(1, 2, 3), keepdim=True).transpose(1, 0)
         return weight_norm
 
     def _apply_dora(self, x, lora_A, lora_B, scaling, active_adapter):
