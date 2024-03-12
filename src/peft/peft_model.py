@@ -517,6 +517,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def print_trainable_parameters(self) -> None:
         """
         Prints the number of trainable parameters in the model.
+
+        Note: print_trainable_parameters() uses get_nb_trainable_parameters() which is different from
+        num_parameters(only_trainable=True) from huggingface/transformers. get_nb_trainable_parameters() returns
+        (trainable parameters, all parameters) of the Peft Model which includes modified backbone transformer model.
+        For techniques like LoRA, the backbone transformer model is modified in place with LoRA modules. However, for
+        prompt tuning, the backbone transformer model is unmodified. num_parameters(only_trainable=True) returns number
+        of trainable parameters of the backbone transformer model which can be different.
         """
         trainable_params, all_param = self.get_nb_trainable_parameters()
 

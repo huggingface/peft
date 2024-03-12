@@ -21,7 +21,7 @@ import pytest
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
-from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM
+from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
 
 from peft import IA3Config, LoHaConfig, LoraConfig, get_peft_model
 from peft.tuners.tuners_utils import (
@@ -254,9 +254,9 @@ class PeftCustomKwargsTester(unittest.TestCase):
         self, model_id, model_type, initial_target_modules, expected_target_modules, quantization
     ):
         if quantization == "4bit":
-            config_kwargs = {"load_in_4bit": True}
+            config_kwargs = {"quantization_config": BitsAndBytesConfig(load_in_4bit=True)}
         elif quantization == "8bit":
-            config_kwargs = {"load_in_8bit": True}
+            config_kwargs = {"quantization_config": BitsAndBytesConfig(load_in_8bit=True)}
         model = self.transformers_class_map[model_type].from_pretrained(model_id, device_map="auto", **config_kwargs)
         config_cls = LoraConfig
         self._check_match_with_expected_target_modules(

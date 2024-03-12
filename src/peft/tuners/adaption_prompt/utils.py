@@ -68,7 +68,12 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
     past_key_value = kwargs.get("past_key_value")
     bsz, q_len, _ = hidden_states.size()
     query_states = model.q_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
-    value_states = model.v_proj(hidden_states).view(bsz, q_len, model.num_heads, model.head_dim).transpose(1, 2)
+
+    factor = model.k_proj.in_features // model.k_proj.out_features
+    value_states = (
+        model.v_proj(hidden_states).view(bsz, q_len, (model.num_heads // factor), model.head_dim).transpose(1, 2)
+    )
+
     seq_len = q_len
 
     if past_key_value is not None:
@@ -95,7 +100,12 @@ def llama_compute_query_states(model: nn.Module, **kwargs) -> torch.Tensor:
             new_cache_positions = torch.arange(past_seen_tokens, past_seen_tokens + q_len, device=value_states.device)
         position_ids = new_cache_positions.unsqueeze(0)
 
-    cos, sin = model.rotary_emb(value_states, seq_len=q_len + past_seen_tokens, position_ids=position_ids)
+    rotary_emb_kwargs = {"position_ids": position_ids}
+    # The `seq_len` argument has been officially removed in transformers >= 4.39.0
+    if "seq_len" in inspect.signature(model.rotary_emb.forward).parameters:
+        rotary_emb_kwargs["seq_len"] = q_len + past_seen_tokens
+
+    cos, sin = model.rotary_emb(value_states, **rotary_emb_kwargs)
 
     # For batched inference unsqueeze it on the correct dim
     # since: https://github.com/huggingface/transformers/pull/29109
