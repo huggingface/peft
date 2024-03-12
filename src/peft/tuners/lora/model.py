@@ -28,7 +28,13 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    check_target_module_exists,
+    onload_layer,
+    replicate_layers,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -140,6 +146,19 @@ class LoraModel(BaseTuner):
     @staticmethod
     def _check_target_module_exists(lora_config, key):
         return check_target_module_exists(lora_config, key)
+
+    def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
+        r"""
+        A private method to modify the model structure before adapter is applied.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The prepared adapter config.
+            model (`nn.Module`):
+                The model that is going to be adapted.
+        """
+        if peft_config.layer_replication:
+            replicate_layers(model, peft_config.layer_replication)
 
     def _create_and_replace(
         self,
@@ -345,6 +364,16 @@ class LoraModel(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
+    def _check_merge_allowed(self):
+        """Verify that the configuration supports merging.
+
+        Currently gptq quantization and replicated layers do not support merging.
+        """
+        if getattr(self.model, "quantization_method", None) == "gptq":
+            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+        if self.peft_config.get("layer_replication"):
+            raise ValueError("Cannot merge LORA layers when base model layers are replicated")
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
@@ -363,8 +392,7 @@ class LoraModel(BaseTuner):
         adapter_names: Optional[list[str]] = None,
     ):
         if merge:
-            if getattr(self.model, "quantization_method", None) == "gptq":
-                raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+            self._check_merge_allowed()
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
