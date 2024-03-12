@@ -181,7 +181,8 @@ class LoraLayer(BaseTunerLayer):
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer()):
             weight = self.get_base_layer().weight
-            lora_weight = lora_B.weight @ lora_A.weight
+            lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+            lora_weight = lora_weight.reshape(weight.shape)
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         self.lora_magnitude_vector = nn.ParameterDict()
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
@@ -764,7 +765,7 @@ class Conv2d(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                        new_weight = dora_factor.view(-1, 1) * (base_layer.weight.data + delta_weight)
+                        new_weight = dora_factor.view(-1, 1, 1, 1) * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
 
                 self.merged_adapters.append(active_adapter)
@@ -829,10 +830,11 @@ class Conv2d(nn.Module, LoraLayer):
 
         return output_tensor
 
-    def _get_weight_norm(weight, lora_weight, scaling) -> torch.Tensor:
+    def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, channel-wise
         weight = weight + scaling * lora_weight
         weight_norm = weight.norm(p=2, dim=(1, 2, 3))
+        weight_norm = weight_norm.reshape((1, self.get_base_layer().out_channels, 1, 1))
         return weight_norm
 
     def _apply_dora(self, x, lora_A, lora_B, scaling, active_adapter):
@@ -853,7 +855,6 @@ class Conv2d(nn.Module, LoraLayer):
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
         weight_norm = weight_norm.detach()
-        weight_norm = weight_norm.reshape((1, base_layer.out_channels, 1, 1))
         mag_norm_scale = magnitude / weight_norm
         result_dora = (mag_norm_scale - 1) * (
             F.conv2d(x, weight, None, base_layer.stride, base_layer.padding, base_layer.dilation, base_layer.groups)
