@@ -104,7 +104,10 @@ class LoraConfig(PeftConfig):
         use_dora (`bool`):
             Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
             into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
-            handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low
+            handled by a separate learnable parameter. This can improve the performance of LoRA especially at low
+            ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
+            LoRA, so it is recommended to merge weights for inference. For more information, see
+            https://arxiv.org/abs/2402.09353.
         layer_replication(`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -239,7 +242,7 @@ class LoraConfig(PeftConfig):
                 "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
                 "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
-                "especially at low ranks. Right now, DoRA only supports linear layers. DoRA introduces a bigger"
+                "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
                 "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
                 "see  https://arxiv.org/abs/2402.09353."
             )
