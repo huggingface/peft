@@ -64,9 +64,7 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
         elif "test" in split:
             raw_datasets["test"] = dataset
         else:
-            raise ValueError(
-                f"Split type {split} not recognized as one of test or train."
-            )
+            raise ValueError(f"Split type {split} not recognized as one of test or train.")
 
     if apply_chat_template:
         raw_datasets = raw_datasets.map(
@@ -77,9 +75,7 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
 
     train_data = raw_datasets["train"]
     valid_data = raw_datasets["test"]
-    print(
-        f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}"
-    )
+    print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
     print(f"A sample of train dataset: {train_data[0]}")
 
     return train_data, valid_data
@@ -115,9 +111,7 @@ def create_and_prepare_model(args, data_args, training_args):
             major, _ = torch.cuda.get_device_capability()
             if major >= 8:
                 print("=" * 80)
-                print(
-                    "Your GPU supports bfloat16, you can accelerate training with the argument --bf16"
-                )
+                print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
         elif args.use_8bit_quantization:
             bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
@@ -175,9 +169,7 @@ def create_and_prepare_model(args, data_args, training_args):
         # make embedding resizing configurable?
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(
-            args.model_name_or_path, trust_remote_code=True
-        )
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
         tokenizer.pad_token = tokenizer.eos_token
 
     if args.use_unsloth:
