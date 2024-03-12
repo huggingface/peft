@@ -745,7 +745,7 @@ class Conv2d(nn.Module, LoraLayer):
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                        orig_weights = dora_factor.view(-1, 1) * (orig_weights + delta_weight)
+                        orig_weights = dora_factor.view(-1, 1, 1, 1) * (orig_weights + delta_weight)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -780,7 +780,15 @@ class Conv2d(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                weight = self.get_base_layer().weight
+                delta_weight = self.get_delta_weight(active_adapter)
+                if not self.use_dora[active_adapter]:
+                    weight.data -= delta_weight
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    weight_orig = weight.data / dora_factor.view(-1, 1, 1, 1) - delta_weight
+                    weight.data = weight_orig
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
