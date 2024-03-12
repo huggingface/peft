@@ -38,4 +38,5 @@ accelerate launch --config_file "configs/deepspeed_config_z3_qlora.yaml"  train.
 --lora_target_modules "all-linear" \
 --use_4bit_quantization True \
 --use_nested_quant True \
---bnb_4bit_compute_dtype "bfloat16"
+--bnb_4bit_compute_dtype "bfloat16" \
+--bnb_4bit_quant_storage_dtype "bfloat16"
