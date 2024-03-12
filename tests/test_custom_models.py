@@ -32,15 +32,16 @@ from transformers import AutoModelForCausalLM, AutoModelForSequenceClassificatio
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
-    AdaLoraConfig,
-    IA3Config,
-    LoHaConfig,
-    LoKrConfig,
-    LoraConfig,
-    OFTConfig,
-    PeftModel,
+    AdaLoraConfig, 
+    IA3Config, 
+    LoHaConfig, 
+    LoKrConfig, 
+    LoraConfig, 
+    OFTConfig, 
+    LNTuningConfig, 
+    PeftModel, 
     TaskType,
-    get_peft_model,
+    get_peft_model
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import ModulesToSaveWrapper, infer_device
@@ -241,6 +242,14 @@ TEST_CASES = [
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
     ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
     ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    #############
+    # LN Tuning #
+    #############
+    ("LayerNorm 1 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "layernorm0"}),
+    ("LayerNorm 2 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["layernorm0"]}),
+    ("LayerNorm 3 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["layernorm0"], "modules_to_save": ["layernorm1"]}),
+    ("Linear 4 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "lin0"}),
+    ("Linear 5 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["lin0"]}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -302,6 +311,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
+    (
+        "LNTuning Same",
+        "lntuning",
+        LNTuningConfig,
+        {"target_modules": ["layernorm0"], "init_lntuning_weights": False, "inference_mode": True},
+        {"target_modules": ["layernorm0"], "init_lntuning_weights": False, "inference_mode": True},
+    ),
+    (
+        "LNTuning Different",
+        "lntuning",
+        LNTuningConfig,
+        {"target_modules": ["layernorm0"], "init_lntuning_weights": False, "inference_mode": True},
+        {"target_modules": ["layernorm1"], "init_lntuning_weights": False, "inference_mode": True},
+    ),
 ]
 PREFIXES = {
     IA3Config: "ia3_",
@@ -309,6 +332,7 @@ PREFIXES = {
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
+    LNTuningConfig: "lntuning_",
 }
 
 
@@ -326,6 +350,28 @@ class MLP(nn.Module):
         X = self.lin0(X)
         X = self.relu(X)
         X = self.drop(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+    
+class MLP_LayerNorm(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.layernorm0 = nn.LayerNorm(10, 10)
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.layernorm1 = nn.LayerNorm(20, 20)
+        self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.layernorm0(X)
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.layernorm1(X)
         X = self.lin1(X)
         X = self.sm(X)
         return X
@@ -453,6 +499,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+        
+        if model_id == "MLP_LayerNorm":
+            return MLP_LayerNorm().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -501,6 +550,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
+        elif issubclass(config_cls, LNTuningConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)

@@ -30,7 +30,6 @@ from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
 from .constants import (
     CONFIG_NAME,
     EMBEDDING_LAYER_NAMES,
-    INCLUDE_LAYER_NORMS_SHORTHAND,
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
