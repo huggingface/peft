@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import gather_params_ctx
+from peft.utils.integrations import dequantize_bnb_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -172,7 +172,7 @@ class LoraLayer(BaseTunerLayer):
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        weight_norm = torch.linalg.norm(weight, dim=1)
+        weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
@@ -181,6 +181,8 @@ class LoraLayer(BaseTunerLayer):
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer()):
             weight = self.get_base_layer().weight
+            quant_state = getattr(self.get_base_layer(), "state", None)
+            weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
             lora_weight = lora_B.weight @ lora_A.weight
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         self.lora_magnitude_vector = nn.ParameterDict()
@@ -203,6 +205,9 @@ class LoraLayer(BaseTunerLayer):
         lora_weight = lora_B.weight @ lora_A.weight
         magnitude = self.lora_magnitude_vector[active_adapter]
         weight = self.get_base_layer().weight
+        quant_state = getattr(self.get_base_layer(), "state", None)
+        weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+        weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in

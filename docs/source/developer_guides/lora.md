@@ -71,13 +71,19 @@ config = LoraConfig(use_rslora=True, ...)
 
 ### Weight-Decomposed Low-Rank Adaptation (DoRA)
 
-This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. Right now, DoRA only supports non-quantized linear layers. DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. For more information on DoRA, see  https://arxiv.org/abs/2402.09353.
+This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. For more information on DoRA, see  https://arxiv.org/abs/2402.09353.
 
 ```py
 from peft import LoraConfig
 
 config = LoraConfig(use_dora=True, ...)
 ```
+
+#### Caveats
+
+- DoRA only supports linear layers at the momement.
+- DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. 
+- DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
 ### QLoRA-style training
 
