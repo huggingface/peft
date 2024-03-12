@@ -648,10 +648,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
-        print(f"Class name: {self.transformers_class.__name__}")
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
-        for k in X:
-            print(k, X[k].shape)
+
         outputs_base = model(**X)
 
         config = config_cls(
