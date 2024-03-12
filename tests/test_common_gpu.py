@@ -89,19 +89,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
             self.audio_model_id,
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
 
         opt_8bit = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
 
         flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
             self.seq2seq_model_id,
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
 
         flan_lora_config = LoraConfig(
@@ -138,19 +138,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_8bit = WhisperForConditionalGeneration.from_pretrained(
             self.audio_model_id,
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
 
         opt_8bit = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
 
         flan_8bit = AutoModelForSeq2SeqLM.from_pretrained(
             self.seq2seq_model_id,
             device_map="auto",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
 
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
@@ -184,9 +184,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         peft_model_id = "ybelkada/test-st-lora"
         kwargs = {"device_map": "auto"}
         if quantization == "4bit":
-            kwargs["load_in_4bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
         else:
-            kwargs["load_in_8bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         model = PeftModel.from_pretrained(model, peft_model_id)
@@ -213,9 +213,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         model_id = "facebook/opt-350m"
         kwargs = {"device_map": "auto"}
         if quantization == "4bit":
-            kwargs["load_in_4bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
         else:
-            kwargs["load_in_8bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         config = AdaLoraConfig(task_type=TaskType.CAUSAL_LM)
@@ -250,9 +250,9 @@ class PeftGPUCommonTests(unittest.TestCase):
         model_id = "facebook/opt-350m"
         kwargs = {"device_map": "auto"}
         if quantization == "4bit":
-            kwargs["load_in_4bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True)
         else:
-            kwargs["load_in_8bit"] = True
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         config = IA3Config(task_type=TaskType.CAUSAL_LM)
@@ -324,19 +324,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
             self.audio_model_id,
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         opt_4bit = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
             self.seq2seq_model_id,
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         flan_lora_config = LoraConfig(
@@ -373,19 +373,19 @@ class PeftGPUCommonTests(unittest.TestCase):
         whisper_4bit = WhisperForConditionalGeneration.from_pretrained(
             self.audio_model_id,
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         opt_4bit = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         flan_4bit = AutoModelForSeq2SeqLM.from_pretrained(
             self.seq2seq_model_id,
             device_map="auto",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         flan_ia3_config = IA3Config(target_modules=["q", "v"], task_type="SEQ_2_SEQ_LM")
@@ -447,7 +447,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=16, lora_alpha=32, target_modules=["q", "v"], lora_dropout=0.05, bias="none", task_type="SEQ_2_SEQ_LM"
         )
 
-        model = AutoModelForSeq2SeqLM.from_pretrained(self.seq2seq_model_id, device_map="balanced", load_in_8bit=True)
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            self.seq2seq_model_id, device_map="balanced", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+        )
         tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
 
         assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
@@ -468,7 +470,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_adaption_prompt_8bit(self):
         model = LlamaForCausalLM.from_pretrained(
             "HuggingFaceM4/tiny-random-LlamaForCausalLM",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float16,
             device_map="auto",
         )
@@ -491,7 +493,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_adaption_prompt_4bit(self):
         model = LlamaForCausalLM.from_pretrained(
             "HuggingFaceM4/tiny-random-LlamaForCausalLM",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             torch_dtype=torch.float16,
             device_map="auto",
         )
@@ -517,7 +519,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
         )
 
         config = LoraConfig(
@@ -531,7 +533,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         # test with double quant
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             bnb_4bit_use_double_quant=True,
         )
 
@@ -554,11 +556,10 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_modules_to_save_grad(self):
         model_id = "bigscience/bloomz-560m"
-        load_in_4bit = True
 
         model = AutoModelForSequenceClassification.from_pretrained(
             model_id,
-            load_in_4bit=load_in_4bit,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             torch_dtype=torch.float32,
         )
 
@@ -593,7 +594,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         out_base = F.softmax(model(random_input).logits, dim=-1)
@@ -626,7 +627,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(1000)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
         # compare outputs in probability space, because logits can have outliers
@@ -661,7 +662,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_4bit_merge_lora(self):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             bnb_4bit_use_double_quant=False,
             bnb_4bit_compute_type=torch.float32,
         )
@@ -703,7 +704,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_4bit_merge_and_disable_lora(self):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             bnb_4bit_use_double_quant=False,
             bnb_4bit_compute_type=torch.float32,
         )
