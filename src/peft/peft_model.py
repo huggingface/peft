@@ -50,7 +50,11 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    XLoraConfig,
+    XLoraModel,
 )
+from .tuners.xlora.classifier import XLoraClassifier
+from .tuners.xlora.util import _load_classifier_weights as xlora_load_classifier_weights
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -82,6 +86,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
+    PeftType.XLORA: XLoraModel,
 }
 
 
@@ -124,6 +129,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self._peft_config = None
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
+            if isinstance(self.base_model, XLoraModel):
+                self.base_model.post_init_lora(model, peft_config, adapter_name, self)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if getattr(model, "is_gradient_checkpointing", True):
@@ -280,6 +287,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 
+        if hasattr(self.base_model, "_save_pretrained_hook"):
+            self.base_model._save_pretrained_hook(save_directory, safe_serialization, is_main_process)
+
     @classmethod
     def from_pretrained(
         cls,
@@ -350,7 +360,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = cls(model, config, adapter_name)
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
-        model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+
+        if isinstance(model.base_model, XLoraModel):
+            if not isinstance(config, XLoraConfig):
+                raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
+
+            device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device()
+            config.device = torch.device(device)
+
+            # If we are passed adapters in the kwargs, it is already in the config.
+            # If no adapters are passed, config.adapters is None
+
+            classifier: XLoraClassifier = model.base_model.internal_xlora_classifier  # type: ignore
+            classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
+        else:
+            model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+
         return model
 
     def _setup_prompt_encoder(self, adapter_name: str):

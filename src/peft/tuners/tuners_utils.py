@@ -29,6 +29,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils.peft_types import PeftType
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -123,7 +124,12 @@ class BaseTuner(nn.Module, ABC):
             double-check that the `config.target_modules` where specified correctly.
     """
 
-    def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
+    def __init__(
+        self,
+        model,
+        peft_config: Union[PeftConfig, dict[str, PeftConfig]],
+        adapter_name: str,
+    ) -> None:
         super().__init__()
 
         self.model = model
@@ -145,7 +151,8 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
-        self.inject_adapter(self.model, adapter_name)
+        if peft_config[adapter_name] != PeftType.XLORA:
+            self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
