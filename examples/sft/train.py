@@ -16,7 +16,9 @@ class ModelArguments:
     """
 
     model_name_or_path: str = field(
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
+        metadata={
+            "help": "Path to pretrained model or model identifier from huggingface.co/models"
+        }
     )
     chat_template_format: Optional[str] = field(
         default="none",
@@ -29,7 +31,9 @@ class ModelArguments:
     lora_r: Optional[int] = field(default=64)
     lora_target_modules: Optional[str] = field(
         default="q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj",
-        metadata={"help": "comma separated list of target modules to apply LoRA layers to"},
+        metadata={
+            "help": "comma separated list of target modules to apply LoRA layers to"
+        },
     )
     use_nested_quant: Optional[bool] = field(
         default=False,
@@ -38,6 +42,10 @@ class ModelArguments:
     bnb_4bit_compute_dtype: Optional[str] = field(
         default="float16",
         metadata={"help": "Compute dtype for 4bit base models"},
+    )
+    bnb_4bit_quant_storage_dtype: Optional[str] = field(
+        default="float32",
+        metadata={"help": "Quantization storage dtype for 4bit base models"},
     )
     bnb_4bit_quant_type: Optional[str] = field(
         default="nf4",
@@ -79,15 +87,21 @@ class DataTrainingArguments:
         default=False,
         metadata={"help": "Use packing dataset creating."},
     )
-    dataset_text_field: str = field(default="text", metadata={"help": "Dataset field to use as input text."})
+    dataset_text_field: str = field(
+        default="text", metadata={"help": "Dataset field to use as input text."}
+    )
     max_seq_length: Optional[int] = field(default=512)
     append_concat_token: Optional[bool] = field(
         default=False,
-        metadata={"help": "If True, appends `eos_token_id` at the end of each sample being packed."},
+        metadata={
+            "help": "If True, appends `eos_token_id` at the end of each sample being packed."
+        },
     )
     add_special_tokens: Optional[bool] = field(
         default=False,
-        metadata={"help": "If True, tokenizers adds special tokens to each sample being packed."},
+        metadata={
+            "help": "If True, tokenizers adds special tokens to each sample being packed."
+        },
     )
     splits: Optional[str] = field(
         default="train,test",
@@ -100,13 +114,19 @@ def main(model_args, data_args, training_args):
     set_seed(training_args.seed)
 
     # model
-    model, peft_config, tokenizer = create_and_prepare_model(model_args, data_args, training_args)
+    model, peft_config, tokenizer = create_and_prepare_model(
+        model_args, data_args, training_args
+    )
 
     # gradient ckpt
     model.config.use_cache = not training_args.gradient_checkpointing
-    training_args.gradient_checkpointing = training_args.gradient_checkpointing and not model_args.use_unsloth
+    training_args.gradient_checkpointing = (
+        training_args.gradient_checkpointing and not model_args.use_unsloth
+    )
     if training_args.gradient_checkpointing:
-        training_args.gradient_checkpointing_kwargs = {"use_reentrant": model_args.use_reentrant}
+        training_args.gradient_checkpointing_kwargs = {
+            "use_reentrant": model_args.use_reentrant
+        }
 
     # datasets
     train_dataset, eval_dataset = create_datasets(
@@ -133,14 +153,7 @@ def main(model_args, data_args, training_args):
         max_seq_length=data_args.max_seq_length,
     )
     trainer.accelerator.print(f"{trainer.model}")
-    if model_args.use_peft_lora:
-        # handle PEFT+FSDP case
-        trainer.model.print_trainable_parameters()
-        if getattr(trainer.accelerator.state, "fsdp_plugin", None):
-            from peft.utils.other import fsdp_auto_wrap_policy
-
-            fsdp_plugin = trainer.accelerator.state.fsdp_plugin
-            fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
+    trainer.model.print_trainable_parameters()
 
     # train
     checkpoint = None
@@ -155,11 +168,15 @@ def main(model_args, data_args, training_args):
 
 
 if __name__ == "__main__":
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments)
+    )
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(
+            json_file=os.path.abspath(sys.argv[1])
+        )
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     main(model_args, data_args, training_args)

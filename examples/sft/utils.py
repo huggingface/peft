@@ -64,7 +64,9 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
         elif "test" in split:
             raw_datasets["test"] = dataset
         else:
-            raise ValueError(f"Split type {split} not recognized as one of test or train.")
+            raise ValueError(
+                f"Split type {split} not recognized as one of test or train."
+            )
 
     if apply_chat_template:
         raw_datasets = raw_datasets.map(
@@ -75,7 +77,9 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
 
     train_data = raw_datasets["train"]
     valid_data = raw_datasets["test"]
-    print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
+    print(
+        f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}"
+    )
     print(f"A sample of train dataset: {train_data[0]}")
 
     return train_data, valid_data
@@ -84,8 +88,8 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
 def create_and_prepare_model(args, data_args, training_args):
     if args.use_unsloth:
         from unsloth import FastLanguageModel
-    device_map = None
     bnb_config = None
+    quant_storage_stype = None
 
     if (
         torch.distributed.is_available()
@@ -97,29 +101,26 @@ def create_and_prepare_model(args, data_args, training_args):
 
     if args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
+        quant_storage_stype = getattr(torch, args.bnb_4bit_quant_storage_dtype)
 
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=args.use_4bit_quantization,
             bnb_4bit_quant_type=args.bnb_4bit_quant_type,
             bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=args.use_nested_quant,
+            bnb_4bit_quant_storage=quant_storage_stype,
         )
 
         if compute_dtype == torch.float16 and args.use_4bit_quantization:
             major, _ = torch.cuda.get_device_capability()
             if major >= 8:
                 print("=" * 80)
-                print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
+                print(
+                    "Your GPU supports bfloat16, you can accelerate training with the argument --bf16"
+                )
                 print("=" * 80)
         elif args.use_8bit_quantization:
             bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
-
-    if args.use_4bit_quantization or args.use_8bit_quantization:
-        device_map = (
-            int(os.environ.get("LOCAL_RANK", -1))
-            if torch.distributed.is_available() and torch.distributed.is_initialized()
-            else "auto"
-        )  # {"": 0}
 
     if args.use_unsloth:
         # Load model
@@ -133,9 +134,9 @@ def create_and_prepare_model(args, data_args, training_args):
         model = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
             quantization_config=bnb_config,
-            device_map=device_map,
             trust_remote_code=True,
             attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+            torch_dtype=quant_storage_stype or torch.float32,
         )
 
     peft_config = None
@@ -174,7 +175,9 @@ def create_and_prepare_model(args, data_args, training_args):
         # make embedding resizing configurable?
         model.resize_token_embeddings(len(tokenizer), pad_to_multiple_of=8)
     else:
-        tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.model_name_or_path, trust_remote_code=True
+        )
         tokenizer.pad_token = tokenizer.eos_token
 
     if args.use_unsloth:

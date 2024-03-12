@@ -16,13 +16,15 @@ Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsan
 |---|---|
 | Zero-1 |  🟢 |
 | Zero-2   |  🟢 |
-| Zero-3  |  🔴 |
+| Zero-3  |  🟢 |
+
+For using DeepSpeed Stage 3 + QLoRA, please share to the section []() below:
 
 For confirming these observations, we ran the SFT (Supervised Fine-tuning) [offical example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
 
 Note DeepSpeed-Zero3 and `bitsandbytes` are currently **not** compatible.
 
-# Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple machines and multiple nodes
+# Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple devices and multiple nodes
 
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) for performing SFT. You'll configure the script to do SFT (supervised fine-tuning) of Llama-70B model with LoRA and ZeRO-3 on 8xH100 80GB GPUs on a single machine. You can configure it to scale to multiple machines by changing the accelerate config.
 
@@ -170,6 +172,9 @@ In the above example, the memory consumed per GPU is 64 GB (80%) as seen in the 
 
 ## More resources
 You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and DeepSpeed](https://medium.com/@sourabmangrulkar/falcon-180b-finetuning-using-peft-and-deepspeed-b92643091d99) on how to finetune 180B Falcon model on 16 A100 GPUs on 2 machines.
+
+
+# Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on a single GPU
 
 # Use PEFT and DeepSpeed with ZeRO3 and CPU Offloading for finetuning large models on a single GPU
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You'll configure the script to train a large model for conditional generation with ZeRO-3 and CPU Offload.
