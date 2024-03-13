@@ -11,9 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import warnings
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import bitsandbytes as bnb
 import torch
@@ -57,7 +58,7 @@ if is_bnb_available():
                 use_dora=use_dora,
             )
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -66,7 +67,7 @@ if is_bnb_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
-                adapter_names (`List[str]`, *optional*):
+                adapter_names (`list[str]`, *optional*):
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
@@ -299,7 +300,7 @@ if is_bnb_4bit_available():
                 use_dora=use_dora,
             )
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -308,7 +309,7 @@ if is_bnb_4bit_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
-                adapter_names (`List[str]`, *optional*):
+                adapter_names (`list[str]`, *optional*):
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
