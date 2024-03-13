@@ -16,13 +16,15 @@ Below is a table that summarizes the compatibility between PEFT's LoRA, [`bitsan
 |---|---|
 | Zero-1 |  🟢 |
 | Zero-2   |  🟢 |
-| Zero-3  |  🔴 |
+| Zero-3  |  🟢 |
+
+For DeepSpeed Stage 3 + QLoRA, please refer to the section [Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs](#use-peft-qlora-and-deepspeed-with-zero3-for-finetuning-large-models-on-multiple-gpus) below.
 
 For confirming these observations, we ran the SFT (Supervised Fine-tuning) [offical example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
 
 Note DeepSpeed-Zero3 and `bitsandbytes` are currently **not** compatible.
 
-# Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple machines and multiple nodes
+# Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple devices and multiple nodes
 
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) for performing SFT. You'll configure the script to do SFT (supervised fine-tuning) of Llama-70B model with LoRA and ZeRO-3 on 8xH100 80GB GPUs on a single machine. You can configure it to scale to multiple machines by changing the accelerate config.
 
@@ -170,6 +172,115 @@ In the above example, the memory consumed per GPU is 64 GB (80%) as seen in the 
 
 ## More resources
 You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and DeepSpeed](https://medium.com/@sourabmangrulkar/falcon-180b-finetuning-using-peft-and-deepspeed-b92643091d99) on how to finetune 180B Falcon model on 16 A100 GPUs on 2 machines.
+
+
+# Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs
+
+In this section, we will look at how to use QLoRA and DeepSpeed Stage-3 for finetuning 70B llama model on 2X40GB GPUs.
+For this, we first need `bitsandbytes>=0.43.0`, `accelerate>=0.28.0`, `transformers>4.38.2`, `trl>0.7.11` and `peft>0.9.0`. We need to set `zero3_init_flag` to true when using Accelerate config. Below is the config which can be found at [deepspeed_config_z3_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config_z3_qlora.yaml):
+
+```yml
+compute_environment: LOCAL_MACHINE                                                                                                                                           
+debug: false
+deepspeed_config:
+  deepspeed_multinode_launcher: standard
+  offload_optimizer_device: none
+  offload_param_device: none
+  zero3_init_flag: true
+  zero3_save_16bit_model: true
+  zero_stage: 3
+distributed_type: DEEPSPEED
+downcast_bf16: 'no'
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 2
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false
+```
+
+Launch command is given below which is available at [run_peft_qlora_deepspeed_stage3.sh](https://github.com/huggingface/peft/blob/main/examples/sft/run_peft_deepspeed.sh):
+```
+accelerate launch --config_file "configs/deepspeed_config_z3_qlora.yaml"  train.py \
+--seed 100 \
+--model_name_or_path "meta-llama/Llama-2-70b-hf" \
+--dataset_name "smangrul/ultrachat-10k-chatml" \
+--chat_template_format "chatml" \
+--add_special_tokens False \
+--append_concat_token False \
+--splits "train,test" \
+--max_seq_len 2048 \
+--num_train_epochs 1 \
+--logging_steps 5 \
+--log_level "info" \
+--logging_strategy "steps" \
+--evaluation_strategy "epoch" \
+--save_strategy "epoch" \
+--push_to_hub \
+--hub_private_repo True \
+--hub_strategy "every_save" \
+--bf16 True \
+--packing True \
+--learning_rate 1e-4 \
+--lr_scheduler_type "cosine" \
+--weight_decay 1e-4 \
+--warmup_ratio 0.0 \
+--max_grad_norm 1.0 \
+--output_dir "llama-sft-qlora-dsz3" \
+--per_device_train_batch_size 2 \
+--per_device_eval_batch_size 2 \
+--gradient_accumulation_steps 2 \
+--gradient_checkpointing True \
+--use_reentrant True \
+--dataset_text_field "content" \
+--use_flash_attn True \
+--use_peft_lora True \
+--lora_r 8 \
+--lora_alpha 16 \
+--lora_dropout 0.1 \
+--lora_target_modules "all-linear" \
+--use_4bit_quantization True \
+--use_nested_quant True \
+--bnb_4bit_compute_dtype "bfloat16" \
+--bnb_4bit_quant_storage_dtype "bfloat16"
+```
+
+Notice the new argument being passed `bnb_4bit_quant_storage_dtype` which denotes the data type for packing the 4-bit parameters. For example, when it is set to `bfloat16`, **32/4 = 8** 4-bit params are packed together post quantization.
+
+In terms of training code, the important code changes are: 
+
+```diff
+...
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=args.use_4bit_quantization,
+    bnb_4bit_quant_type=args.bnb_4bit_quant_type,
+    bnb_4bit_compute_dtype=compute_dtype,
+    bnb_4bit_use_double_quant=args.use_nested_quant,
++   bnb_4bit_quant_storage=quant_storage_dtype,
+)
+
+...
+
+model = AutoModelForCausalLM.from_pretrained(
+    args.model_name_or_path,
+    quantization_config=bnb_config,
+    trust_remote_code=True,
+    attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
++   torch_dtype=quant_storage_dtype or torch.float32,
+)
+```
+
+Notice that `torch_dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_quant_storage` data type. That's it. Everything else is handled by Trainer and TRL.
+
+## Memory usage
+
+In the above example, the memory consumed per GPU is **36.6 GB**. Therefore, what took 8X80GB GPUs with DeepSpeed Stage 3+LoRA and a couple of 80GB GPUs with DDP+QLoRA now requires 2X40GB GPUs. This makes finetuning of large models more accessible.
 
 # Use PEFT and DeepSpeed with ZeRO3 and CPU Offloading for finetuning large models on a single GPU
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/conditional_generation/peft_lora_seq2seq_accelerate_ds_zero3_offload.py). You'll configure the script to train a large model for conditional generation with ZeRO-3 and CPU Offload.
@@ -335,3 +446,4 @@ dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint'
 # Caveats
 1. Merging when using PEFT and DeepSpeed is currently unsupported and will raise error.
 2. When using CPU offloading, the major gains from using PEFT to shrink the optimizer states and gradients to that of the adapter weights would be realized on CPU RAM and there won't be savings with respect to GPU memory.
+3. DeepSpeed Stage 3 and qlora when used with CPU offloading leads to more GPU memory usage when compared to disabling CPU offloading. 
