@@ -177,7 +177,7 @@ You can also refer this blog post [Falcon 180B Finetuning using 🤗 PEFT and De
 # Use PEFT QLoRA and DeepSpeed with ZeRO3 for finetuning large models on multiple GPUs
 
 In this section, we will look at how to use QLoRA and DeepSpeed Stage-3 for finetuning 70B llama model on 2X40GB GPUs.
-For this, we need to set `zero3_init_flag` to true when using Accleerate config. When passing `--deepspeed` argument with deepspeed stage 3 json config file path to `TrainingArguments` class, zero init is enabled by default. Here, we will be using accelerate config and below is the config which is also in configs folder at [deepspeed_config_z3_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config_z3_qlora.yaml):
+For this, we first need `bitsandbytes>=0.43.0`, `accelerate>=0.28.0`, `transformers>4.38.2`, `trl>0.7.11` and `peft>0.9.0`. We need to set `zero3_init_flag` to true when using Accelerate config. Below is the config which can be found at [deepspeed_config_z3_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/deepspeed_config_z3_qlora.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE                                                                                                                                           
@@ -262,7 +262,7 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_quant_type=args.bnb_4bit_quant_type,
     bnb_4bit_compute_dtype=compute_dtype,
     bnb_4bit_use_double_quant=args.use_nested_quant,
-+    bnb_4bit_quant_storage=quant_storage_stype,
++   bnb_4bit_quant_storage=quant_storage_dtype,
 )
 
 ...
@@ -272,7 +272,7 @@ model = AutoModelForCausalLM.from_pretrained(
     quantization_config=bnb_config,
     trust_remote_code=True,
     attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-+     torch_dtype=quant_storage_stype or torch.float32,
++   torch_dtype=quant_storage_dtype or torch.float32,
 )
 ```
 
@@ -446,3 +446,4 @@ dataset['train'][label_column][:10]=['no complaint', 'no complaint', 'complaint'
 # Caveats
 1. Merging when using PEFT and DeepSpeed is currently unsupported and will raise error.
 2. When using CPU offloading, the major gains from using PEFT to shrink the optimizer states and gradients to that of the adapter weights would be realized on CPU RAM and there won't be savings with respect to GPU memory.
+3. DeepSpeed Stage 3 and qlora when used with CPU offloading leads to more GPU memory usage when compared to disabling CPU offloading. 
