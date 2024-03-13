@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# The implementation is based on "Parameter-Efficient Orthogonal Finetuning
+# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+
 import operator
 import re
 import warnings
@@ -142,11 +145,11 @@ class BOFTModel(BaseTuner):
         else:
             target.update_layer(
                 adapter_name,
-                boft_config.boft_block_size,
-                boft_config.boft_block_num,
-                boft_config.boft_n_butterfly_factor,
-                boft_config.boft_dropout,
-                boft_config.init_weights,
+                boft_block_size=boft_config.boft_block_size,
+                boft_block_num=boft_config.boft_block_num,
+                boft_n_butterfly_factor=boft_config.boft_n_butterfly_factor,
+                boft_dropout=boft_config.boft_dropout,
+                init_weights=boft_config.init_weights,
             )
 
     def _replace_module(self, parent, child_name, new_module, child):
@@ -215,7 +218,8 @@ class BOFTModel(BaseTuner):
             new_module = Conv2d(target, adapter_name, **kwargs)
         else:
             raise ValueError(
-                f"Target module {target} is not supported. " f"Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` is supported."
+                f"Target module {target} is not supported. "
+                "Currently, only `torch.nn.Linear` and `torch.nn.Conv2d` are supported."
             )
 
         return new_module

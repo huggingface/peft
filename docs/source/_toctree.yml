@@ -22,8 +22,6 @@
     title: LoRA methods
   - local: task_guides/ia3
     title: IA3
-  - local: task_guides/orthogonal_finetuning_methods
-    title: OFT methods
 
 - title: Developer guides
   sections:

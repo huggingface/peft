@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# The implementation is based on "Parameter-Efficient Orthogonal Finetuning
+# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
@@ -49,7 +52,7 @@ class BOFTConfig(PeftConfig):
     """
 
     boft_block_size: int = field(
-        default=0,
+        default=4,
         metadata={
             "help": "BOFT block size across different layers.",
             "note": "You can only specify either boft_block_size or boft_block_num, but not both simultaneously, because boft_block_size x boft_block_num = layer dimension.",
@@ -122,3 +125,10 @@ class BOFTConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.boft_block_size == 0 and self.boft_block_num == 0:
+            raise ValueError("You must specify either boft_block_size or boft_block_num.")
+        if not (self.boft_block_size != 0) ^ (self.boft_block_num != 0):
+            raise ValueError(
+                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), " 
+                "but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+            )

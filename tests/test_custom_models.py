@@ -266,6 +266,8 @@ TEST_CASES = [
         BOFTConfig,
         {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
     ),
+    ("Conv2d 1 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d"], "boft_block_size": 45, "boft_block_num": 0, "boft_n_butterfly_factor": 1}),
+    ("Conv2d 2 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d"], "boft_block_size": 0, "boft_block_num": 1, "boft_n_butterfly_factor": 1}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -794,12 +796,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
-        if config_cls != LoraConfig:
+        if config_cls != LoraConfig or config_cls != BOFTConfig:
             # skip this test for other configs as bias is specific to Lora
-            self.skipTest("Testing bias warnings only for LoraConfig")
+            self.skipTest("Testing bias warnings only for LoraConfig or BOFTConfig")
 
-        if not issubclass(config_cls, LoraConfig):
-            self.skipTest("Bias argument is only supported for LoRA models")
+        if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
+            self.skipTest("Bias argument is only supported for LoRA or BOFT models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -813,12 +815,21 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with peft_model.disable_adapter():
                 pass  # there is nothing to be done
 
-        # check that bias=all and bias=lora_only give a warning with the correct message
-        msg_start = "Careful, disabling adapter layers with bias configured to be"
-        with pytest.warns(UserWarning, match=msg_start):
-            run_with_disable(config_kwargs, bias="lora_only")
-        with pytest.warns(UserWarning, match=msg_start):
-            run_with_disable(config_kwargs, bias="all")
+        if config_cls == LoraConfig:
+            # check that bias=all and bias=lora_only give a warning with the correct message
+            msg_start = "Careful, disabling adapter layers with bias configured to be"
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="lora_only")
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="all")
+
+        if config_cls == BOFTConfig:
+            # check that bias=all and bias=boft_only give a warning with the correct message
+            msg_start = "Careful, disabling adapter layers with bias configured to be"
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="boft_only")
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="all") 
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
         # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning

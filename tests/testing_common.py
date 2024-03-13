@@ -31,6 +31,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    BOFTConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -78,6 +79,10 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # BOFT
+    {
+        "target_modules": None,
+    },
 )
 
 CLASSES_MAPPING = {
@@ -87,6 +92,7 @@ CLASSES_MAPPING = {
     "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[3]),
     "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
     "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
+    "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[6]),
 }
 
 
@@ -1316,9 +1322,9 @@ class PeftCommonTester:
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
 
     def _test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
-        # When trying to add multiple adapters with bias in Lora or AdaLora, an error should be
+        # When trying to add multiple adapters with bias in Lora, AdaLora or BOFTConfig, an error should be
         # raised. Also, the peft model should not be left in a half-initialized state.
-        if not issubclass(config_cls, (LoraConfig, AdaLoraConfig)):
+        if not issubclass(config_cls, (LoraConfig, AdaLoraConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         config_kwargs = config_kwargs.copy()
@@ -1330,8 +1336,14 @@ class PeftCommonTester:
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, "adapter0")
-        with pytest.raises(ValueError):
-            model.add_adapter("adapter1", replace(config, r=20))
+
+        if config_cls == LoraConfig or config_cls == AdaLoraConfig:
+            with pytest.raises(ValueError):
+                model.add_adapter("adapter1", replace(config, r=20))
+
+        if config_cls == BOFTConfig:
+            with pytest.raises(ValueError):
+                model.add_adapter("adapter1", replace(config, boft_block_num=1, boft_block_size=0))
 
         # (superficial) test that the model is not left in a half-initialized state when adding an adapter fails
         assert "adapter1" not in model.peft_config

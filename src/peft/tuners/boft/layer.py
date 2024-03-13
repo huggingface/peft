@@ -13,6 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# The implementation is based on "Parameter-Efficient Orthogonal Finetuning
+# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+
 import math
 import warnings
 from typing import Any, List, Optional, Tuple, Union
@@ -32,6 +35,26 @@ os.environ["CC"] = "gcc"
 os.environ["CXX"] = "gcc"
 curr_dir = os.path.dirname(__file__)
 
+_FBD_CUDA = None
+
+def get_fbd_cuda():
+    global _FBD_CUDA
+
+    if _FBD_CUDA is not None:
+        return _FBD_CUDA
+
+    curr_dir = os.path.dirname(__file__)
+    fbd_cuda = load(
+        name="fbd_cuda",
+        sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
+        verbose=True,
+        # build_directory='/tmp/'  # for debugging
+        )
+    # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
+    import fbd_cuda
+
+    _FBD_CUDA = fbd_cuda
+    return _FBD_CUDA
 
 class FastBlockDiag(Function):
     """
@@ -60,14 +83,14 @@ class FastBlockDiag(Function):
         Tensor: The resulting tensor after applying the block diagonal operation,
                 will have the shape (N, DxH, DxH).
         """
-        output = fbd_cuda.forward(input)[0]
+        output = get_fbd_cuda().forward(input)[0]
         ctx.save_for_backward(input)
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
         (input,) = ctx.saved_tensors
-        grad_input = fbd_cuda.backward(grad_output, input)[0]
+        grad_input = get_fbd_cuda().backward(grad_output, input)[0]
         return grad_input
 
 
@@ -82,13 +105,11 @@ class MultiplicativeDropoutLayer(nn.Module):
         Parameters:
         p (float): The probability of dropping out a block. Defaults to 0.0.
         """
-        super(MultiplicativeDropoutLayer, self).__init__()
+        super().__init__()
         self.p = p
 
     def forward(self, x):
         """
-        The forward method for MultiplicativeDropoutLayer.
-
         Applies multiplicative dropout to the input tensor.
         Parameters:
         x (Tensor): The input tensor of shape (N, D, H, H), where `N` is the batch size, `D` represents
@@ -165,16 +186,6 @@ class BOFTLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
         
-        global fbd_cuda
-        fbd_cuda = load(
-            name="fbd_cuda",
-            sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
-            verbose=True,
-            # build_directory='/tmp/'  # for debugging
-            )
-        # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
-        import fbd_cuda
-
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -219,12 +230,6 @@ class BOFTLayer(BaseTunerLayer):
             boft_dropout_layer = nn.Identity()
         self.boft_dropout.update(nn.ModuleDict({adapter_name: boft_dropout_layer}))
 
-        # Initialize the BOFT parameters.
-        if not (boft_block_size != 0) ^ (boft_block_num != 0):
-            raise ValueError(
-                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num != in_features."
-            )
-
         if boft_block_size == 0 and boft_block_num != 0:
             if self.in_features % boft_block_num != 0:
                 raise ValueError(
@@ -262,7 +267,10 @@ class BOFTLayer(BaseTunerLayer):
             boft_block_num = int(self.in_features // boft_block_size)
 
         else:
-            raise ValueError("Unknown error!")
+            raise ValueError(
+                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously or setting both"
+                "to be 0, because boft_block_size x boft_block_num != in_features."
+            )
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -379,6 +387,22 @@ class BOFTLayer(BaseTunerLayer):
             indices[i:block_end] = tmp_indices[sorted_order]
         return indices
 
+    def cayley_batch(self, data):
+        """
+        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
+        Args:
+            data: A batch of skew-symmetric matrices of shape (b, r, c).
+        """
+        b, r, c = data.shape
+        # Ensure the input matrix is skew-symmetric
+        skew = 0.5 * (data - data.transpose(1, 2))
+        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
+
+        # Perform the Cayley parametrization
+        Q = torch.linalg.solve(I + skew, I - skew, left=False)
+
+        return Q
+
 
 class Linear(nn.Module, BOFTLayer):
     """
@@ -452,13 +476,15 @@ class Linear(nn.Module, BOFTLayer):
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
                     orig_weight = torch.transpose(orig_weight, 0, 1)
-                    self.base_layer.weight.data = orig_weight * boft_s
+                    orig_weight = orig_weight * boft_s
+
+                    self.base_layer.weight.data = orig_weight
 
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
         """
-        This method unmerges all merged adapter layers from the base weights.
+        This method unmerges all merged adapter layers from the base weights. 
         """
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
@@ -503,53 +529,6 @@ class Linear(nn.Module, BOFTLayer):
             butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
         return butterfly_oft_mat, boft_s
-
-    def cayley_batch(self, data):
-        """
-        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
-        Args:
-            data: A batch of skew-symmetric matrices of shape (b, r, c).
-        """
-        b, r, c = data.shape
-        # Ensure the input matrix is skew-symmetric
-        skew = 0.5 * (data - data.transpose(1, 2))
-        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
-
-        # Perform the Cayley parametrization
-        Q = torch.linalg.solve(I + skew, I - skew, left=False)
-
-        return Q
-
-    def angle2rot(self, alphas):
-        """
-        Convert the angle to rotation matrix.
-        Only applicable for BOFT block size 2.
-        """
-        c = torch.cos(alphas)
-        s = torch.sin(alphas)
-        rot_mats = torch.cat([c, -s, s, c], dim=-1).view(alphas.shape[0], alphas.shape[1], 2, 2)
-        return rot_mats
-
-    def is_orthogonal(self, R, eps=1e-3):
-        """
-        Check if the matrix is orthogonal.
-        """
-        R = R.float()
-        with torch.no_grad():
-            RtR = torch.matmul(R.t(), R)
-            diff = torch.abs(RtR - torch.eye(R.shape[1], dtype=R.dtype, device=R.device))
-            return torch.all(diff < eps)
-
-    def is_identity_matrix(self, tensor):
-        """
-        Check if the matrix is identity.
-        """
-        if not torch.is_tensor(tensor):
-            raise TypeError("Input must be a PyTorch tensor.")
-        if tensor.ndim != 2 or tensor.shape[0] != tensor.shape[1]:
-            return False
-        identity = torch.eye(tensor.shape[0], device=tensor.device)
-        return torch.all(torch.eq(tensor, identity))
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -635,7 +614,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
     ):
         """
-        Update the linear layer with trainable BOFT weights.
+        Update the conv2d layer with trainable BOFT weights.
         """
         # to be consistent with the paper notation 
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
@@ -722,7 +701,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
         )
-        self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
+        self.boft_s[adapter_name] = nn.Parameter(torch.ones(1, int(self.out_features)))
 
         self.reset_boft_parameters(adapter_name, init_weights)
 
@@ -765,19 +744,16 @@ class Conv2d(nn.Module, BOFTLayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
                     orig_weight = orig_weight.view(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0])
 
-                    if not torch.isfinite(orig_weight).all():
-                        raise ValueError(
-                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                        )
-
                     self.base_layer.weight.data = orig_weight
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
@@ -801,10 +777,10 @@ class Conv2d(nn.Module, BOFTLayer):
                 butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                 orig_weight = self.get_base_layer().weight.data.clone()
-                orig_weight = orig_weight.view(self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features)
+                orig_weight = orig_weight.view(self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0], self.out_features)
                 orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
                 orig_weight = orig_weight * (1 / boft_s)
-                orig_weight = orig_weight.view(self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0])
+                orig_weight = orig_weight.view(self.out_features, self.in_features, self.get_base_layer().kernel_size[0], self.get_base_layer().kernel_size[0])
 
                 self.get_base_layer().weight.data = orig_weight
 
@@ -837,54 +813,6 @@ class Conv2d(nn.Module, BOFTLayer):
             butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
         return butterfly_oft_mat, boft_s
-
-
-    def cayley_batch(self, data):
-        """
-        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
-        Args:
-            data: A batch of skew-symmetric matrices of shape (b, r, c).
-        """
-        b, r, c = data.shape
-        # Ensure the input matrix is skew-symmetric
-        skew = 0.5 * (data - data.transpose(1, 2))
-        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)
-
-        # Perform the Cayley parametrization
-        Q = torch.linalg.solve(I + skew, I - skew, left=False)
-
-        return Q
-
-    def angle2rot(self, alphas):
-        """
-        Convert the angle to rotation matrix.
-        Only applicable for BOFT block size 2.
-        """
-        c = torch.cos(alphas)
-        s = torch.sin(alphas)
-        rot_mats = torch.cat([c, -s, s, c], dim=-1).view(alphas.shape[0], alphas.shape[1], 2, 2)
-        return rot_mats
-
-    def is_orthogonal(self, R, eps=1e-3):
-        """
-        Check if the matrix is orthogonal.
-        """
-        R = R.float()
-        with torch.no_grad():
-            RtR = torch.matmul(R.t(), R)
-            diff = torch.abs(RtR - torch.eye(R.shape[1], dtype=R.dtype, device=R.device))
-            return torch.all(diff < eps)
-
-    def is_identity_matrix(self, tensor):
-        """
-        Check if the matrix is identity.
-        """
-        if not torch.is_tensor(tensor):
-            raise TypeError("Input must be a PyTorch tensor.")
-        if tensor.ndim != 2 or tensor.shape[0] != tensor.shape[1]:
-            return False
-        identity = torch.eye(tensor.shape[0], device=tensor.device)
-        return torch.all(torch.eq(tensor, identity))
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype

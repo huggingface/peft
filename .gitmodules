@@ -1,4 +1,0 @@
-[submodule "examples/boft_dreambooth/data/dreambooth"]
-	path = examples/boft_dreambooth/data/dreambooth
-    url = git@github.com:google/dreambooth.git
-    ignore = dirty
