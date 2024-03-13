@@ -160,7 +160,9 @@ if is_bnb_available():
                 * self.scaling[adapter]
             )
 
-        def _mixed_batch_forward(self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any) -> torch.Tensor:
+        def _mixed_batch_forward(
+            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        ) -> torch.Tensor:
             # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
             # extra argument that allows mixing different adapters in the same batch at inference time.
             result = self.base_layer(x, *args, **kwargs)
@@ -395,7 +397,9 @@ if is_bnb_4bit_available():
                 * self.scaling[adapter]
             )
 
-        def _mixed_batch_forward(self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any) -> torch.Tensor:
+        def _mixed_batch_forward(
+            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        ) -> torch.Tensor:
             # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
             # extra argument that allows mixing different adapters in the same batch at inference time.
             result = self.base_layer(x, *args, **kwargs)

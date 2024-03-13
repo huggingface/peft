@@ -676,7 +676,7 @@ class PeftCommonTester:
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
-        if config_cls not in (LoraConfig, ):
+        if config_cls not in (LoraConfig,):
             return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
 
         config = config_cls(

@@ -17,9 +17,9 @@
 import copy
 import os
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
-import time
 
 import pytest
 import torch
@@ -2028,6 +2028,7 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
         )
+
 
 class TestMixedAdapterBatches:
     torch_device = infer_device()
