@@ -173,7 +173,7 @@ In the above example, the memory consumed per GPU is  72-80 GB (90-98%) as seen 
 
 In this section, we will look at how to use QLoRA and FSDP for finetuning 70B llama model on 2X24GB GPUs. [Answer.AI](https://www.answer.ai/) in collaboration with bitsandbytes and Hugging Face 🤗 open sourced code enabling the usage of FSDP+QLoRA and explained the whole process in their insightful blogpost [You can now train a 70b language model at home](https://www.answer.ai/posts/2024-03-06-fsdp-qlora.html). This is now integrated in Hugging Face ecosystem. 
 
-For this, we need to set `fsdp_cpu_ram_efficient_loading=true`, `fsdp_use_orig_params=false` and `fsdp_offload_params=true`(cpu offloading) when using Accelerate config. When not using accelerate launcher, you can alternately set the environment variable `export FSDP_CPU_RAM_EFFICIENT_LOADING=true`.  Here, we will be using accelerate config and below is the config which is also in configs folder at [fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml):
+For this, we first need `bitsandbytes>=0.43.0` then we need to set `fsdp_cpu_ram_efficient_loading=true`, `fsdp_use_orig_params=false` and `fsdp_offload_params=true`(cpu offloading) when using Accelerate config. When not using accelerate launcher, you can alternately set the environment variable `export FSDP_CPU_RAM_EFFICIENT_LOADING=true`.  Here, we will be using accelerate config and below is the config which is also in configs folder at [fsdp_config_qlora.yaml](https://github.com/huggingface/peft/blob/main/examples/sft/configs/fsdp_config_qlora.yaml):
 
 ```yml
 compute_environment: LOCAL_MACHINE                                                                                                                                           
@@ -249,7 +249,7 @@ accelerate launch --config_file "configs/fsdp_config_qlora.yaml"  train.py \
 --bnb_4bit_quant_storage_dtype "bfloat16"
 ```
 
-Notice the new argument being passed `bnb_4bit_quant_storage_dtype` which denotes the data type for packing the 4-bit parameters. For example, when it is set to `bfloat16`, **32/4 = 8** 4-bit params are packed together post quantization. When using mized precision training with `bfloat16`, `bnb_4bit_quant_storage_dtype` can be wither `bfloat16` for pure `bfloat16` finetuning or `float32` for automatic mixed precision (this consumes more GPU memory). When using mixed precision training with `float16`, `bnb_4bit_quant_storage_dtype` should be set to `float32` for stable automatic mixed precision training.
+Notice the new argument being passed, `bnb_4bit_quant_storage_dtype`, which denotes the data type for packing the 4-bit parameters. For example, when it is set to `bfloat16`, **32/4 = 8** 4-bit params are packed together post quantization. When using mixed precision training with `bfloat16`, `bnb_4bit_quant_storage_dtype` can be either `bfloat16` for pure `bfloat16` finetuning, or `float32` for automatic mixed precision (this consumes more GPU memory). When using mixed precision training with `float16`, `bnb_4bit_quant_storage_dtype` should be set to `float32` for stable automatic mixed precision training.
 
 In terms of training code, the important code changes are: 
 
@@ -261,7 +261,7 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_quant_type=args.bnb_4bit_quant_type,
     bnb_4bit_compute_dtype=compute_dtype,
     bnb_4bit_use_double_quant=args.use_nested_quant,
-+    bnb_4bit_quant_storage=quant_storage_stype,
++   bnb_4bit_quant_storage=quant_storage_stype,
 )
 
 ...
@@ -271,7 +271,7 @@ model = AutoModelForCausalLM.from_pretrained(
             quantization_config=bnb_config,
             trust_remote_code=True,
             attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
-+            torch_dtype=quant_storage_stype or torch.float32,
++           torch_dtype=quant_storage_stype or torch.float32,
         )
 ```
 
@@ -279,7 +279,7 @@ Notice that `torch_dtype` for `AutoModelForCausalLM` is same as the `bnb_4bit_qu
 
 ## Memory usage
 
-In the above example, the memory consumed per GPU is **19.6 GB** while CPU RAM usage is around **107 GB**. When disabling CPU offloading, the GPU memory usage is  **35.6 GB/ GPU**. Therefore, what took 16X80GB GPUs for full finetuning, 8X80GB GPUs with FSDP+LoRA and couple of 80GB GPUs with DDP+QLoRA now requires 2X24GB GPUs. This makes finetuning of large models more accessible.
+In the above example, the memory consumed per GPU is **19.6 GB** while CPU RAM usage is around **107 GB**. When disabling CPU offloading, the GPU memory usage is  **35.6 GB/ GPU**. Therefore, what took 16X80GB GPUs for full finetuning, 8X80GB GPUs with FSDP+LoRA, and a couple of 80GB GPUs with DDP+QLoRA, now requires 2X24GB GPUs. This makes finetuning of large models more accessible.
 
 ## More resources
 You can also refer the [llama-recipes](https://github.com/facebookresearch/llama-recipes/?tab=readme-ov-file#fine-tuning) repo and [Getting started with Llama](https://llama.meta.com/get-started/#fine-tuning) guide on how to finetune using FSDP and PEFT.
@@ -288,4 +288,4 @@ You can also refer the [llama-recipes](https://github.com/facebookresearch/llama
 1. Merging when using PEFT and FSDP is currently unsupported and will raise error.
 2. Passing `modules_to_save` config parameter to is untested at present.
 3. GPU Memory saving when using CPU Offloading is untested at present.
-4. When using FSDP+QLoRA, `paged_adamw_8bit` currently results in error when saving a checkpoint.
+4. When using FSDP+QLoRA, `paged_adamw_8bit` currently results in an error when saving a checkpoint.
