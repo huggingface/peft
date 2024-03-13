@@ -39,6 +39,10 @@ class ModelArguments:
         default="float16",
         metadata={"help": "Compute dtype for 4bit base models"},
     )
+    bnb_4bit_quant_storage_dtype: Optional[str] = field(
+        default="float32",
+        metadata={"help": "Quantization storage dtype for 4bit base models"},
+    )
     bnb_4bit_quant_type: Optional[str] = field(
         default="nf4",
         metadata={"help": "Quantization type fp4 or nf4"},
@@ -133,14 +137,7 @@ def main(model_args, data_args, training_args):
         max_seq_length=data_args.max_seq_length,
     )
     trainer.accelerator.print(f"{trainer.model}")
-    if model_args.use_peft_lora:
-        # handle PEFT+FSDP case
-        trainer.model.print_trainable_parameters()
-        if getattr(trainer.accelerator.state, "fsdp_plugin", None):
-            from peft.utils.other import fsdp_auto_wrap_policy
-
-            fsdp_plugin = trainer.accelerator.state.fsdp_plugin
-            fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
+    trainer.model.print_trainable_parameters()
 
     # train
     checkpoint = None
