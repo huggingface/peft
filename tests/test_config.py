@@ -24,12 +24,12 @@ from parameterized import parameterized
 from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
+    BOFTConfig,
     IA3Config,
     LoHaConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
     OFTConfig,
-    BOFTConfig,
     PeftConfig,
     PeftType,
     PolyConfig,

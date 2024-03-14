@@ -15,23 +15,22 @@
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
 # via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
 
-import os
 import glob
-from tqdm import tqdm
-import numpy as np
+import os
 from pathlib import Path
-from skimage.io import imread
-import cv2
-import json
-import argparse
-import face_alignment
-import torch
-from torchvision.utils import save_image
-from accelerate import Accelerator
-from transformers import AutoTokenizer
 
-from utils.dataset import make_dataset
+import cv2
+import face_alignment
+import numpy as np
+import torch
+from accelerate import Accelerator
+from skimage.io import imread
+from torchvision.utils import save_image
+from tqdm import tqdm
+from transformers import AutoTokenizer
 from utils.args_loader import parse_args
+from utils.dataset import make_dataset
+
 
 detect_model = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device="cuda:0", flip_input=False)
 
@@ -79,7 +78,7 @@ def plot_kpts(image, kpts, color="g"):
 
 
 def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False):
-    print(f"Generate 2d landmarks ...")
+    print("Generate 2d landmarks ...")
     os.makedirs(pred_lmk_dir, exist_ok=True)
 
     imagepath_list = sorted(glob.glob(f"{input_dir}/pred*.png"))
@@ -134,7 +133,7 @@ def generate_landmark2d(dataset, input_dir, pred_lmk_dir, gt_lmk_dir, vis=False)
 
 
 def landmark_comparison(val_dataset, lmk_dir, gt_lmk_dir):
-    print(f"Calculating reprojection error")
+    print("Calculating reprojection error")
     lmk_err = []
 
     pbar = tqdm(range(len(val_dataset)))
@@ -153,7 +152,7 @@ def landmark_comparison(val_dataset, lmk_dir, gt_lmk_dir):
         lmk_err.append(np.mean(np.linalg.norm(lmk1 - lmk2, axis=1)))
         pbar.set_description(f"lmk_err: {np.mean(lmk_err):.5f}")
 
-    print(f"Reprojection error:", np.mean(lmk_err))
+    print("Reprojection error:", np.mean(lmk_err))
     np.save(os.path.join(lmk_dir, "lmk_err.npy"), lmk_err)
 
 

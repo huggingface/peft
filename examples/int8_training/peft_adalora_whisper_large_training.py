@@ -18,7 +18,6 @@ import evaluate
 import numpy as np
 import torch
 import transformers
-import wandb
 
 # accelerate imports
 from accelerate import Accelerator, dispatch_model
@@ -38,6 +37,8 @@ from transformers import (
 )
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from transformers.utils import get_full_repo_name
+
+import wandb
 
 # peft imports
 from peft import AdaLoraConfig, LoraConfig, PeftModel, get_peft_model

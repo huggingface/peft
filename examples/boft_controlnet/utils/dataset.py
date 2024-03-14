@@ -1,11 +1,14 @@
 import random
-import wandb
+
+import numpy as np
+import torch
+from datasets import load_dataset
 from diffusers import DDIMScheduler
 from PIL import Image
-import torch
 from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
-from datasets import load_dataset
+
+import wandb
 
 
 def image_grid(imgs, rows, cols):
@@ -48,9 +51,7 @@ def log_validation(val_dataset, text_encoder, unet, controlnet, args, accelerato
             [validation_image],
             num_inference_steps=50,
             generator=generator,
-        )[
-            0
-        ][0]
+        )[0][0]
 
         image_logs.append(
             {
@@ -105,10 +106,9 @@ def make_dataset(args, tokenizer, accelerator, split="train"):
     # We need to tokenize inputs and targets.
     column_names = dataset[split].column_names
 
-    # 6. Get the column names for input/target.
+    # Get the column names for input/target.
     if args.image_column is None:
         image_column = column_names[0]
-        logger.info(f"image column defaulting to {image_column}")
     else:
         image_column = args.image_column
         if image_column not in column_names:
@@ -118,7 +118,6 @@ def make_dataset(args, tokenizer, accelerator, split="train"):
 
     if args.caption_column is None:
         caption_column = column_names[1]
-        logger.info(f"caption column defaulting to {caption_column}")
     else:
         caption_column = args.caption_column
         if caption_column not in column_names:
@@ -128,7 +127,6 @@ def make_dataset(args, tokenizer, accelerator, split="train"):
 
     if args.conditioning_image_column is None:
         conditioning_image_column = column_names[2]
-        logger.info(f"conditioning image column defaulting to {conditioning_image_column}")
     else:
         conditioning_image_column = args.conditioning_image_column
         if conditioning_image_column not in column_names:

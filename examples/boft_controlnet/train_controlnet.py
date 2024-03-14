@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -40,19 +39,20 @@ from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
 from packaging import version
-from peft import BOFTConfig, get_peft_model
-from peft.peft_model import PeftModel
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
-
 from utils.args_loader import (
     import_model_class_from_model_name_or_path,
     parse_args,
 )
 from utils.dataset import collate_fn, log_validation, make_dataset
-from utils.tracemalloc import TorchTracemalloc, b2mb
 from utils.light_controlnet import ControlNetModel
+from utils.tracemalloc import TorchTracemalloc, b2mb
 from utils.unet_2d_condition import UNet2DConditionNewModel
+
+from peft import BOFTConfig, get_peft_model
+from peft.peft_model import PeftModel
+
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.16.0.dev0")
@@ -513,22 +513,18 @@ def main(args):
                     break
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
+        accelerator.print(f"GPU Memory before entering the train : {b2mb(tracemalloc.begin)}")
+        accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
+        accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
         accelerator.print(
-            "GPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
-            )
+            f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
 
-        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
+        accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")
+        accelerator.print(f"CPU Memory consumed at the end of the train (end-begin): {tracemalloc.cpu_used}")
+        accelerator.print(f"CPU Peak Memory consumed during the train (max-begin): {tracemalloc.cpu_peaked}")
         accelerator.print(
-            "CPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
-            )
+            f"CPU Total Peak Memory consumed during the train (max): {tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)}"
         )
 
     # Create the pipeline using using the trained modules and save it.

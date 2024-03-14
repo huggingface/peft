@@ -19,7 +19,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import LoHaConfig, LoraConfig, OFTConfig, BOFTConfig, get_peft_model
+from peft import BOFTConfig, LoHaConfig, LoraConfig, OFTConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -84,7 +84,7 @@ CONFIG_TESTING_KWARGS = (
             "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
             "boft_dropout": 0.0,
         },
-    }
+    },
 )
 CLASSES_MAPPING = {
     "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),

@@ -40,11 +40,11 @@ from .config import PeftConfig
 from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
+    BOFTModel,
     IA3Model,
     LoHaModel,
     LoKrModel,
     LoraModel,
-    BOFTModel,
     MultitaskPromptEmbedding,
     OFTModel,
     PolyModel,

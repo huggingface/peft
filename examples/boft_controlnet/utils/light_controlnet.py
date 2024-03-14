@@ -17,17 +17,17 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
-from torch import nn
-from torch.nn import functional as F
-
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.utils import BaseOutput, logging
 from diffusers.models.attention_processor import AttentionProcessor, AttnProcessor
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.unet_2d_blocks import (
     CrossAttnDownBlock2D,
     DownBlock2D,
 )
+from diffusers.utils import BaseOutput, logging
+from torch import nn
+from torch.nn import functional as F
+
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

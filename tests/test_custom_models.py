@@ -27,12 +27,12 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    BOFTConfig,
     IA3Config,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
     OFTConfig,
-    BOFTConfig,
     PeftModel,
     get_peft_model,
 )
@@ -237,7 +237,12 @@ TEST_CASES = [
     # BOFT #
     ########
     ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "boft_block_size": 2}),
-    ("Vanilla MLP 2 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "modules_to_save": ["lin0"], "boft_block_size": 2}),
+    (
+        "Vanilla MLP 2 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "modules_to_save": ["lin0"], "boft_block_size": 2},
+    ),
     (
         "Vanilla MLP 3 BOFT",
         "MLP",
@@ -266,8 +271,30 @@ TEST_CASES = [
         BOFTConfig,
         {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
     ),
-    ("Conv2d 1 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d"], "boft_block_size": 45, "boft_block_num": 0, "boft_n_butterfly_factor": 1}),
-    ("Conv2d 2 BOFT", "Conv2d", BOFTConfig, {"target_modules": ["conv2d"], "boft_block_size": 0, "boft_block_num": 1, "boft_n_butterfly_factor": 1}),
+    (
+        "Conv2d 1 BOFT",
+        "Conv2d",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 45, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Conv2d 2 BOFT",
+        "Conv2d",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 0, "boft_block_num": 1, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "MLP2 1 BOFT",
+        "MLP2",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
+    ),
+    (
+        "MLP2 2 BOFT",
+        "MLP2",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 8, "boft_n_butterfly_factor": 3},
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -347,6 +374,25 @@ class MLP(nn.Module):
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(0.5)
         self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class MLP2(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 32, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(32, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
@@ -481,6 +527,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "MLP2":
+            return MLP2().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -829,7 +878,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with pytest.warns(UserWarning, match=msg_start):
                 run_with_disable(config_kwargs, bias="boft_only")
             with pytest.warns(UserWarning, match=msg_start):
-                run_with_disable(config_kwargs, bias="all") 
+                run_with_disable(config_kwargs, bias="all")
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
         # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning

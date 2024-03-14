@@ -35,6 +35,7 @@ from peft import (
     AdaptionPromptConfig,
     IA3Config,
     LoraConfig,
+    BOFTConfig,
     PeftModel,
     TaskType,
     get_peft_model,
@@ -751,3 +752,4 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             model.save_pretrained(tmp_dir, safe_serialization=True)
+

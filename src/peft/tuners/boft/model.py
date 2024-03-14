@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,39 +15,29 @@
 # The implementation is based on "Parameter-Efficient Orthogonal Finetuning
 # via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
 
-import operator
-import re
 import warnings
-from dataclasses import asdict, replace
+from dataclasses import asdict
 from enum import Enum
-from functools import reduce
-from itertools import chain
 from typing import List, Optional
 
 import torch
 from torch import nn
 from tqdm import tqdm
-from transformers.pytorch_utils import Conv1D
 
-from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
-    _freeze_adapter,
     _get_submodules,
-    get_auto_gptq_quant_linear,
-    get_quantization_config,
 )
 
 from .config import BOFTConfig
-from .layer import Linear, Conv2d, BOFTLayer
+from .layer import BOFTLayer, Conv2d, Linear
 
 
 class BOFTModel(BaseTuner):
     """
-    Creates BOFT and OFT model from a pretrained transformers model. Paper:
-    https://arxiv.org/abs/2311.06243
+    Creates BOFT and OFT model from a pretrained transformers model. Paper: https://arxiv.org/abs/2311.06243
     https://arxiv.org/abs/2306.07280
 
     Args:
@@ -61,26 +50,15 @@ class BOFTModel(BaseTuner):
 
     Example::
 
-        ```py
-        >>> import transformers
-        >>> from transformers import AutoModelForSeq2SeqLM, BOFTConfig
-        >>> from peft import BOFTConfig, get_peft_model
+        >>> import transformers >>> from transformers import AutoModelForSeq2SeqLM, BOFTConfig >>> from peft import
+        BOFTConfig, get_peft_model
 
-        >>> config = BOFTConfig(
-        ...     boft_block_size=8,
-        ...     boft_n_butterfly_factor=1,
-        ...     target_modules=["query", "value", "key", "output.dense", "mlp.fc1", "mlp.fc2"],
-        ...     boft_dropout=0.1,
-        ...     bias="boft_only",
-        ...     modules_to_save=["classifier"],
-        ... )
+        >>> config = BOFTConfig( ... boft_block_size=8, ... boft_n_butterfly_factor=1, ... target_modules=["query",
+        "value", "key", "output.dense", "mlp.fc1", "mlp.fc2"], ... boft_dropout=0.1, ... bias="boft_only", ...
+        modules_to_save=["classifier"], ... )
 
-        >>> model = transformers.Dinov2ForImageClassification.from_pretrained(
-        ...     "facebook/dinov2-large",
-        ...     num_labels=100,
-        ... )
-        >>> boft_model = get_peft_model(model, config)
-        ```
+        >>> model = transformers.Dinov2ForImageClassification.from_pretrained( ... "facebook/dinov2-large", ...
+        num_labels=100, ... ) >>> boft_model = get_peft_model(model, config)
 
     **Attributes**:
         - **model** ([`transformers.PreTrainedModel`]) -- The model to be adapted.

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -129,6 +128,6 @@ class BOFTConfig(PeftConfig):
             raise ValueError("You must specify either boft_block_size or boft_block_num.")
         if not (self.boft_block_size != 0) ^ (self.boft_block_num != 0):
             raise ValueError(
-                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), " 
+                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), "
                 "but not both simultaneously, because boft_block_size x boft_block_num != in_features."
             )

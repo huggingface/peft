@@ -1,5 +1,6 @@
-import threading
 import gc
+import threading
+
 import psutil
 import torch
 

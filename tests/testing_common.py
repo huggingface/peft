@@ -27,11 +27,11 @@ from diffusers import StableDiffusionPipeline
 
 from peft import (
     AdaLoraConfig,
+    BOFTConfig,
     IA3Config,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
-    BOFTConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -516,6 +516,9 @@ class PeftCommonTester:
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
+        if issubclass(config_cls, BOFTConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -632,9 +635,6 @@ class PeftCommonTester:
         assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
-        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
-            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
-
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -897,7 +897,14 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
-        parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        # parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
+        if config_cls == IA3Config:
+            parameter_prefix = "ia3"
+        elif config_cls == BOFTConfig:
+            parameter_prefix = "boft"
+        else:
+            parameter_prefix = "lora"
+
         for n, param in model.named_parameters():
             if parameter_prefix in n:
                 assert param.grad is not None
@@ -1033,7 +1040,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:

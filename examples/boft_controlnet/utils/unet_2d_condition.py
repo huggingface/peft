@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from diffusers.models import UNet2DConditionModel
-import torch
-from typing import Any, Dict, Optional, Tuple, Union
-from diffusers.utils import BaseOutput, logging
 from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple, Union
+
+import torch
+from diffusers.models import UNet2DConditionModel
+from diffusers.utils import BaseOutput, logging
+
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
