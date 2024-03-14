@@ -105,7 +105,9 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
-        if init_lora_weights == "loftq":
+        if init_lora_weights == "pisa_init":
+            self.pisa_init(adapter_name)
+        elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -147,6 +149,16 @@ class LoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+
+    def pisa_init(self, adapter_name):
+        assert self.scaling[adapter_name] == 1
+        u,s,v = self.base_layer.weight.data.svd()
+        ur = u[:,:self.r[adapter_name]]
+        sr = torch.sqrt(s[:self.r[adapter_name]])
+        vr = v[:,:self.r[adapter_name]].t()
+        self.lora_A[adapter_name].weight.data = torch.mm(torch.diag(sr), vr)
+        self.lora_B[adapter_name].weight.data = torch.mm(ur, torch.diag(sr))
+        self.base_layer.weight.data = self.base_layer.weight.data - torch.mm(self.lora_B[adapter_name].weight.data, self.lora_A[adapter_name].weight.data)
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
