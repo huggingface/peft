@@ -36,6 +36,7 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VeraConfig,
 )
 
 
@@ -53,6 +54,7 @@ ALL_CONFIG_CLASSES = (
     PromptTuningConfig,
     OFTConfig,
     PolyConfig,
+    VeraConfig,
 )
 
 

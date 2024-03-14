@@ -50,6 +50,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VeraModel,
 )
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
@@ -82,6 +83,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
+    PeftType.VERA: VeraModel,
 }
 
 

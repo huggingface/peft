@@ -104,6 +104,7 @@ def get_peft_model_state_dict(
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
+
     elif config.is_prompt_learning:
         to_return = {}
         if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
@@ -116,14 +117,32 @@ def get_peft_model_state_dict(
             else:
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
+
     elif config.peft_type == PeftType.IA3:
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
+
     elif config.peft_type == PeftType.OFT:
         to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
+
     elif config.peft_type == PeftType.POLY:
         to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
+
+    elif config.peft_type == PeftType.VERA:
+        to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
+        if config.save_projection:
+            # TODO: adding vera_A and vera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.vera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
+                    " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
+            to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
+
     else:
-        raise NotImplementedError
+        raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
+
     if getattr(model, "modules_to_save", None) is not None:
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
@@ -215,6 +234,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         PeftType.IA3,
         PeftType.OFT,
         PeftType.POLY,
+        PeftType.VERA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -225,6 +245,7 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
+            PeftType.VERA: "vera_lambda_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
@@ -237,10 +258,28 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
+
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        elif config.peft_type == PeftType.VERA:
+            if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
+                raise ValueError(
+                    "Specified to load vera_A and vera_B from state dictionary however they were not present!"
+                )
+            elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
+                warnings.warn(
+                    "Specified to not load vera_A and vera_B from state dictionary however they are present in state"
+                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                    " `peft_config.save_projection = True`"
+                )
+            elif not config.save_projection:  # and no vera_A in state dictionary
+                warnings.warn(
+                    "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
+                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                    " not be accurate on all system configurations."
+                )
     elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
     else:

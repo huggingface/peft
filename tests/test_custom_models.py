@@ -25,7 +25,17 @@ from parameterized import parameterized
 from torch import nn
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    IA3Config,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    OFTConfig,
+    PeftModel,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import ModulesToSaveWrapper
 
@@ -223,6 +233,19 @@ TEST_CASES = [
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
     ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
     ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    ########
+    # VeRA #
+    ########
+    ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0", "projection_prng_key": 42}),
+    ("Vanilla MLP 2 VeRA", "MLP", VeraConfig, {"target_modules": ["lin0"], "projection_prng_key": 42}),
+    ("Vanilla MLP 3 VeRA", "MLP", VeraConfig, {"target_modules": ["lin1"], "projection_prng_key": 42}),
+    (
+        "Vanilla MLP 5 VeRA",
+        "MLP",
+        VeraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "projection_prng_key": 42},
+    ),
+    # TODO: add test that if shapes don't match, it raises an error
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -291,6 +314,7 @@ PREFIXES = {
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
+    VeraConfig: "vera_lambda_",
 }
 
 
