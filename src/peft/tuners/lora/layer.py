@@ -152,13 +152,11 @@ class LoraLayer(BaseTunerLayer):
 
     def pisa_init(self, adapter_name):
         assert self.scaling[adapter_name] == 1
-        u,s,v = self.base_layer.weight.data.svd()
-        ur = u[:,:self.r[adapter_name]]
-        sr = torch.sqrt(s[:self.r[adapter_name]])
-        vr = v[:,:self.r[adapter_name]].t()
-        self.lora_A[adapter_name].weight.data = torch.mm(torch.diag(sr), vr)
-        self.lora_B[adapter_name].weight.data = torch.mm(ur, torch.diag(sr))
-        self.base_layer.weight.data = self.base_layer.weight.data - torch.mm(self.lora_B[adapter_name].weight.data, self.lora_A[adapter_name].weight.data)
+        from peft.utils.loftq_utils import _low_rank_decomposition
+        output = _low_rank_decomposition(self.base_layer.weight.data, reduced_rank=self.r[adapter_name])
+        self.lora_A[adapter_name].weight.data = output["L"]
+        self.lora_B[adapter_name].weight.data = output["R"]
+        self.base_layer.weight.data = self.base_layer.weight.data - torch.mm(output["L"], output["R"])
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
