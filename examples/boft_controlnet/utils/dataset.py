@@ -1,14 +1,14 @@
 import random
 
-import numpy as np
-import torch
 from datasets import load_dataset
 from diffusers import DDIMScheduler
+import numpy as np
 from PIL import Image
+import torch
 from torchvision import transforms
-from utils.pipeline_controlnet import LightControlNetPipeline
-
 import wandb
+
+from utils.pipeline_controlnet import LightControlNetPipeline
 
 
 def image_grid(imgs, rows, cols):
