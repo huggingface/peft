@@ -3,7 +3,6 @@ import os
 import sys
 import threading
 
-import numpy as np
 import psutil
 import torch
 from accelerate import Accelerator
@@ -23,23 +22,23 @@ from peft import LoraConfig, TaskType, get_peft_model
 
 def levenshtein_distance(str1, str2):
     # TC: O(N^2)
-    # SC: O(N^2)
+    # SC: O(N)
     if str1 == str2:
         return 0
     num_rows = len(str1) + 1
     num_cols = len(str2) + 1
-    dp_matrix = np.empty((num_rows, num_cols))
-    dp_matrix[0, :] = range(num_cols)
-    dp_matrix[:, 0] = range(num_rows)
-
+    dp_matrix = list(range(num_cols))
     for i in range(1, num_rows):
+        prev = dp_matrix[0]
+        dp_matrix[0] = i
         for j in range(1, num_cols):
+            temp = dp_matrix[j]
             if str1[i - 1] == str2[j - 1]:
-                dp_matrix[i, j] = dp_matrix[i - 1, j - 1]
+                dp_matrix[j] = prev
             else:
-                dp_matrix[i, j] = min(dp_matrix[i - 1, j - 1], dp_matrix[i - 1, j], dp_matrix[i, j - 1]) + 1
-
-    return dp_matrix[num_rows - 1, num_cols - 1]
+                dp_matrix[j] = min(prev, dp_matrix[j], dp_matrix[j - 1]) + 1
+            prev = temp
+    return dp_matrix[num_cols - 1]
 
 
 def get_closest_label(eval_pred, classes):

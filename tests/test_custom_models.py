@@ -78,6 +78,8 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
+    ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
     #######
     # IA³ #
     #######
@@ -742,6 +744,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
+
         outputs_base = model(**X)
 
         config = config_cls(
@@ -908,6 +911,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    def test_weight_bias_attributes(self):
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+        assert hasattr(model.base_model.model.lin0, "weight")
+        assert hasattr(model.base_model.model.lin0, "bias")
 
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
