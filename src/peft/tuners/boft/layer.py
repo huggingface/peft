@@ -542,8 +542,8 @@ class Linear(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            boft_rotation = torch.eye(self.in_features)
-            boft_scale = torch.ones(int(self.out_features), 1)
+            boft_rotation = torch.eye(self.in_features, device=x.device)
+            boft_scale = torch.ones((int(self.out_features), 1), device=x.device)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
@@ -566,8 +566,8 @@ class Linear(nn.Module, BOFTLayer):
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):
                     butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
-                boft_rotation = boft_rotation @ butterfly_oft_mat
-                boft_scale = boft_scale * boft_s
+                boft_rotation = butterfly_oft_mat @ boft_rotation
+                boft_scale = boft_s * boft_scale 
 
             x = x.to(self.get_base_layer().weight.data.dtype)
 
@@ -810,8 +810,6 @@ class Conv2d(nn.Module, BOFTLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        # device = self.boft_R[adapter].device
-        # dtype = self.boft_R[adapter].dtype
 
         boft_R = self.boft_R[adapter]
         boft_s = self.boft_s[adapter]
@@ -841,7 +839,9 @@ class Conv2d(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            result_initialized = False  # Initialize the flag
+            boft_rotation = torch.eye(self.in_features*self.base_layer.kernel_size[0]*self.base_layer.kernel_size[0], device=x.device)
+            boft_scale = torch.ones((1, int(self.out_features)), device=x.device)
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
                     continue
@@ -863,32 +863,30 @@ class Conv2d(nn.Module, BOFTLayer):
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):
                     butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
-                x = x.to(boft_R.data.dtype)
+                boft_rotation = butterfly_oft_mat @ boft_rotation
+                boft_scale = boft_s * boft_scale 
 
-                orig_weight = self.base_layer.weight.data
-                orig_weight = orig_weight.view(
-                    self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-                    self.out_features,
-                )
-                rotated_weight = torch.mm(butterfly_oft_mat, orig_weight)
+            x = x.to(self.base_layer.weight.data.dtype)
 
-                scaled_rotated_weight = rotated_weight * boft_s
+            orig_weight = self.base_layer.weight.data
+            orig_weight = orig_weight.view(
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.out_features,
+            )
+            rotated_weight = torch.mm(boft_rotation, orig_weight)
 
-                scaled_rotated_weight = scaled_rotated_weight.view(
-                    self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
-                )
-                result = F.conv2d(
-                    input=x,
-                    weight=scaled_rotated_weight,
-                    bias=self.base_layer.bias,
-                    padding=self.base_layer.padding[0],
-                    stride=self.base_layer.stride[0],
-                )
-                result_initialized = True
+            scaled_rotated_weight = rotated_weight * boft_scale
 
-            # handle the case when there are no activate adapter in BOFT
-            if not result_initialized:
-                result = self.base_layer(x, *args, **kwargs)
+            scaled_rotated_weight = scaled_rotated_weight.view(
+                self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
+            )
+            result = F.conv2d(
+                input=x,
+                weight=scaled_rotated_weight,
+                bias=self.base_layer.bias,
+                padding=self.base_layer.padding[0],
+                stride=self.base_layer.stride[0],
+            )
 
         result = result.to(previous_dtype)
         return result
