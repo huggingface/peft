@@ -384,12 +384,10 @@ class LoraModel(BaseTuner):
             raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
 
         hook_handles = []
-        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
-        for key in key_list:
-            _, target, _ = _get_submodules(self.model, key)
-            if isinstance(target, LoraLayer):
+        for module in self.modules():
+            if isinstance(module, LoraLayer):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
-                handle = target.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)
 
         yield

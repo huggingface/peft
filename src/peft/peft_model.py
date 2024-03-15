@@ -114,6 +114,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.modules_to_save = None
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
+        # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
+        # forward.
+        self.special_peft_forward_args = {"adapter_names"}
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
@@ -555,14 +558,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Forward pass of the model.
         """
         with self._enable_peft_forward_hooks(*args, **kwargs):
-            special_peft_args = {"adapter_names"}
-            kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+            kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
             return self.get_base_model()(*args, **kwargs)
 
     def generate(self, *args, **kwargs):
         with self._enable_peft_forward_hooks(*args, **kwargs):
-            special_peft_args = {"adapter_names"}
-            kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+            kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
             return self.get_base_model().generate(*args, **kwargs)
 
     def _get_base_model_class(self, is_prompt_tuning=False):
@@ -925,10 +926,9 @@ class PeftModelForSequenceClassification(PeftModel):
     ):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         peft_config = self.active_peft_config
-        special_peft_args = {"adapter_names"}
         if not peft_config.is_prompt_learning:
             with self._enable_peft_forward_hooks(**kwargs):
-                kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                 if peft_config.peft_type == PeftType.POLY:
                     kwargs["task_ids"] = task_ids
                 return self.base_model(
@@ -1122,8 +1122,7 @@ class PeftModelForCausalLM(PeftModel):
                 kwargs["task_ids"] = task_ids
 
             with self._enable_peft_forward_hooks(**kwargs):
-                special_peft_args = {"adapter_names"}
-                kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                 return self.base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -1183,9 +1182,8 @@ class PeftModelForCausalLM(PeftModel):
             self.base_model.generation_config = self.generation_config
         try:
             if not peft_config.is_prompt_learning:
-                special_peft_args = {"adapter_names"}
                 with self._enable_peft_forward_hooks(*args, **kwargs):
-                    kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                    kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(*args, **kwargs)
             else:
                 outputs = self.base_model.generate(**kwargs)
@@ -1321,8 +1319,7 @@ class PeftModelForSeq2SeqLM(PeftModel):
                 kwargs["task_ids"] = task_ids
 
             with self._enable_peft_forward_hooks(**kwargs):
-                special_peft_args = {"adapter_names"}
-                kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                 return self.base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -1436,9 +1433,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
         )
         try:
             if not peft_config.is_prompt_learning:
-                special_peft_args = {"adapter_names"}
                 with self._enable_peft_forward_hooks(**kwargs):
-                    kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                    kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                     outputs = self.base_model.generate(**kwargs)
             else:
                 if "input_ids" not in kwargs:
@@ -1585,8 +1581,7 @@ class PeftModelForTokenClassification(PeftModel):
 
         if not peft_config.is_prompt_learning:
             with self._enable_peft_forward_hooks(**kwargs):
-                special_peft_args = {"adapter_names"}
-                kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                 if peft_config.peft_type == PeftType.POLY:
                     kwargs["task_ids"] = task_ids
                 return self.base_model(
@@ -1767,8 +1762,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 kwargs["task_ids"] = task_ids
 
             with self._enable_peft_forward_hooks(**kwargs):
-                special_peft_args = {"adapter_names"}
-                kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                 return self.base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -1945,8 +1939,7 @@ class PeftModelForFeatureExtraction(PeftModel):
                 kwargs["task_ids"] = task_ids
 
             with self._enable_peft_forward_hooks(**kwargs):
-                special_peft_args = {"adapter_names"}
-                kwargs = {k: v for k, v in kwargs.items() if k not in special_peft_args}
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
                 return self.base_model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,

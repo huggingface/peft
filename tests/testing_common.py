@@ -711,12 +711,8 @@ class PeftCommonTester:
 
         atol, rtol = 1e-4, 1e-4
         # sanity check that there are enough outputs and that they are different
-        assert len(output_base) >= 3
-        assert len(output_adapter0) >= 3
-        assert len(output_adapter1) >= 3
-        assert len(logits_base) >= 3
-        assert len(logits_adapter0) >= 3
-        assert len(logits_adapter1) >= 3
+        assert len(output_base) == len(output_adapter0) == len(output_adapter1) >= 3
+        assert len(logits_base) == len(logits_adapter0) == len(logits_adapter1) >= 3
         assert not torch.allclose(output_base, output_adapter0, atol=atol, rtol=rtol)
         assert not torch.allclose(output_base, output_adapter1, atol=atol, rtol=rtol)
         assert not torch.allclose(output_adapter0, output_adapter1, atol=atol, rtol=rtol)
