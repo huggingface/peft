@@ -567,7 +567,7 @@ class Linear(nn.Module, BOFTLayer):
                     butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
                 boft_rotation = butterfly_oft_mat @ boft_rotation
-                boft_scale = boft_s * boft_scale 
+                boft_scale = boft_s * boft_scale
 
             x = x.to(self.get_base_layer().weight.data.dtype)
 
@@ -839,7 +839,9 @@ class Conv2d(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            boft_rotation = torch.eye(self.in_features*self.base_layer.kernel_size[0]*self.base_layer.kernel_size[0], device=x.device)
+            boft_rotation = torch.eye(
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0], device=x.device
+            )
             boft_scale = torch.ones((1, int(self.out_features)), device=x.device)
 
             for active_adapter in self.active_adapters:
@@ -864,7 +866,7 @@ class Conv2d(nn.Module, BOFTLayer):
                     butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
 
                 boft_rotation = butterfly_oft_mat @ boft_rotation
-                boft_scale = boft_s * boft_scale 
+                boft_scale = boft_s * boft_scale
 
             x = x.to(self.base_layer.weight.data.dtype)
 

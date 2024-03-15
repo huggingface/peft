@@ -35,7 +35,6 @@ from peft import (
     AdaptionPromptConfig,
     IA3Config,
     LoraConfig,
-    BOFTConfig,
     PeftModel,
     TaskType,
     get_peft_model,

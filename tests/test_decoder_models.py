@@ -19,7 +19,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AdaLoraConfig, LoraConfig, BOFTConfig, PromptTuningConfig, PromptTuningInit, get_peft_model
+from peft import AdaLoraConfig, BOFTConfig, LoraConfig, PromptTuningConfig, PromptTuningInit, get_peft_model
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -43,6 +43,7 @@ FULL_GRID = {
 
 def skip_adalora_and_gpt2(test_list):
     return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == AdaLoraConfig))]
+
 
 def skip_boft_and_gpt2(test_list):
     return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == BOFTConfig))]
@@ -294,7 +295,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "boft_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_boft_and_gpt2
+            filter_params_func=skip_boft_and_gpt2,
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
