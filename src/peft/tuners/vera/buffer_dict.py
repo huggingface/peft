@@ -84,6 +84,7 @@ class BufferDict(Module):
 
     def pop(self, key):
         r"""Remove key from the BufferDict and return its buffer.
+
         Args:
             key (`str`):
                 Key to pop from the BufferDict
