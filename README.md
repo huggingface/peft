@@ -81,19 +81,19 @@ There are many benefits of using PEFT but the main one is the huge savings in co
 
 Consider the memory requirements for training the following models on the [ought/raft/twitter_complaints](https://huggingface.co/datasets/ought/raft/viewer/twitter_complaints) dataset with an A100 80GB GPU with more than 64GB of CPU RAM.
 
-| Model                             | Full Finetuning          | PEFT-LoRA PyTorch       | PEFT-LoRA DeepSpeed with CPU Offloading |
-| --------------------------------- | ------------------------ | ----------------------- | --------------------------------------- |
-| bigscience/T0_3B (3B params)      | 47.14GB GPU / 2.96GB CPU | 14.4GB GPU / 2.96GB CPU | 9.8GB GPU / 17.8GB CPU                  |
-| bigscience/mt0-xxl (12B params)   | OOM GPU                  | 56GB GPU / 3GB CPU      | 22GB GPU / 52GB CPU                     |
-| bigscience/bloomz-7b1 (7B params) | OOM GPU                  | 32GB GPU / 3.8GB CPU    | 18.1GB GPU / 35GB CPU                   |
+|   Model         | Full Finetuning | PEFT-LoRA PyTorch  | PEFT-LoRA DeepSpeed with CPU Offloading |
+| --------- | ---- | ---- | ---- |
+| bigscience/T0_3B (3B params) | 47.14GB GPU / 2.96GB CPU  | 14.4GB GPU / 2.96GB CPU | 9.8GB GPU / 17.8GB CPU |
+| bigscience/mt0-xxl (12B params) | OOM GPU | 56GB GPU / 3GB CPU | 22GB GPU / 52GB CPU |
+| bigscience/bloomz-7b1 (7B params) | OOM GPU | 32GB GPU / 3.8GB CPU | 18.1GB GPU / 35GB CPU |
 
 With LoRA you can fully finetune a 12B parameter model that would've otherwise run out of memory on the 80GB GPU, and comfortably fit and train a 3B parameter model. When you look at the 3B parameter model's performance, it is comparable to a fully finetuned model at a fraction of the GPU memory.
 
-| Submission Name               | Accuracy |
-| ----------------------------- | -------- |
-| Human baseline (crowdsourced) | 0.897    |
-| Flan-T5                       | 0.892    |
-| lora-t0-3b                    | 0.863    |
+|   Submission Name        | Accuracy |
+| --------- | ---- |
+| Human baseline (crowdsourced) |	0.897 |
+| Flan-T5 | 0.892 |
+| lora-t0-3b | 0.863 |
 
 > [!TIP]
 > The bigscience/T0_3B model performance isn't optimized in the table above. You can squeeze even more performance out of it by playing around with the input instruction templates, LoRA hyperparameters, and other training related hyperparameters. The final checkpoint size of this model is just 19MB compared to 11GB of the full bigscience/T0_3B model. Learn more about the advantages of finetuning with PEFT in this [blog post](https://www.philschmid.de/fine-tune-flan-t5-peft).

@@ -3,7 +3,6 @@ BLOCK_NUM=8
 BLOCK_SIZE=0
 N_BUTTERFLY_FACTOR=1
 
-export CUDA_HOME="/is/software/nvidia/cuda-11.7"
 export DATASET_NAME="oftverse/control-celeba-hq"
 export PROJECT_NAME="controlnet_${PEFT_TYPE}"
 export RUN_NAME="${PEFT_TYPE}_${BLOCK_NUM}${BLOCK_SIZE}${N_BUTTERFLY_FACTOR}"
@@ -41,4 +40,3 @@ accelerate launch train_controlnet.py \
   --boft_n_butterfly_factor=$N_BUTTERFLY_FACTOR \
   --boft_dropout=0.1 \
   --boft_bias="boft_only" \
-  --report_to="wandb" \
