@@ -160,7 +160,7 @@ class LoraLayer(BaseTunerLayer):
         lora_B = Ur @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        self.base_layer.weight.data -= lora_B @ lora_A
+        self.base_layer.weight.data = self.base_layer.weight.data - lora_B @ lora_A
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
