@@ -18,7 +18,7 @@
 import math
 import os
 import warnings
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional, Union, Tuple
 
 import torch
 import torch.nn as nn
@@ -506,7 +506,7 @@ class Linear(nn.Module, BOFTLayer):
 
                 self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
 
-    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_delta_weight(self, adapter) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 
@@ -802,7 +802,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
                 self.get_base_layer().weight.data = orig_weight
 
-    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_delta_weight(self, adapter) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 
