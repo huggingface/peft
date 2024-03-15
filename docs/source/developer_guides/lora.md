@@ -274,9 +274,9 @@ Note that the order does not matter here, i.e. the samples in the batch don't ne
 Using this features has some drawbacks, namely:
 
 - It only works for inference, not for training.
-- Disabling adapters using the `with model.disable_adapter` context takes precedence over `adapter_names`.
+- Disabling adapters using the `with model.disable_adapter()` context takes precedence over `adapter_names`.
 - You cannot pass `adapter_names` when some adapter weights where merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
-- For obvious reasons, this cannot be used after calling `merge_and_unload`, since all the LoRA adapters will be merged into the base weights in this case.
+- For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
 - This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
 - There is an expected overhead for inference with `adapter_names`, especially if the amount of different adapters in the batch is high. This is because the batch size is effectively reduced to the number of samples per adapter. If runtime performance is your top priority, try the following:
   - Increase the batch size.
