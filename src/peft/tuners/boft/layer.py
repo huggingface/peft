@@ -20,7 +20,7 @@ from __future__ import annotations
 import math
 import os
 import warnings
-from typing import Any, List, Optional, Union, Tuple
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -440,7 +440,7 @@ class Linear(nn.Module, BOFTLayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -508,7 +508,7 @@ class Linear(nn.Module, BOFTLayer):
 
                 self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
 
-    def get_delta_weight(self, adapter) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 
@@ -722,7 +722,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
@@ -804,7 +804,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
                 self.get_base_layer().weight.data = orig_weight
 
-    def get_delta_weight(self, adapter) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 

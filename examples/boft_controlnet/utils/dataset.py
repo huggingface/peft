@@ -2,12 +2,13 @@ import random
 
 import numpy as np
 import torch
-import wandb
 from datasets import load_dataset
 from diffusers import DDIMScheduler
 from PIL import Image
 from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
+
+import wandb
 
 
 def image_grid(imgs, rows, cols):
