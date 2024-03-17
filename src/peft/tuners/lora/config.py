@@ -250,3 +250,21 @@ class LoraConfig(PeftConfig):
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):
             self.loftq_config = vars(self.loftq_config)
+
+@dataclass(init=False)
+class LoraPlusConfig(LoraConfig):
+    
+    loraplus_lr_ratio: float = field(
+        default_factory=float,
+        metadata={
+            "help": (
+                "loraplus_lr_ratio is the ratio of the LR of the optimizer to the LR of the LoraPlus optimizer."
+            )
+        }
+    )
+    
+    def __init__(self, *args, **kwargs):
+        loraplus_lr_ratio = kwargs.pop("loraplus_lr_ratio")
+        super(LoraPlusConfig, self).__init__(*args, **kwargs)
+        self.loraplus_lr_ratio = loraplus_lr_ratio
+    

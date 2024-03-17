@@ -1,9 +1,14 @@
 import inspect
 from copy import deepcopy
-from functools import update_wrapper
+from functools import update_wrapper, reduce
 from types import MethodType
 
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
+from transformers.trainer_pt_utils import get_parameter_names
+
 from .peft_model import PeftModel
+from .tuners.lora import LoraConfig
+from torch.optim import Optimizer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -111,3 +116,103 @@ def update_signature(model: PeftModel, method: str = "all") -> None:
         update_generate_signature(model)
     else:
         raise ValueError(f"method {method} is not supported please choose one of ['forward', 'generate', 'all']")
+
+
+def get_module(name, opt_model):
+    """
+    Retrieve a module from a model using its parameter name.
+    Args:
+        name (str): Full name of the parameter, typically including module path.
+        opt_model (torch.nn.Module): The model from which to retrieve the module.
+
+    Returns:
+        Module corresponding to the given name.
+    """
+    parent_idx = 2 if "lora" in name else 1
+    module_names = name.split(sep=".")[:-parent_idx]
+    module = reduce(getattr, module_names, opt_model)
+    return module
+
+
+def create_loraplus_optimizer(model: PeftModel, config: LoraConfig, optimizer_cls: Optimizer, optimizer_kwargs: dict) -> Optimizer:
+    """
+    Creates a LoraPlus optimizer.
+    Implementing LoRA+ https://arxiv.org/abs/2402.12354
+    Reference: https://github.com/nikhil-ghosh-berkeley/loraplus/
+
+    Args:
+        model (`torch.nn.Module`): The model to be optimized.
+    """
+    from .tuners.lora.layer import Embedding
+    loraplus_lr_ratio = config.loraplus_lr_ratio
+    assert loraplus_lr_ratio is not None, "loraplus_lr_ratio must be provided."
+
+    if loraplus_lr_embedding is None:
+        loraplus_lr_embedding = 1e-6
+
+    decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
+    decay_parameters = [name for name in decay_parameters if "bias" not in name]
+    param_groups = {
+        "groupA": {},
+        "groupB": {},
+        "groupB_no_decay": {},
+        "embedding": {},
+    }
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+
+        module = get_module(name, model)
+        if isinstance(module, Embedding):
+            param_groups["embedding"][name] = param
+        elif "lora_B" in name or param.ndim == 1:
+            if name in decay_parameters:
+                param_groups["groupB"][name] = param
+            else:
+                param_groups["groupB_no_decay"][name] = param
+        else:
+            param_groups["groupA"][name] = param
+
+    assigned_param_groups = ""
+    for group in param_groups:
+        assigned_param_groups += f"{group}\n {list(param_groups[group].keys())}\n\n"
+
+    lr = optimizer_kwargs["lr"]
+    weight_decay = optimizer_kwargs.get("weight_decay", 0.0)
+
+    optimizer_grouped_parameters = [
+        {
+            "params": list(param_groups["groupA"].values()),
+            "weight_decay": weight_decay,
+            "lr": lr,
+        },
+        {
+            "params": list(param_groups["embedding"].values()),
+            "weight_decay": weight_decay,
+            "lr": loraplus_lr_embedding,
+        },
+        {
+            "params": list(param_groups["groupB"].values()),
+            "weight_decay": weight_decay,
+            "lr": lr * loraplus_lr_ratio,
+        },
+        {
+            "params": list(param_groups["groupB_no_decay"].values()),
+            "weight_decay": 0.0,
+            "lr": lr * loraplus_lr_ratio,
+        },
+    ]
+
+    optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+    if optimizer_cls.__name__ == "Adam8bit":
+        import bitsandbytes
+        manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
+        skipped = 0
+        for module in model.modules():
+            if isinstance(module, nn.Embedding):
+                skipped += sum(
+                    {p.data_ptr(): p.numel() for p in module.parameters()}.values()
+                )
+                manager.register_module_override(module, "weight", {"optim_bits": 32})
+    return optimizer
