@@ -21,6 +21,7 @@ import itertools
 import logging
 import math
 import os
+import subprocess
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -81,9 +82,6 @@ def save_adaptor(accelerator, step, unet, text_encoder, args):
 
 
 def main(args):
-    # Clone the dreambooth repository from https://github.com/google/dreambooth
-    os.system("git clone git@github.com:google/dreambooth.git ./data/dreambooth")
-
     validation_prompts = list(filter(None, args.validation_prompt[0].split(".")))
 
     logging_dir = Path(args.output_dir, args.logging_dir)
@@ -313,6 +311,13 @@ def main(args):
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
     )
+
+    # Download the official dreambooth dataset from the official repository: https://github.com/google/dreambooth.git
+    data_path = os.path.join(os.getcwd(), "data", "dreambooth")
+    if not os.path.exists(data_path):
+        os.makedirs(os.path.join(os.getcwd(), "data"), exist_ok=True)
+        clone_command = ["git", "clone", "https://github.com/google/dreambooth.git", data_path]
+        subprocess.run(clone_command)
 
     # Dataset and DataLoaders creation:
     train_dataset = DreamBoothDataset(
