@@ -172,7 +172,7 @@ accelerate launch train_dreambooth.py \
   --validation_prompt="$VALIDATION_PROMPT" \
   --class_prompt="$CLASS_PROMPT" \
   --resolution=512 \
-  --train_batch_size=4 \
+  --train_batch_size=1 \
   --num_dataloader_workers=2 \
   --lr_scheduler="constant" \
   --lr_warmup_steps=0 \
