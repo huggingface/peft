@@ -33,7 +33,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import ModulesToSaveWrapper, infer_device
 
 from .testing_common import PeftCommonTester
-from .testing_utils import get_state_dict
+from .testing_utils import get_state_dict, require_torch_gpu
 
 
 # MLP is a vanilla FF network with only linear layers
@@ -2183,6 +2183,7 @@ class TestMixedAdapterBatches:
         with pytest.raises(ValueError, match=msg):
             peft_model.forward(**inputs)
 
+    @require_torch_gpu
     def test_mixed_adapter_batches_lora_opt_timing(self):
         # Use a more realistic model (opt-125m) and do a simple runtime check to ensure that mixed adapter batches
         # don't add too much overhead. These types of tests are inherently flaky, so we try to add in some robustness.
@@ -2243,14 +2244,17 @@ class TestMixedAdapterBatches:
         factor = 2.0
         assert time_mixed < factor * time_non_mixed
 
-        # Measure timing of running base and adapter separately vs using a mixed batch.
-        with timed():
-            with peft_model.disable_adapter():
-                peft_model(**{k: v[::3] for k, v in inputs.items()})
-            peft_model.set_adapter("adapter1")
-            peft_model(**{k: v[1::3] for k, v in inputs.items()})
-            peft_model.set_adapter("adapter2")
-            peft_model(**{k: v[2::3] for k, v in inputs.items()})
+        # Measure timing of running base and adapter separately vs using a mixed batch. Note that on CPU, the
+        # differences are quite small, so this test requires GPU to avoid flakiness.
+        for _ in range(3):
+            with timed():
+                with peft_model.disable_adapter():
+                    peft_model(**{k: v[::3] for k, v in inputs.items()})
+                peft_model.set_adapter("adapter1")
+                peft_model(**{k: v[1::3] for k, v in inputs.items()})
+                peft_model.set_adapter("adapter2")
+                peft_model(**{k: v[2::3] for k, v in inputs.items()})
 
-        time_separate = logs[-1]
+        times_separate = logs[-3:]
+        time_separate = sum(times_separate) / 3
         assert time_separate > time_mixed
