@@ -114,6 +114,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         self.modules_to_save = None
         self.active_adapter = adapter_name
         self.peft_type = peft_config.peft_type
+        # These args are special PEFT arguments that users can pass. They need to be removed before passing them to
+        # forward.
+        self.special_peft_forward_args = {"adapter_names"}
 
         self._is_prompt_learning = peft_config.is_prompt_learning
         if self._is_prompt_learning:
@@ -538,11 +541,31 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         except AttributeError:
             return getattr(self.base_model, name)
 
+    @contextmanager
+    def _enable_peft_forward_hooks(self, *args, **kwargs):
+        # If the base model has a method called _enable_peft_forward_hooks, it is invoked as a context. Otherwise, this
+        # runs without any changes
+        if hasattr(self.base_model, "_enable_peft_forward_hooks"):
+            with self.base_model._enable_peft_forward_hooks(*args, **kwargs):
+                yield
+            return
+        else:
+            # nothing to enable
+            yield
+            return
+
     def forward(self, *args: Any, **kwargs: Any):
         """
         Forward pass of the model.
         """
-        return self.get_base_model()(*args, **kwargs)
+        with self._enable_peft_forward_hooks(*args, **kwargs):
+            kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+            return self.get_base_model()(*args, **kwargs)
+
+    def generate(self, *args, **kwargs):
+        with self._enable_peft_forward_hooks(*args, **kwargs):
+            kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+            return self.get_base_model().generate(*args, **kwargs)
 
     def _get_base_model_class(self, is_prompt_tuning=False):
         """
@@ -595,6 +618,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
         """
         Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
 
         The name for the new adapter should be unique.
 
@@ -905,18 +930,20 @@ class PeftModelForSequenceClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         peft_config = self.active_peft_config
         if not peft_config.is_prompt_learning:
-            if peft_config.peft_type == PeftType.POLY:
-                kwargs["task_ids"] = task_ids
-            return self.base_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs,
-            )
+            with self._enable_peft_forward_hooks(**kwargs):
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                if peft_config.peft_type == PeftType.POLY:
+                    kwargs["task_ids"] = task_ids
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
@@ -1096,16 +1123,19 @@ class PeftModelForCausalLM(PeftModel):
 
             if peft_config.peft_type == PeftType.POLY:
                 kwargs["task_ids"] = task_ids
-            return self.base_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs,
-            )
+
+            with self._enable_peft_forward_hooks(**kwargs):
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
@@ -1147,13 +1177,19 @@ class PeftModelForCausalLM(PeftModel):
             return self.base_model(inputs_embeds=inputs_embeds, **kwargs)
 
     def generate(self, *args, **kwargs):
+        peft_config = self.active_peft_config
         self.base_model.prepare_inputs_for_generation = self.prepare_inputs_for_generation
         if hasattr(self.base_model, "model"):
             self.base_model.model.generation_config = self.generation_config
         else:
             self.base_model.generation_config = self.generation_config
         try:
-            outputs = self.base_model.generate(*args, **kwargs)
+            if not peft_config.is_prompt_learning:
+                with self._enable_peft_forward_hooks(*args, **kwargs):
+                    kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                    outputs = self.base_model.generate(*args, **kwargs)
+            else:
+                outputs = self.base_model.generate(**kwargs)
         except:
             self.base_model.prepare_inputs_for_generation = self.base_model_prepare_inputs_for_generation
             raise
@@ -1284,19 +1320,22 @@ class PeftModelForSeq2SeqLM(PeftModel):
         if not peft_config.is_prompt_learning:
             if peft_config.peft_type == PeftType.POLY:
                 kwargs["task_ids"] = task_ids
-            return self.base_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                decoder_input_ids=decoder_input_ids,
-                decoder_attention_mask=decoder_attention_mask,
-                decoder_inputs_embeds=decoder_inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs,
-            )
+
+            with self._enable_peft_forward_hooks(**kwargs):
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    decoder_input_ids=decoder_input_ids,
+                    decoder_attention_mask=decoder_attention_mask,
+                    decoder_inputs_embeds=decoder_inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if decoder_attention_mask is not None:
@@ -1397,7 +1436,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
         )
         try:
             if not peft_config.is_prompt_learning:
-                outputs = self.base_model.generate(**kwargs)
+                with self._enable_peft_forward_hooks(**kwargs):
+                    kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                    outputs = self.base_model.generate(**kwargs)
             else:
                 if "input_ids" not in kwargs:
                     raise ValueError("input_ids must be provided for Peft model generation")
@@ -1542,18 +1583,20 @@ class PeftModelForTokenClassification(PeftModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         if not peft_config.is_prompt_learning:
-            if peft_config.peft_type == PeftType.POLY:
-                kwargs["task_ids"] = task_ids
-            return self.base_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                labels=labels,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs,
-            )
+            with self._enable_peft_forward_hooks(**kwargs):
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                if peft_config.peft_type == PeftType.POLY:
+                    kwargs["task_ids"] = task_ids
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    labels=labels,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
@@ -1720,17 +1763,20 @@ class PeftModelForQuestionAnswering(PeftModel):
         if not peft_config.is_prompt_learning:
             if peft_config.peft_type == PeftType.POLY:
                 kwargs["task_ids"] = task_ids
-            return self.base_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                start_positions=start_positions,
-                end_positions=end_positions,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs,
-            )
+
+            with self._enable_peft_forward_hooks(**kwargs):
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    start_positions=start_positions,
+                    end_positions=end_positions,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:
@@ -1894,15 +1940,18 @@ class PeftModelForFeatureExtraction(PeftModel):
         if not peft_config.is_prompt_learning:
             if peft_config.peft_type == PeftType.POLY:
                 kwargs["task_ids"] = task_ids
-            return self.base_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                inputs_embeds=inputs_embeds,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                **kwargs,
-            )
+
+            with self._enable_peft_forward_hooks(**kwargs):
+                kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
+                return self.base_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    output_attentions=output_attentions,
+                    output_hidden_states=output_hidden_states,
+                    return_dict=return_dict,
+                    **kwargs,
+                )
 
         batch_size = _get_batch_size(input_ids, inputs_embeds)
         if attention_mask is not None:

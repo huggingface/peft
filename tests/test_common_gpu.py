@@ -742,6 +742,150 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_lora_mixed_adapter_batches_lora(self):
+        # check that we can pass mixed adapter names to the model
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        ).eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        # input with 9 samples
+        inputs = tokenizer(
+            [
+                "Hello, my dog is cute",
+                "Hello, my cat is awesome",
+                "Hello, my fish is great",
+                "Salut, mon chien est mignon",
+                "Salut, mon chat est génial",
+                "Salut, mon poisson est super",
+                "Hallo, mein Hund ist süß",
+                "Hallo, meine Katze ist toll",
+                "Hallo, mein Fisch ist großartig",
+            ],
+            return_tensors="pt",
+            padding=True,
+        ).to(model.device)
+        with torch.inference_mode():
+            out_base = model(**inputs).logits
+
+        config0 = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config0).eval()
+        with torch.inference_mode():
+            out_adapter0 = model(**inputs).logits
+
+        config1 = LoraConfig(
+            r=16,
+            init_lora_weights=False,
+        )
+        model.add_adapter("adapter1", config1)
+        model.set_adapter("adapter1")
+        with torch.inference_mode():
+            out_adapter1 = model(**inputs).logits
+
+        atol, rtol = 1e-5, 1e-5
+        # sanity check, outputs have the right shape and are not the same
+        assert len(out_base) >= 3
+        assert len(out_base) == len(out_adapter0) == len(out_adapter1)
+        assert not torch.allclose(out_base, out_adapter0, atol=atol, rtol=rtol)
+        assert not torch.allclose(out_base, out_adapter1, atol=atol, rtol=rtol)
+        assert not torch.allclose(out_adapter0, out_adapter1, atol=atol, rtol=rtol)
+
+        # mixed adapter batch
+        adapters = ["__base__", "default", "adapter1"]
+        adapter_names = [adapters[i % 3] for i in (range(9))]
+        with torch.inference_mode():
+            out_mixed = model(**inputs, adapter_names=adapter_names).logits
+
+        assert torch.allclose(out_base[::3], out_mixed[::3], atol=atol, rtol=rtol)
+        assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
+        assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_lora_mixed_adapter_batches_lora(self):
+        # check that we can pass mixed adapter names to the model
+        # note that with 8bit, we have quite a bit of imprecision, therefore we use softmax and higher tolerances
+        torch.manual_seed(3000)
+        bnb_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_type=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        ).eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        # input with 9 samples
+        inputs = tokenizer(
+            [
+                "Hello, my dog is cute",
+                "Hello, my cat is awesome",
+                "Hello, my fish is great",
+                "Salut, mon chien est mignon",
+                "Salut, mon chat est génial",
+                "Salut, mon poisson est super",
+                "Hallo, mein Hund ist süß",
+                "Hallo, meine Katze ist toll",
+                "Hallo, mein Fisch ist großartig",
+            ],
+            return_tensors="pt",
+            padding=True,
+        ).to(model.device)
+        with torch.inference_mode():
+            out_base = F.softmax(model(**inputs).logits, dim=-1)
+
+        config0 = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, config0).eval()
+        with torch.inference_mode():
+            out_adapter0 = F.softmax(model(**inputs).logits, dim=-1)
+
+        config1 = LoraConfig(
+            r=16,
+            init_lora_weights=False,
+        )
+        model.add_adapter("adapter1", config1)
+        model.set_adapter("adapter1")
+        with torch.inference_mode():
+            out_adapter1 = F.softmax(model(**inputs).logits, dim=-1)
+
+        atol = 0.01
+        rtol = 0.5
+        # sanity check, outputs have the right shape and are not the same
+        assert len(out_base) >= 3
+        assert len(out_base) == len(out_adapter0) == len(out_adapter1)
+        assert not torch.allclose(out_base, out_adapter0, atol=atol, rtol=rtol)
+        assert not torch.allclose(out_base, out_adapter1, atol=atol, rtol=rtol)
+        assert not torch.allclose(out_adapter0, out_adapter1, atol=atol, rtol=rtol)
+
+        # mixed adapter batch
+        adapters = ["__base__", "default", "adapter1"]
+        adapter_names = [adapters[i % 3] for i in (range(9))]
+        with torch.inference_mode():
+            out_mixed = F.softmax(model(**inputs, adapter_names=adapter_names).logits, dim=-1)
+
+        assert torch.allclose(out_base[::3], out_mixed[::3], atol=atol, rtol=rtol)
+        assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
+        assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
     def test_serialization_shared_tensors(self):
         model_checkpoint = "roberta-base"
         peft_config = LoraConfig(

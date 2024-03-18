@@ -11,9 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import warnings
-from typing import List, Optional
+from typing import Any, Optional
 
 import bitsandbytes as bnb
 import torch
@@ -57,7 +58,7 @@ if is_bnb_available():
                 use_dora=use_dora,
             )
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -66,7 +67,7 @@ if is_bnb_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
-                adapter_names (`List[str]`, *optional*):
+                adapter_names (`list[str]`, *optional*):
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
@@ -160,11 +161,56 @@ if is_bnb_available():
                 * self.scaling[adapter]
             )
 
+        def _mixed_batch_forward(
+            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        ) -> torch.Tensor:
+            # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+            # extra argument that allows mixing different adapters in the same batch at inference time.
+            result = self.base_layer(x, *args, **kwargs)
+
+            unique_adapters = set(adapter_names)
+            sub_batch_indices_list = []
+            for adapter in unique_adapters:
+                sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+            for i, active_adapter in enumerate(unique_adapters):
+                if active_adapter == "__base__":
+                    continue
+                if active_adapter not in self.lora_A.keys():
+                    continue
+
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    compute_dtype = lora_A.weight.dtype
+                    if x.dtype != compute_dtype:
+                        x = x.to(compute_dtype)
+
+                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # layer output
+                sub_batch = x[sub_batch_indices_list[i]]
+                output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += output
+
+            return result
+
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            self._check_forward_args(x, *args, **kwargs)
+            adapter_names = kwargs.pop("adapter_names", None)
+
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
+            elif adapter_names is not None:
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -254,7 +300,7 @@ if is_bnb_4bit_available():
                 use_dora=use_dora,
             )
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -263,7 +309,7 @@ if is_bnb_4bit_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
-                adapter_names (`List[str]`, *optional*):
+                adapter_names (`list[str]`, *optional*):
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
@@ -352,11 +398,54 @@ if is_bnb_4bit_available():
                 * self.scaling[adapter]
             )
 
+        def _mixed_batch_forward(
+            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        ) -> torch.Tensor:
+            # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+            # extra argument that allows mixing different adapters in the same batch at inference time.
+            result = self.base_layer(x, *args, **kwargs)
+
+            unique_adapters = set(adapter_names)
+            sub_batch_indices_list = []
+            for adapter in unique_adapters:
+                sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+            for i, active_adapter in enumerate(unique_adapters):
+                if active_adapter == "__base__":
+                    continue
+                if active_adapter not in self.lora_A.keys():
+                    continue
+
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    x = x.to(lora_A.weight.dtype)
+
+                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # layer output
+                sub_batch = x[sub_batch_indices_list[i]]
+                output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += output
+
+            return result
+
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            self._check_forward_args(x, *args, **kwargs)
+            adapter_names = kwargs.pop("adapter_names", None)
+
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
+            elif adapter_names is not None:
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
