@@ -191,7 +191,7 @@ if is_bnb_available():
                     if x.dtype != compute_dtype:
                         x = x.to(compute_dtype)
 
-                # getting the sub-batch, passing it ot LoRA layers and updating the corresponding indices of the linear
+                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
                 output = lora_B(lora_A(dropout(sub_batch))) * scaling
@@ -426,7 +426,7 @@ if is_bnb_4bit_available():
                     expected_dtype = result.dtype
                     x = x.to(lora_A.weight.dtype)
 
-                # getting the sub-batch, passing it ot LoRA layers and updating the corresponding indices of the linear
+                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
                 output = lora_B(lora_A(dropout(sub_batch))) * scaling

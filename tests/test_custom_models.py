@@ -2196,7 +2196,7 @@ class TestMixedAdapterBatches:
             logs.append(toc - tic)
 
         base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m").to(self.torch_device).eval()
-        inputs = {"input_ids": torch.randint(0, 1000, (1, 64)).to(self.torch_device)}
+        inputs = {"input_ids": torch.randint(0, 1000, (16, 64)).to(self.torch_device)}
         with timed():
             output_base = base_model(**inputs).logits
 
@@ -2223,9 +2223,10 @@ class TestMixedAdapterBatches:
         with timed():
             output_mixed = peft_model.forward(**inputs).logits
 
-        assert torch.allclose(output_base[::3], output_mixed[::3])
-        assert torch.allclose(output0[1::3], output_mixed[1::3])
-        assert torch.allclose(output1[2::3], output_mixed[2::3])
+        atol, rtol = 1e-4, 1e-4
+        assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
+        assert torch.allclose(output0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
+        assert torch.allclose(output1[2::3], output_mixed[2::3], atol=atol, rtol=rtol)
 
         # Check that the overhead in time added by mixed batches is not too high.
         # To prevent flakiness, we measure mixed inference 3 times and take the lowest value, then compare it to the mean
@@ -2241,3 +2242,15 @@ class TestMixedAdapterBatches:
 
         factor = 2.0
         assert time_mixed < factor * time_non_mixed
+
+        # Measure timing of running base and adapter separately vs using a mixed batch.
+        with timed():
+            with peft_model.disable_adapter():
+                peft_model(**{k: v[::3] for k, v in inputs.items()})
+            peft_model.set_adapter("adapter1")
+            peft_model(**{k: v[1::3] for k, v in inputs.items()})
+            peft_model.set_adapter("adapter2")
+            peft_model(**{k: v[2::3] for k, v in inputs.items()})
+
+        time_separate = logs[-1]
+        assert time_separate > time_mixed

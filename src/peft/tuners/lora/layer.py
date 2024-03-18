@@ -309,7 +309,7 @@ class LoraLayer(BaseTunerLayer):
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
-            # getting the sub-batch, passing it ot LoRA layers and updating the corresponding indices of the linear
+            # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
             lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
@@ -686,7 +686,7 @@ class Embedding(nn.Module, LoraLayer):
             embedding_B = self.lora_embedding_B[active_adapter].T
             scaling = self.scaling[active_adapter]
 
-            # getting the sub-batch, passing it ot LoRA layers and updating the corresponding indices of the linear
+            # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]]
             after_A = self._embed(sub_batch, embedding_A)
