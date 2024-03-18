@@ -618,6 +618,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         """
         Add an adapter to the model based on the passed configuration.
 
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
         The name for the new adapter should be unique.
 
         The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
