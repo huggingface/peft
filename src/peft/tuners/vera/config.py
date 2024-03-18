@@ -139,3 +139,7 @@ class VeraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+
+        if self.projection_prng_key is None:
+            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
+            raise ValueError(msg)

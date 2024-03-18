@@ -11,11 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from __future__ import annotations
+
 import math
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -30,7 +33,6 @@ from peft.utils import (
     _get_submodules,
 )
 
-from ...config import PeftConfig
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .buffer_dict import BufferDict
 from .config import VeraConfig
@@ -38,14 +40,14 @@ from .layer import Embedding, Linear, VeraLayer
 
 
 def _kaiming_init(
-    tensor_or_shape: Union[torch.Tensor, Tuple[int, ...]],
+    tensor_or_shape: Union[torch.Tensor, tuple[int, ...]],
     generator: torch.Generator,
 ) -> torch.Tensor:
     """
     Kaiming Uniform Initialisation adapted to accept a `torch.Generator` object for PRNG.
 
     Args:
-        tensor_or_shape (`Union[torch.Tensor, Tuple[int, ...]]`):
+        tensor_or_shape (`Union[torch.Tensor, tuple[int, ...]]`):
             Tensor to initialise, or shape of new tensor to create and then initialise.
         generator: (`torch.Generator`):
             Generator object that manages the state of the PRNG algorithm in use.
@@ -124,7 +126,15 @@ class VeraModel(BaseTuner):
 
     prefix: str = "vera_lambda"
 
-    def _find_first_dim(self, config) -> int:
+    def __init__(self, model, config, adapter_name) -> None:
+        # Separate two parent class init for correct vera_A/B init.
+        nn.Module.__init__(self)
+        self.model = model
+        config = config[adapter_name]
+        self._init_vera_A_vera_B(config, adapter_name)
+        super().__init__(model, config, adapter_name)
+
+    def _find_first_dim(self, config) -> tuple[tuple[int, ...] | None, tuple[int, ...] | None]:
         """
         Finds the first linear and embedding that has been wrapped with Vera, and extract the input and output
         dimension.
@@ -171,51 +181,7 @@ class VeraModel(BaseTuner):
 
         return first_linear, first_embedding
 
-    def _tuner_init(self, model, peft_config, adapter_name: str) -> None:
-        r"""
-        Used for the separated init calls. This is used as a replacement for the `BaseTuner.__init__` call the only
-        difference is it does not call `nn.Module.__init__` (which would clear the already initialised vera_A/B
-        parameters) and it does not set `self.model = model` as this is already done (though, we could do this again
-        without issue)
-
-        TODO: we could remove this entirely if we add a flag that controls whether `super().__init__` is called in
-        `BaseTuner.__init__`, then we simply call `nn.Module` first, then call `BaseTuner.__init__(no_super_init=True)`
-        """
-        self.model = model
-        self.targeted_module_names: list[str] = []
-
-        # For advanced developpers, if you want to attach multiple adapters to your
-        # model, just add a `peft_config` dict attribute to your model.
-        if not hasattr(self, "peft_config"):
-            self.peft_config = {adapter_name: peft_config} if isinstance(peft_config, PeftConfig) else peft_config
-        else:
-            if isinstance(peft_config, PeftConfig):
-                self.peft_config[adapter_name] = peft_config
-            else:
-                # user is adding a dict of PeftConfigs
-                self.peft_config.update(peft_config)
-
-        self.active_adapter = adapter_name
-
-        self.inject_adapter(self.model, adapter_name)
-
-        # Copy the peft_config in the injected model.
-        self.model.peft_config = self.peft_config
-
-    def __init__(self, model, config, adapter_name) -> None:
-        # Separate two parent class init for correct vera_A/B init.
-        nn.Module.__init__(self)
-        self.model = model
-        config = config[adapter_name]
-
-        if config.projection_prng_key is None:
-            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
-            raise ValueError(msg)
-
-        if config.projection_prng_key is None:
-            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
-            raise ValueError(msg)
-
+    def _init_vera_A_vera_B(self, config: VeraConfig, adapter_name: str) -> None:
         first_linear, first_embedding = self._find_first_dim(config)
 
         if first_embedding is not None:
@@ -255,10 +221,6 @@ class VeraModel(BaseTuner):
                 " to `True` to guarantee restoring the checkpoint correctly on all system configurations."
             )
 
-        # TODO: ideally replace `__tuner_init__` with a call to BaseTuner, but disabling the super call
-        # super(BaseTuner, self).__init__(model, config, adapter_name)
-        self._tuner_init(model, config, adapter_name)
-
     def _check_new_adapter_config(self, config: VeraConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -277,6 +239,17 @@ class VeraModel(BaseTuner):
 
         if config.projection_prng_key is None:
             raise ValueError("Vera PRNG initialisation key cannot be `None`. Set `VeraConfig.projection_prng_key`.")
+
+        for existing_config in self.peft_config.values():
+            if existing_config is config:
+                # skip the current config
+                continue
+
+            if existing_config.projection_prng_key != config.projection_prng_key:
+                raise ValueError(
+                    f"Vera PRNG initialisation key must be the same for all adapters. Got {config.projection_prng_key=} but "
+                    f"previous config had {existing_config.projection_prng_key}."
+                )
 
     @staticmethod
     def _check_target_module_exists(vera_config, key):
@@ -304,13 +277,7 @@ class VeraModel(BaseTuner):
             "init_weights": vera_config.init_weights,
         }
 
-        # TODO: add back once we have quant support
-        # kwargs["loaded_in_8bit"] = False
-        # kwargs["loaded_in_4bit"] = False
-        # quantization_config = get_quantization_config(self.model, method="gptq")
-        # if quantization_config is not None:
-        # kwargs["gptq_quantization_config"] = quantization_config
-
+        # TODO: add quantization support
         kwargs["bias"] = bias
 
         if isinstance(target, Embedding):
@@ -499,7 +466,7 @@ class VeraModel(BaseTuner):
         merge=True,
         progressbar: bool = False,
         safe_merge: bool = False,
-        adapter_names: Optional[List[str]] = None,
+        adapter_names: Optional[list[str]] = None,
     ):
         # we cannot use self.prefix as we want to include non-trainable vera parameters
         key_list = [key for key, _ in self.model.named_modules() if "vera" not in key]
@@ -545,7 +512,7 @@ class VeraModel(BaseTuner):
         self.active_adapter = new_adapter or []
 
     def merge_and_unload(
-        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[List[str]] = None
+        self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ):
         r"""
         This method merges the Vera layers into the base model. This is needed if someone wants to use the base model
@@ -557,7 +524,7 @@ class VeraModel(BaseTuner):
             safe_merge (`bool`):
                 whether to activate the safe merging check to check if there is any potential Nan in the adapter
                 weights
-            adapter_names (`List[str]`, *optional*):
+            adapter_names (`list[str]`, *optional*):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
 

@@ -124,7 +124,8 @@ class BaseTuner(nn.Module, ABC):
     """
 
     def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
-        super().__init__()
+        if not hasattr(self, "_parameters"):  # this is a workaround to check if nn.Module.__init__ was already called
+            super().__init__()
 
         self.model = model
         self.targeted_module_names: list[str] = []

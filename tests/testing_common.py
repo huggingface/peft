@@ -349,9 +349,11 @@ class PeftCommonTester:
         if issubclass(config_cls, LoraConfig):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_lora_weights"] = False
-        if issubclass(config_cls, IA3Config):
+        elif issubclass(config_cls, IA3Config):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_ia3_weights"] = False
+        elif hasattr(config_cls, "init_weights"):
+            config_kwargs["init_weights"] = False
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
