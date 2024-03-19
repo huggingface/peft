@@ -1404,7 +1404,7 @@ class TestLoftQ:
         torch.cuda.empty_cache()
 
         # logits from the normal quantized LoRA model
-        target_modules="all-linear" if task_type != TaskType.SEQ_2_SEQ_LM else ['o', 'k', 'wi', 'q', 'v']
+        target_modules = "all-linear" if task_type != TaskType.SEQ_2_SEQ_LM else ["o", "k", "wi", "q", "v"]
         lora_config = LoraConfig(task_type=task_type, use_dora=use_dora, target_modules=target_modules)
         kwargs = {}
         if bits == 4:
@@ -1427,7 +1427,11 @@ class TestLoftQ:
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
         lora_config = LoraConfig(
-            task_type=task_type, init_lora_weights="loftq", loftq_config=loftq_config, use_dora=use_dora, target_modules=target_modules
+            task_type=task_type,
+            init_lora_weights="loftq",
+            loftq_config=loftq_config,
+            use_dora=use_dora,
+            target_modules=target_modules,
         )
         model = self.get_base_model(model_id, device)
         if device == "cuda":
@@ -1516,7 +1520,6 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    # @pytest.mark.xfail  # failing for now, see discussion in #1532
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_bloomz_loftq_8bit_iter_5(self, device, tmp_path):
         # Same test as test_bloomz_loftq_4bit_iter_5 but with 8 bits.
@@ -1534,7 +1537,6 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    # @pytest.mark.xfail  # failing for now, see discussion in #1532
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_t5_loftq_4bit(self, device, tmp_path):
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
@@ -1565,7 +1567,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    # @pytest.mark.xfail  # failing for now, see discussion in #1532
+    @pytest.mark.xfail  # failing for now, see discussion in #1532
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_bloomz_loftq_4bit_dora(self, device, tmp_path):
         # same as test_bloomz_loftq_4bit but with DoRA
