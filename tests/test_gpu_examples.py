@@ -1357,7 +1357,10 @@ class TestLoftQ:
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
     """
 
-    error_factor = 1  # FIXME should be > 1
+    # The error factor indicates by how much the quantization error should be decreased when using LoftQ compared to
+    # quantization without LoftQ. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
+    # conservative value to prevent flakiness, in practice most gains are > 1.5
+    error_factor = 1.03
 
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -1567,7 +1570,7 @@ class TestLoftQ:
         assert mse_loftq < (mse_quantized / self.error_factor)
         assert mae_loftq < (mae_quantized / self.error_factor)
 
-    @pytest.mark.xfail  # failing for now, see discussion in #1532
+    @pytest.mark.xfail  # failing for now, but having DoRA pass is only a nice-to-have, not a must, so we're good
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_bloomz_loftq_4bit_dora(self, device, tmp_path):
         # same as test_bloomz_loftq_4bit but with DoRA
