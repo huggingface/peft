@@ -263,6 +263,7 @@ class _SafetensorLoader:
     Takes care of file name normalization etc.
 
     """
+
     def __init__(self, peft_model, model_path):
         if model_path is None:
             try:
@@ -273,7 +274,9 @@ class _SafetensorLoader:
                     "model_path to the safetensors file."
                 ) from exc
             except LocalEntryNotFoundError as exc:
-                raise ValueError("The model.safetensors file must be present on disk, but it could not be found.") from exc
+                raise ValueError(
+                    "The model.safetensors file must be present on disk, but it could not be found."
+                ) from exc
 
         suffix = "model.safetensors"
         if not model_path.endswith(suffix):
@@ -290,7 +293,7 @@ class _SafetensorLoader:
             par_dir = model_path.rpartition(os.path.sep)[0]
             try:
                 resolved_archive_file, sharded_metadata = get_checkpoint_shard_files(
-                    par_dir, cached_file(par_dir, 'model.safetensors.index.json')
+                    par_dir, cached_file(par_dir, "model.safetensors.index.json")
                 )
             except OSError as exc:
                 raise FileNotFoundError(
