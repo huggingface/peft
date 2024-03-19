@@ -367,7 +367,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if p in disk_modules
                 }
                 kwargs["offload_index"] = offload_index
-                
+
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
         ) > 0:
