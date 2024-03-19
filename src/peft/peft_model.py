@@ -338,37 +338,39 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
-        weight_map = dict(named_module_tensors(model, recurse=True))
+        if hasattr(model, "hf_device_map"):
+            weight_map = dict(named_module_tensors(model, recurse=True))
 
-        disk_modules = set()
-        index = None
-        for name, module in model.named_modules():
-            if hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "original_devices"):
-                if hasattr(module._hf_hook.weights_map, "dataset"):
-                    index = module._hf_hook.weights_map.dataset.index
-                for key in module._hf_hook.original_devices.keys():
-                    if module._hf_hook.original_devices[key] == torch.device("meta"):
-                        disk_modules.add(str(name) + "." + str(key))
+            # recreate the offload_index for disk-offloaded modules: we need to know the location in storage of each weight
+            # before the offload hook is removed from the model
+            disk_modules = set()
+            index = None
+            for name, module in model.named_modules():
+                if hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "original_devices"):
+                    if hasattr(module._hf_hook.weights_map, "dataset"):
+                        index = module._hf_hook.weights_map.dataset.index
+                    for key in module._hf_hook.original_devices.keys():
+                        if module._hf_hook.original_devices[key] == torch.device("meta"):
+                            disk_modules.add(str(name) + "." + str(key))
 
-        if disk_modules and not kwargs.get("use_safetensors", True):
-            raise ValueError("Disk offloading currently only supported for safetensors")
+            if disk_modules and not kwargs.get("use_safetensors", True):
+                raise ValueError("Disk offloading currently only supported for safetensors")
 
-        start_prefix = ""
-        if index:
-            offload_index = {
-                p[len(start_prefix) :]: {
-                    "safetensors_file": index[p]["safetensors_file"],
-                    "weight_name": p,
-                    "dtype": str(weight_map[p].dtype).replace("torch.", ""),
+            if index:
+                offload_index = {
+                    p: {
+                        "safetensors_file": index[p]["safetensors_file"],
+                        "weight_name": p,
+                        "dtype": str(weight_map[p].dtype).replace("torch.", ""),
+                    }
+                    for p in weight_map.keys()
+                    if p in disk_modules
                 }
-                for p in weight_map.keys()
-                if p in disk_modules
-            }
-            kwargs["offload_index"] = offload_index
-        if (getattr(model, "hf_device_map", None) is not None) and len(
-            set(model.hf_device_map.values()).intersection({"cpu", "disk"})
-        ) > 0:
-            remove_hook_from_submodules(model)
+                kwargs["offload_index"] = offload_index
+            if (getattr(model, "hf_device_map", None) is not None) and len(
+                set(model.hf_device_map.values()).intersection({"cpu", "disk"})
+            ) > 0:
+                remove_hook_from_submodules(model)
 
         if config.is_prompt_learning and is_trainable:
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
