@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import gather_params_ctx
+from peft.utils.integrations import dequantize_bnb_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -172,7 +172,7 @@ class LoraLayer(BaseTunerLayer):
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
         weight = weight + scaling * lora_weight
-        weight_norm = torch.linalg.norm(weight, dim=1)
+        weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
@@ -181,7 +181,13 @@ class LoraLayer(BaseTunerLayer):
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer()):
             weight = self.get_base_layer().weight
-            lora_weight = lora_B.weight @ lora_A.weight
+            quant_state = getattr(self.get_base_layer(), "state", None)
+            weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+            if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
+                lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+                lora_weight = lora_weight.reshape(weight.shape)
+            else:
+                lora_weight = lora_B.weight @ lora_A.weight
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         self.lora_magnitude_vector = nn.ParameterDict()
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
@@ -203,6 +209,9 @@ class LoraLayer(BaseTunerLayer):
         lora_weight = lora_B.weight @ lora_A.weight
         magnitude = self.lora_magnitude_vector[active_adapter]
         weight = self.get_base_layer().weight
+        quant_state = getattr(self.get_base_layer(), "state", None)
+        weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+        weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
@@ -324,7 +333,7 @@ class Linear(nn.Module, LoraLayer):
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        orig_weights += delta_weight
+                        orig_weights = orig_weights + delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -345,7 +354,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        base_layer.weight.data += delta_weight
+                        base_layer.weight.data = base_layer.weight.data + delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -510,6 +519,7 @@ class Embedding(nn.Module, LoraLayer):
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(base_layer.weight.device, dtype=weight.dtype)
+
         self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -537,7 +547,7 @@ class Embedding(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                    orig_weights = orig_weights + self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -546,7 +556,7 @@ class Embedding(nn.Module, LoraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    base_layer.weight.data = base_layer.weight.data + self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -625,7 +635,7 @@ class Embedding(nn.Module, LoraLayer):
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
                 after_A = self._embed(x, embedding_A)
-                result += (after_A @ embedding_B) * scaling
+                result = result + (after_A @ embedding_B) * scaling
             result = result.to(torch_result_dtype)
 
         return result
@@ -651,9 +661,6 @@ class Conv2d(nn.Module, LoraLayer):
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
-
-        if use_dora:
-            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -699,6 +706,13 @@ class Conv2d(nn.Module, LoraLayer):
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(base_layer.weight.device, dtype=weight.dtype)
+
+        if use_dora:
+            self.dora_init(adapter_name)
+            self.use_dora[adapter_name] = True
+        else:
+            self.use_dora[adapter_name] = False
+
         self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
@@ -726,7 +740,20 @@ class Conv2d(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights += self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter)
+
+                    if not self.use_dora[active_adapter]:
+                        orig_weights = orig_weights + delta_weight
+                    else:
+                        # handle dora
+                        # since delta_weight already includes scaling, set it to 1 here
+                        weight_norm = self._get_weight_norm(orig_weights, delta_weight, scaling=1).detach()
+                        # We need to cache weight_norm because it has to be based on the original weights. We
+                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                        # different value
+                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                        dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                        orig_weights = dora_factor.view(-1, 1, 1, 1) * (orig_weights + delta_weight)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -734,7 +761,21 @@ class Conv2d(nn.Module, LoraLayer):
                         )
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data += self.get_delta_weight(active_adapter)
+                    delta_weight = self.get_delta_weight(active_adapter)
+                    if not self.use_dora[active_adapter]:
+                        base_layer.weight.data = base_layer.weight.data + delta_weight
+                    else:
+                        # handle dora
+                        # since delta_weight already includes scaling, set it to 1 here
+                        weight_norm = self._get_weight_norm(base_layer.weight, delta_weight, scaling=1).detach()
+                        # We need to cache weight_norm because it has to be based on the original weights. We
+                        # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                        # different value
+                        self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                        dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                        new_weight = dora_factor.view(-1, 1, 1, 1) * (base_layer.weight.data + delta_weight)
+                        base_layer.weight.data = new_weight
+
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -747,7 +788,15 @@ class Conv2d(nn.Module, LoraLayer):
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
-                self.get_base_layer().weight.data -= self.get_delta_weight(active_adapter)
+                weight = self.get_base_layer().weight
+                delta_weight = self.get_delta_weight(active_adapter)
+                if not self.use_dora[active_adapter]:
+                    weight.data -= delta_weight
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    weight_orig = weight.data / dora_factor.view(-1, 1, 1, 1) - delta_weight
+                    weight.data = weight_orig
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         """
@@ -797,6 +846,46 @@ class Conv2d(nn.Module, LoraLayer):
 
         return output_tensor
 
+    def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
+        # calculate L2 norm of weight matrix, channel-wise
+        weight = weight + scaling * lora_weight
+        # the following is needed to have compatibility with the 4D weight tensors of Conv2D
+        weight_norm = weight.norm(p=2, dim=(1, 2, 3), keepdim=True).transpose(1, 0)
+        return weight_norm
+
+    def _apply_dora(self, x, lora_A, lora_B, scaling, active_adapter):
+        """
+        For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
+        output.
+        """
+        base_layer = self.get_base_layer()
+        weight = base_layer.weight
+        lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+        lora_weight = lora_weight.reshape(weight.shape)
+        magnitude = self.lora_magnitude_vector[active_adapter]
+        weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
+        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # "[...] we suggest treating ||V +∆V ||_c in
+        # Eq. (5) as a constant, thereby detaching it from the gradient
+        # graph. This means that while ||V + ∆V ||_c dynamically
+        # reflects the updates of ∆V , it won’t receive any gradient
+        # during backpropagation"
+        weight_norm = weight_norm.detach()
+        mag_norm_scale = magnitude / weight_norm
+        result_dora = (mag_norm_scale - 1) * (
+            F.conv2d(
+                x,
+                weight,
+                bias=None,
+                stride=base_layer.stride,
+                padding=base_layer.padding,
+                dilation=base_layer.dilation,
+                groups=base_layer.groups,
+            )
+        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
+
+        return result_dora
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         if self.disable_adapters:
             if self.merged:
@@ -816,7 +905,12 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-                result += lora_B(lora_A(dropout(x))) * scaling
+
+                if not self.use_dora[active_adapter]:
+                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                else:
+                    x = dropout(x)
+                    result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
             result = result.to(torch_result_dtype)
         return result
