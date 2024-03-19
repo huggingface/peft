@@ -528,7 +528,7 @@ class TestOpt8bitBnb(RegressionTester):
         self.fix_seed()
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
         )
         return model
 

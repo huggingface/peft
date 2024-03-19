@@ -37,8 +37,9 @@ class AdaLoraLayer(LoraLayer):
         self.ranknum = nn.ParameterDict({})
 
     def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        if r < 0:
+            # note: r == 0 is allowed for AdaLora, see #1539
+            raise ValueError(f"`r` should be a positive integer or 0, but the value passed is {r}")
 
         self.r[adapter_name] = r
         self.lora_alpha[adapter_name] = lora_alpha
@@ -156,7 +157,6 @@ class SVDLinear(nn.Module, AdaLoraLayer):
         )
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        # TODO: SVDLinear does not convert dtype, unlike lora linear, is that correct?
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -175,6 +175,7 @@ class SVDLinear(nn.Module, AdaLoraLayer):
                 scaling = self.scaling[active_adapter]
                 ranknum = self.ranknum[active_adapter] + 1e-5
 
+                x = x.to(lora_A.dtype)
                 result += (dropout(x) @ (lora_A * lora_E).T @ lora_B.T) * scaling / ranknum
 
         return result

@@ -69,6 +69,22 @@ from peft import LoraConfig
 config = LoraConfig(use_rslora=True, ...)
 ```
 
+### Weight-Decomposed Low-Rank Adaptation (DoRA)
+
+This technique decomposes the updates of the weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, especially at low ranks. For more information on DoRA, see  https://arxiv.org/abs/2402.09353.
+
+```py
+from peft import LoraConfig
+
+config = LoraConfig(use_dora=True, ...)
+```
+
+#### Caveats
+
+- DoRA only supports linear layers at the momement.
+- DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. 
+- DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
+
 ### QLoRA-style training
 
 The default LoRA settings in PEFT add trainable weights to the query and value layers of each attention block. But [QLoRA](https://hf.co/papers/2305.14314), which adds trainable weights to all the linear layers of a transformer model, can provide performance equal to a fully finetuned model. To apply LoRA to all the linear layers, like in QLoRA, set `target_modules="all-linear"` (easier than specifying individual modules by name which can vary depending on the architecture).
@@ -76,6 +92,19 @@ The default LoRA settings in PEFT add trainable weights to the query and value l
 ```py
 config = LoraConfig(target_modules="all-linear", ...)
 ```
+
+### Memory efficient Layer Replication with LoRA
+
+An approach used to improve the performance of models is to expand a model by duplicating layers in the model to build a larger model from a pretrained model of a given size. For example increasing a 7B model to a 10B model as described in the [SOLAR](https://arxiv.org/abs/2312.15166) paper. PEFT LoRA supports this kind of expansion in a memory efficient manner that supports further fine-tuning using LoRA adapters attached to the layers post replication of the layers. The replicated layers do not take additional memory as they share the underlying weights so the only additional memory required is the memory for the adapter weights. To use this feature you would create a config with the `layer_replication` argument.
+
+```py
+config = LoraConfig(layer_replication=[[0,4], [2,5]], ...)
+```
+
+Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a model with 7 layers arranged as `[0, 1, 2, 3, 2, 3, 4]`. This follows the [mergekit](https://github.com/arcee-ai/mergekit) pass through merge convention where sequences of layers specified as start inclusive and end exclusive tuples are stacked to build the final model. Each layer in the final model gets its own distinct set of LoRA adpaters.
+
+[Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
+(adapter_config.json)[https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json] shows a sample LoRA adapter config applying this method for fine-tuning.
 
 ## Merge adapters
 
@@ -190,3 +219,66 @@ model.unload()
 # delete adapter
 model.delete_adapter("dpo")
 ```
+
+## Inference with different LoRA adapters in the same batch
+
+Normally, each inference batch has to use the same adapter(s) in PEFT. This can sometimes be annoying, because we may have batches that contain samples intended to be used with different LoRA adapters. For example, we could have a base model that works well in English and two more LoRA adapters, one for French and one for German. Usually, we would have to split our batches such that each batch only contains samples of one of the languages, we cannot combine different languages in the same batch.
+
+Thankfully, it is possible to mix different LoRA adapters in the same batch using the `adapter_name` argument. Below, we show an examle of how this works in practice. First, let's load the base model, English, and the two adapters, French and German, like this:
+
+```python
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+
+model_id = ...
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+model = AutoModelForCausalLM.from_pretrained(model_id)
+# load the LoRA adapter for French
+peft_model = PeftModel.from_pretrained(model, <path>, adapter_name="adapter_fr")
+# next, load the LoRA adapter for German
+peft_model.load_adapter(<path>, adapter_name="adapter_de")
+```
+
+Now, we want to generate text on a sample that contains all three languages: The first three samples are in English, the next three are in French, and the last three are in German. We can use the `adapter_names` argument to specify which adapter to use for each sample. Since our base model is used for English, we use the special string `"__base__"` for these samples. For the next three samples, we indicate the adapter name of the French LoRA fine-tune, in this case `"adapter_fr"`. For the last three samples, we indicate the adapter name of the German LoRA fine-tune, in this case `"adapter_de"`. This way, we can use the base model and the two adapters in a single batch.
+
+```python
+inputs = tokenizer(
+    [
+        "Hello, my dog is cute",
+        "Hello, my cat is awesome",
+        "Hello, my fish is great",
+        "Salut, mon chien est mignon",
+        "Salut, mon chat est génial",
+        "Salut, mon poisson est super",
+        "Hallo, mein Hund ist süß",
+        "Hallo, meine Katze ist toll",
+        "Hallo, mein Fisch ist großartig",
+    ],
+    return_tensors="pt",
+    padding=True,
+)
+
+adapter_names = [
+    "__base__", "__base__", "__base__",
+    "adapter_fr", "adapter_fr", "adapter_fr",
+    "adapter_de", "adapter_de", "adapter_de",
+]
+output = peft_model.generate(**inputs, adapter_names=adapter_names, max_new_tokens=20)
+```
+
+Note that the order does not matter here, i.e. the samples in the batch don't need to be grouped by adapter as in the example above. We just need to ensure that the `adapter_names` argument is aligned correctly with the samples.
+
+### Caveats
+
+Using this features has some drawbacks, namely:
+
+- It only works for inference, not for training.
+- Disabling adapters using the `with model.disable_adapter()` context takes precedence over `adapter_names`.
+- You cannot pass `adapter_names` when some adapter weights where merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
+- For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
+- This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
+- There is an expected overhead for inference with `adapter_names`, especially if the amount of different adapters in the batch is high. This is because the batch size is effectively reduced to the number of samples per adapter. If runtime performance is your top priority, try the following:
+  - Increase the batch size.
+  - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handfull of different adapters.
+  - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.

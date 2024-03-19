@@ -21,6 +21,7 @@ Quantization represents data with fewer bits, making it a useful technique for r
 * optimizing which model weights are quantized with the [AWQ](https://hf.co/papers/2306.00978) algorithm
 * independently quantizing each row of a weight matrix with the [GPTQ](https://hf.co/papers/2210.17323) algorithm
 * quantizing to 8-bit and 4-bit precision with the [bitsandbytes](https://github.com/TimDettmers/bitsandbytes) library
+* quantizing to as low as 2-bit precision with the [AQLM](https://arxiv.org/abs/2401.06118) algorithm
 
 However, after a model is quantized it isn't typically further trained for downstream tasks because training can be unstable due to the lower precision of the weights and activations. But since PEFT methods only add *extra* trainable parameters, this allows you to train a quantized model with a PEFT adapter on top! Combining quantization with PEFT can be a good strategy for training even the largest models on a single GPU. For example, [QLoRA](https://hf.co/papers/2305.14314) is a method that quantizes a model to 4-bits and then trains it with LoRA. This method allows you to finetune a 65B parameter model on a single 48GB GPU!
 
@@ -55,7 +56,7 @@ from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", quantization_config=config)
 ```
 
-Next, you should call the [`~peft.utils.prepare_model_for_kbit_training`] function to preprocess the quantized model for traininng.
+Next, you should call the [`~peft.utils.prepare_model_for_kbit_training`] function to preprocess the quantized model for training.
 
 ```py
 from peft import prepare_model_for_kbit_training
@@ -76,7 +77,7 @@ config = LoraConfig(
     r=16,
     lora_alpha=8,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05
+    lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM"
 )
@@ -136,6 +137,27 @@ QLoRA adds trainable weights to all the linear layers in the transformer archite
 ```py
 config = LoraConfig(target_modules="all-linear", ...)
 ```
+
+## AQLM quantization
+
+Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
+
+Since the AQLM quantization process is computationally expensive, a use of prequantized models is recommended. A partial list of available models can be found in the official aqlm [repository](https://github.com/Vahe1994/AQLM).
+
+The models support LoRA adapter tuning. To tune the quantized model you'll need to install the `aqlm` inference library: `pip install aqlm>=1.0.2`. Finetuned LoRA adapters shall be saved separately, as merging them with AQLM quantized weights is not possible.
+
+```py
+quantized_model = AutoModelForCausalLM.from_pretrained(
+    "BlackSamorez/Mixtral-8x7b-AQLM-2Bit-1x16-hf-test-dispatch",
+    torch_dtype="auto", device_map="auto", low_cpu_mem_usage=True,
+)
+
+peft_config = LoraConfig(...)
+
+quantized_model = get_peft_model(quantized_model, peft_config)
+```
+
+You can refer to the [Google Colab](https://colab.research.google.com/drive/12GTp1FCj5_0SnnNQH18h_2XFh9vS_guX?usp=sharing) example for an overview of AQLM+LoRA finetuning.
 
 ## Next steps
 
