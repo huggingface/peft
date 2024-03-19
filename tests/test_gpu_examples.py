@@ -1601,7 +1601,7 @@ class LoftQTests(unittest.TestCase):
                 bnb_4bit_use_double_quant=True,
             )
             model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
-            model = get_peft_model(model, LoraConfig(task_type="CAUSAL_LM"))
+            model = get_peft_model(model, LoraConfig(task_type="CAUSAL_LM", target_modules="all-linear"))
             logits_lora = model(**inputs).logits
 
             current_mse = float("inf")
@@ -1629,8 +1629,8 @@ class LoftQTests(unittest.TestCase):
             mse_loftq = ((logits_base - logits_loftq) ** 2).mean()
 
             # check that the error was reduced by a certain margin
-            assert mae_loftq * 1.1 < mae_lora
-            assert mse_loftq * 1.3 < mse_lora
+            assert mae_loftq * 1.5 < mae_lora
+            assert mse_loftq * 2.5 < mse_lora
 
             # check that the callback has returned some True and some False values
             assert any(logs)
