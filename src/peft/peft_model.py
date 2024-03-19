@@ -367,10 +367,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if p in disk_modules
                 }
                 kwargs["offload_index"] = offload_index
-            if (getattr(model, "hf_device_map", None) is not None) and len(
-                set(model.hf_device_map.values()).intersection({"cpu", "disk"})
-            ) > 0:
-                remove_hook_from_submodules(model)
+                
+        if (getattr(model, "hf_device_map", None) is not None) and len(
+            set(model.hf_device_map.values()).intersection({"cpu", "disk"})
+        ) > 0:
+            remove_hook_from_submodules(model)
 
         if config.is_prompt_learning and is_trainable:
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
