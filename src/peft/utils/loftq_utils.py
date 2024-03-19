@@ -25,6 +25,8 @@ import torch
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import LocalEntryNotFoundError
 from safetensors import SafetensorError, safe_open
+from transformers.utils import cached_file
+from transformers.utils.hub import get_checkpoint_shard_files
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
@@ -235,30 +237,6 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
     return dequantized_weight.to(device=device, dtype=dtype), lora_A, lora_B
 
 
-def _check_model_path_loftq(model_path, peft_model):
-    """Check if there is a local model file corresponding to the given model, then format it properly."""
-    if model_path is None:
-        try:
-            model_path = snapshot_download(peft_model.base_model.config._name_or_path, local_files_only=True)
-        except AttributeError as exc:
-            raise ValueError(
-                "The provided model does not appear to be a transformers model. In this case, you must pass the "
-                "model_path to the safetensors file."
-            ) from exc
-        except LocalEntryNotFoundError as exc:
-            raise ValueError("The model.safetensors file must be present on disk, but it could not be found.") from exc
-
-    suffix = "model.safetensors"
-    if not model_path.endswith(suffix):
-        model_path = os.path.join(model_path, suffix)
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(
-            f"Could not find file {model_path}, ensure that there is a safetensors file of the model."
-        )
-
-    return model_path
-
-
 @torch.no_grad()
 def _loftq_init_new(qweight, weight, num_bits: int, reduced_rank: int):
     if num_bits != 4:
@@ -276,6 +254,72 @@ def _loftq_init_new(qweight, weight, num_bits: int, reduced_rank: int):
     output = _low_rank_decomposition(residual, reduced_rank=reduced_rank)
     L, R, reduced_rank = output["L"], output["R"], output["reduced_rank"]
     return R, L
+
+
+class _SafetensorLoader:
+    """
+    Simple utility class that loads tensors with safetensors from a single file or sharded files.
+
+    Takes care of file name normalization etc.
+
+    """
+    def __init__(self, peft_model, model_path):
+        if model_path is None:
+            try:
+                model_path = snapshot_download(peft_model.base_model.config._name_or_path, local_files_only=True)
+            except AttributeError as exc:
+                raise ValueError(
+                    "The provided model does not appear to be a transformers model. In this case, you must pass the "
+                    "model_path to the safetensors file."
+                ) from exc
+            except LocalEntryNotFoundError as exc:
+                raise ValueError("The model.safetensors file must be present on disk, but it could not be found.") from exc
+
+        suffix = "model.safetensors"
+        if not model_path.endswith(suffix):
+            model_path = os.path.join(model_path, suffix)
+
+        self.model_path = model_path
+        self.base_model_prefix = getattr(peft_model.get_base_model(), "base_model_prefix", None)
+        self.prefix = "base_model.model."
+        self.is_sharded = False
+        self.weight_map = None
+
+        if not os.path.exists(model_path):
+            # check if the file is sharded
+            par_dir = model_path.rpartition(os.path.sep)[0]
+            try:
+                resolved_archive_file, sharded_metadata = get_checkpoint_shard_files(
+                    par_dir, cached_file(par_dir, 'model.safetensors.index.json')
+                )
+            except OSError as exc:
+                raise FileNotFoundError(
+                    f"Could not find file for {model_path}, ensure that there is a (sharded) safetensors file of the model."
+                ) from exc
+
+            self.is_sharded = True
+            # maps from 'model-X-of-Y.safetensors' to full file path
+            file_map = {k.rpartition(os.path.sep)[-1]: k for k in resolved_archive_file}
+            self.weight_map = {k: file_map[v] for k, v in sharded_metadata["weight_map"].items()}
+
+    def get_tensor(self, name):
+        if not self.is_sharded:
+            file_path = self.model_path
+        else:
+            file_path = self.weight_map[name]
+
+        with safe_open(file_path, framework="pt", device="cpu") as f:
+            try:
+                tensor = f.get_tensor(name)
+            except SafetensorError as exc:
+                # no matching key found, we probably need to remove the base model prefix
+                if self.base_model_prefix:
+                    # remove 1 extra character for "."
+                    name = name[len(self.base_model_prefix) + 1 :]
+                    tensor = f.get_tensor(name)
+                else:
+                    raise exc
+        return tensor
 
 
 @torch.no_grad()
@@ -319,53 +363,42 @@ def replace_lora_weights_loftq(
 
     from peft.tuners.lora import Linear4bit
 
-    model_path = _check_model_path_loftq(model_path, peft_model)
+    # model_path = _check_model_path_loftq(model_path, peft_model)
     prefix = "base_model.model."
     any_match = False
+    safetensor_loader = _SafetensorLoader(peft_model, model_path)
 
-    with safe_open(model_path, framework="pt", device="cpu") as f:
-        # if too slow, consider adding tqdm as an option
-        for name, module in peft_model.named_modules():
-            if not isinstance(module, Linear4bit):
-                continue
+    # if too slow, consider adding tqdm as an option
+    for name, module in peft_model.named_modules():
+        if not isinstance(module, Linear4bit):
+            continue
 
-            if not name.startswith(prefix):
-                raise TypeError("The passed model does not appear to be a valid PeftModel")
+        if not name.startswith(prefix):
+            raise TypeError("The passed model does not appear to be a valid PeftModel")
 
-            any_match = True
-            name = name[len(prefix) :]
-            base_model_prefix = getattr(peft_model.get_base_model(), "base_model_prefix", None)
+        any_match = True
+        name = name[len(prefix) :]
+        tensor = safetensor_loader.get_tensor(name + ".weight")
 
-            try:
-                tensor = f.get_tensor(name + ".weight")
-            except SafetensorError as exc:
-                # no matching key found, we probably need to remove the base model prefix
-                if base_model_prefix:
-                    # remove 1 extra character for "."
-                    name = name[len(base_model_prefix) + 1 :]
-                    tensor = f.get_tensor(name + ".weight")
-                else:
-                    raise exc
-
-            reduced_rank = module.r[adapter_name]
-            lora_A, lora_B = _loftq_init_new(module.weight, tensor, num_bits=4, reduced_rank=reduced_rank)
-            if not callback:
-                module.lora_A[adapter_name].weight.data = lora_A
-                module.lora_B[adapter_name].weight.data = lora_B
-                continue
-
-            lora_A_before = module.lora_A[adapter_name].weight.data
-            lora_B_before = module.lora_B[adapter_name].weight.data
-
+        reduced_rank = module.r[adapter_name]
+        lora_A, lora_B = _loftq_init_new(module.weight, tensor, num_bits=4, reduced_rank=reduced_rank)
+        if not callback:
             module.lora_A[adapter_name].weight.data = lora_A
             module.lora_B[adapter_name].weight.data = lora_B
-            should_replace = callback(peft_model, name)
-            if not should_replace:
-                # roll back
-                module.lora_A[adapter_name].weight.data = lora_A_before
-                module.lora_B[adapter_name].weight.data = lora_B_before
+            continue
 
-            del lora_A_before, lora_B_before
+        lora_A_before = module.lora_A[adapter_name].weight.data
+        lora_B_before = module.lora_B[adapter_name].weight.data
+
+        module.lora_A[adapter_name].weight.data = lora_A
+        module.lora_B[adapter_name].weight.data = lora_B
+        should_replace = callback(peft_model, name)
+        if not should_replace:
+            # roll back
+            module.lora_A[adapter_name].weight.data = lora_A_before
+            module.lora_B[adapter_name].weight.data = lora_B_before
+
+        del lora_A_before, lora_B_before
 
     if not any_match:
         raise ValueError("No bnb LoRA module found on the model")
