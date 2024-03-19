@@ -1544,6 +1544,36 @@ class LoftQTests(unittest.TestCase):
         assert mae_loftq < (mae_quantized / factor)
         assert mse_loftq < (mse_quantized / factor)
 
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_4bit_dora(self, device):
+        # same as test_bloomz_loftq_4bit but with DoRA
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device, use_dora=True)
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
+
+        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
+        factor = 3
+        assert mae_loftq < (mae_quantized / factor)
+        assert mse_loftq < (mse_quantized / factor)
+
+    @parameterized.expand(["cuda", "cpu"])
+    def test_bloomz_loftq_8bit_dora(self, device):
+        # same as test_bloomz_loftq_8bit but with DoRA
+        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device, use_dora=True)
+
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_loftq > 0.0
+        assert mse_loftq > 0.0
+
+        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
+        assert mae_loftq < (mae_quantized / self.error_factor)
+        assert mse_loftq < (mse_quantized / self.error_factor)
+
     def test_replace_lora_weights_with_loftq_using_callable(self):
         """
         Test replacing LoRa weights with LoFTQ using a callable.
@@ -1610,36 +1640,6 @@ class LoftQTests(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         gc.collect()
-
-    @parameterized.expand(["cuda", "cpu"])
-    def test_bloomz_loftq_4bit_dora(self, device):
-        # same as test_bloomz_loftq_4bit but with DoRA
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=4, device=device, use_dora=True)
-        # first, sanity check that all errors are > 0.0
-        assert mae_quantized > 0.0
-        assert mse_quantized > 0.0
-        assert mae_loftq > 0.0
-        assert mse_loftq > 0.0
-
-        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        factor = 3
-        assert mae_loftq < (mae_quantized / factor)
-        assert mse_loftq < (mse_quantized / factor)
-
-    @parameterized.expand(["cuda", "cpu"])
-    def test_bloomz_loftq_8bit_dora(self, device):
-        # same as test_bloomz_loftq_8bit but with DoRA
-        mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(bits=8, device=device, use_dora=True)
-
-        # first, sanity check that all errors are > 0.0
-        assert mae_quantized > 0.0
-        assert mse_quantized > 0.0
-        assert mae_loftq > 0.0
-        assert mse_loftq > 0.0
-
-        # next, check that LoftQ quantization errors are smaller than LoRA errors by a certain margin
-        assert mae_loftq < (mae_quantized / self.error_factor)
-        assert mse_loftq < (mse_quantized / self.error_factor)
 
 
 @require_bitsandbytes
