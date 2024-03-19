@@ -1359,30 +1359,6 @@ class TestLoftQ:
 
     error_factor = 1  # FIXME should be > 1
 
-    def unwrap_model(self, model, sub_module_name=".base_layer"):
-        class Shell(torch.nn.Module):
-            def __init__(self, weight, bias=None):
-                super().__init__()
-                self.weight = torch.nn.Parameter(weight, requires_grad=False)
-                if bias is not None:
-                    self.bias = torch.nn.Parameter(bias, requires_grad=False)
-
-        sub_module_name_list = [k.split(sub_module_name)[0] for k in model.state_dict().keys() if sub_module_name in k]
-        sub_module_name_set = set(sub_module_name_list)
-        for name in sub_module_name_set:
-            # get the parent of the submodule
-            name_parent = ".".join(name.split(".")[:-1])
-            name_child = name.split(".")[-1]
-            sub_module = model.get_submodule(name_parent)
-
-            # replace with shell
-            child = getattr(sub_module, name_child)
-            weight = getattr(child.base_layer, "weight", None)
-            bias = getattr(child.base_layer, "bias", None)
-            shell = Shell(weight, bias)
-
-            setattr(sub_module, name_child, shell)
-
     def get_input(self, model_id, device):
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
@@ -1428,7 +1404,8 @@ class TestLoftQ:
         torch.cuda.empty_cache()
 
         # logits from the normal quantized LoRA model
-        lora_config = LoraConfig(task_type=task_type, use_dora=use_dora)
+        target_modules="all-linear" if task_type != TaskType.SEQ_2_SEQ_LM else ['o', 'k', 'wi', 'q', 'v']
+        lora_config = LoraConfig(task_type=task_type, use_dora=use_dora, target_modules=target_modules)
         kwargs = {}
         if bits == 4:
             kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
@@ -1450,7 +1427,7 @@ class TestLoftQ:
         # logits from quantized LoRA model using LoftQ
         loftq_config = LoftQConfig(loftq_bits=bits, loftq_iter=loftq_iter)
         lora_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, init_lora_weights="loftq", loftq_config=loftq_config, use_dora=use_dora
+            task_type=task_type, init_lora_weights="loftq", loftq_config=loftq_config, use_dora=use_dora, target_modules=target_modules
         )
         model = self.get_base_model(model_id, device)
         if device == "cuda":
@@ -1463,15 +1440,15 @@ class TestLoftQ:
         loftq_model.base_model.peft_config["default"].init_lora_weights = True
         loftq_model.save_pretrained(tmp_path / "loftq_model")
 
-        self.unwrap_model(loftq_model)
-        loftq_model.get_base_model().save_pretrained(tmp_path / "base_model")
+        loftq_model = loftq_model.unload()
+        loftq_model.save_pretrained(tmp_path / "base_model")
 
         del loftq_model
         gc.collect()
         torch.cuda.empty_cache()
 
         # now load quantized model and apply LoftQ-initialized weights on top
-        base_model = self.get_base_model(tmp_path / "base_model", device=None, **kwargs)
+        base_model = self.get_base_model(tmp_path / "base_model", device=None, **kwargs, torch_dtype=torch.float32)
         loftq_model = PeftModel.from_pretrained(base_model, tmp_path / "loftq_model", is_trainable=True)
 
         # TODO sanity check: model is quantized
@@ -1512,7 +1489,7 @@ class TestLoftQ:
         # Same test as the previous one but with 5 iterations. We should expect the error to be even smaller with more
         # iterations, but in practice the difference is not that large, at least not for this small base model.
         mae_quantized, mse_quantized, mae_loftq, mse_loftq = self.get_errors(
-            bits=4, loftq_iter=25, device=device, tmp_path=tmp_path
+            bits=4, loftq_iter=5, device=device, tmp_path=tmp_path
         )
         # first, sanity check that all errors are > 0.0
         assert mae_quantized > 0.0
