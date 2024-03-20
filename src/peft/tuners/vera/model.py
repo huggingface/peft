@@ -127,11 +127,6 @@ class VeraModel(BaseTuner):
     prefix: str = "vera_lambda"
 
     def __init__(self, model, config, adapter_name) -> None:
-        # Separate two parent class init for correct vera_A/B init.
-        nn.Module.__init__(self)
-        self.model = model
-        config = config[adapter_name]
-        self._init_vera_A_vera_B(config, adapter_name)
         super().__init__(model, config, adapter_name)
 
     def _find_first_dim(self, config) -> tuple[int, int]:
@@ -190,6 +185,9 @@ class VeraModel(BaseTuner):
         vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
         self.vera_A[adapter_name] = vera_A
         self.vera_B[adapter_name] = vera_B
+
+    def _pre_injection_hook(self, model: nn.Module, config: VeraConfig, adapter_name: str) -> None:
+        self._init_vera_A_vera_B(config, adapter_name)
 
     def _check_new_adapter_config(self, config: VeraConfig) -> None:
         """

@@ -124,8 +124,7 @@ class BaseTuner(nn.Module, ABC):
     """
 
     def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
-        if not hasattr(self, "_parameters"):  # this is a workaround to check if nn.Module.__init__ was already called
-            super().__init__()
+        super().__init__()
 
         self.model = model
         self.targeted_module_names: list[str] = []
@@ -146,6 +145,7 @@ class BaseTuner(nn.Module, ABC):
                 self.peft_config.update(peft_config)
 
         self.active_adapter = adapter_name
+        self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
@@ -160,6 +160,21 @@ class BaseTuner(nn.Module, ABC):
 
     def forward(self, *args: Any, **kwargs: Any):
         return self.model.forward(*args, **kwargs)
+
+    def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
+        r"""
+        A hook to be called before the adapter is injected into the model. This method can be overridden by child
+        classes to perform any pre-injection operations.
+
+        Args:
+            model (`nn.Module`):
+                The model to be adapted.
+            config (`PeftConfig`):
+                The adapter config.
+            adapter_name (`str`):
+                The adapter name.
+        """
+        pass
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
