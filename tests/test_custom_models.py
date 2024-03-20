@@ -1803,7 +1803,7 @@ class RequiresGradTester(unittest.TestCase):
         config1 = LoHaConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
-        # active pter is still "default"
+        # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.hada_w1_a.default",
@@ -1904,7 +1904,7 @@ class RequiresGradTester(unittest.TestCase):
         config1 = LoKrConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
-        # active pter is still "default"
+        # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.lokr_w1.default",
@@ -1989,7 +1989,7 @@ class RequiresGradTester(unittest.TestCase):
         config1 = OFTConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
-        # active pter is still "default"
+        # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.default",
@@ -2056,4 +2056,146 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+        )
+
+    def test_requires_grad_vera_different_targets(self):
+        # Test two different VeRA adapters that target different modules. Most notably, ensure that vera_A and vera_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = VeraConfig(target_modules=["lin1"], projection_prng_key=0)
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = VeraConfig(target_modules=["lin2"], projection_prng_key=0)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_vera_same_targets(self):
+        # Test two different VeRA adapters that target the same module. Most notably, ensure that vera_A and vera_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = VeraConfig(target_modules=["lin1", "lin2"], projection_prng_key=0)
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = VeraConfig(target_modules=["lin1", "lin2"], projection_prng_key=0)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+            "base_model.model.lin2.vera_lambda_b.default",
+            "base_model.model.lin2.vera_lambda_d.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+            "base_model.model.lin2.vera_lambda_b.default",
+            "base_model.model.lin2.vera_lambda_d.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.adapter1",
+            "base_model.model.lin1.vera_lambda_d.adapter1",
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.adapter1",
+            "base_model.model.lin1.vera_lambda_d.adapter1",
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
         )
