@@ -190,6 +190,7 @@ class Linear(nn.Linear, VeraLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.vera_lambda_d.keys():
@@ -203,9 +204,6 @@ class Linear(nn.Linear, VeraLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        if self.vera_A is None or self.vera_B is None:
-            msg = "Attempted to get reference to `vera_A` or `vera_B` but it was `None`! Ensure these are set using the `update_layer` methods"
-            raise ValueError(msg)
         vera_A = self.vera_A[adapter]
         vera_B = self.vera_B[adapter]
 
@@ -251,14 +249,6 @@ class Linear(nn.Linear, VeraLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
-
-            if self.vera_A is None or self.vera_B is None:
-                msg = (
-                    "Attempted to get reference to `vera_A` or `vera_B` but it was `None`! Ensure these are set using "
-                    "the `update_layer` methods"
-                )
-                raise ValueError(msg)
-
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
@@ -271,7 +261,7 @@ class Linear(nn.Linear, VeraLayer):
 
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
-                result += lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)
+                result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)
 
         result = result.to(previous_dtype)
         return result

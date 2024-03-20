@@ -471,7 +471,7 @@ class PeftCommonTester:
         _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VeraConfig):
             # Merge layers only supported for LoRA and IA³
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -960,8 +960,7 @@ class PeftCommonTester:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
-        # IA3 does not support deleting adapters yet, but it just needs to be added
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.VERA]
         # AdaLora does not support multiple adapters
         config = config_cls(
             base_model_name_or_path=model_id,
