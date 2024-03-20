@@ -36,7 +36,7 @@ from peft.utils import (
 from ..tuners_utils import _maybe_include_all_linear_layers
 from .buffer_dict import BufferDict
 from .config import VeraConfig
-from .layer import Embedding, Linear, VeraLayer
+from .layer import Linear, VeraLayer
 
 
 def _kaiming_init(
@@ -134,10 +134,9 @@ class VeraModel(BaseTuner):
         self._init_vera_A_vera_B(config, adapter_name)
         super().__init__(model, config, adapter_name)
 
-    def _find_first_dim(self, config) -> tuple[tuple[int, ...] | None, tuple[int, ...] | None]:
+    def _find_first_dim(self, config) -> tuple[int, int]:
         """
-        Finds the first linear and embedding that has been wrapped with Vera, and extract the input and output
-        dimension.
+        Finds the first linear layer that has been wrapped with Vera, and extract the input and output dimension.
 
         This will be used for determining the size of the shared vera_A and vera_B matrices.
 
@@ -150,7 +149,7 @@ class VeraModel(BaseTuner):
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
-        first_linear, first_embedding = None, None
+        first_shape = None
         for key, module in self.model.named_modules():
             if not self._check_target_module_exists(peft_config, key):
                 continue
@@ -159,67 +158,38 @@ class VeraModel(BaseTuner):
                 module_shape = tuple(module.weight.shape)
                 if isinstance(module, Conv1D):  # TODO: feels fragile, thoughts?
                     module_shape = module_shape[::-1]
+            else:
+                continue
 
-                if first_linear is not None and module_shape != first_linear:
-                    raise ValueError(
-                        "Multiple target linear layers with different dimensions were specified! Vera only supports a"
-                        f" single dimension size. Got '{module_shape}' expected '{first_linear}"
-                    )
-                first_linear = module_shape
+            if first_shape is None:
+                first_shape = module_shape
+                continue
 
-            elif isinstance(module, nn.Embedding):
-                if first_embedding is not None and tuple(module.weight.shape) != first_embedding:
-                    raise ValueError(
-                        "Multiple target embedding layers with different dimensions or vocabulary sizes were"
-                        " specified! Vera only supports a single size."
-                    )
-                first_embedding = tuple(module.weight.shape)
+            if module_shape != first_shape:
+                raise ValueError(
+                    "Multiple target layers with different dimensions were specified. VeRA only supports a "
+                    f"single dimension size. Expected shape {first_shape}, got {module_shape}."
+                )
 
-        if first_linear is None and first_embedding is None:
-            msg = "No `VeraLayer`s were found in `self.model`, so cannot determine rank of projection matrices!"
+        if first_shape is None:
+            msg = "No layers types compatible with VeRA were found. Please check `peft_config.target_modules`."
             raise ValueError(msg)
 
-        return first_linear, first_embedding
+        return first_shape
 
     def _init_vera_A_vera_B(self, config: VeraConfig, adapter_name: str) -> None:
-        first_linear, first_embedding = self._find_first_dim(config)
+        first_linear_out_dim, first_linear_in_dim = self._find_first_dim(config)
 
-        if first_embedding is not None:
-            first_embedding_vocab_size, first_embedding_dim = first_embedding
-        if first_linear is not None:
-            first_linear_out_dim, first_linear_in_dim = first_linear
-
-        # use of persistent to exclude vera_A and vera_B from the state dict
-        # if we choose not to save them.
+        # use of persistent to exclude vera_A and vera_B from the state dict if we choose not to save them.
         self.vera_A = BufferDict({}, persistent=config.save_projection)
         self.vera_B = BufferDict({}, persistent=config.save_projection)
 
-        self.vera_embedding_A = BufferDict({}, persistent=config.save_projection)
-        self.vera_embedding_B = BufferDict({}, persistent=config.save_projection)
-
         # deterministic init of vera_A and vera_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        if first_linear is not None:
-            vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
-            vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
-
-            self.vera_A[adapter_name] = vera_A
-            self.vera_B[adapter_name] = vera_B
-
-        # as above, but for embedding layer if at least one has been wrapped with Vera.
-        if first_embedding is not None:
-            vera_embedding_A = torch.randn((config.r, first_embedding_vocab_size), generator=generator)
-            vera_embedding_B = torch.randn((first_embedding_dim, config.r), generator=generator)
-
-            self.vera_embedding_A[adapter_name] = vera_embedding_A
-            self.vera_embedding_B[adapter_name] = vera_embedding_B
-
-        if not config.save_projection:
-            warnings.warn(
-                "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored"
-                " using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection`"
-                " to `True` to guarantee restoring the checkpoint correctly on all system configurations."
-            )
+        vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
+        vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
+        self.vera_A[adapter_name] = vera_A
+        self.vera_B[adapter_name] = vera_B
 
     def _check_new_adapter_config(self, config: VeraConfig) -> None:
         """
@@ -286,17 +256,7 @@ class VeraModel(BaseTuner):
         kwargs["bias"] = bias
         # TODO: add quantization support
 
-        if isinstance(target, Embedding):
-            target.update_layer_embedding(
-                adapter_name,
-                self.vera_embedding_A,
-                self.vera_embedding_B,
-                r,
-                vera_config.vera_dropout,
-                vera_config.init_weights,
-                d_initial=vera_config.d_initial,
-            )
-        elif isinstance(target, Linear):
+        if isinstance(target, Linear):
             target.update_layer(
                 adapter_name,
                 self.vera_A,
@@ -370,47 +330,35 @@ class VeraModel(BaseTuner):
         else:
             target_base_layer = target
 
-        if isinstance(target_base_layer, torch.nn.Embedding):
-            embedding_kwargs = kwargs.copy()
-            embedding_kwargs.pop("fan_in_fan_out", None)
-            new_module = Embedding(
-                target,
-                vera_A,
-                vera_B,
-                adapter_name,
-                d_initial=vera_config.d_initial,
-                **embedding_kwargs,
-            )
-        else:
-            if isinstance(target_base_layer, torch.nn.Linear):
-                if kwargs["fan_in_fan_out"]:
-                    warnings.warn(
-                        "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                        "Setting fan_in_fan_out to False."
-                    )
-                    kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = False
-            elif isinstance(target_base_layer, Conv1D):
-                kwargs["is_target_conv_1d_layer"] = True
-                if not kwargs["fan_in_fan_out"]:
-                    warnings.warn(
-                        "fan_in_fan_out is set to False but the target module is `Conv1D`. "
-                        "Setting fan_in_fan_out to True."
-                    )
-                    kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = True
-            else:
-                raise ValueError(
-                    f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                    "`torch.nn.Linear`, `torch.nn.Embedding`, `transformers.pytorch_utils.Conv1D`."
+        if isinstance(target_base_layer, torch.nn.Linear):
+            if kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
+                    "Setting fan_in_fan_out to False."
                 )
-            new_module = Linear(
-                target,
-                vera_A,
-                vera_B,
-                adapter_name,
-                bias=bias,
-                d_initial=vera_config.d_initial,
-                **kwargs,
+                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = False
+        elif isinstance(target_base_layer, Conv1D):
+            kwargs["is_target_conv_1d_layer"] = True
+            if not kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                    "Setting fan_in_fan_out to True."
+                )
+                kwargs["fan_in_fan_out"] = vera_config.fan_in_fan_out = True
+        else:
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
+        new_module = Linear(
+            target,
+            vera_A,
+            vera_B,
+            adapter_name,
+            bias=bias,
+            d_initial=vera_config.d_initial,
+            **kwargs,
+        )
 
         return new_module
 

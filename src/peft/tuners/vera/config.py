@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
@@ -24,11 +25,13 @@ class VeraConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`VeraModel`].
 
+    Paper: https://arxiv.org/abs/2310.11454.
+
     Args:
         r (`int`):
             Vera attention dimension.
         target_modules (`Union[List[str],str]`):
-            The names of the modules to apply Vera to.
+            The names of the modules to apply Vera to. Only linear layers are supported.
         projection_prng_key (`Optional[int]`):
             Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint did not
             include these projections.
@@ -68,7 +71,8 @@ class VeraConfig(PeftConfig):
         metadata={
             "help": (
                 "List of module names or regex expression of the module names to replace with Vera."
-                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
+                "Only linear layers are supported."
             )
         },
     )
@@ -146,3 +150,10 @@ class VeraConfig(PeftConfig):
         if self.projection_prng_key is None:
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
+
+        if not self.save_projection:
+            warnings.warn(
+                "Specified to not save vera_A and vera_B within the state dictionary, instead they will be restored "
+                "using the PRNG key store in `config.projection_prng_key`. Consider setting `config.save_projection` "
+                "to `True` to guarantee restoring the checkpoint correctly on all system configurations."
+            )

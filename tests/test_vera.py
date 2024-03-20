@@ -15,6 +15,7 @@
 # This test file is for tests specific to VeRA, since VeRA has some specific challenges due to the shared weights.
 
 import os
+import re
 
 import pytest
 import torch
@@ -231,3 +232,23 @@ class TestVera:
 
         assert not any("vera_A" in key for key in sd_other)
         assert not any("vera_B" in key for key in sd_other)
+
+    def test_vera_A_vera_B_share_memory(self, mlp_same_prng):
+        vera_A = mlp_same_prng.vera_A["default"]
+        vera_B = mlp_same_prng.vera_B["default"]
+
+        assert vera_A.data_ptr() == mlp_same_prng.base_model.model.lin1.vera_A["default"].data_ptr()
+        assert vera_B.data_ptr() == mlp_same_prng.base_model.model.lin1.vera_B["default"].data_ptr()
+        assert vera_A.data_ptr() == mlp_same_prng.base_model.model.lin2.vera_A["default"].data_ptr()
+        assert vera_B.data_ptr() == mlp_same_prng.base_model.model.lin2.vera_B["default"].data_ptr()
+
+    def test_vera_different_shapes_raises(self, mlp):
+        # It is not possible (currently) to have vera_A and vera_B for different shapes, as they cannot be shared if
+        # their shapes are not identical. lin0 and lin1 have different shapes.
+        config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False, projection_prng_key=42)
+        msg = re.escape(
+            "Multiple target layers with different dimensions were specified. VeRA only supports a single dimension "
+            "size. Expected shape (20, 10), got (20, 20)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(mlp, config)

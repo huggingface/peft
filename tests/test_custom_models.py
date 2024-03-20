@@ -247,7 +247,12 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "projection_prng_key": 42},
     ),
-    # TODO: add test that if shapes don't match, it raises an error
+    (
+        "Embedding + transformers Conv1D 1 VeRA",
+        "EmbConv1D",
+        VeraConfig,
+        {"target_modules": ["conv1d"], "projection_prng_key": 42},
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [

@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from .config import VeraConfig
-from .layer import Embedding, Linear, VeraLayer
+from .layer import Linear, VeraLayer
 from .model import VeraModel
 
 
-__all__ = ["VeraConfig", "Embedding", "VeraLayer", "Linear", "VeraModel"]
+__all__ = ["VeraConfig", "VeraLayer", "Linear", "VeraModel"]
