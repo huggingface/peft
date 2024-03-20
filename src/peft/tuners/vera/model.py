@@ -251,6 +251,13 @@ class VeraModel(BaseTuner):
                     f"previous config had {existing_config.projection_prng_key}."
                 )
 
+        save_project_unique_values = sorted({config.save_projection for config in self.peft_config.values()})
+        if len(save_project_unique_values) > 1:
+            raise ValueError(
+                "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
+                f"{save_project_unique_values}"
+            )
+
     @staticmethod
     def _check_target_module_exists(vera_config, key):
         return check_target_module_exists(vera_config, key)
@@ -276,9 +283,8 @@ class VeraModel(BaseTuner):
             "fan_in_fan_out": vera_config.fan_in_fan_out,
             "init_weights": vera_config.init_weights,
         }
-
-        # TODO: add quantization support
         kwargs["bias"] = bias
+        # TODO: add quantization support
 
         if isinstance(target, Embedding):
             target.update_layer_embedding(

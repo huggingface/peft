@@ -399,9 +399,9 @@ class BaseTunerLayer(ABC):
     active_adapter = None
 
     # All names of layers that may contain adapter (trainable) weights
-    adapter_layer_names: tuple[str] = ()
+    adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str] = ()
+    other_param_names: tuple[str, ...] = ()
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False

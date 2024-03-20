@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+
 import pytest
 import torch
 from scipy import stats
 from torch import nn
 
-from peft import LoraConfig, PromptTuningConfig, get_peft_model
+from peft import LoraConfig, PromptTuningConfig, VeraConfig, get_peft_model
 from peft.utils import infer_device
 
 
@@ -365,3 +367,27 @@ class TestInitialization:
             PromptTuningConfig(prompt_tuning_init="TEXT", prompt_tuning_init_text="prompt tuning init text")
         with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', prompt_tuning_init_text can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", tokenizer_name_or_path="t5-base")
+
+    def test_vera_no_prng_key_raises(self):
+        msg = r"`config.projection_prng_key` must not be `None` when using VeRA!"
+        with pytest.raises(ValueError, match=msg):
+            VeraConfig(target_modules=["lin1", "lin2"])
+        with pytest.raises(ValueError, match=msg):
+            VeraConfig(target_modules=["lin1", "lin2"], projection_prng_key=None)
+
+    def test_vera_mixing_save_projection_raises(self):
+        # it is unclear what the right thing to do would be if some adapters save the projection weights and some don't
+        # so we better raise an error
+
+        config0 = VeraConfig(target_modules="linear", init_weights=False, projection_prng_key=42, save_projection=True)
+        model = self.get_model()
+        model = get_peft_model(model, config0)
+        config1 = VeraConfig(
+            target_modules="linear", init_weights=False, projection_prng_key=42, save_projection=False
+        )
+        msg = re.escape(
+            "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
+            "[False, True]"
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)

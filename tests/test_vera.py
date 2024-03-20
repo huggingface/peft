@@ -18,6 +18,7 @@ import os
 
 import pytest
 import torch
+from safetensors import safe_open
 from torch import nn
 
 from peft import PeftModel, VeraConfig, get_peft_model
@@ -43,6 +44,7 @@ class MLP(nn.Module):
         X = self.relu(X)
         X = self.lin3(X)
         X = self.sm(X)
+        return X
 
 
 class TestVera:
@@ -82,7 +84,7 @@ class TestVera:
             is mlp_same_prng.base_model.model.lin2.vera_B["other"]
         )
 
-        input = torch.randn(1, 10)
+        input = torch.randn(5, 10)
         mlp_same_prng.set_adapter("default")
         output_default = mlp_same_prng(input)
         mlp_same_prng.set_adapter("other")
@@ -97,27 +99,35 @@ class TestVera:
         peft_model = get_peft_model(model, config)
         config2 = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=123)
 
-        msg = r"Vera PRNG initialisation key must be the same for all adapters. Got config.projection_prng_key=123 but previous config had 42"
+        msg = (
+            r"Vera PRNG initialisation key must be the same for all adapters. Got config.projection_prng_key=123 but "
+            r"previous config had 42"
+        )
         with pytest.raises(ValueError, match=msg):
             peft_model.add_adapter("other", config2)
 
-    def test_multiple_adapters_save_load(self, mlp_same_prng, tmp_path):
-        # check saving and loading works with multiple adapters
+    def test_multiple_adapters_save_load_save_projection_true(self, mlp_same_prng, tmp_path):
+        # check saving and loading works with multiple adapters and saved projection weights
         torch.manual_seed(0)
-        input = torch.randn(1, 10)
+        input = torch.randn(5, 10)
         mlp_same_prng.set_adapter("default")
         output_default = mlp_same_prng(input)
         mlp_same_prng.set_adapter("other")
         output_other = mlp_same_prng(input)
 
+        # sanity check
+        assert not torch.allclose(output_default, output_other, atol=1e-3, rtol=1e-3)
+
         save_path = tmp_path / "vera"
         mlp_same_prng.save_pretrained(save_path)
-        assert os.path.exists(save_path / "adapter-config.json")
-        assert os.path.exists(save_path / "other" / "adapter-config.json")
+        assert os.path.exists(save_path / "adapter_config.json")
+        assert os.path.exists(save_path / "other" / "adapter_config.json")
 
         torch.manual_seed(0)
         mlp = MLP()
         peft_model = PeftModel.from_pretrained(mlp, save_path)
+        peft_model.load_adapter(save_path / "other", "other")
+
         peft_model.set_adapter("default")
         output_default_loaded = peft_model(input)
         peft_model.set_adapter("other")
@@ -125,3 +135,99 @@ class TestVera:
 
         assert torch.allclose(output_default, output_default_loaded, atol=1e-3, rtol=1e-3)
         assert torch.allclose(output_other, output_other_loaded, atol=1e-3, rtol=1e-3)
+
+    def test_multiple_adapters_save_load_save_projection_false(self, mlp, tmp_path):
+        # check saving and loading works with multiple adapters without saved projection weights
+        torch.manual_seed(1)
+        config = VeraConfig(
+            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
+        )
+        # creates a default VeRA adapter
+        peft_model = get_peft_model(mlp, config, adapter_name="first")
+        config2 = VeraConfig(
+            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
+        )
+        peft_model.add_adapter("second", config2)
+
+        input = torch.randn(5, 10)
+        peft_model.set_adapter("first")
+        output_first = peft_model(input)
+        peft_model.set_adapter("second")
+        output_second = peft_model(input)
+
+        # sanity check
+        assert not torch.allclose(output_first, output_second, atol=1e-3, rtol=1e-3)
+
+        save_path = tmp_path / "vera"
+        peft_model.save_pretrained(save_path)
+        assert os.path.exists(save_path / "first" / "adapter_config.json")
+        assert os.path.exists(save_path / "second" / "adapter_config.json")
+
+        torch.manual_seed(0)
+        mlp = MLP()
+        peft_model = PeftModel.from_pretrained(mlp, save_path / "first", adapter_name="first")
+        peft_model.load_adapter(save_path / "second", "second")
+
+        peft_model.set_adapter("first")
+        output_first_loaded = peft_model(input)
+        peft_model.set_adapter("second")
+        output_second_loaded = peft_model(input)
+
+        assert torch.allclose(output_first, output_first_loaded, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(output_second, output_second_loaded, atol=1e-3, rtol=1e-3)
+
+    def test_multiple_adapters_save_projection_true_contains_vera_A_vera_B(self, mlp_same_prng, tmp_path):
+        # check that the state_dicts don't contain the projection weights
+        save_path = tmp_path / "vera"
+        mlp_same_prng.save_pretrained(save_path)
+
+        sd_default = {}
+        with safe_open(save_path / "adapter_model.safetensors", framework="pt", device="cpu") as f:
+            for key in f.keys():
+                sd_default[key] = f.get_tensor(key)
+
+        assert any("vera_A" in key for key in sd_default)
+        assert any("vera_B" in key for key in sd_default)
+        assert sd_default["base_model.vera_A"].shape == (8, 20)
+        assert sd_default["base_model.vera_B"].shape == (20, 8)
+
+        sd_other = {}
+        with safe_open(save_path / "other" / "adapter_model.safetensors", framework="pt", device="cpu") as f:
+            for key in f.keys():
+                sd_other[key] = f.get_tensor(key)
+
+        assert any("vera_A" in key for key in sd_other)
+        assert any("vera_B" in key for key in sd_other)
+        assert sd_other["base_model.vera_A"].shape == (8, 20)
+        assert sd_other["base_model.vera_B"].shape == (20, 8)
+
+    def test_multiple_adapters_save_projection_false_contains_no_vera_A_vera_B(self, mlp, tmp_path):
+        torch.manual_seed(1)
+        config = VeraConfig(
+            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
+        )
+        # creates a default VeRA adapter
+        peft_model = get_peft_model(mlp, config, adapter_name="first")
+        config2 = VeraConfig(
+            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
+        )
+        peft_model.add_adapter("second", config2)
+
+        save_path = tmp_path / "vera"
+        peft_model.save_pretrained(save_path)
+
+        sd_default = {}
+        with safe_open(save_path / "first" / "adapter_model.safetensors", framework="pt", device="cpu") as f:
+            for key in f.keys():
+                sd_default[key] = f.get_tensor(key)
+
+        assert not any("vera_A" in key for key in sd_default)
+        assert not any("vera_B" in key for key in sd_default)
+
+        sd_other = {}
+        with safe_open(save_path / "second" / "adapter_model.safetensors", framework="pt", device="cpu") as f:
+            for key in f.keys():
+                sd_other[key] = f.get_tensor(key)
+
+        assert not any("vera_A" in key for key in sd_other)
+        assert not any("vera_B" in key for key in sd_other)

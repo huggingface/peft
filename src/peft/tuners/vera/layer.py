@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import warnings
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -42,8 +42,8 @@ class VeraLayer(BaseTunerLayer):
 
         # Stores a reference to the vera_A/B BufferDict.
         # Set to `None` otherwise to avoid computation with random weights
-        self.vera_A = None
-        self.vera_B = None
+        self.vera_A: Optional[BufferDict] = None
+        self.vera_B: Optional[BufferDict] = None
 
         # Mark the weight as unmerged
         self._disable_adapters = False
@@ -88,13 +88,24 @@ class VeraLayer(BaseTunerLayer):
         self.vera_dropout.update(nn.ModuleDict({adapter_name: vera_dropout_layer}))
         # Actual trainable parameters
         self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
-        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.randn(r), requires_grad=True)
 
         # non trainable references to vera_A/B buffers
         # use setattr as this happens post `nn.Module.__init__`
         # but should not be issue as these are just references to the normally initialised `vera_A/B`
-        setattr(self, "vera_A", vera_A)
-        setattr(self, "vera_B", vera_B)
+        self.vera_A = vera_A
+        self.vera_B = vera_B
+        if adapter_name not in vera_A:
+            # This means that this is not the first VeRA adapter. We have to add an entry in the dict for this adapter.
+            if len(self.vera_A) < 1:
+                raise ValueError(
+                    "The `vera_A` and `vera_B` buffers are empty. This should not happen. Please report this issue."
+                )
+            # we can take any of the existing adapter's parameters, as they should all be identical
+            vera_A_param = list(self.vera_A.values())[0]
+            vera_B_param = list(self.vera_B.values())[0]
+            self.vera_A[adapter_name] = vera_A_param
+            self.vera_B[adapter_name] = vera_B_param
 
         if init_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
@@ -107,43 +118,6 @@ class VeraLayer(BaseTunerLayer):
             else:
                 self.to(weight.device)
         self.set_adapter(self.active_adapters)
-
-    def update_layer_embedding(
-        self,
-        adapter_name,
-        vera_A: BufferDict,
-        vera_B: BufferDict,
-        r,
-        vera_dropout,
-        init_weights,
-        d_initial: float = 1.0,
-    ):
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
-        self.r[adapter_name] = r
-        if vera_dropout > 0.0:
-            vera_dropout_layer = nn.Dropout(p=vera_dropout)
-        else:
-            vera_dropout_layer = nn.Identity()
-
-        self.vera_dropout[adapter_name] = vera_dropout_layer
-        # Actual trainable parameters
-        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
-        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
-
-        # non trainable references to vera_A/B buffers
-        # use setattr as this happens post `nn.Module.__init__`
-        # but should not be issue as these are just references to the normally initialised `vera_A/B`
-        setattr(self, "vera_A", vera_A)
-        setattr(self, "vera_B", vera_B)
-
-        if init_weights:
-            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
-
-        weight = getattr(self.get_base_layer(), "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            self.to(self.weight.device, dtype=weight.dtype)
 
     def reset_vera_parameters(self, adapter_name, d_initial: float = 1.0):
         if adapter_name in self.vera_lambda_d.keys():
@@ -174,7 +148,7 @@ class Linear(nn.Linear, VeraLayer):
         vera_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
-        init_weights: Union[bool, str] = True,
+        init_weights: bool = True,
         d_initial: float = 1.0,
         **kwargs,
     ) -> None:
@@ -328,11 +302,48 @@ class Embedding(nn.Embedding, VeraLayer):
         r: int = 0,
         vera_dropout: float = 0.0,
         d_initial: float = 1.0,
+        init_weights: bool = True,
         **kwargs,
     ) -> None:
-        init_weights = kwargs.pop("init_weights", True)
         VeraLayer.__init__(self, base_layer, **kwargs)
-        self.update_layer_embedding(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights, d_initial=d_initial)
+        self.update_layer(adapter_name, vera_A, vera_B, r, vera_dropout, init_weights, d_initial=d_initial)
+
+    def update_layer(
+        self,
+        adapter_name,
+        vera_A: BufferDict,
+        vera_B: BufferDict,
+        r,
+        vera_dropout,
+        init_weights,
+        d_initial: float = 1.0,
+    ):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        self.r[adapter_name] = r
+        if vera_dropout > 0.0:
+            vera_dropout_layer = nn.Dropout(p=vera_dropout)
+        else:
+            vera_dropout_layer = nn.Identity()
+
+        self.vera_dropout[adapter_name] = vera_dropout_layer
+        # Actual trainable parameters
+        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
+        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+
+        # non trainable references to vera_A/B buffers
+        # use setattr as this happens post `nn.Module.__init__`
+        # but should not be issue as these are just references to the normally initialised `vera_A/B`
+        setattr(self, "vera_A", vera_A)
+        setattr(self, "vera_B", vera_B)
+
+        if init_weights:
+            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
+
+        weight = getattr(self.get_base_layer(), "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            self.to(self.weight.device, dtype=weight.dtype)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """

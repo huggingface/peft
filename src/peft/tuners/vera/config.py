@@ -49,6 +49,9 @@ class VeraConfig(PeftConfig):
             will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
             List of modules apart from Vera layers to be set as trainable and saved in the final checkpoint.
+        init_weights (`bool`):
+            Whether to initialize the weights of the Vera layers with their default initialization. Don't change this
+            setting, except if you know exactly what you're doing.
         layers_to_transform (`Union[List[int],int]`):
             The layer indexes to transform, if this argument is specified, it will apply the Vera transformations on
             the layer indexes that are specified in this list. If a single integer is passed, it will apply the Vera
@@ -82,9 +85,9 @@ class VeraConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b /"
-                " lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload"
-                " the checkpoint on all system configurations."
+                "Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / "
+                "lambda_d weights. This will increase the size of the checkpoint, but guarantee that we can reload "
+                "the checkpoint on all system configurations."
             )
         },
     )
