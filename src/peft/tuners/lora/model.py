@@ -94,7 +94,7 @@ class LoraModel(BaseTuner):
         ```py
         >>> import torch
         >>> import transformers
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
+        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
@@ -121,7 +121,7 @@ class LoraModel(BaseTuner):
         ...     torch_dtype=torch.float16,
         ...     quantization_config=quantization_config,
         ... )
-        >>> model = prepare_model_for_int8_training(model)
+        >>> model = prepare_model_for_kbit_training(model)
         >>> lora_model = get_peft_model(model, config)
         ```
 

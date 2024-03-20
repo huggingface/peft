@@ -39,7 +39,7 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
-    prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
@@ -237,9 +237,9 @@ class PeftCommonTester:
 
         assert not dummy_output.requires_grad
 
-        # load with `prepare_model_for_int8_training`
+        # load with `prepare_model_for_kbit_training`
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
 
         for param in model.parameters():
             assert not param.requires_grad
