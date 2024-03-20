@@ -42,16 +42,36 @@ config = LoraConfig(init_lora_weights=False, ...)
 
 ### LoftQ
 
-When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. If you're using LoftQ, *do not* quantize the base model. You should set up a [`LoftQConfig`] instead:
+#### Standard approach
+
+When quantizing the base model for QLoRA training, consider using the [LoftQ initialization](https://arxiv.org/abs/2310.08659), which has been shown to improve performance when training quantized models. The idea is that the LoRA weights are initialized such that the quantization error is minimized. To use LoftQ, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
+
+In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
+
+#### A more convienient way
+
+An easier but more limited way to apply LoftQ initialization is to use the convenience function `replace_lora_weights_loftq`. This takes the quantized PEFT model as input and replaces the LoRA weights in-place with their LoftQ-initialized counterparts.
 
 ```python
-from peft import LoftQConfig, LoraConfig, get_peft_model
+from peft import replace_lora_weights_loftq
+from transformers import BitsAndBytesConfig
 
-base_model = AutoModelForCausalLM.from_pretrained(...)  # don't quantize here
-loftq_config = LoftQConfig(loftq_bits=4, ...)           # set 4bit quantization
-lora_config = LoraConfig(..., init_lora_weights="loftq", loftq_config=loftq_config)
+bnb_config = BitsAndBytesConfig(load_in_4bit, ...)
+base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
+# note: don't pass init_lora_weights="loftq" or loftq_config!
+lora_config = LoraConfig(task_type="CAUSAL_LM")
 peft_model = get_peft_model(base_model, lora_config)
+replace_lora_weights_loft(peft_model)
 ```
+
+`replace_lora_weights_loftq` also allows you to pass a `callback` argument to give you more control over which layers should be modified or not, which empirically can improve the results quite a lot. To see a more elaborate example of this, check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb).
+
+`replace_lora_weights_loftq` implements only one iteration step of LoftQ. This means that only the LoRA weights are updated, instead of iteratevily updating LoRA weights and quantized base model weights. This may lead to lower performance but has the advantage that we can use the original quantized weights derived from the base model, instead of having to keep an extra copy of modified quantized weights. Whether this tradeoff is worthwhile depends on the use case.
+
+At the moment, `replace_lora_weights_loftq` has these additional limitations:
+
+- Model files must be stored as a `safetensors` file.
+- Only bitsandbytes 4bit quantization is supported.
 
 <Tip>
 
@@ -219,3 +239,66 @@ model.unload()
 # delete adapter
 model.delete_adapter("dpo")
 ```
+
+## Inference with different LoRA adapters in the same batch
+
+Normally, each inference batch has to use the same adapter(s) in PEFT. This can sometimes be annoying, because we may have batches that contain samples intended to be used with different LoRA adapters. For example, we could have a base model that works well in English and two more LoRA adapters, one for French and one for German. Usually, we would have to split our batches such that each batch only contains samples of one of the languages, we cannot combine different languages in the same batch.
+
+Thankfully, it is possible to mix different LoRA adapters in the same batch using the `adapter_name` argument. Below, we show an examle of how this works in practice. First, let's load the base model, English, and the two adapters, French and German, like this:
+
+```python
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+
+model_id = ...
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+model = AutoModelForCausalLM.from_pretrained(model_id)
+# load the LoRA adapter for French
+peft_model = PeftModel.from_pretrained(model, <path>, adapter_name="adapter_fr")
+# next, load the LoRA adapter for German
+peft_model.load_adapter(<path>, adapter_name="adapter_de")
+```
+
+Now, we want to generate text on a sample that contains all three languages: The first three samples are in English, the next three are in French, and the last three are in German. We can use the `adapter_names` argument to specify which adapter to use for each sample. Since our base model is used for English, we use the special string `"__base__"` for these samples. For the next three samples, we indicate the adapter name of the French LoRA fine-tune, in this case `"adapter_fr"`. For the last three samples, we indicate the adapter name of the German LoRA fine-tune, in this case `"adapter_de"`. This way, we can use the base model and the two adapters in a single batch.
+
+```python
+inputs = tokenizer(
+    [
+        "Hello, my dog is cute",
+        "Hello, my cat is awesome",
+        "Hello, my fish is great",
+        "Salut, mon chien est mignon",
+        "Salut, mon chat est génial",
+        "Salut, mon poisson est super",
+        "Hallo, mein Hund ist süß",
+        "Hallo, meine Katze ist toll",
+        "Hallo, mein Fisch ist großartig",
+    ],
+    return_tensors="pt",
+    padding=True,
+)
+
+adapter_names = [
+    "__base__", "__base__", "__base__",
+    "adapter_fr", "adapter_fr", "adapter_fr",
+    "adapter_de", "adapter_de", "adapter_de",
+]
+output = peft_model.generate(**inputs, adapter_names=adapter_names, max_new_tokens=20)
+```
+
+Note that the order does not matter here, i.e. the samples in the batch don't need to be grouped by adapter as in the example above. We just need to ensure that the `adapter_names` argument is aligned correctly with the samples.
+
+### Caveats
+
+Using this features has some drawbacks, namely:
+
+- It only works for inference, not for training.
+- Disabling adapters using the `with model.disable_adapter()` context takes precedence over `adapter_names`.
+- You cannot pass `adapter_names` when some adapter weights where merged with base weight using the `merge_adapter` method. Please unmerge all adapters first by calling `model.unmerge_adapter()`.
+- For obvious reasons, this cannot be used after calling `merge_and_unload()`, since all the LoRA adapters will be merged into the base weights in this case.
+- This feature does not currently work with DoRA, so set `use_dora=False` in your `LoraConfig` if you want to use it.
+- There is an expected overhead for inference with `adapter_names`, especially if the amount of different adapters in the batch is high. This is because the batch size is effectively reduced to the number of samples per adapter. If runtime performance is your top priority, try the following:
+  - Increase the batch size.
+  - Try to avoid having a large number of different adapters in the same batch, prefer homogeneous batches. This can be achieved by buffering samples with the same adapter and only perform inference with a small handfull of different adapters.
+  - Take a look at alternative implementations such as [LoRAX](https://github.com/predibase/lorax), [punica](https://github.com/punica-ai/punica), or [S-LoRA](https://github.com/S-LoRA/S-LoRA), which are specialized to work with a large number of different adapters.
