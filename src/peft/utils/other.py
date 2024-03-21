@@ -142,15 +142,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     return model
 
 
-# For backward compatibility
-def prepare_model_for_int8_training(*args, **kwargs):
-    warnings.warn(
-        "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
-        FutureWarning,
-    )
-    return prepare_model_for_kbit_training(*args, **kwargs)
-
-
 # copied from transformers.models.bart.modeling_bart
 def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
     """

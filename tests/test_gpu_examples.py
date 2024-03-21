@@ -50,7 +50,6 @@ from peft import (
     PeftModel,
     TaskType,
     get_peft_model,
-    prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
 )
@@ -162,7 +161,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             )
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -473,7 +472,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             setattr(model, "model_parallel", True)
             setattr(model, "is_parallelizable", True)
@@ -536,7 +535,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == {0}
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -597,7 +596,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -688,7 +687,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.config.forced_decoder_ids = None
             model.config.suppress_tokens = []
 
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
             # to avoid this, make the inputs trainable
