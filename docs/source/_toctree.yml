@@ -98,6 +98,8 @@
       title: Prefix tuning
     - local: package_reference/prompt_tuning
       title: Prompt tuning
+    - local: package_reference/vera
+      title: VeRA
     title: Adapters
   - sections:
     - local: package_reference/merge_utils
