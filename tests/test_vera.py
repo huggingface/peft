@@ -59,10 +59,10 @@ class TestVera:
     def mlp_same_prng(self, mlp):
         torch.manual_seed(0)
 
-        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42)
+        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         # creates a default VeRA adapter
         peft_model = get_peft_model(mlp, config)
-        config2 = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42)
+        config2 = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         peft_model.add_adapter("other", config2)
         return peft_model
 
@@ -95,14 +95,14 @@ class TestVera:
     def test_multiple_adapters_different_prng_raises(self):
         # we cannot have multiple adapters with different prng keys
         model = MLP()
-        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42)
+        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False)
         # creates a default VeRA adapter
         peft_model = get_peft_model(model, config)
         config2 = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=123)
 
         msg = (
             r"Vera PRNG initialisation key must be the same for all adapters. Got config.projection_prng_key=123 but "
-            r"previous config had 42"
+            r"previous config had 0"
         )
         with pytest.raises(ValueError, match=msg):
             peft_model.add_adapter("other", config2)
@@ -140,14 +140,10 @@ class TestVera:
     def test_multiple_adapters_save_load_save_projection_false(self, mlp, tmp_path):
         # check saving and loading works with multiple adapters without saved projection weights
         torch.manual_seed(1)
-        config = VeraConfig(
-            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
-        )
+        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         # creates a default VeRA adapter
         peft_model = get_peft_model(mlp, config, adapter_name="first")
-        config2 = VeraConfig(
-            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
-        )
+        config2 = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model.add_adapter("second", config2)
 
         input = torch.randn(5, 10)
@@ -204,14 +200,10 @@ class TestVera:
 
     def test_multiple_adapters_save_projection_false_contains_no_vera_A_vera_B(self, mlp, tmp_path):
         torch.manual_seed(1)
-        config = VeraConfig(
-            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
-        )
+        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         # creates a default VeRA adapter
         peft_model = get_peft_model(mlp, config, adapter_name="first")
-        config2 = VeraConfig(
-            target_modules=["lin1", "lin2"], init_weights=False, projection_prng_key=42, save_projection=False
-        )
+        config2 = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False, save_projection=False)
         peft_model.add_adapter("second", config2)
 
         save_path = tmp_path / "vera"
@@ -245,7 +237,7 @@ class TestVera:
     def test_vera_different_shapes_raises(self, mlp):
         # It is not possible (currently) to have vera_A and vera_B for different shapes, as they cannot be shared if
         # their shapes are not identical. lin0 and lin1 have different shapes.
-        config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False, projection_prng_key=42)
+        config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False)
         msg = re.escape(
             "Multiple target layers with different dimensions were specified. VeRA only supports a single dimension "
             "size. Expected shape (20, 10), got (20, 20)."

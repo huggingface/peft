@@ -32,9 +32,9 @@ class VeraConfig(PeftConfig):
             Vera attention dimension.
         target_modules (`Union[List[str],str]`):
             The names of the modules to apply Vera to. Only linear layers are supported.
-        projection_prng_key (`Optional[int]`):
-            Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint did not
-            include these projections.
+        projection_prng_key (`int`):
+            Vera PRNG init key. Used for initialising vera_A and vera_B for new models or when loading a checkpoint
+            that did not include these projections. Defaults to `0`.
         save_projection (`bool`):
             Whether to save the vera_A / vera_B projections in the state dict alongside per layer lambda_b / lambda_d
             weights. This will increase the size of the checkpoint, but guarantee that we can reload the checkpoint on
@@ -76,12 +76,12 @@ class VeraConfig(PeftConfig):
             )
         },
     )
-    projection_prng_key: Optional[int] = field(
-        default=None,
+    projection_prng_key: int = field(
+        default=0,
         metadata={
             "help": (
-                "Vera PRNG init key. Used for initialising vera_A and vera_B for new models, or when the checkpoint "
-                "did not include these projections. This value cannot be set to `None`."
+                "Vera PRNG init key. Used for initialising vera_A and vera_B for new models or when loading a "
+                "checkpoint that did not include these projections."
             )
         },
     )
@@ -146,10 +146,6 @@ class VeraConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-
-        if self.projection_prng_key is None:
-            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
-            raise ValueError(msg)
 
         if not self.save_projection:
             warnings.warn(

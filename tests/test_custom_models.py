@@ -241,20 +241,20 @@ TEST_CASES = [
     ########
     # VeRA #
     ########
-    ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0", "projection_prng_key": 42}),
-    ("Vanilla MLP 2 VeRA", "MLP", VeraConfig, {"target_modules": ["lin0"], "projection_prng_key": 42}),
-    ("Vanilla MLP 3 VeRA", "MLP", VeraConfig, {"target_modules": ["lin1"], "projection_prng_key": 42}),
+    ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 VeRA", "MLP", VeraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 VeRA", "MLP", VeraConfig, {"target_modules": ["lin1"]}),
     (
         "Vanilla MLP 5 VeRA",
         "MLP",
         VeraConfig,
-        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "projection_prng_key": 42},
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
     ),
     (
         "Embedding + transformers Conv1D 1 VeRA",
         "EmbConv1D",
         VeraConfig,
-        {"target_modules": ["conv1d"], "projection_prng_key": 42},
+        {"target_modules": ["conv1d"]},
     ),
 ]
 
@@ -2088,10 +2088,10 @@ class RequiresGradTester(unittest.TestCase):
                 X = self.sm(X)
                 return X
 
-        config0 = VeraConfig(target_modules=["lin1"], projection_prng_key=0)
+        config0 = VeraConfig(target_modules=["lin1"])
         peft_model = get_peft_model(MLP2(), config0)
 
-        config1 = VeraConfig(target_modules=["lin2"], projection_prng_key=0)
+        config1 = VeraConfig(target_modules=["lin2"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2155,10 +2155,10 @@ class RequiresGradTester(unittest.TestCase):
                 X = self.sm(X)
                 return X
 
-        config0 = VeraConfig(target_modules=["lin1", "lin2"], projection_prng_key=0)
+        config0 = VeraConfig(target_modules=["lin1", "lin2"])
         peft_model = get_peft_model(MLP2(), config0)
 
-        config1 = VeraConfig(target_modules=["lin1", "lin2"], projection_prng_key=0)
+        config1 = VeraConfig(target_modules=["lin1", "lin2"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
