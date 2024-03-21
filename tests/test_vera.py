@@ -229,12 +229,40 @@ class TestVera:
         vera_A = mlp_same_prng.vera_A["default"]
         vera_B = mlp_same_prng.vera_B["default"]
 
+        # these tensors should share the same data
         assert vera_A.data_ptr() == mlp_same_prng.base_model.model.lin1.vera_A["default"].data_ptr()
         assert vera_B.data_ptr() == mlp_same_prng.base_model.model.lin1.vera_B["default"].data_ptr()
         assert vera_A.data_ptr() == mlp_same_prng.base_model.model.lin2.vera_A["default"].data_ptr()
         assert vera_B.data_ptr() == mlp_same_prng.base_model.model.lin2.vera_B["default"].data_ptr()
-        # sanity check
+        # sanity check: these tensors shouldn't share the same data
         assert vera_A.data_ptr() != vera_B.data_ptr()
+
+    def test_vera_lambda_dont_share_memory(self, mlp_same_prng):
+        # sanity check: these tensors shouldn't share the same data
+        assert (
+            mlp_same_prng.base_model.model.lin1.vera_lambda_b["default"].data_ptr()
+            != mlp_same_prng.base_model.model.lin1.vera_lambda_b["other"].data_ptr()
+        )
+        assert (
+            mlp_same_prng.base_model.model.lin1.vera_lambda_b["default"].data_ptr()
+            != mlp_same_prng.base_model.model.lin2.vera_lambda_b["default"].data_ptr()
+        )
+        assert (
+            mlp_same_prng.base_model.model.lin1.vera_lambda_b["other"].data_ptr()
+            != mlp_same_prng.base_model.model.lin2.vera_lambda_b["other"].data_ptr()
+        )
+        assert (
+            mlp_same_prng.base_model.model.lin1.vera_lambda_d["default"].data_ptr()
+            != mlp_same_prng.base_model.model.lin1.vera_lambda_d["other"].data_ptr()
+        )
+        assert (
+            mlp_same_prng.base_model.model.lin1.vera_lambda_d["default"].data_ptr()
+            != mlp_same_prng.base_model.model.lin2.vera_lambda_d["default"].data_ptr()
+        )
+        assert (
+            mlp_same_prng.base_model.model.lin1.vera_lambda_d["other"].data_ptr()
+            != mlp_same_prng.base_model.model.lin2.vera_lambda_d["other"].data_ptr()
+        )
 
     def test_vera_different_shapes_raises(self, mlp):
         # It is not possible (currently) to have vera_A and vera_B for different shapes, as they cannot be shared if
