@@ -56,12 +56,12 @@ An easier but more limited way to apply LoftQ initialization is to use the conve
 from peft import replace_lora_weights_loftq
 from transformers import BitsAndBytesConfig
 
-bnb_config = BitsAndBytesConfig(load_in_4bit, ...)
+bnb_config = BitsAndBytesConfig(load_in_4bit=True, ...)
 base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
 # note: don't pass init_lora_weights="loftq" or loftq_config!
 lora_config = LoraConfig(task_type="CAUSAL_LM")
 peft_model = get_peft_model(base_model, lora_config)
-replace_lora_weights_loft(peft_model)
+replace_lora_weights_loftq(peft_model)
 ```
 
 `replace_lora_weights_loftq` also allows you to pass a `callback` argument to give you more control over which layers should be modified or not, which empirically can improve the results quite a lot. To see a more elaborate example of this, check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb).
@@ -101,7 +101,7 @@ config = LoraConfig(use_dora=True, ...)
 
 #### Caveats
 
-- DoRA only supports linear layers at the momement.
+- DoRA only supports linear and Conv2d layers at the momement.
 - DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. 
 - DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
