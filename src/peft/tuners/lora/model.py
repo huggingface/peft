@@ -17,9 +17,10 @@ import math
 import operator
 import re
 import warnings
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from enum import Enum
-from functools import reduce
+from functools import partial, reduce
 from itertools import chain
 from typing import Literal, Optional
 
@@ -50,6 +51,12 @@ from .config import LoraConfig
 from .gptq import dispatch_gptq
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .tp_layer import dispatch_megatron
+
+
+def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
+    # pre-forward hook to inject the adapter_names argument when using mixed adapter batches inference
+    kwargs["adapter_names"] = adapter_names
+    return args, kwargs
 
 
 class LoraModel(BaseTuner):
@@ -87,7 +94,7 @@ class LoraModel(BaseTuner):
         ```py
         >>> import torch
         >>> import transformers
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
+        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
         >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
@@ -114,7 +121,7 @@ class LoraModel(BaseTuner):
         ...     torch_dtype=torch.float16,
         ...     quantization_config=quantization_config,
         ... )
-        >>> model = prepare_model_for_int8_training(model)
+        >>> model = prepare_model_for_kbit_training(model)
         >>> lora_model = get_peft_model(model, config)
         ```
 
@@ -363,6 +370,30 @@ class LoraModel(BaseTuner):
                     module.unmerge()
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
+
+    @contextmanager
+    def _enable_peft_forward_hooks(self, *args, **kwargs):
+        # If adapter_names is passed as an argument, we inject it into the forward arguments.
+        adapter_names = kwargs.pop("adapter_names", None)
+        if adapter_names is None:
+            # nothing to do
+            yield
+            return
+
+        if self.training:
+            raise ValueError("Cannot pass `adapter_names` when the model is in training mode.")
+
+        hook_handles = []
+        for module in self.modules():
+            if isinstance(module, LoraLayer):
+                pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
+                handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                hook_handles.append(handle)
+
+        yield
+
+        for handle in hook_handles:
+            handle.remove()
 
     def _check_merge_allowed(self):
         """Verify that the configuration supports merging.

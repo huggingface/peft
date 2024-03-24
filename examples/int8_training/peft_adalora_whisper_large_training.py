@@ -18,7 +18,6 @@ import evaluate
 import numpy as np
 import torch
 import transformers
-import wandb
 
 # accelerate imports
 from accelerate import Accelerator, dispatch_model
@@ -39,6 +38,8 @@ from transformers import (
 )
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
 from transformers.utils import get_full_repo_name
+
+import wandb
 
 # peft imports
 from peft import AdaLoraConfig, LoraConfig, PeftModel, get_peft_model
@@ -555,9 +556,9 @@ def main():
 
     # preparing peft model
     if args.use_peft:
-        from peft import prepare_model_for_int8_training
+        from peft import prepare_model_for_kbit_training
 
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
 
         # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
         # to avoid this, make the inputs trainable
