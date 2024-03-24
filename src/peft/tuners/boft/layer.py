@@ -45,7 +45,6 @@ def get_fbd_cuda():
         return _FBD_CUDA
 
     curr_dir = os.path.dirname(__file__)
-    
     # need ninja to build the extension
     try:
         fbd_cuda = load(
