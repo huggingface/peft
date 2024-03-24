@@ -21,7 +21,6 @@ import itertools
 import logging
 import math
 import os
-import subprocess
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -316,8 +315,7 @@ def main(args):
     data_path = os.path.join(os.getcwd(), "data", "dreambooth")
     if not os.path.exists(data_path):
         os.makedirs(os.path.join(os.getcwd(), "data"), exist_ok=True)
-        clone_command = ["git", "clone", "https://github.com/google/dreambooth.git", data_path]
-        subprocess.run(clone_command)
+        os.system(f"git clone https://github.com/google/dreambooth.git '{data_path}'")
 
     # Dataset and DataLoaders creation:
     train_dataset = DreamBoothDataset(

@@ -51,7 +51,7 @@ pip install git+https://github.com/huggingface/peft
 
 ## Download the data
 
-[dreambooth](https://github.com/google/dreambooth) dataset should have been automatically cloned in the following structure as a submodule if cloned with `--recursive`. Otherwise, `git submodule update --init --recursive` to clone the submodule.
+[dreambooth](https://github.com/google/dreambooth) dataset should have been automatically cloned in the following structure when running the training script.
 
 ```
 boft_dreambooth

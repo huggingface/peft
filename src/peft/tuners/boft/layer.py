@@ -47,6 +47,9 @@ def get_fbd_cuda():
     curr_dir = os.path.dirname(__file__)
     # need ninja to build the extension
     try:
+        # Force an exception to trigger the except block
+        raise Exception("Forced exception to test except block.")
+
         fbd_cuda = load(
             name="fbd_cuda",
             sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
@@ -57,6 +60,7 @@ def get_fbd_cuda():
         import fbd_cuda
     except Exception as e:
         warnings.warn(f"Failed to load the CUDA extension: {e}, check if ninja is available.")
+        warnings.warn("Setting boft_n_butterfly_factor to 1 to speed up the finetuning process.")
         fbd_cuda = None
 
     _FBD_CUDA = fbd_cuda
@@ -440,6 +444,12 @@ class Linear(nn.Module, BOFTLayer):
 
         self._active_adapter = adapter_name
 
+        # Attempt to load the CUDA extension during model initialization
+        self.fbd_cuda_available = get_fbd_cuda()
+        if not self.fbd_cuda_available:
+            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
+            boft_n_butterfly_factor = 1
+
         self.update_layer(
             adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
@@ -528,7 +538,12 @@ class Linear(nn.Module, BOFTLayer):
         boft_R = boft_R.view(N * D, H, H)
         orth_rotate_butterfly = self.cayley_batch(boft_R)
         orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
-        block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+        if self.fbd_cuda_available:
+            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+        else:
+            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
@@ -564,7 +579,12 @@ class Linear(nn.Module, BOFTLayer):
                 orth_rotate_butterfly = self.cayley_batch(boft_R)
                 orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
                 orth_rotate_butterfly = dropout(orth_rotate_butterfly)
-                block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+                if self.fbd_cuda_available:
+                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+                else:
+                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
                 butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
                 butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
@@ -615,6 +635,13 @@ class Conv2d(nn.Module, BOFTLayer):
         BOFTLayer.__init__(self, base_layer)
 
         self._active_adapter = adapter_name
+
+        # Attempt to load the CUDA extension during model initialization
+        self.fbd_cuda_available = get_fbd_cuda()
+        if not self.fbd_cuda_available:
+            # If the CUDA extension is not available, set the butterfly factor to 1 to speed up the finetuning process
+            boft_n_butterfly_factor = 1
+
         self.update_layer(
             adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
         )
@@ -825,7 +852,12 @@ class Conv2d(nn.Module, BOFTLayer):
         boft_R = boft_R.view(N * D, H, H)
         orth_rotate_butterfly = self.cayley_batch(boft_R)
         orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
-        block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+        if self.fbd_cuda_available:
+            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+        else:
+            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
         butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
         butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
@@ -863,7 +895,12 @@ class Conv2d(nn.Module, BOFTLayer):
                 orth_rotate_butterfly = self.cayley_batch(boft_R)
                 orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
                 orth_rotate_butterfly = dropout(orth_rotate_butterfly)
-                block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+                if self.fbd_cuda_available:
+                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+                else:
+                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
                 butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
                 butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
