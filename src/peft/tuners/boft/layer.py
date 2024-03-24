@@ -45,14 +45,20 @@ def get_fbd_cuda():
         return _FBD_CUDA
 
     curr_dir = os.path.dirname(__file__)
-    fbd_cuda = load(
-        name="fbd_cuda",
-        sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
-        verbose=True,
-        # build_directory='/tmp/'  # for debugging
-    )
-    # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
-    import fbd_cuda
+    
+    # need ninja to build the extension
+    try:
+        fbd_cuda = load(
+            name="fbd_cuda",
+            sources=[f"{curr_dir}/fbd/fbd_cuda.cpp", f"{curr_dir}/fbd/fbd_cuda_kernel.cu"],
+            verbose=True,
+            # build_directory='/tmp/'  # for debugging
+        )
+        # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
+        import fbd_cuda
+    except Exception as e:
+        warnings.warn(f"Failed to load the CUDA extension: {e}, check if ninja is available.")
+        fbd_cuda = None
 
     _FBD_CUDA = fbd_cuda
     return _FBD_CUDA
