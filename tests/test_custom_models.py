@@ -2180,6 +2180,7 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.boft_s.adapter1",
         )
 
+
 class TestMixedAdapterBatches:
     torch_device = infer_device()
 
