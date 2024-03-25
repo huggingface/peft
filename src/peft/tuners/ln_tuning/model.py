@@ -76,7 +76,7 @@ class LNTuningModel(BaseTuner):
     prefix: str = "select_"
 
     def __init__(self, model, config, adapter_name) -> None:
-        self.adapter_name = adapter_name
+        # self.adapter_name = adapter_name
         super().__init__(model, config, adapter_name)
 
     def __getattr__(self, name: str):
@@ -91,7 +91,7 @@ class LNTuningModel(BaseTuner):
     def _prepare_adapter_config(peft_config: PeftConfig, model_config: dict) -> PeftConfig:
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING:
-                raise ValueError("Please specify `modules_to_save` in `peft_config`")
+                raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
                 TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING[model_config["model_type"]]
             )
@@ -105,16 +105,15 @@ class LNTuningModel(BaseTuner):
         target_name: str,
         parent: Module,
         current_key: str,
-        **optional_kwargs: Any,
     ) -> None:
         # replace the original module with a same new module
-        new_module = self._create_new_module(peft_config, target, adapter_name, **optional_kwargs)
+        new_module = self._create_new_module(peft_config, target, adapter_name)
         if adapter_name != self.active_adapter:
             new_module.requires_grad_(False)
         self._replace_module(parent, target_name, new_module, target)
 
     def _create_new_module(
-        self, peft_config: PeftConfig, target: Module, adapter_name: str, **optional_kwargs: Any
+        self, peft_config: PeftConfig, target: Module, adapter_name: str,
     ) -> Module:
         new_module = SelectLayer(target, adapter_name)
         return new_module
@@ -139,7 +138,7 @@ class LNTuningModel(BaseTuner):
     def _mark_only_adapters_as_trainable(self, model: Module):
         for n, p in model.named_parameters():
             flag = False
-            for module_name in self.peft_config[self.adapter_name].target_modules:
+            for module_name in self.peft_config[self.active_adapter].target_modules:
                 if module_name in n and self.prefix in n:
                     flag = True
                     break
@@ -147,22 +146,25 @@ class LNTuningModel(BaseTuner):
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
+    
+    def _set_adapter_layers(self, enabled: bool) -> None:
+        for module in self.model.modules():
+            if isinstance(module, SelectLayer):
+                module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
-        """Enable adapter layers placeholder for LNTuning.
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
         """
-        msg = (
-            "LNTuning method does not need to enable adapter layers."
-        )
-        warnings.warn(msg)
+        self._set_adapter_layers(enabled=True)
 
     def disable_adapter_layers(self) -> None:
-        """Disable adapter layers placeholder for LNTuning.
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
         """
-        msg = (
-            "LNTuning method does not need to disable adapter layers."
-        )
-        warnings.warn(msg)
+        self._set_adapter_layers(enabled=False)
 
     def _unload_and_optionally_merge(
         self,
@@ -184,7 +186,7 @@ class LNTuningModel(BaseTuner):
             if hasattr(target, "base_layer"):
                 if merge:
                     target.merge(adapter_names)
-                self._replace_module(parent, target_name, target.base_layer, target)
+                self._replace_module(parent, target_name, target.get_base_layer(), target)
 
         return self.model
 
