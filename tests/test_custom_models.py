@@ -986,6 +986,22 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         assert isinstance(unloaded.classifier, nn.Linear)
 
+    def test_gpt2_dora_merge_and_unload(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload()
+
+    def test_gpt2_dora_merge_and_unload_safe_merge(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload(safe_merge=True)
+
 
 class TestMultiRankAdapter(unittest.TestCase):
     """Tests related to multirank LoRA adapters"""

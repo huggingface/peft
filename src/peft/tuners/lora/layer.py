@@ -396,13 +396,16 @@ class Linear(nn.Module, LoraLayer):
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
-                        weight_norm = self._get_weight_norm(orig_weights, delta_weight, scaling=1).detach()
+                        weight_norm = self._get_weight_norm(
+                            orig_weights, transpose(delta_weight, self.fan_in_fan_out), scaling=1
+                        ).detach()
                         # We need to cache weight_norm because it has to be based on the original weights. We
                         # cannot calculate it on the fly based on the merged weights when unmerging because its a
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                        orig_weights = dora_factor.view(-1, 1) * (orig_weights + delta_weight)
+                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
+                        orig_weights = dora_factor * (orig_weights + delta_weight)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -417,13 +420,16 @@ class Linear(nn.Module, LoraLayer):
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
-                        weight_norm = self._get_weight_norm(base_layer.weight, delta_weight, scaling=1).detach()
+                        weight_norm = self._get_weight_norm(
+                            base_layer.weight, transpose(delta_weight, self.fan_in_fan_out), scaling=1
+                        ).detach()
                         # We need to cache weight_norm because it has to be based on the original weights. We
                         # cannot calculate it on the fly based on the merged weights when unmerging because its a
                         # different value
                         self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
-                        new_weight = dora_factor.view(-1, 1) * (base_layer.weight.data + delta_weight)
+                        dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
+                        new_weight = dora_factor * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
 
                 self.merged_adapters.append(active_adapter)
