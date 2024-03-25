@@ -68,7 +68,7 @@ You can also put your custom images into `boft_dreambooth/data/dreambooth`.
 
 ## Finetune Dreambooth with BOFT
 
-```python
+```bash
 ./train_dreambooth.sh
 ```
 
