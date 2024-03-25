@@ -232,7 +232,7 @@ class BOFTLayer(BaseTunerLayer):
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
             raise ValueError(
-                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor} to be a positive integer number."
+                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor+1} to be a positive integer number."
             )
 
         # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
@@ -251,11 +251,11 @@ class BOFTLayer(BaseTunerLayer):
             if boft_n_butterfly_factor != 0:
                 if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
                     raise ValueError(
-                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_num ({boft_block_num})!"
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_num ({boft_block_num})!"
                     )
                 if boft_block_num % (2**boft_n_butterfly_factor) != 0:
                     raise ValueError(
-                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor})!"
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor+1})!"
                     )
 
             boft_block_size = int(self.in_features // boft_block_num)
@@ -269,11 +269,11 @@ class BOFTLayer(BaseTunerLayer):
             if boft_n_butterfly_factor != 0:
                 if self.in_features < (boft_block_size * (2**boft_n_butterfly_factor)):
                     raise ValueError(
-                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
                 if self.in_features % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
                     raise ValueError(
-                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of in_features ({self.in_features}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
 
             boft_block_num = int(self.in_features // boft_block_size)
@@ -657,7 +657,7 @@ class Conv2d(nn.Module, BOFTLayer):
         boft_n_butterfly_factor = boft_n_butterfly_factor - 1
         if boft_n_butterfly_factor < 0:
             raise ValueError(
-                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor} to be a positive integer number."
+                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor+1} to be a positive integer number."
             )
 
         # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
@@ -686,11 +686,11 @@ class Conv2d(nn.Module, BOFTLayer):
             if boft_n_butterfly_factor != 0:
                 if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
                     raise ValueError(
-                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_num ({boft_block_num})!"
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_num ({boft_block_num})!"
                     )
                 if boft_block_num % (2**boft_n_butterfly_factor) != 0:
                     raise ValueError(
-                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor})!"
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor+1})!"
                     )
 
             boft_block_size = int(conv_filter_dim // boft_block_num)
@@ -704,11 +704,11 @@ class Conv2d(nn.Module, BOFTLayer):
             if boft_n_butterfly_factor != 0:
                 if conv_filter_dim < (boft_block_size * (2**boft_n_butterfly_factor)):
                     raise ValueError(
-                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
                 if conv_filter_dim % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
                     raise ValueError(
-                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor}) and boft_block_size ({boft_block_size})!"
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
                     )
 
             boft_block_num = int(conv_filter_dim // boft_block_size)

@@ -300,6 +300,18 @@ TEST_CASES = [
         BOFTConfig,
         {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 8, "boft_n_butterfly_factor": 3},
     ),
+    (
+        "Conv2d2 1 BOFT",
+        "Conv2d2",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
+    ),
+    (
+        "Conv2d2 1 BOFT",
+        "Conv2d2",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
+    )
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -509,6 +521,29 @@ class ModelConv2D(nn.Module):
         return X
 
 
+class ModelConv2D2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 40)
+        self.conv2d = nn.Conv2d(8, 32, 3)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin1 = nn.Linear(32, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = X.reshape(-1, 8, 3, 3)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -535,6 +570,9 @@ class MockTransformerWrapper:
 
         if model_id == "MLP2":
             return MLP2().to(torch_dtype)
+
+        if model_id == "Conv2d2":
+            return ModelConv2D2().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -2135,6 +2173,48 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+        )
+
+    def test_requires_grad_boft_different_targets(self):
+        # test two different OFT adapters that target different modules
+        config0 = BOFTConfig(target_modules=["lin0"], boft_block_size=2)
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active pter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.boft_R.default",
+            "base_model.model.lin0.boft_s.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.boft_R.default",
+            "base_model.model.lin0.boft_s.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
         )
 
     def test_requires_grad_boft_same_targets(self):

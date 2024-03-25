@@ -28,7 +28,7 @@ In this guide we provide a controllable generation (ControlNet) fine-tuning scri
 ## Set up your environment
 Start by cloning the PEFT repository:
 
-```python
+```bash
 git clone https://github.com/huggingface/peft
 ```
 
@@ -39,7 +39,7 @@ cd peft/examples/boft_controlnet
 
 Set up your environment: install PEFT, and all the required libraries. At the time of writing this guide we recommend installing PEFT from source.
 
-```python
+```bash
 conda create --name peft python=3.10
 conda activate peft
 conda install pytorch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 pytorch-cuda=11.8 -c pytorch -c nvidia
@@ -117,12 +117,11 @@ accelerate launch train_controlnet.py \
 
 Run inference on the saved model to sample new images from the validation set:
 
-```python
+```bash
 ./test_controlnet.sh
 ```
 or
 ```bash
-#!/bin/bash
 ITER_NUM=50000
 
 export MODEL_NAME="stabilityai/stable-diffusion-2-1"
@@ -136,8 +135,7 @@ export CONTROLNET_PATH="${OUTPUT_DIR}/controlnet/model.safetensors"
 export UNET_PATH="${OUTPUT_DIR}/unet/${RUN_NAME}"
 export RESULTS_PATH="${OUTPUT_DIR}/results"
 
-# CUDA_VISIBLE_DEVICES=0 python test_controlnet.py \
-CUDA_VISIBLE_DEVICES=0 accelerate launch test_controlnet.py \
+accelerate launch test_controlnet.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME \
   --controlnet_path=$CONTROLNET_PATH \
@@ -150,7 +148,7 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch test_controlnet.py \
 
 Run evaluation on the sampled images to evaluate the landmark reprojection error:
 
-```python
+```bash
 ./eval.sh
 ```
 or
@@ -167,8 +165,6 @@ export OUTPUT_DIR="./output/${DATASET_NAME}/${RUN_NAME}/${CKPT_NAME}"
 export CONTROLNET_PATH="${OUTPUT_DIR}/controlnet/model.safetensors"
 export UNET_PATH="${OUTPUT_DIR}/unet/${RUN_NAME}"
 
-# CUDA_VISIBLE_DEVICES=0 python test_controlnet.py \
-# CUDA_VISIBLE_DEVICES=0 
 accelerate launch eval.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME \
@@ -178,5 +174,4 @@ accelerate launch eval.py \
   --output_dir=$OUTPUT_DIR \
   --dataset_name=$DATASET_NAME \
   --vis_overlays \
-
 ```

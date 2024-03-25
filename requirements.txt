@@ -13,4 +13,3 @@ pyyaml
 datasets
 psutil
 setuptools
-Ninja
