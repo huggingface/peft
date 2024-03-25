@@ -17,9 +17,11 @@ from functools import cache, lru_cache
 
 import packaging.version
 
+
 @cache
 def is_bnb_available() -> bool:
     return importlib.util.find_spec("bitsandbytes") is not None
+
 
 @cache
 def is_bnb_4bit_available() -> bool:
@@ -29,6 +31,7 @@ def is_bnb_4bit_available() -> bool:
     import bitsandbytes as bnb
 
     return hasattr(bnb.nn, "Linear4bit")
+
 
 @cache
 def is_auto_gptq_available():
@@ -42,6 +45,7 @@ def is_auto_gptq_available():
                 f"Found an incompatible version of auto-gptq. Found version {version_autogptq}, "
                 f"but only versions above {AUTOGPTQ_MINIMUM_VERSION} are supported"
             )
+
 
 @cache
 def is_optimum_available() -> bool:
@@ -64,9 +68,11 @@ def is_torch_tpu_available(check_device=True):
         return True
     return False
 
+
 @cache
 def is_aqlm_available():
     return importlib.util.find_spec("aqlm") is not None
+
 
 @cache
 def is_auto_awq_available():
