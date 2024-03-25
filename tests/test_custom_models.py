@@ -311,20 +311,6 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
-    (
-        "LNTuning Same",
-        "lntuning",
-        LNTuningConfig,
-        {"target_modules": ["layernorm0"], "init_lntuning_weights": False, "inference_mode": True},
-        {"target_modules": ["layernorm0"], "init_lntuning_weights": False, "inference_mode": True},
-    ),
-    (
-        "LNTuning Different",
-        "lntuning",
-        LNTuningConfig,
-        {"target_modules": ["layernorm0"], "init_lntuning_weights": False, "inference_mode": True},
-        {"target_modules": ["layernorm1"], "init_lntuning_weights": False, "inference_mode": True},
-    ),
 ]
 PREFIXES = {
     IA3Config: "ia3_",
@@ -332,7 +318,7 @@ PREFIXES = {
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
-    LNTuningConfig: "lntuning_",
+    LNTuningConfig: "select_new_",
 }
 
 
@@ -732,6 +718,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
+        if isinstance(config_cls, LNTuningConfig):
+            # LayerNorm tuning is slow to learn
+            lr = 1.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -771,9 +760,14 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_before = model(**X)
 
         model.train()
-        lr = 0.01
-        # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        if isinstance(config_cls, LNTuningConfig):
+            # LayerNorm tuning is slow to learn
+            lr = 1.0
+            optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        else:
+            # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
+            lr = 0.01
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -808,7 +802,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
+        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol), f"model_id: {model_id}\nbefore: {outputs_before}\nafter{outputs_after}\ndisable:{outputs_disabled}\nenable_disable{outputs_enabled_after_disable}\n{model.base_model.layernorm0.base_layer.weight}"
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)

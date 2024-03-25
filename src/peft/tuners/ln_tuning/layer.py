@@ -27,19 +27,39 @@ class SelectLayer(nn.Module, BaseTunerLayer):
     Selects a layer from the model.
     """
 
-    adapter_layer_names = "select_new_layers"
+    adapter_layer_names = ("select_new_layers", )
 
     def __init__(self, base_layer: nn.Module, adapter_name: str):
         super().__init__()
         self.base_layer = base_layer
         self.select_new_layers = nn.ModuleDict({})
         self.update_layer(self.base_layer, adapter_name)
-        self.adapter_names = [adapter_name]
+        # self.adapter_names = [adapter_name]
         self._active_adapter = adapter_name
         self.merged_adapters = []
 
     def update_layer(self, layer: nn.Module, adapter_name: str):
         self.select_new_layers[adapter_name] = deepcopy(layer)
+
+    def enable_adapters(self, enabled: bool) -> None:
+        """Toggle the enabling and disabling of adapters
+
+        Takes care of setting the requires_grad flag for the adapter weights.
+
+        Args:
+            enabled (bool): True to enable adapters, False to disable adapters
+        """
+        if enabled:
+            self.set_adapter(self.active_adapters)
+            self._disable_adapters = False
+        else:
+            if self.merged:
+                self.unmerge()
+            # disable grads on all adapter layers
+            for layer_name in self.adapter_layer_names:
+                layer = getattr(self, layer_name)
+                layer.requires_grad_(False)
+            self._disable_adapters = True
 
     def merge(self, adapter_names: Optional[List[str]] = None):
         adapter_names = check_adapters_to_merge(self, adapter_names)
@@ -47,9 +67,16 @@ class SelectLayer(nn.Module, BaseTunerLayer):
             # no adapter to merge
             return
 
-        assert (
-            len(adapter_names) == 1
-        ), "You can only use one adapter for SelectLayer Adapter. Because SelectLayer selects one set of layers from the original arch."
+        if len(adapter_names) > 1:
+            raise ValueError(
+                "You can only use one adapter for SelectLayer Adapter. "
+                "Because SelectLayer selects one set of layers from the original arch."
+            )
+        merged_adapters = set(self.merged_adapters)
+        if merged_adapters:
+            warnings.warn("Already merged with {}. Unmerging first.".format(merged_adapters))
+            self.unmerge()
+
         self.base_layer, self.select_new_layers[adapter_names[0]] = (
             self.select_new_layers[adapter_names[0]],
             self.base_layer,
@@ -60,8 +87,9 @@ class SelectLayer(nn.Module, BaseTunerLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        self.base_layer, self.select_new_layers[self.merged_adapters[0]] = (
-            self.select_new_layers[self.merged_adapters[0]],
+        merged_name = self.merged_adapters.pop(0)
+        self.base_layer, self.select_new_layers[merged_name] = (
+            self.select_new_layers[merged_name],
             self.base_layer,
         )
 
@@ -73,9 +101,11 @@ class SelectLayer(nn.Module, BaseTunerLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            assert (
-                len(self.active_adapters) == 1
-            ), "You can only use one adapter for SelectLayer Adapter. Because SelectLayer selects one set of layers from the original arch."
+            if len(self.active_adapters) != 1:
+                raise ValueError(
+                    "You can only use one adapter for SelectLayer Adapter."
+                    "Because SelectLayer selects one set of layers from the original arch."
+                )
             active_adapter = self.active_adapters[0]
             result = self.select_new_layers[active_adapter](x, *args, **kwargs)
 
