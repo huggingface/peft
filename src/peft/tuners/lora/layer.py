@@ -17,6 +17,7 @@ import warnings
 from typing import Any, List, Optional, Union
 
 import torch
+from torch._lowrank import svd_lowrank
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
@@ -105,8 +106,8 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
-        if init_lora_weights == "pisa_init":
-            self.pisa_init(adapter_name)
+        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pie"):
+            self.pie_init(adapter_name, init_lora_weights)
         elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
@@ -150,17 +151,39 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
-    def pisa_init(self, adapter_name):
+    def pie_init(self, adapter_name, init_lora_weights):
         assert self.scaling[adapter_name] == 1
-        U, S, Vh = torch.linalg.svd(self.base_layer.weight.data, full_matrices=False)
-        Ur = U[:,:self.r[adapter_name]]
-        Sr = S[:self.r[adapter_name]]
-        Vhr = Vh[:self.r[adapter_name]]
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        device = weight.device
+        if dtype == torch.uint8:
+            quant_type = weight.quant_type
+            import bitsandbytes as bnb
+            weight = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).to(torch.float32)
+        elif dtype != torch.float32:
+            weight = self.get_base_layer().weight.to(torch.float32)
+        
+        if init_lora_weights == 'pie':
+            U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
+            Ur = U[:,:self.r[adapter_name]]
+            Sr = S[:self.r[adapter_name]]
+            Vhr = Vh[:self.r[adapter_name]]
+        elif len(init_lora_weights.split("_niter_"))==2:
+            Ur, Sr, Vr = svd_lowrank(weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1]))
+            Vhr = Vr.t()
+        else:
+            raise "init_lora_weights should be pie or pie_niter_[number of iters]."
+        
         lora_A = torch.diag(torch.sqrt(Sr)) @ Vhr
         lora_B = Ur @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        self.base_layer.weight.data = self.base_layer.weight.data - lora_B @ lora_A
+        res = weight.data - lora_B @ lora_A
+        if dtype == torch.uint8:
+            weight = bnb.nn.Params4bit(res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type).to(device)
+        else:
+            weight = weight.to(dtype)
+        self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
