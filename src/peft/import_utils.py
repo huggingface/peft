@@ -13,17 +13,17 @@
 # limitations under the License.
 import importlib
 import importlib.metadata as importlib_metadata
-from functools import cache, lru_cache
+from functools import lru_cache
 
 import packaging.version
 
 
-@cache
+@lru_cache(maxsize=None)
 def is_bnb_available() -> bool:
     return importlib.util.find_spec("bitsandbytes") is not None
 
 
-@cache
+@lru_cache(maxsize=None)
 def is_bnb_4bit_available() -> bool:
     if not is_bnb_available():
         return False
@@ -33,7 +33,7 @@ def is_bnb_4bit_available() -> bool:
     return hasattr(bnb.nn, "Linear4bit")
 
 
-@cache
+@lru_cache(maxsize=None)
 def is_auto_gptq_available():
     if importlib.util.find_spec("auto_gptq") is not None:
         AUTOGPTQ_MINIMUM_VERSION = packaging.version.parse("0.5.0")
@@ -47,7 +47,7 @@ def is_auto_gptq_available():
             )
 
 
-@cache
+@lru_cache(maxsize=None)
 def is_optimum_available() -> bool:
     return importlib.util.find_spec("optimum") is not None
 
@@ -69,11 +69,11 @@ def is_torch_tpu_available(check_device=True):
     return False
 
 
-@cache
+@lru_cache(maxsize=None)
 def is_aqlm_available():
     return importlib.util.find_spec("aqlm") is not None
 
 
-@cache
+@lru_cache(maxsize=None)
 def is_auto_awq_available():
     return importlib.util.find_spec("awq") is not None
