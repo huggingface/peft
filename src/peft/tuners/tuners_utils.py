@@ -13,7 +13,9 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 import logging
+import os
 import re
 import warnings
 from abc import ABC, abstractmethod
@@ -65,9 +67,23 @@ def onload_layer(layer):
         and isinstance(layer.base_layer._hf_hook, AlignDevicesHook)
         and layer.base_layer._hf_hook.offload
     ):
-        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
-            # retrieve the name of the original disk-offload directory
-            offload_folder = layer.base_layer._hf_hook.weights_map.dataset.save_folder
+        # check if the base layer is disk-offloaded (must contain a 'dataset' and an offload index)
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values() and hasattr(
+            layer.base_layer._hf_hook.weights_map, "dataset"
+        ):
+            # find the disk-offload index (maps modules to safetensors) from the `dataset` (OffloadedWeightsLoader object)
+            index = layer.base_layer._hf_hook.weights_map.dataset.index
+            module_name = list(dict(layer.base_layer._hf_hook.weights_map.dataset).keys())[0]  # any module will do
+            file_name = index[module_name]["safetensors_file"]
+            base_name_arr = []
+            # get effective dir name
+            for i in os.path.split(file_name):
+                if "--" in i:
+                    base_name_arr.append(i)
+                    break
+                base_name_arr.append(i)
+            base_name = os.path.join(*base_name_arr)
+            safetensors_filename = base_name + "-merged"
         layer.base_layer._hf_hook.pre_forward(layer.base_layer)
         base_layer_offload = True
 
@@ -82,9 +98,11 @@ def onload_layer(layer):
             name: param.to("cpu") for name, param in named_module_tensors(layer.base_layer)
         }
         # offload weights map to disk if original device is the disk
-        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values():
+        if torch.device("meta") in layer.base_layer._hf_hook.original_devices.values() and hasattr(
+            layer.base_layer._hf_hook.weights_map, "dataset"
+        ):
             # rewrite directory with merged weights
-            offload_state_dict(offload_folder, layer.base_layer._hf_hook.weights_map)
+            offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
         layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
 
@@ -170,12 +188,26 @@ class BaseTuner(nn.Module, ABC):
         Check out `peft.tuner.lora.LoraModel._prepare_adapter_config` for an example.
 
         Args:
-            peft_config (`str`):
+            peft_config (`PeftConfig`):
                 The adapter config.
-            model_config (`str`):
+            model_config (`dict`):
                 The transformers model config, that config should contain the `model_type` key.
         """
         ...
+
+    def _prepare_model(self, peft_config: PeftConfig, model: nn.Module):
+        r"""
+        A private method to modify the model structure before adapter is applied.
+
+        See `peft.tuner.lora.LoraModel._prepare_model` for an example.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The prepared adapter config.
+            model (`nn.Module`):
+                The model that is going to be adapted.
+        """
+        pass
 
     @abstractmethod
     def _check_target_module_exists(peft_config: PeftConfig, key: str) -> bool:
@@ -242,6 +274,13 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
+    def _check_merge_allowed(self):
+        """Helper method to check whether the adapter can be merged.
+
+        Raise a ValueError if it is not possible to merge the adapter with the given configuration.
+        """
+        pass
+
     def inject_adapter(self, model: nn.Module, adapter_name: str):
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
@@ -261,9 +300,6 @@ class BaseTuner(nn.Module, ABC):
         # in a bad (half-initialized) state.
         self._check_new_adapter_config(peft_config)
 
-        is_target_modules_in_base_model = False
-        key_list = [key for key, _ in model.named_modules()]
-
         _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
         _has_modules_to_save = False
 
@@ -272,6 +308,10 @@ class BaseTuner(nn.Module, ABC):
             model_config = model_config.to_dict()
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
+
+        self._prepare_model(peft_config, model)
+        is_target_modules_in_base_model = False
+        key_list = [key for key, _ in model.named_modules()]
 
         # update peft_config.target_modules if required
         peft_config = _maybe_include_all_linear_layers(peft_config, model)
@@ -337,6 +377,7 @@ class BaseTuner(nn.Module, ABC):
                 The list of adapter names that should be merged. If `None`, all active adapters will be merged.
                 Defaults to `None`.
         """
+        self._check_merge_allowed()
         for module in self.model.modules():
             if isinstance(module, BaseTunerLayer):
                 with onload_layer(module):
@@ -670,3 +711,74 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
             warnings.warn("All adapters are already merged, nothing to do.")
 
     return adapter_names
+
+
+def clone_module(module: nn.Module, share_weights=False):
+    """Clone a module in a pytorch model.
+
+    Clones a module of a model, optionally sharing all the parameters between the original and the clone. Simplifies
+    reusing a module when manipulating the architecture of a model.
+    """
+    clone = copy.deepcopy(module)
+
+    def _share_weights(src: nn.Module, dst: nn.Module):
+        for name, param in src.named_parameters(recurse=False):
+            dst.register_parameter(name, param)
+
+    if share_weights:
+        for name, submodule in module.named_modules():
+            _share_weights(submodule, clone.get_submodule(name))
+
+    return clone
+
+
+def replicate_layers(model: nn.Module, layer_map: list[tuple[int, int]]):
+    """Replicate layers in a transfomer model with weight sharing.
+
+    This function looks for a module list attribute at model[(.model)*].layers and replicates the layers in the module
+    list according to the layer map. For example the map `[[0, 4], [2, 5]]` will take the set of layers `[0, 1, 2, 3,
+    4]` and replace them with a module list containing `[0, 1, 2, 3, 2, 3, 4]`.
+    """
+    while hasattr(model, "model"):
+        model = model.model
+    # Some variants of the bert model nest the main model under the bert attribute.
+    if hasattr(model, "bert"):
+        model = model.bert
+
+    model_type = None
+    layers: nn.ModuleList = None
+    if hasattr(model, "layers"):
+        model_type = "llama"
+        layers = model.layers
+    elif hasattr(model, "encoder") and hasattr(model.encoder, "layer"):
+        model_type = "bert"
+        layers = model.encoder.layer
+    elif hasattr(model, "h"):
+        model_type = "falcon"
+        layers = model.h
+    if not model_type or not isinstance(layers, nn.ModuleList):
+        raise ValueError(
+            "Could not locate the layers attribute in the model. "
+            "Expected Llama, Bert or Falcon compatible architectures."
+        )
+
+    new_layers = []
+    for start, end in layer_map:
+        for i in range(start, end):
+            current_idx = len(new_layers)
+            new_layers.append(clone_module(layers[i], share_weights=True))
+            # This is a hack needed to work around the layer_idx introduced in HF transformers.
+            for submodule in new_layers[-1].modules():
+                if hasattr(submodule, "layer_idx"):
+                    submodule.layer_idx = current_idx
+    layers = nn.ModuleList(new_layers)
+    if model_type == "llama":
+        model.layers = layers
+    elif model_type == "bert":
+        model.encoder.layer = layers
+    elif model_type == "falcon":
+        model.h = layers
+    else:
+        raise ValueError("Unexpected model type, need to handle post-processing of layers.")
+    if hasattr(model.config, "num_hidden_layers"):  # Common to Llama, Bert, Falcon.
+        model.config.num_hidden_layers = len(new_layers)

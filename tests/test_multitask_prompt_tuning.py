@@ -25,7 +25,7 @@ from torch.testing import assert_close
 from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
 from peft.tuners.multitask_prompt_tuning import MultitaskPromptTuningConfig, MultitaskPromptTuningInit
-from peft.utils.other import WEIGHTS_NAME, prepare_model_for_int8_training
+from peft.utils.other import WEIGHTS_NAME, prepare_model_for_kbit_training
 from peft.utils.save_and_load import get_peft_model_state_dict
 from tests.testing_common import PeftCommonTester
 
@@ -92,7 +92,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
 
     def test_prepare_for_int8_training(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
         model = model.to(self.torch_device)
 
         for param in model.parameters():

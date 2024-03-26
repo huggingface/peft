@@ -11,15 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import warnings
-from typing import List, Optional
+from typing import Any, Optional
 
 import bitsandbytes as bnb
 import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
 from .layer import LoraLayer
@@ -43,9 +45,7 @@ if is_bnb_available():
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
-
-            if use_dora:
-                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+            self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -58,7 +58,7 @@ if is_bnb_available():
                 use_dora=use_dora,
             )
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -67,7 +67,7 @@ if is_bnb_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
-                adapter_names (`List[str]`, *optional*):
+                adapter_names (`list[str]`, *optional*):
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
@@ -79,6 +79,7 @@ if is_bnb_available():
             for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
                     continue
+
                 warnings.warn(
                     "Merge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
@@ -91,15 +92,20 @@ if is_bnb_available():
 
                 # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
                 # dequantization directly
-                im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
-                if state.CxB is None:
-                    state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
-                out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-                output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+                output = dequantize_bnb_weight(weight, state=state)
+                if not self.use_dora[active_adapter]:
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
+                else:
+                    # handle dora
+                    # since output already includes scaling, set it to 1 here
+                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    # We need to cache weight_norm because it has to be based on the original weights. We
+                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                    # different value
+                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
 
-                w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -132,16 +138,15 @@ if is_bnb_available():
                 state = self.get_base_layer().state
                 if state.SCB is None:
                     state.SCB = weight.SCB
-                im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
+                output = dequantize_bnb_weight(weight, state=state)
 
-                if state.CxB is None:
-                    state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
-                out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-                output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+                if not self.use_dora[active_adapter]:
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
-                w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
@@ -156,11 +161,56 @@ if is_bnb_available():
                 * self.scaling[adapter]
             )
 
+        def _mixed_batch_forward(
+            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        ) -> torch.Tensor:
+            # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+            # extra argument that allows mixing different adapters in the same batch at inference time.
+            result = self.base_layer(x, *args, **kwargs)
+
+            unique_adapters = set(adapter_names)
+            sub_batch_indices_list = []
+            for adapter in unique_adapters:
+                sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+            for i, active_adapter in enumerate(unique_adapters):
+                if active_adapter == "__base__":
+                    continue
+                if active_adapter not in self.lora_A.keys():
+                    continue
+
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    compute_dtype = lora_A.weight.dtype
+                    if x.dtype != compute_dtype:
+                        x = x.to(compute_dtype)
+
+                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # layer output
+                sub_batch = x[sub_batch_indices_list[i]]
+                output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += output
+
+            return result
+
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            self._check_forward_args(x, *args, **kwargs)
+            adapter_names = kwargs.pop("adapter_names", None)
+
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
+            elif adapter_names is not None:
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -179,10 +229,14 @@ if is_bnb_available():
                         compute_dtype = lora_A.weight.dtype
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
-                    output = lora_B(lora_A(dropout(x)))
+
+                    if not self.use_dora[active_adapter]:
+                        output = lora_B(lora_A(dropout(x))) * scaling
+                    else:
+                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
                     if requires_conversion:
                         output = output.to(expected_dtype)
-                    output = output * scaling
+
                     result = result + output
 
             return result
@@ -233,9 +287,7 @@ if is_bnb_4bit_available():
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
-
-            if use_dora:
-                raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+            self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
             self.update_layer(
@@ -248,7 +300,7 @@ if is_bnb_4bit_available():
                 use_dora=use_dora,
             )
 
-        def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+        def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
             Merge the active adapter weights into the base weights
 
@@ -257,7 +309,7 @@ if is_bnb_4bit_available():
                     If True, the merge operation will be performed in a copy of the original weights and check for NaNs
                     before merging the weights. This is useful if you want to check if the merge operation will produce
                     NaNs. Defaults to `False`.
-                adapter_names (`List[str]`, *optional*):
+                adapter_names (`list[str]`, *optional*):
                     The list of adapter names that should be merged. If None, all active adapters will be merged.
                     Defaults to `None`.
             """
@@ -269,6 +321,7 @@ if is_bnb_4bit_available():
             for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
                     continue
+
                 warnings.warn(
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
@@ -277,7 +330,20 @@ if is_bnb_4bit_available():
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
 
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                output = dequantize_bnb_weight(weight, state=weight.quant_state)
+                if not self.use_dora[active_adapter]:
+                    w_data = output + lora_data
+                else:
+                    # handle dora
+                    # since output already includes scaling, set it to 1 here
+                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    # We need to cache weight_norm because it has to be based on the original weights. We
+                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                    # different value
+                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
+
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -304,10 +370,19 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
+
+                lora_data = self.get_delta_weight(active_adapter)
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
-                lora_data = self.get_delta_weight(active_adapter)
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                output = dequantize_bnb_weight(weight, state=weight.quant_state)
+
+                if not self.use_dora[active_adapter]:
+                    w_data = output - lora_data
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
+
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
@@ -323,11 +398,54 @@ if is_bnb_4bit_available():
                 * self.scaling[adapter]
             )
 
+        def _mixed_batch_forward(
+            self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        ) -> torch.Tensor:
+            # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+            # extra argument that allows mixing different adapters in the same batch at inference time.
+            result = self.base_layer(x, *args, **kwargs)
+
+            unique_adapters = set(adapter_names)
+            sub_batch_indices_list = []
+            for adapter in unique_adapters:
+                sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
+
+            for i, active_adapter in enumerate(unique_adapters):
+                if active_adapter == "__base__":
+                    continue
+                if active_adapter not in self.lora_A.keys():
+                    continue
+
+                lora_A = self.lora_A[active_adapter]
+                lora_B = self.lora_B[active_adapter]
+                dropout = self.lora_dropout[active_adapter]
+                scaling = self.scaling[active_adapter]
+
+                requires_conversion = not torch.is_autocast_enabled()
+                if requires_conversion:
+                    expected_dtype = result.dtype
+                    x = x.to(lora_A.weight.dtype)
+
+                # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
+                # layer output
+                sub_batch = x[sub_batch_indices_list[i]]
+                output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if requires_conversion:
+                    output = output.to(expected_dtype)
+                result[sub_batch_indices_list[i]] += output
+
+            return result
+
         def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+            self._check_forward_args(x, *args, **kwargs)
+            adapter_names = kwargs.pop("adapter_names", None)
+
             if self.disable_adapters:
                 if self.merged:
                     self.unmerge()
                 result = self.base_layer(x, *args, **kwargs)
+            elif adapter_names is not None:
+                result = self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
             elif self.merged:
                 result = self.base_layer(x, *args, **kwargs)
             else:
@@ -352,10 +470,13 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         x = x.to(lora_A.weight.dtype)
 
-                    output = lora_B(lora_A(dropout(x)))
+                    if not self.use_dora[active_adapter]:
+                        output = lora_B(lora_A(dropout(x))) * scaling
+                    else:
+                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
                     if requires_conversion:
                         output = output.to(expected_dtype)
-                    output = output * scaling
+
                     result = result + output
 
             return result

@@ -103,7 +103,9 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     if not is_gptq_quantized and not is_aqlm_quantized:
         # cast all non INT8 parameters to fp32
         for param in model.parameters():
-            if (param.dtype == torch.float16) or (param.dtype == torch.bfloat16):
+            if (
+                (param.dtype == torch.float16) or (param.dtype == torch.bfloat16)
+            ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
 
     if (loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized) and use_gradient_checkpointing:
@@ -138,15 +140,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # enable gradient checkpointing for memory efficiency
         model.gradient_checkpointing_enable(**gc_enable_kwargs)
     return model
-
-
-# For backward compatibility
-def prepare_model_for_int8_training(*args, **kwargs):
-    warnings.warn(
-        "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
-        FutureWarning,
-    )
-    return prepare_model_for_kbit_training(*args, **kwargs)
 
 
 # copied from transformers.models.bart.modeling_bart
