@@ -743,7 +743,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_enabled_after_disable = model(**X)
 
         assert not torch.allclose(outputs_before, outputs_after)
-        assert torch.allclose(outputs_before, outputs_disabled)
+        assert torch.allclose(outputs_before, outputs_disabled), f"{config_kwargs}"
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
     @parameterized.expand(TEST_CASES)
@@ -802,7 +802,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol), f"model_id: {model_id}\nbefore: {outputs_before}\nafter{outputs_after}\ndisable:{outputs_disabled}\nenable_disable{outputs_enabled_after_disable}\n{model.base_model.layernorm0.base_layer.weight}"
+        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol), f"{config_kwargs}"
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)

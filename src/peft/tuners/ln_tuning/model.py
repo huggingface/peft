@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, _get_submodules, check_target_module_exists
-from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING
+from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING, ModulesToSaveWrapper
 
 from .layer import SelectLayer
 
@@ -136,9 +136,12 @@ class LNTuningModel(BaseTuner):
             module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: Module):
+        target_modules = self.peft_config[self.active_adapter].target_modules
+        if isinstance(target_modules, str):
+            target_modules = [target_modules]
         for n, p in model.named_parameters():
             flag = False
-            for module_name in self.peft_config[self.active_adapter].target_modules:
+            for module_name in target_modules:
                 if module_name in n and self.prefix in n:
                     flag = True
                     break
@@ -149,7 +152,7 @@ class LNTuningModel(BaseTuner):
     
     def _set_adapter_layers(self, enabled: bool) -> None:
         for module in self.model.modules():
-            if isinstance(module, SelectLayer):
+            if isinstance(module, (SelectLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
