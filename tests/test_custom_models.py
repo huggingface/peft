@@ -32,16 +32,16 @@ from transformers import AutoModelForCausalLM, AutoModelForSequenceClassificatio
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
-    AdaLoraConfig, 
-    IA3Config, 
-    LoHaConfig, 
-    LoKrConfig, 
-    LoraConfig, 
-    OFTConfig, 
-    LNTuningConfig, 
-    PeftModel, 
+    AdaLoraConfig,
+    IA3Config,
+    LNTuningConfig,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    OFTConfig,
+    PeftModel,
     TaskType,
-    get_peft_model
+    get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import ModulesToSaveWrapper, infer_device
@@ -247,7 +247,12 @@ TEST_CASES = [
     #############
     ("LayerNorm 1 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "layernorm0"}),
     ("LayerNorm 2 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["layernorm0"]}),
-    ("LayerNorm 3 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["layernorm0"], "modules_to_save": ["layernorm1"]}),
+    (
+        "LayerNorm 3 LNTuning",
+        "MLP_LayerNorm",
+        LNTuningConfig,
+        {"target_modules": ["layernorm0"], "modules_to_save": ["layernorm1"]},
+    ),
     ("Linear 4 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "lin0"}),
     ("Linear 5 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["lin0"]}),
 ]
@@ -339,7 +344,8 @@ class MLP(nn.Module):
         X = self.lin1(X)
         X = self.sm(X)
         return X
-    
+
+
 class MLP_LayerNorm(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -485,7 +491,7 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
-        
+
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(torch_dtype)
 

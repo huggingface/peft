@@ -27,7 +27,7 @@ class SelectLayer(nn.Module, BaseTunerLayer):
     Selects a layer from the model.
     """
 
-    adapter_layer_names = ("select_new_layers", )
+    adapter_layer_names = ("select_new_layers",)
 
     def __init__(self, base_layer: nn.Module, adapter_name: str):
         super().__init__()
@@ -74,7 +74,7 @@ class SelectLayer(nn.Module, BaseTunerLayer):
             )
         merged_adapters = set(self.merged_adapters)
         if merged_adapters:
-            warnings.warn("Already merged with {}. Unmerging first.".format(merged_adapters))
+            warnings.warn(f"Already merged with {merged_adapters}. Unmerging first.")
             self.unmerge()
 
         self.base_layer, self.select_new_layers[adapter_names[0]] = (
