@@ -1078,7 +1078,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
         else:
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
