@@ -27,8 +27,9 @@ import torch
 import transformers
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
-from accelerate.utils import get_balanced_memory
+from accelerate.utils import get_balanced_memory, named_module_tensors
 from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
+from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers import PreTrainedModel
@@ -51,6 +52,7 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
 )
+from .tuners.tuners_utils import BaseTunerLayer
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -338,6 +340,36 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.inference_mode = not is_trainable
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
+
+        if hasattr(model, "hf_device_map"):
+            weight_map = dict(named_module_tensors(model, recurse=True))
+
+            # recreate the offload_index for disk-offloaded modules: we need to know the location in storage of each weight
+            # before the offload hook is removed from the model
+            disk_modules = set()
+            index = None
+            for name, module in model.named_modules():
+                if hasattr(module, "_hf_hook") and hasattr(module._hf_hook, "original_devices"):
+                    if hasattr(module._hf_hook.weights_map, "dataset"):
+                        index = module._hf_hook.weights_map.dataset.index
+                    for key in module._hf_hook.original_devices.keys():
+                        if module._hf_hook.original_devices[key] == torch.device("meta"):
+                            disk_modules.add(str(name) + "." + str(key))
+
+            if disk_modules and not kwargs.get("use_safetensors", True):
+                raise ValueError("Disk offloading currently only supported for safetensors")
+
+            if index:
+                offload_index = {
+                    p: {
+                        "safetensors_file": index[p]["safetensors_file"],
+                        "weight_name": p,
+                        "dtype": str(weight_map[p].dtype).replace("torch.", ""),
+                    }
+                    for p in weight_map.keys()
+                    if p in disk_modules
+                }
+                kwargs["offload_index"] = offload_index
 
         if (getattr(model, "hf_device_map", None) is not None) and len(
             set(model.hf_device_map.values()).intersection({"cpu", "disk"})
@@ -682,6 +714,86 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return hf_hub_download_kwargs, other_kwargs
 
+    def _update_offload(self, offload_index: dict[dict[str:str]], adapters_weights: dict[str : torch.tensor]):
+        """
+        Update the offload_index and safetensors files for loading and mergine PeftModels with disk-offloaded modules.
+
+        Args:
+            offload_index (Dict[str: str]):
+                Dictionary of disk-offloaded modules with their metadata and safetensors filenames
+            adapters_weights (Dict[str: torch.tensor]):
+                Dictionary of Peft adapter module names and weights
+        """
+
+        if not offload_index:
+            return offload_index
+
+        prefix = "base_model.model."
+        # rename offload index weight and model names
+        adapter_names = list(self.peft_config.keys())
+        for adapter_name in adapter_names:
+            keys = list(offload_index.keys())
+            block_id = keys[0].split(".")[0] + "."  # for writing safetensors key,
+
+            # replace original offload index keys with PeftModel keys
+            for key in keys:
+                suffix_pos = key.rfind(".")
+                extended_prefix = prefix + key[:suffix_pos]
+                module = dict(self.named_modules())[extended_prefix]
+                if isinstance(module, BaseTunerLayer):
+                    new_key = prefix + key[:suffix_pos] + ".base_layer" + key[suffix_pos:]
+                else:
+                    new_key = prefix + key
+                offload_index[key]["weight_name"] = new_key
+                offload_index[new_key] = offload_index[key]
+                del offload_index[key]
+
+            files_seen = set()
+            # rename safetensors for dispatch
+            for new_key in list(offload_index.keys()):
+                fname = offload_index[new_key]["safetensors_file"]
+
+                # make a new file name
+                new_fname_list = list(fname.split(os.sep))
+                for i, name in enumerate(new_fname_list):
+                    if "--" in name:
+                        new_fname_list[i] += "-peft"
+                        break
+                new_fname = os.path.join(*new_fname_list)
+
+                if fname in files_seen:
+                    continue
+                safe_dict = {}
+                with safe_open(fname, framework="pt") as f:
+                    for safe_key in f.keys():
+                        safe_tensor = f.get_tensor(safe_key)
+                        metadata = f.metadata()
+                        suffix_pos = safe_key.rfind(".")
+                        extended_prefix = prefix + block_id + safe_key[:suffix_pos]
+                        safe_module = dict(self.named_modules())[extended_prefix]
+                        if isinstance(safe_module, BaseTunerLayer):
+                            final_key = extended_prefix + ".base_layer" + safe_key[suffix_pos:]
+                            lora_dict = {key: val for key, val in adapters_weights.items() if extended_prefix in key}
+
+                            # add LoRA keys and values to disk offload
+                            for lora_key, lora_val in lora_dict.items():
+                                divide = lora_key.rfind(".")
+                                new_key = lora_key[:divide] + f".{adapter_name}" + lora_key[divide:]
+                                safe_dict[new_key] = lora_val
+                        else:
+                            final_key = prefix + block_id + safe_key
+                        safe_dict[final_key] = safe_tensor
+                    files_seen.add(new_fname)
+
+                    # avoid overwriting original safetensors
+                    for key in safe_dict.keys():
+                        offload_index[key] = {"safetensors_file": new_fname, "weight_name": key}
+
+                    base_name = os.path.dirname(new_fname)
+                    if not os.path.exists(base_name):
+                        os.makedirs(base_name)
+                    safe_save_file(safe_dict, new_fname, metadata=metadata)
+
     def load_adapter(self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any):
         """
         Load a trained adapter into the model.
@@ -753,16 +865,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     no_split_module_classes=no_split_module_classes,
                     low_zero=(device_map == "balanced_low_0"),
                 )
+
             if isinstance(device_map, str):
                 device_map = infer_auto_device_map(
                     self, max_memory=max_memory, no_split_module_classes=no_split_module_classes
                 )
+
+            self._update_offload(offload_index, adapters_weights)
+            dispatch_model_kwargs["offload_index"] = offload_index
+
             dispatch_model(
                 self,
                 device_map=device_map,
                 offload_dir=offload_dir,
                 **dispatch_model_kwargs,
             )
+
             hook = AlignDevicesHook(io_same_device=True)
             if self.peft_config[adapter_name].is_prompt_learning:
                 remove_hook_from_submodules(self.prompt_encoder)
