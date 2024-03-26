@@ -13,9 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
-import warnings
 from torch import nn
 from torch.nn.modules import Module
 from tqdm import tqdm
@@ -113,26 +112,29 @@ class LNTuningModel(BaseTuner):
         self._replace_module(parent, target_name, new_module, target)
 
     def _create_new_module(
-        self, peft_config: PeftConfig, target: Module, adapter_name: str,
+        self,
+        peft_config: PeftConfig,
+        target: Module,
+        adapter_name: str,
     ) -> Module:
         new_module = SelectLayer(target, adapter_name)
         return new_module
 
-    def _replace_module(self, parent: Module, target_name: str, new_module: Module, target: Module) -> None:
-        setattr(parent, target_name, new_module)
+    def _replace_module(self, parent: Module, child_name: str, new_module: Module, child: Module) -> None:
+        setattr(parent, child_name, new_module)
 
-        if hasattr(target, "base_layer"):
-            target = target.base_layer
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
 
-        if getattr(target, "state", None) is not None:
+        if getattr(child, "state", None) is not None:
             if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = target.state
+                new_module.base_layer.state = child.state
             else:
-                new_module.state = target.state
-            new_module.to(target.weight.device)
+                new_module.state = child.state
+            new_module.to(child.weight.device)
 
         for name, module in new_module.named_modules():
-            weight = target.qweight if hasattr(target, "qweight") else target.weight
+            weight = child.qweight if hasattr(child, "qweight") else child.weight
             module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: Module):
@@ -149,7 +151,7 @@ class LNTuningModel(BaseTuner):
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
-    
+
     def _set_adapter_layers(self, enabled: bool) -> None:
         for module in self.model.modules():
             if isinstance(module, (SelectLayer, ModulesToSaveWrapper)):
