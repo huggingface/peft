@@ -27,7 +27,7 @@ from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
 from transformers import PreTrainedModel
-from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS, Conv1D
+from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
@@ -685,6 +685,7 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         linear_module_names -= {last_module_name}
     peft_config.target_modules = linear_module_names
     return peft_config
+
 
 def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list[str]] = None) -> list[str]:
     """
