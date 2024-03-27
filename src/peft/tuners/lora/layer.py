@@ -182,7 +182,7 @@ class LoraLayer(BaseTunerLayer):
         if dtype == torch.uint8:
             weight = bnb.nn.Params4bit(res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type).to(device)
         else:
-            weight = weight.to(dtype)
+            weight = res.to(dtype)
         self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):
