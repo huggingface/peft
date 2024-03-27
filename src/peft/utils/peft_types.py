@@ -49,6 +49,7 @@ class PeftType(str, enum.Enum):
     LOKR = "LOKR"
     OFT = "OFT"
     POLY = "POLY"
+    CUSTOM_TOKENS = "CUSTOM_TOKENS"
 
 
 class TaskType(str, enum.Enum):
