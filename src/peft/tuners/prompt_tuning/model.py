@@ -16,6 +16,8 @@ import math
 
 import torch
 
+from peft.utils.integrations import gather_params_ctx
+
 from .config import PromptTuningInit
 
 
@@ -78,8 +80,8 @@ class PromptEmbedding(torch.nn.Module):
                 init_token_ids = init_token_ids * num_reps
             init_token_ids = init_token_ids[:total_virtual_tokens]
             init_token_ids = torch.LongTensor(init_token_ids).to(word_embeddings.weight.device)
-
-            word_embedding_weights = word_embeddings(init_token_ids).detach().clone()
+            with gather_params_ctx(word_embeddings):
+                word_embedding_weights = word_embeddings(init_token_ids).detach().clone()
             word_embedding_weights = word_embedding_weights.to(torch.float32)
             self.embedding.weight = torch.nn.Parameter(word_embedding_weights)
 
