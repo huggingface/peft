@@ -37,10 +37,12 @@ def get_router(poly_config: PolyConfig) -> nn.Module:
 
 class Router(nn.Module, ABC):
     @abstractmethod
-    def reset(self): ...
+    def reset(self):
+        ...
 
     @abstractmethod
-    def forward(self, task_ids: torch.Tensor, input_ids: torch.Tensor): ...
+    def forward(self, task_ids: torch.Tensor, input_ids: torch.Tensor):
+        ...
 
 
 class PolyRouter(Router):
