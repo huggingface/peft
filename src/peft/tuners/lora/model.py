@@ -232,11 +232,6 @@ class LoraModel(BaseTuner):
         if hasattr(child, "base_layer"):
             child = child.base_layer
 
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
         if getattr(child, "state", None) is not None:
             if hasattr(new_module, "base_layer"):
                 new_module.base_layer.state = child.state
@@ -247,7 +242,16 @@ class LoraModel(BaseTuner):
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
-                weight = child.qweight if hasattr(child, "qweight") else child.weight
+                if hasattr(child, "qweight"):
+                    weight = child.qweight
+                elif hasattr(child, "weight"):
+                    weight = child.weight
+                elif getattr(child, "in_proj_weight", None) is not None:  # MHA
+                    weight = child.in_proj_weight
+                elif getattr(child, "q_proj_weight", None) is not None:  # MHA
+                    weight = child.q_proj_weight
+                else:
+                    raise ValueError(f"Encountered unknown module type: {type(child)}")
                 module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
@@ -300,7 +304,8 @@ class LoraModel(BaseTuner):
             # no module could be matched
             raise ValueError(
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
-                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`, "
+                "`torch.nn.MultiheadAttention.`"
             )
 
         return new_module

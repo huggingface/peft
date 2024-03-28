@@ -73,6 +73,8 @@ TEST_CASES = [
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
     ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
+    ("MHA 1 LoRA", "MHA", LoraConfig, {"target_modules": ["mha"]}),
+    ("MHA 2 LoRA", "MHA", LoraConfig, {"target_modules": ["mha", "lin0"]}),
     #######
     # IA³ #
     #######
@@ -417,6 +419,21 @@ class ModelConv2D(nn.Module):
         return X
 
 
+class ModelMha(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(10, 2)
+        self.lin0 = nn.Linear(10, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X, _ = self.mha(X, X, X)
+        X = self.lin0(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -440,6 +457,9 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "MHA":
+            return ModelMha().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -583,7 +603,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        # we get exploding gradients with MHA when learning rate is too high
+        lr = 0.5 if "mha" not in model_id.lower() else 1e-3
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -620,7 +642,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.train()
-        lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
+
+        lr = 0.5
+        if config_kwargs.get("use_dora"):
+            lr = 0.1  # otherwise we get nan
+        elif "mha" in model_id.lower():
+            # we get exploding gradients with MHA when learning rate is too high
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -985,6 +1013,29 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             unloaded = model.unload()
 
         assert isinstance(unloaded.classifier, nn.Linear)
+
+    def test_mha_gradients_set_correctly(self):
+        # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
+        base_model = ModelMha()
+        config = LoraConfig(target_modules=["mha"])
+        model = get_peft_model(base_model, config)
+
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False
+
+        # _restore_weights used to ignore the gradient, this checks that it is indeed considered
+        model.base_model.model.mha._restore_weights()
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False
+
+        model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad = True
+        model.base_model.model.mha.base_layer.in_proj_weight.requires_grad = True
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
+
+        model.base_model.model.mha._restore_weights()
+        assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is True
+        assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is True
 
 
 class TestMultiRankAdapter(unittest.TestCase):
