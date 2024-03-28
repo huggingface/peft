@@ -729,12 +729,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
-            lr = 10.0
+            lr = 1.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        for _ in range(3):
+        for _ in range(5):
             optimizer.zero_grad()
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
@@ -751,7 +751,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        assert not torch.allclose(outputs_before, outputs_after)
+        assert not torch.allclose(outputs_before, outputs_after), f"model"
         assert torch.allclose(outputs_before, outputs_disabled), f"{config_kwargs}"
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
