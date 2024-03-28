@@ -16,7 +16,10 @@ rendered properly in your Markdown viewer.
 
 # LayerNorm Tuning
 
-LayerNorm Tuning ([LN Tuning](https://arxiv.org/abs/2312.11420)) is a PEFT method that only fine-tunes the parameters of the LayerNorm layers in a large language model.
+LayerNorm Tuning ([LN Tuning](https://arxiv.org/abs/2312.11420)) is a PEFT method that only fine-tunes the parameters of the LayerNorm layers in a model.
+The paper has tested the performance of this method on large language models and has shown that it can achieve strong performance with a significant reduction in the number of trainable parameters and GPU memory usage.
+However, the method is not limited to language models and can be applied to any model that uses LayerNorm layers.
+In this implementation, the default is that all layernorm layers inside a model is finetuned, but it could be used to target other layer types such as `MLP` or `Attention` layers, this can be done by specifying the `target_modules` in the `LNTuningConfig`.
 
 The abstract from the paper is:
 
