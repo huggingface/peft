@@ -28,6 +28,7 @@ from diffusers import StableDiffusionPipeline
 from peft import (
     AdaLoraConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
@@ -665,8 +666,10 @@ class PeftCommonTester:
         model = get_peft_model(model, config).eval()
         logits_peft = model(**inputs)[0]
 
-        # sanity check that the logits are different
-        assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
+        # LNTuning do not change the logits
+        if not issubclass(config_cls, LNTuningConfig):
+            # sanity check that the logits are different
+            assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
 
         model_unloaded = model.merge_and_unload(safe_merge=True)
         logits_unloaded = model_unloaded(**inputs)[0]

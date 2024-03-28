@@ -42,6 +42,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     IA3Model,
+    LNTuningModel,
     LoHaModel,
     LoKrModel,
     LoraModel,
@@ -84,6 +85,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
+    PeftType.LN_TUNING: LNTuningModel,
 }
 
 
