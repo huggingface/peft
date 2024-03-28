@@ -533,7 +533,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         # test with double quant
         bnb_config = BitsAndBytesConfig(
-            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
         )
 
@@ -662,7 +662,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_4bit_merge_lora(self):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(
-            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
             bnb_4bit_compute_dtype=torch.float32,
         )
@@ -704,7 +704,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_4bit_merge_and_disable_lora(self):
         torch.manual_seed(3000)
         bnb_config = BitsAndBytesConfig(
-            quantization_config=BitsAndBytesConfig(load_in_4bit=True),
+            load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
             bnb_4bit_compute_dtype=torch.float32,
         )
