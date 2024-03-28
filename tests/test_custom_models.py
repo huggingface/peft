@@ -729,7 +729,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
-            lr = 1.0
+            lr = 10.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
