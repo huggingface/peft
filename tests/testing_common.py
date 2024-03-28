@@ -28,6 +28,7 @@ from diffusers import StableDiffusionPipeline
 from peft import (
     AdaLoraConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
@@ -37,7 +38,6 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
-    LNTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_kbit_training,
