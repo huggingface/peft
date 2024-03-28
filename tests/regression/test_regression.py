@@ -579,7 +579,7 @@ class TestOpt4bitBnb(RegressionTester):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
