@@ -664,7 +664,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         bnb_config = BitsAndBytesConfig(
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -706,7 +706,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         bnb_config = BitsAndBytesConfig(
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -749,7 +749,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -821,7 +821,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         bnb_config = BitsAndBytesConfig(
             load_in_8bit=True,
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -905,7 +905,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -979,7 +979,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_type=torch.float32,
+            bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
             "HuggingFaceM4/tiny-random-LlamaForCausalLM",
