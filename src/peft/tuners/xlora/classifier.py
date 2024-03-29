@@ -78,56 +78,57 @@ class XLoraClassifier(nn.Module):
         dtype = next(model.parameters()).dtype
         bias_flag = config.use_bias
 
-        self.inner = nn.ModuleList([])
+        layers = []
         if self.config.xlora_depth == 1:
             if config.layerwise_scalings:  # bias=False if we have just one layer
-                self.last = (
+                last = (
                     nn.Linear(config.hidden_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
                 )
             else:
-                self.last = nn.Linear(config.hidden_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
+                last = nn.Linear(config.hidden_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
         elif self.config.xlora_depth == 2:
-            self.inner.append(
+            layers.append(
                 nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype)
             )
 
             if config.enable_relu_and_dropout:
-                self.inner.append(nn.ReLU())
-                self.inner.append(nn.Dropout(p=config.xlora_dropout_p))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             if config.layerwise_scalings:
-                self.last = (
+                last = (
                     nn.Linear(config.xlora_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
                 )
             else:
-                self.last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
+                last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
         else:
             if self.config.xlora_depth <= 0 :
                 raise ValueError("X-LoRA depth must be strictly positive.")
             
-            self.inner.append(
+            layers.append(
                 nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype)
             )
 
             if config.enable_relu_and_dropout:
-                self.inner.append(nn.ReLU())
-                self.inner.append(nn.Dropout(p=config.xlora_dropout_p))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             for _ in range(config.xlora_depth - 2):
-                self.inner.append(
+                layers.append(
                     nn.Linear(config.xlora_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype)
                 )
 
                 if config.enable_relu_and_dropout:
-                    self.inner.append(nn.ReLU())
-                    self.inner.append(nn.Dropout(p=config.xlora_dropout_p))
+                    layers.append(nn.ReLU())
+                    layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             if config.layerwise_scalings:
-                self.last = (
+                last = (
                     nn.Linear(config.xlora_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
                 )
             else:
-                self.last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
+                last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
+        self.layers = nn.Sequential(*layers, last)
 
     def forward(
         self,
@@ -175,12 +176,11 @@ class XLoraClassifier(nn.Module):
 
         ### Classifier run
         # hidden_state=[batch_size, seq_len, hidden_size]
-        for layer in self.inner:
-            hidden_state = layer.forward(hidden_state)
+        logits = self.layers.forward(hidden_state)
 
-        logits = self.last.forward(hidden_state)
-
-        ### Repeat to make layerwise scalings if the classifier layer does not
+        ### Repeat to make layerwise scalings
+        ### If layerwise_scalings=False, then the classifier only outputs logits which are not layer-wise.
+        ### So, we expand them to the correct shape.
         if not self.config.layerwise_scalings:
             logits = logits.unsqueeze(2)
             logits = logits.expand(-1, -1, self.n_layers, -1)

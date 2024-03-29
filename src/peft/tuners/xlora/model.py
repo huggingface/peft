@@ -47,8 +47,6 @@ def convert_layers_to_xlora(
 
     for module in base.modules():
         if isinstance(module, lora.LoraLayer):
-            module.forward = new_layer.forward  # type: ignore[method-assign]
-
             def hook(module, *args, **kwargs) -> None:
                 kwargs_real: dict = args[1]
                 kwargs_real.update(kwargs)

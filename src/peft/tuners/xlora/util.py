@@ -27,7 +27,8 @@ from peft.utils.other import (
 
 def _load_classifier_weights(model_id: str, device: Optional[str] = None, **hf_hub_download_kwargs) -> dict:
     r"""
-    A helper method to load the classifier weights from the HuggingFace Hub or locally. Copied from load_peft_weights
+    A helper method to load the classifier weights from the HuggingFace Hub or locally.
+    This is essentially `load_peft_weights`, but with the safetensors names changed.
 
     Args:
         model_id (`str`):
