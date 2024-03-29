@@ -50,4 +50,4 @@ jobs:
           pip install -e .[test]
       - name: Test with pytest
         run: |
-          make test_custom_model
+          make test

@@ -751,7 +751,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        assert not torch.allclose(outputs_before, outputs_after), "model"
+        assert not torch.allclose(outputs_before, outputs_after)
         assert torch.allclose(outputs_before, outputs_disabled), f"{config_kwargs}"
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 

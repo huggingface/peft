@@ -19,9 +19,6 @@ style:
 test:
 	python -m pytest -n 3 tests/ $(if $(IS_GITHUB_CI),--report-log "ci_tests.log",)
 
-test_custom_model:
-	python -m pytest tests/test_custom_models.py
-
 tests_examples_multi_gpu:
 	python -m pytest -m multi_gpu_tests tests/test_gpu_examples.py $(if $(IS_GITHUB_CI),--report-log "multi_gpu_examples.log",)
 
