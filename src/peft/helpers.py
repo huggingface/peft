@@ -121,21 +121,6 @@ def update_signature(model: PeftModel, method: str = "all") -> None:
         raise ValueError(f"method {method} is not supported please choose one of ['forward', 'generate', 'all']")
 
 
-def get_module(name, opt_model):
-    """
-    Retrieve a module from a model using its parameter name.
-    Args:
-        name (str): Full name of the parameter, typically including module path.
-        opt_model (torch.nn.Module): The model from which to retrieve the module.
-
-    Returns:
-        Module corresponding to the given name.
-    """
-    parent_idx = 2 if "lora" in name else 1
-    module_names = name.split(sep=".")[:-parent_idx]
-    module = reduce(getattr, module_names, opt_model)
-    return module
-
 
 def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict) -> Optimizer:
     """
