@@ -156,6 +156,7 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 
     return is_peft_model
 
+
 def get_module(name, opt_model):
     """
     Retrieve a module from a model using its parameter name.
