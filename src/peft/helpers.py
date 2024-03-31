@@ -1,14 +1,17 @@
 import inspect
+import torch.nn as nn
+
+from __future__ import annotations
 from copy import deepcopy
-from functools import update_wrapper, reduce
+from functools import reduce, update_wrapper
+from operator import attrgetter
 from types import MethodType
 
+from torch.optim import Optimizer
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.trainer_pt_utils import get_parameter_names
 
 from .peft_model import PeftModel
-from .tuners.lora import LoraConfig
-from torch.optim import Optimizer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -134,7 +137,7 @@ def get_module(name, opt_model):
     return module
 
 
-def create_loraplus_optimizer(model: PeftModel, config: LoraConfig, optimizer_cls: Optimizer, optimizer_kwargs: dict) -> Optimizer:
+def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict) -> Optimizer:
     """
     Creates a LoraPlus optimizer.
     Implementing LoRA+ https://arxiv.org/abs/2402.12354
@@ -142,10 +145,14 @@ def create_loraplus_optimizer(model: PeftModel, config: LoraConfig, optimizer_cl
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
+        optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
+        optimizer_kwargs (`dict`): Additional keyword arguments to be passed to the optimizer.
+            - **loraplus_lr_ratio** (`float`): The ratio of the learning rate to be used for the embedding layer. Defaults to loraplus_lr_ratio
+            - loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer. Defaults to loraplus_lr_embedding
     """
     from .tuners.lora.layer import Embedding
-    loraplus_lr_ratio = config.loraplus_lr_ratio
-    assert loraplus_lr_ratio is not None, "loraplus_lr_ratio must be provided."
+    loraplus_lr_ratio = optimizer_kwargs.pop("loraplus_lr_ratio")
+    loraplus_lr_embedding = optimizer_kwargs.pop("loraplus_lr_embedding")
 
     if loraplus_lr_embedding is None:
         loraplus_lr_embedding = 1e-6
@@ -163,7 +170,7 @@ def create_loraplus_optimizer(model: PeftModel, config: LoraConfig, optimizer_cl
         if not param.requires_grad:
             continue
 
-        module = get_module(name, model)
+        module = attrgetter(name)(model)
         if isinstance(module, Embedding):
             param_groups["embedding"][name] = param
         elif "lora_B" in name or param.ndim == 1:
