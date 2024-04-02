@@ -39,7 +39,7 @@ from peft import (
     PromptTuningConfig,
     get_peft_model,
     get_peft_model_state_dict,
-    prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
 )
 from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
@@ -237,9 +237,9 @@ class PeftCommonTester:
 
         assert not dummy_output.requires_grad
 
-        # load with `prepare_model_for_int8_training`
+        # load with `prepare_model_for_kbit_training`
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
 
         for param in model.parameters():
             assert not param.requires_grad
@@ -673,6 +673,67 @@ class PeftCommonTester:
 
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=1e-6, rtol=1e-6)
+
+    def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
+        # Test for mixing different adapters in a single batch by passing the adapter_names argument
+        if config_cls not in (LoraConfig,):
+            return pytest.skip(f"Mixed adapter batches not supported for {config_cls}")
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        torch.manual_seed(0)
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config, adapter_name="adapter0").eval()
+        model.add_adapter("adapter1", config)
+        model = model.to(self.torch_device).eval()
+
+        dummy_input = self.prepare_inputs_for_testing()
+        # ensure that we have at least 3 samples for this test
+        dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
+
+        with torch.inference_mode():
+            with model.disable_adapter():
+                output_base = model(**dummy_input)[0]
+                logits_base = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
+
+        model.set_adapter("adapter0")
+        with torch.inference_mode():
+            output_adapter0 = model(**dummy_input)[0]
+            logits_adapter0 = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
+
+        model.set_adapter("adapter1")
+        with torch.inference_mode():
+            output_adapter1 = model(**dummy_input)[0]
+            logits_adapter1 = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
+
+        atol, rtol = 1e-4, 1e-4
+        # sanity check that there are enough outputs and that they are different
+        assert len(output_base) == len(output_adapter0) == len(output_adapter1) >= 3
+        assert len(logits_base) == len(logits_adapter0) == len(logits_adapter1) >= 3
+        assert not torch.allclose(output_base, output_adapter0, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_base, output_adapter1, atol=atol, rtol=rtol)
+        assert not torch.allclose(output_adapter0, output_adapter1, atol=atol, rtol=rtol)
+        assert not torch.allclose(logits_base, logits_adapter0, atol=atol, rtol=rtol)
+        assert not torch.allclose(logits_base, logits_adapter1, atol=atol, rtol=rtol)
+        assert not torch.allclose(logits_adapter0, logits_adapter1, atol=atol, rtol=rtol)
+
+        # alternate between base model, adapter0, and adapter1
+        adapters = ["__base__", "adapter0", "adapter1"]
+        dummy_input["adapter_names"] = [adapters[i % 3] for i in (range(len(dummy_input["input_ids"])))]
+
+        with torch.inference_mode():
+            output_mixed = model(**dummy_input)[0]
+            logits_mixed = model.generate(**dummy_input, return_dict_in_generate=True, output_scores=True).scores[0]
+
+        assert torch.allclose(output_base[::3], output_mixed[::3], atol=atol, rtol=rtol)
+        assert torch.allclose(output_adapter0[1::3], output_mixed[1::3], atol=atol, rtol=rtol)
+        assert torch.allclose(output_adapter1[2::3], output_mixed[2::3], atol=atol, rtol=rtol)
+        assert torch.allclose(logits_base[::3], logits_mixed[::3], atol=atol, rtol=rtol)
+        assert torch.allclose(logits_adapter0[1::3], logits_mixed[1::3], atol=atol, rtol=rtol)
+        assert torch.allclose(logits_adapter1[2::3], logits_mixed[2::3], atol=atol, rtol=rtol)
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
