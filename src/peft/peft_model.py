@@ -698,7 +698,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save = set(peft_config.modules_to_save)
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
-            _set_trainable(self, adapter_name)
+
+        if self.modules_to_save:
+            _set_trainable(self, adapter_name)  # this may add a new ModulesToSaveWrapper
 
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
@@ -1030,7 +1032,7 @@ class PeftModelForSequenceClassification(PeftModel):
                 self.cls_layer_name = name
                 break
 
-        # to make sure classifier layer is trainable
+        # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
 
     def forward(
@@ -1682,7 +1684,7 @@ class PeftModelForTokenClassification(PeftModel):
                 self.cls_layer_name = name
                 break
 
-        # to make sure classifier layer is trainable
+        # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
 
     def forward(
@@ -1857,7 +1859,7 @@ class PeftModelForQuestionAnswering(PeftModel):
                 self.cls_layer_name = name
                 break
 
-        # to make sure classifier layer is trainable
+        # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
 
     def forward(
