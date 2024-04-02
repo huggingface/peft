@@ -106,8 +106,8 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
-        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pie"):
-            self.pie_init(adapter_name, init_lora_weights)
+        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
+            self.pissa_init(adapter_name, init_lora_weights)
         elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
@@ -151,7 +151,7 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
-    def pie_init(self, adapter_name, init_lora_weights):
+    def pissa_init(self, adapter_name, init_lora_weights):
         assert self.scaling[adapter_name] == 1
         weight = self.get_base_layer().weight
         dtype = weight.dtype
@@ -163,7 +163,7 @@ class LoraLayer(BaseTunerLayer):
         elif dtype != torch.float32:
             weight = self.get_base_layer().weight.to(torch.float32)
         
-        if init_lora_weights == 'pie':
+        if init_lora_weights == 'pissa':
             U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
             Ur = U[:,:self.r[adapter_name]]
             Sr = S[:self.r[adapter_name]]
@@ -172,7 +172,7 @@ class LoraLayer(BaseTunerLayer):
             Ur, Sr, Vr = svd_lowrank(weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1]))
             Vhr = Vr.t()
         else:
-            raise "init_lora_weights should be pie or pie_niter_[number of iters]."
+            raise "init_lora_weights should be pissa or pissa_niter_[number of iters]."
         
         lora_A = torch.diag(torch.sqrt(Sr)) @ Vhr
         lora_B = Ur @ torch.diag(torch.sqrt(Sr))
