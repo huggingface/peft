@@ -219,8 +219,8 @@ if is_hqq_available():
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
                         continue
-                    lora_A = self.lora_A[active_adapter+'_hqq']
-                    lora_B = self.lora_B[active_adapter+'_hqq']
+                    lora_A = self.lora_A[active_adapter] # self.lora_A[active_adapter+'_hqq']
+                    lora_B = self.lora_B[active_adapter] # self.lora_B[active_adapter+'_hqq']
                     dropout = self.lora_dropout[active_adapter]
                     scaling = self.scaling[active_adapter]
 
