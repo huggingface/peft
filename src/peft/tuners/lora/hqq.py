@@ -71,8 +71,8 @@ if is_hqq_available():
             quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
 
             for k in not_done:
-                self.lora_A[k+'_hqq'] = HQQLinear(self.lora_A[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=layer.compute_dtype, device=layer.device)
-                self.lora_B[k+'_hqq'] = HQQLinear(self.lora_B[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=layer.compute_dtype, device=layer.device)
+                self.lora_A[k+'_hqq'] = HQQLinear(self.lora_A[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=self.lora_A[k].weight.dtype, device=layer.device)
+                self.lora_B[k+'_hqq'] = HQQLinear(self.lora_B[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=self.lora_B[k].weight.dtype, device=layer.device)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -194,7 +194,7 @@ if is_hqq_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = x.to(lora_A.weight.dtype)
+                    x = x.to(lora_A.compute_dtype)
 
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
@@ -232,7 +232,7 @@ if is_hqq_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        x = x.to(lora_A.weight.dtype)
+                        x = x.to(lora_A.compute_dtype)
 
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
