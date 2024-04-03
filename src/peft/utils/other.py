@@ -93,7 +93,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
-    is_hqq_quantized = getattr(model, "quantization_method", None) == "hqq"
+    is_hqq_quantized = getattr(model, "hqq_quantized", False)
     if gradient_checkpointing_kwargs is None:
         gradient_checkpointing_kwargs = {}
 
