@@ -204,12 +204,6 @@ if is_hqq_available():
                 result = self.base_layer(x, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
-                # As per Tim Dettmers, for 4bit, we need to defensively clone here.
-                # The reason is that in some cases, an error can occur that backprop
-                # does not work on a manipulated view. This issue may be solved with
-                # newer PyTorch versions but this would need extensive testing to be
-                # sure.
-                result = result.clone()
 
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
