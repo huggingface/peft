@@ -68,16 +68,11 @@ if is_hqq_available():
                 return
             
             layer = self.get_base_layer()
-            quant_config = copy.deepcopy(layer.quant_config)
+            quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
 
             for k in not_done:
-                new_hqq_layer = HQQLinear(None, quant_config)
-                new_hqq_layer.quantize(self.lora_A[k].weight.clone(), **quant_config)
-                self.lora_A[k+'_hqq'] = new_hqq_layer
-
-                new_hqq_layer = HQQLinear(None, quant_config)
-                new_hqq_layer.quantize(self.lora_B[k].weight.clone(), **quant_config)
-                self.lora_B[k+'_hqq'] = new_hqq_layer
+                self.lora_A[k+'_hqq'] = HQQLinear(self.lora_A[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=layer.compute_dtype, device=layer.device)
+                self.lora_B[k+'_hqq'] = HQQLinear(self.lora_B[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=layer.compute_dtype, device=layer.device)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -106,7 +101,7 @@ if is_hqq_available():
                 )
                 # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 layer = self.get_base_layer()
-                quant_config = copy.deepcopy(layer.quant_config)
+                quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
                 lora_data = self.get_delta_weight(active_adapter)
 
                 output = layer.dequantize()
@@ -127,7 +122,7 @@ if is_hqq_available():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
-                new_hqq_layer = HQQLinear(None, quant_config)
+                new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
                 new_hqq_layer.quantize(w_data, **quant_config)
                 self.base_layer = new_hqq_layer
                 self.merged_adapters.append(active_adapter)
@@ -150,7 +145,7 @@ if is_hqq_available():
 
                 lora_data = self.get_delta_weight(active_adapter)
                 layer = self.get_base_layer()
-                quant_config = copy.deepcopy(layer.quant_config)
+                quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
                 output = layer.dequantize()
 
                 if not self.use_dora[active_adapter]:
@@ -160,7 +155,7 @@ if is_hqq_available():
                     dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
                     w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
-                new_hqq_layer = HQQLinear(None, quant_config)
+                new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
                 new_hqq_layer.quantize(w_data, **quant_config)
                 self.base_layer = new_hqq_layer
 
