@@ -57,6 +57,27 @@ if is_hqq_available():
                 use_rslora=use_rslora,
                 use_dora=use_dora,
             )
+        
+        def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False):
+            super().update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora)
+
+            done_keys = [k.removesuffix('_hqq') for k in self.lora_A.keys() if k.endswith('_hqq')]
+            not_done = [k for k in self.lora_A.keys() if ((not k.endswith('_hqq')) and (k not in done_keys))]
+
+            if len(not_done) == 0:
+                return
+            
+            layer = self.get_base_layer()
+            quant_config = copy.deepcopy(layer.quant_config)
+
+            for k in not_done:
+                new_hqq_layer = HQQLinear(None, quant_config)
+                new_hqq_layer.quantize(self.lora_A[k].weight.clone(), **quant_config)
+                self.lora_A[k+'_hqq'] = new_hqq_layer
+
+                new_hqq_layer = HQQLinear(None, quant_config)
+                new_hqq_layer.quantize(self.lora_B[k].weight.clone(), **quant_config)
+                self.lora_B[k+'_hqq'] = new_hqq_layer
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -170,8 +191,8 @@ if is_hqq_available():
                 if active_adapter not in self.lora_A.keys():
                     continue
 
-                lora_A = self.lora_A[active_adapter]
-                lora_B = self.lora_B[active_adapter]
+                lora_A = self.lora_A[active_adapter+'_hqq']
+                lora_B = self.lora_B[active_adapter+'_hqq']
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
 
@@ -208,8 +229,8 @@ if is_hqq_available():
                 for active_adapter in self.active_adapters:
                     if active_adapter not in self.lora_A.keys():
                         continue
-                    lora_A = self.lora_A[active_adapter]
-                    lora_B = self.lora_B[active_adapter]
+                    lora_A = self.lora_A[active_adapter+'_hqq']
+                    lora_B = self.lora_B[active_adapter+'_hqq']
                     dropout = self.lora_dropout[active_adapter]
                     scaling = self.scaling[active_adapter]
 
