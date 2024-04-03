@@ -57,6 +57,7 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME
 
 from .testing_utils import (
     require_aqlm,
+    require_hqq,
     require_auto_awq,
     require_auto_gptq,
     require_bitsandbytes,
@@ -1870,6 +1871,101 @@ class PeftAqlmGPUTests(unittest.TestCase):
             trainer.train()
 
             model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+
+@require_torch_gpu
+@require_hqq
+@unittest.skipUnless(
+    version.parse(importlib.metadata.version("transformers")) >= version.parse("4.36.1"),
+    "test requires `transformers>=4.36.1`",
+)
+class PeftHQQGPUTests(unittest.TestCase):
+    r"""
+    HQQ + peft tests
+    """
+
+    def setUp(self):
+        self.causal_lm_model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+
+    def tearDown(self):
+        r"""
+        Efficient mechanism to free GPU memory after each test. Based on
+        https://github.com/huggingface/transformers/issues/21094
+        """
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def _check_inference_finite(self, model, batch):
+        # try inference without Trainer class
+        training = model.training
+        model.eval()
+        output = model(**batch.to(model.device))
+        assert torch.isfinite(output.logits).all()
+        model.train(training)
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_hqq(self):
+        r"""
+        Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
+        correctly.
+        """
+
+        from hqq.engine.hf import HQQModelForCausalLM
+        from hqq.core.quantize import BaseQuantizeConfig
+ 
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            device = 'cuda'
+            compute_dtype=torch.bfloat16
+
+            model = HQQModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id,
+                device_map=device,
+                torch_dtype=compute_dtype,
+            )
+
+            quant_config = BaseQuantizeConfig(nbits=4, group_size=64)
+            model.quantize_model(quant_config=quant_config, compute_dtype=compute_dtype, device=device)
+
+            model = prepare_model_for_kbit_training(model)
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                    fp16=True,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.save_pretrained(tmp_dir)
 
             assert "adapter_config.json" in os.listdir(tmp_dir)
             assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)

@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 import torch
 
-from peft.import_utils import is_aqlm_available, is_auto_awq_available, is_auto_gptq_available, is_optimum_available
+from peft.import_utils import is_aqlm_available, is_auto_awq_available, is_auto_gptq_available, is_optimum_available, is_hqq_available
 
 
 def require_torch_gpu(test_case):
@@ -66,6 +66,12 @@ def require_aqlm(test_case):
     Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.
     """
     return unittest.skipUnless(is_aqlm_available(), "test requires aqlm")(test_case)
+
+def require_hqq(test_case):
+    """
+    Decorator marking a test that requires aqlm. These tests are skipped when aqlm isn't installed.
+    """
+    return unittest.skipUnless(is_hqq_available(), "test requires hqq")(test_case)
 
 
 def require_auto_awq(test_case):
