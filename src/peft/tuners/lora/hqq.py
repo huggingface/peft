@@ -1,16 +1,3 @@
-# Copyright 2023-present the HuggingFace Inc. team.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 from __future__ import annotations
 
 import warnings
@@ -89,10 +76,6 @@ if is_hqq_available():
                 if active_adapter not in self.lora_A.keys():
                     continue
 
-                warnings.warn(
-                    "Merge lora module to 4-bit linear may get different generations due to rounding errors."
-                )
-                # Refer to https://gist.github.com/ChrisHayduk/1a53463331f52dca205e55982baf9930
                 layer = self.get_base_layer()
                 quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
                 lora_data = self.get_delta_weight(active_adapter)
@@ -132,9 +115,6 @@ if is_hqq_available():
                 active_adapter = self.merged_adapters.pop()
                 if active_adapter not in self.lora_A.keys():
                     continue
-                warnings.warn(
-                    "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
-                )
 
                 lora_data = self.get_delta_weight(active_adapter)
                 layer = self.get_base_layer()
