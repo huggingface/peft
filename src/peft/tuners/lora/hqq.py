@@ -58,21 +58,14 @@ if is_hqq_available():
                 use_dora=use_dora,
             )
         
-        def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False):
-            super().update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora)
-
-            done_keys = [k.removesuffix('_hqq') for k in self.lora_A.keys() if k.endswith('_hqq')]
-            not_done = [k for k in self.lora_A.keys() if ((not k.endswith('_hqq')) and (k not in done_keys))]
-
-            if len(not_done) == 0:
-                return
+        # def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False):
+        #     super().update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora)
             
-            layer = self.get_base_layer()
-            quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
+        #     layer = self.get_base_layer()
+        #     quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
 
-            for k in not_done:
-                self.lora_A[k+'_hqq'] = HQQLinear(self.lora_A[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=self.lora_A[k].weight.dtype, device=layer.device)
-                self.lora_B[k+'_hqq'] = HQQLinear(self.lora_B[k], copy.deepcopy(quant_config), del_orig=False, compute_dtype=self.lora_B[k].weight.dtype, device=layer.device)
+        #     self.lora_A[adapter_name+'_hqq'] = HQQLinear(self.lora_A[adapter_name], copy.deepcopy(quant_config), del_orig=False, compute_dtype=self.lora_A[adapter_name].weight.dtype, device=layer.device)
+        #     self.lora_B[adapter_name+'_hqq'] = HQQLinear(self.lora_B[adapter_name], copy.deepcopy(quant_config), del_orig=False, compute_dtype=self.lora_B[adapter_name].weight.dtype, device=layer.device)
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
             """
@@ -186,15 +179,17 @@ if is_hqq_available():
                 if active_adapter not in self.lora_A.keys():
                     continue
 
-                lora_A = self.lora_A[active_adapter+'_hqq']
-                lora_B = self.lora_B[active_adapter+'_hqq']
+                lora_A = self.lora_A[active_adapter] # self.lora_A[active_adapter+'_hqq']
+                lora_B = self.lora_B[active_adapter] # self.lora_B[active_adapter+'_hqq']
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
 
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    x = x.to(lora_A.compute_dtype)
+                    compute_dtype = lora_A.weight.dtype # lora_A.compute_dtype
+                    if x.dtype != compute_dtype:
+                        x = x.to(compute_dtype)
 
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
@@ -232,7 +227,9 @@ if is_hqq_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        x = x.to(lora_A.compute_dtype)
+                        compute_dtype = lora_A.weight.dtype # lora_A.compute_dtype
+                        if x.dtype != compute_dtype:
+                            x = x.to(compute_dtype)
 
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
