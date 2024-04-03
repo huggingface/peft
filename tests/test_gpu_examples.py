@@ -1922,7 +1922,7 @@ class PeftHQQGPUTests(unittest.TestCase):
  
         with tempfile.TemporaryDirectory() as tmp_dir:
             device = 'cuda'
-            compute_dtype=torch.bfloat16
+            compute_dtype=torch.float16
 
             model = HQQModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
