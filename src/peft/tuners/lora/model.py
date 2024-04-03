@@ -49,6 +49,7 @@ from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
 from .config import LoraConfig
 from .gptq import dispatch_gptq
+from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .tp_layer import dispatch_megatron
 
@@ -288,7 +289,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
-        dispatchers.extend([dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
+        dispatchers.extend([dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_hqq, dispatch_megatron, dispatch_default])
 
         new_module = None
         for dispatcher in dispatchers:

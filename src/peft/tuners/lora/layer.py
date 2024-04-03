@@ -77,6 +77,9 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
             # Awq layers
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
+            # HQQ layers
+            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
