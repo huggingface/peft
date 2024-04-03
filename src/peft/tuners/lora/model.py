@@ -248,7 +248,7 @@ class LoraModel(BaseTuner):
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if (self.prefix in name) or ("ranknum" in name):
-                weight = child.qweight if hasattr(child, "qweight") else child.weight
+                weight = child.qweight if hasattr(child, "qweight") else child.W_q if hasattr(child, 'W_q') else child.weight
                 module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
