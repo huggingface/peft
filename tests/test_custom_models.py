@@ -16,6 +16,7 @@
 # limitations under the License.
 import copy
 import os
+import re
 import tempfile
 import time
 import unittest
@@ -859,6 +860,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config0).to(self.torch_device)
         model.add_adapter("other", config1)
 
+        assert "default" in model.base_model.lin1.modules_to_save
+        assert "other" not in model.base_model.lin1.modules_to_save
+
         # check that switching adapters and predicting does not raise
         inputs = self.prepare_inputs_for_testing()
         # "default" adapter is active
@@ -880,6 +884,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config0).to(self.torch_device)
         model.add_adapter("other", config1)
 
+        assert "default" not in model.base_model.lin1.modules_to_save
+        assert "other" in model.base_model.lin1.modules_to_save
+
         # check that switching adapters and predicting does not raise
         inputs = self.prepare_inputs_for_testing()
         # "default" adapter is active
@@ -887,6 +894,66 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # switch to "other" adapter
         model.set_adapter("other")
         model(**inputs)
+
+    def test_multiple_adapters_mixed_modules_to_save_merging_adapters(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save, but it also checks that merging adapter
+        # weights works when one adapter has a modules_to_save and the other hasn't
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        # check that this does not raise
+        model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+        # since one of the adapters that was merged has a modules_to_save, that one should be used for the merged
+        # adapter
+        assert "default" in model.base_model.model.lin1.modules_to_save
+        assert "other" not in model.base_model.model.lin1.modules_to_save
+        assert "merged" in model.base_model.model.lin1.modules_to_save
+
+        # check that using the merged adapter does not raise
+        model.set_adapter("merged")
+        inputs = self.prepare_inputs_for_testing()
+        model(**inputs)
+
+    def test_multiple_adapters_same_modules_to_save_merging_adapters_raises(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save_merging_adapters but here the two
+        # adapters target the same module with modules_to_save. In this case, trying to merge the adapter weights
+        # should raise an error.
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        msg = re.escape(
+            "Cannot add weighted adapters if they target the same module with modules_to_save, but found 1 such "
+            "instance(s)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+    def test_multiple_adapters_seq_cls_mixed_modules_to_save_merging_adapters(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save_merging_adapters but uses a SEQ_CLS
+        # model like in test_multiple_adapters_automatic_modules_to_save. This should raise an error because the same
+        # module is implicitly targeted by modules_to_save twice.
+        config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        msg = re.escape(
+            "Cannot add weighted adapters if they target the same module with modules_to_save, but found 1 such "
+            "instance(s)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
