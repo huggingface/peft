@@ -352,9 +352,9 @@ class DeepMLP(nn.Module):
 
 
 class ModelEmbConv1D(nn.Module):
-    def __init__(self):
+    def __init__(self, emb_size=100):
         super().__init__()
-        self.emb = nn.Embedding(100, 5)
+        self.emb = nn.Embedding(emb_size, 5)
         self.conv1d = Conv1D(1, 5)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
@@ -900,6 +900,27 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
             assert "base_model.model.emb.base_layer.weight" not in state_dict
             del state_dict
+
+    def test_load_resized_embedding_ignore_mismatched_sizes(self):
+        # issue #1605
+        # Make it possible to load a LoRA layer that targets an embedding layer even if the sizes mismatch by passing
+        # ignore_mismatched_sizes=True
+        model = ModelEmbConv1D(emb_size=100)
+        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            model = ModelEmbConv1D(emb_size=105)
+
+            # first check that this raises
+            with pytest.raises(RuntimeError) as exc:
+                PeftModel.from_pretrained(model, tmp_dirname)
+            msg = exc.value.args[0]
+            assert "size mismatch" in msg and "100" in msg and "105" in msg
+
+            # does not raise
+            PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
 
     @parameterized.expand(
         [
