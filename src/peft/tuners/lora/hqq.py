@@ -17,7 +17,7 @@ if is_hqq_available():
 
     from hqq.core.quantize import HQQLinear
 
-    class HQQLoraLinear(torch.nn.Module, LoraLayer):
+    class HqqLoraLinear(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
         def __init__(
             self,
@@ -236,6 +236,6 @@ if is_hqq_available():
             target_base_layer = target
 
         if is_hqq_available() and isinstance(target_base_layer, HQQLinear):
-            new_module = HQQLoraLinear(target_base_layer, adapter_name, **kwargs)
+            new_module = HqqLoraLinear(target_base_layer, adapter_name, **kwargs)
 
         return new_module
