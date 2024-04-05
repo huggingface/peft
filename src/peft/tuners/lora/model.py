@@ -164,7 +164,7 @@ class LoraModel(BaseTuner):
             model (`nn.Module`):
                 The model that is going to be adapted.
         """
-        if peft_config.layer_replication:
+        if hasattr(peft_config, "layer_replication") and peft_config.layer_replication:
             replicate_layers(model, peft_config.layer_replication)
 
     def _create_and_replace(
