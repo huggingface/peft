@@ -1885,7 +1885,7 @@ class PeftAqlmGPUTests(unittest.TestCase):
     version.parse(importlib.metadata.version("transformers")) >= version.parse("4.36.1"),
     "test requires `transformers>=4.36.1`",
 )
-class PeftHQQGPUTests(unittest.TestCase):
+class PeftHqqGPUTests(unittest.TestCase):
     r"""
     HQQ + peft tests
     """
@@ -1901,14 +1901,6 @@ class PeftHQQGPUTests(unittest.TestCase):
         """
         gc.collect()
         torch.cuda.empty_cache()
-
-    def _check_inference_finite(self, model, batch):
-        # try inference without Trainer class
-        training = model.training
-        model.eval()
-        output = model(**batch.to(model.device))
-        assert torch.isfinite(output.logits).all()
-        model.train(training)
 
     @pytest.mark.single_gpu_tests
     def test_causal_lm_training_hqq(self):
