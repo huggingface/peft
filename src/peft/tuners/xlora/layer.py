@@ -88,6 +88,9 @@ class XLoRALinearLayer(XLoRALayer):
             result = self.target.base_layer(x, *args, **kwargs)
 
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                # TODO: implement X-LoRA with Lora+Dora layers
+                if self.target.use_dora[active_adapter]:
+                    raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
                 if active_adapter not in self.target.lora_A.keys():
                     continue
                 lora_A = self.target.lora_A[active_adapter]
@@ -131,6 +134,9 @@ class XLoRAEmbeddingLayer(XLoRALayer):
         else:
             result = self.target.base_layer(x, *args, **kwargs)
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                # TODO: implement X-LoRA with Lora+Dora layers
+                if self.target.use_dora[active_adapter]:
+                    raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
                 if active_adapter not in self.target.lora_embedding_A:
                     continue
                 embedding_A = self.target.lora_embedding_A[active_adapter].T
@@ -172,6 +178,9 @@ class XLoRAConv2dLayer(XLoRALayer):
         else:
             result = self.target.base_layer(x, *args, **kwargs)
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                # TODO: implement X-LoRA with Lora+Dora layers
+                if self.target.use_dora[active_adapter]:
+                    raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
                 if active_adapter not in self.target.lora_A.keys():
                     continue
                 lora_A = self.target.lora_A[active_adapter]
