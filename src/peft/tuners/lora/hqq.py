@@ -232,6 +232,7 @@ if is_hqq_available():
             rep = super().__repr__()
             return "lora." + rep
 
+
 def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
     new_module = None
 
