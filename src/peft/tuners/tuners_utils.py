@@ -604,6 +604,9 @@ def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
         `bool` | `re.Match[str]` | `None`: True of match object if key matches any target modules from config, False or
         None if no match found
     """
+    # Handle X-LoRA case
+    if not hasattr(config, "target_modules"):
+        return False
     if isinstance(config.target_modules, str):
         target_module_found = re.fullmatch(config.target_modules, key)
     elif key in config.target_modules:
