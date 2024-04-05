@@ -208,7 +208,7 @@ class XLoraModel(LoraModel):
         xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped)
 
         # Setup the model internal state
-        self.internal_xlora_classifier = xlora_classifier
+        self.__dict__["internal_xlora_classifier"] = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
 
     def _freeze_all_adapters(self):
