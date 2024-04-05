@@ -16,6 +16,7 @@ import warnings
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+from sklearn import base
 import torch
 
 from peft.config import PeftConfig
@@ -70,7 +71,7 @@ class XLoraConfig(PeftConfig):
     """
 
     hidden_size: int = None  # type: ignore
-    base_model_id: str
+    base_model_id: str = None
     device: torch.device = None  # type: ignore
     adapters: Dict[str, str] = None  # type: ignore
     enable_softmax: bool = True
@@ -88,10 +89,16 @@ class XLoraConfig(PeftConfig):
     global_scaling_weight: float = 1.0
 
     def __post_init__(self):
-        assert self.hidden_size is not None
-        assert self.device is not None
-        assert self.adapters is not None
         self.peft_type = PeftType.XLORA
+
+        if self.base_model_id == None:
+            raise TypeError("Expected value for base model ID.")
+        if self.hidden_size == None:
+            raise TypeError("Expected value for hidden size.")
+        if self.device == None:
+            raise TypeError("Expected value for device.")
+        if self.adapters == None:
+            raise TypeError("Expected value for adapters.")
 
         if self.enable_softmax_topk and self.top_k_lora is None:
             warnings.warn("`enable_softmax_topk` enabled `top_k_lora` is not set")

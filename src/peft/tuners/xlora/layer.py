@@ -5,7 +5,7 @@ import torch.nn as nn
 from peft.tuners import lora
 from torch import Tensor
 
-from xlora.xlora_config import XLoraConfig
+from .config import XLoraConfig
 
 
 class XLoRALayer:

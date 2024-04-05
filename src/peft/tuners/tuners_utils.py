@@ -281,7 +281,6 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-<<<<<<< HEAD
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
 
@@ -289,8 +288,6 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-=======
->>>>>>> cddc00f (Make a nicer check for having target_modules)
     def inject_adapter(self, model: nn.Module, adapter_name: str):
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
