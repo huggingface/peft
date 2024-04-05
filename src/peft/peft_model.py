@@ -399,12 +399,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if isinstance(model.base_model, XLoraModel):
             if not isinstance(config, XLoraConfig):
                 raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
+            if "adapters" not in kwargs:
+                raise ValueError(f"Expected adapters to be in kwargs")
 
             device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device()
-            config.device = torch.device(device)
-
-            # If we are passed adapters in the kwargs, it is already in the config.
-            # If no adapters are passed, config.adapters is None
+            config.adapters = kwargs["adapters"]
 
             classifier: XLoraClassifier = model.base_model.internal_xlora_classifier  # type: ignore
             classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
