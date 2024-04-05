@@ -921,9 +921,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             assert "size mismatch" in msg and "100" in msg and "105" in msg
 
             # does not raise
-            PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
-            # clean up of temp file fails on Windows, try gc to fix it.
+            model = PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
+            # clean up of temp file fails on Windows, try thisfix
+            del model
             gc.collect()
+            time.sleep(0.5)
 
     @parameterized.expand(
         [
