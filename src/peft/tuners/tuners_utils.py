@@ -663,6 +663,8 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
     the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
+    if not hasattr(peft_config, "target_modules"):
+        return peft_config
 
     # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
     if not (
