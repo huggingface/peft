@@ -2,8 +2,9 @@ from typing import Any, Callable
 
 import torch
 import torch.nn as nn
-from peft.tuners import lora
 from torch import Tensor
+
+from peft.tuners import lora
 
 from .config import XLoraConfig
 
@@ -14,10 +15,10 @@ class XLoRALayer:
     Its primary API is the forward method, which uses the scalings to execute the
     XLoRA algorithm.
     """
-    
+
     def __init__(
         self,
-        model: nn.Module, # XLoraModel
+        model: nn.Module,  # XLoraModel
         target: lora.LoraLayer,
         target_forward: Callable[..., Any],
         layer_number: int,

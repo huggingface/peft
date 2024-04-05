@@ -16,7 +16,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from sklearn import base
 import torch
 
 from peft.config import PeftConfig
@@ -27,7 +26,7 @@ from peft.utils.peft_types import PeftType
 class XLoraConfig(PeftConfig):
     r"""
     This is the configuration class to store the configuration of a [`XLoraClassifier`].
-    When the config is reloaded, the paths of the `adapters` field is disregarded in favor of the 
+    When the config is reloaded, the paths of the `adapters` field is disregarded in favor of the
     saved adapters. As such, only the keys matter during loading.
 
     Args:
@@ -36,7 +35,7 @@ class XLoraConfig(PeftConfig):
         device (`torch.device`):
             Device for the X-LoRA classifier.
         adapters (`dict`):
-            Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter. 
+            Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter.
             *They will be automatically loaded*, to use as LoRA experts.
         enable_softmax (`bool`, *optional*, defaults to `True`):
             Enable softmax application for the X-LoRA classifier.
@@ -88,11 +87,11 @@ class XLoraConfig(PeftConfig):
     def __post_init__(self):
         self.peft_type = PeftType.XLORA
 
-        if self.hidden_size == None:
+        if self.hidden_size is None:
             raise TypeError("Expected value for hidden size.")
-        if self.device == None:
+        if self.device is None:
             raise TypeError("Expected value for device.")
-        if self.adapters == None:
+        if self.adapters is None:
             raise TypeError("Expected value for adapters.")
 
         if self.enable_softmax_topk and self.top_k_lora is None:

@@ -14,7 +14,7 @@
 
 import json
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -27,7 +27,8 @@ from peft.utils.peft_types import PeftType
 from .. import lora
 from .classifier import InhibitorFlagPayload, Number, XLoraClassifier
 from .config import XLoraConfig
-from .layer import XLoRALinearLayer, XLoRAEmbeddingLayer, XLoRAConv2dLayer
+from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALinearLayer
+
 
 @staticmethod
 def apply_scalings_to_x(x: torch.Tensor, scalings_layer: torch.Tensor, adapter: int) -> torch.Tensor:
@@ -36,9 +37,10 @@ def apply_scalings_to_x(x: torch.Tensor, scalings_layer: torch.Tensor, adapter: 
     # scalings_layer = [batch_size, seq_len, 1]
     return x * scalings
 
+
 def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
-    xloramodel: nn.Module, # XLoraModel
+    xloramodel: nn.Module,  # XLoraModel
     config: XLoraConfig,
 ) -> int:
     """
@@ -77,7 +79,7 @@ def convert_layers_to_xlora(
             )
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
-            
+
     return total_swapped
 
 

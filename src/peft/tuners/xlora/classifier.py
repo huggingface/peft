@@ -14,7 +14,6 @@
 
 import builtins
 import json
-import typing
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -81,33 +80,25 @@ class XLoraClassifier(nn.Module):
         layers = []
         if self.config.xlora_depth == 1:
             if config.layerwise_scalings:  # bias=False if we have just one layer
-                last = (
-                    nn.Linear(config.hidden_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
-                )
+                last = nn.Linear(config.hidden_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
             else:
                 last = nn.Linear(config.hidden_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
         elif self.config.xlora_depth == 2:
-            layers.append(
-                nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype)
-            )
+            layers.append(nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype))
 
             if config.enable_relu_and_dropout:
                 layers.append(nn.ReLU())
                 layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             if config.layerwise_scalings:
-                last = (
-                    nn.Linear(config.xlora_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
-                )
+                last = nn.Linear(config.xlora_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
             else:
                 last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
         else:
-            if self.config.xlora_depth <= 0 :
+            if self.config.xlora_depth <= 0:
                 raise ValueError("X-LoRA depth must be strictly positive.")
-            
-            layers.append(
-                nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype)
-            )
+
+            layers.append(nn.Linear(config.hidden_size, config.xlora_size, bias=bias_flag).to(config.device).to(dtype))
 
             if config.enable_relu_and_dropout:
                 layers.append(nn.ReLU())
@@ -123,9 +114,7 @@ class XLoraClassifier(nn.Module):
                     layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             if config.layerwise_scalings:
-                last = (
-                    nn.Linear(config.xlora_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
-                )
+                last = nn.Linear(config.xlora_size, n_classes * n_layers, bias=bias_flag).to(config.device).to(dtype)
             else:
                 last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(config.device).to(dtype)
         self.layers = nn.Sequential(*layers, last)
