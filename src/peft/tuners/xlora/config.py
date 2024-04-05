@@ -16,8 +16,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-import torch
-
 from peft.config import PeftConfig
 from peft.utils.peft_types import PeftType
 
@@ -32,8 +30,6 @@ class XLoraConfig(PeftConfig):
     Args:
         hidden_size (`int`):
             Hidden size of the base model.
-        device (`torch.device`):
-            Device for the X-LoRA classifier.
         adapters (`dict`):
             Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter.
             *They will be automatically loaded*, to use as LoRA experts.
@@ -68,7 +64,6 @@ class XLoraConfig(PeftConfig):
     """
 
     hidden_size: int = None  # type: ignore
-    device: torch.device = None  # type: ignore
     adapters: Dict[str, str] = None  # type: ignore
     enable_softmax: bool = True
     enable_softmax_topk: bool = False
@@ -89,8 +84,6 @@ class XLoraConfig(PeftConfig):
 
         if self.hidden_size is None:
             raise TypeError("Expected value for hidden size.")
-        if self.device is None:
-            raise TypeError("Expected value for device.")
         if self.adapters is None:
             raise TypeError("Expected value for adapters.")
 

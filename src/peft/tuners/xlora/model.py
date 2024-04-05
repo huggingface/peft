@@ -42,14 +42,16 @@ def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
     xloramodel: nn.Module,  # XLoraModel
     config: XLoraConfig,
-) -> int:
+) -> (int, torch.device | None):
     """
     Returns the number of swapped layers.
     """
     total_swapped = 0
 
+    device = None
     for module in base.modules():
         if isinstance(module, lora.Linear):
+            device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoRALinearLayer(
                 model=xloramodel,
                 target=module,
@@ -60,6 +62,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Embedding):
+            device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoRAEmbeddingLayer(
                 model=xloramodel,
                 target=module,
@@ -70,6 +73,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Conv2d):
+            device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoRAConv2dLayer(
                 model=xloramodel,
                 target=module,
@@ -80,7 +84,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
 
-    return total_swapped
+    return (total_swapped, device)
 
 
 class XLoraModel(LoraModel):
@@ -198,14 +202,14 @@ class XLoraModel(LoraModel):
 
         self._freeze_all_adapters()
 
-        total_swapped = convert_layers_to_xlora(
+        total_swapped, device = convert_layers_to_xlora(
             model_peft,
             self,
             peft_config,
         )
 
         n_classes = len(peft_config.adapters)
-        xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped)
+        xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped, device)
 
         # Setup the model internal state
         self.__dict__["internal_xlora_classifier"] = xlora_classifier
@@ -246,7 +250,6 @@ class XLoraModel(LoraModel):
         classifier: XLoraClassifier = self.internal_xlora_classifier
 
         conf = self.xlora_config.__dict__.copy()
-        del conf["device"]
 
         conf["adapters"] = list(conf["adapters"].keys())
         with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
