@@ -100,6 +100,7 @@ if is_hqq_available():
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
                 new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
+                quant_config.pop('offload_meta', None)
                 new_hqq_layer.quantize(w_data, **quant_config)
                 self.base_layer = new_hqq_layer
                 self.merged_adapters.append(active_adapter)
@@ -130,6 +131,7 @@ if is_hqq_available():
                     w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
                 new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
+                quant_config.pop('offload_meta', None)
                 new_hqq_layer.quantize(w_data, **quant_config)
                 self.base_layer = new_hqq_layer
 
