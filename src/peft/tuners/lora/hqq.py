@@ -4,7 +4,6 @@ import warnings
 import copy
 from typing import Any, Optional
 
-from hqq.core.quantize import HQQLinear
 import torch
 
 from peft.import_utils import is_hqq_available
@@ -15,6 +14,8 @@ from .layer import LoraLayer
 
 
 if is_hqq_available():
+
+    from hqq.core.quantize import HQQLinear
 
     class HQQLoraLinear(torch.nn.Module, LoraLayer):
         # Lora implemented in a dense layer
