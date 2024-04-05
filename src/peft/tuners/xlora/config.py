@@ -32,7 +32,8 @@ class XLoraConfig(PeftConfig):
             Hidden size of the base model.
         adapters (`dict`):
             Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter.
-            *They will be automatically loaded*, to use as LoRA experts.
+            *They will be automatically loaded*, to use as LoRA experts. When using from_pretrained, pass the new adapters dict
+            as a keyword argument.
         enable_softmax (`bool`, *optional*, defaults to `True`):
             Enable softmax application for the X-LoRA classifier.
         enable_softmax_topk (`bool`, *optional*, defaults to `False`):

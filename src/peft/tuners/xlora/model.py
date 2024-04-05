@@ -251,7 +251,8 @@ class XLoraModel(LoraModel):
 
         conf = self.xlora_config.__dict__.copy()
 
-        conf["adapters"] = list(conf["adapters"].keys())
+        # So that the adapters are unloadable and the user is forced to set them for from_pretrained
+        conf["adapters"] = None
         with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
             json.dump(conf, f)
 
