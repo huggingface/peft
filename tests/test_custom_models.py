@@ -16,6 +16,7 @@
 # limitations under the License.
 import copy
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -910,22 +911,22 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
 
         # note: not using the context manager here because it fails on Windows CI for some reason
-        tmp_dirname = tempfile.TemporaryDirectory()
+        tmp_dirname = tempfile.mkdtemp()
         try:
-            model.save_pretrained(str(tmp_dirname))
+            model.save_pretrained(tmp_dirname)
             model = ModelEmbConv1D(emb_size=105)
 
             # first check that this raises
             with pytest.raises(RuntimeError) as exc:
-                PeftModel.from_pretrained(model, str(tmp_dirname))
+                PeftModel.from_pretrained(model, tmp_dirname)
             msg = exc.value.args[0]
             assert "size mismatch" in msg and "100" in msg and "105" in msg
 
             # does not raise
-            PeftModel.from_pretrained(model, str(tmp_dirname), ignore_mismatched_sizes=True)
+            PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
         finally:
             try:
-                tmp_dirname.cleanup()
+                shutil.rmtree(tmp_dirname)
             except PermissionError:
                 # windows error
                 pass
