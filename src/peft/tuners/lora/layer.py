@@ -184,9 +184,13 @@ class LoraLayer(BaseTunerLayer):
         lora_B = self.lora_B[adapter_name]
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer()):
-            weight = self.get_base_layer().weight
-            quant_state = getattr(self.get_base_layer(), "state", None)
-            weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+            base_layer = self.get_base_layer()
+            if hasattr(base_layer, 'W_q'):
+                weight = base_layer.dequantize()
+            else:
+                weight = base_layer.weight
+                quant_state = getattr(self.get_base_layer(), "state", None)
+                weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
             if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
                 lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
@@ -212,9 +216,13 @@ class LoraLayer(BaseTunerLayer):
         """
         lora_weight = lora_B.weight @ lora_A.weight
         magnitude = self.lora_magnitude_vector[active_adapter]
-        weight = self.get_base_layer().weight
-        quant_state = getattr(self.get_base_layer(), "state", None)
-        weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+        base_layer = self.get_base_layer()
+        if hasattr(base_layer, 'W_q'):
+            weight = base_layer.dequantize()
+        else:
+            weight = base_layer.weight
+            quant_state = getattr(self.get_base_layer(), "state", None)
+            weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
         weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
