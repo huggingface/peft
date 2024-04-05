@@ -274,13 +274,6 @@ class XLoraModel(LoraModel):
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.config.top_k_lora = value
 
-    def get_topk_lora(self) -> Optional[int]:
-        """
-        Get the current top_k LoRA experts value.
-        """
-        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        return classifier.config.top_k_lora
-
     def set_global_scaling_weight(self, weight: float):
         """
         Set the global LoRA weight, a scalar to multiply the output of each LoRA adapter by. This is by default 1. This is reflected in the config.
@@ -308,16 +301,6 @@ class XLoraModel(LoraModel):
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier.log_scalings.copy()
-
-    def set_scaling_pass_value(self, value: Union[Number, None]):
-        """
-        Manually set the scalings to a specific value during the scaling pass, forever. Call this function with None to enable the default
-        scalings.
-
-        This is reflected in the config.
-        """
-        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        classifier._set_override_scaling_pass_value(value)
 
     def enable_scalings_logging(self):
         """
