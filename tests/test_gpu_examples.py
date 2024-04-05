@@ -1903,7 +1903,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         torch.cuda.empty_cache()
 
     @pytest.mark.single_gpu_tests
-    def test_causal_lm_training_hqq(self):
+    def test_causal_lm_training_hqq(self, use_dora):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
         correctly.
@@ -1933,6 +1933,7 @@ class PeftHqqGPUTests(unittest.TestCase):
                 lora_dropout=0.05,
                 bias="none",
                 task_type="CAUSAL_LM",
+                use_dora=use_dora
             )
             model = get_peft_model(model, config)
 
