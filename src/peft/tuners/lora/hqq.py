@@ -173,7 +173,7 @@ if is_hqq_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    compute_dtype = lora_A.weight.dtype  # lora_A.compute_dtype
+                    compute_dtype = lora_A.weight.dtype
                     if x.dtype != compute_dtype:
                         x = x.to(compute_dtype)
 
@@ -213,7 +213,7 @@ if is_hqq_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        compute_dtype = lora_A.weight.dtype  # lora_A.compute_dtype
+                        compute_dtype = lora_A.weight.dtype
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
