@@ -189,7 +189,7 @@ class LoraLayer(BaseTunerLayer):
                 weight = base_layer.dequantize()
             else:
                 weight = base_layer.weight
-                quant_state = getattr(self.get_base_layer(), "state", None)
+                quant_state = getattr(base_layer, "state", None)
                 weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
             if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
                 lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
@@ -221,7 +221,7 @@ class LoraLayer(BaseTunerLayer):
             weight = base_layer.dequantize()
         else:
             weight = base_layer.weight
-            quant_state = getattr(self.get_base_layer(), "state", None)
+            quant_state = getattr(base_layer, "state", None)
             weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
         weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
