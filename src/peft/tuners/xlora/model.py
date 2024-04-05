@@ -147,11 +147,6 @@ class XLoraModel(LoraModel):
         model_peft: nn.Module,
     ) -> None:
         # model_peft: PeftModel
-        if not isinstance(model, PreTrainedModel):
-            raise TypeError(f"Expected model type to be 'PreTrainedModel', got '{type(model)}' instead.")
-        if not isinstance(peft_config, XLoraConfig):
-            raise TypeError(f"Expected config type to be 'XLoraConfig', got '{type(model)}' instead.")
-
         self.xlora_config = peft_config
 
         if hasattr(model.config, "use_cache"):
@@ -263,6 +258,13 @@ class XLoraModel(LoraModel):
         elif is_main_process:
             state_dict = classifier.state_dict()
             torch.save(state_dict, os.path.join(save_directory, "xlora_classifier.pt"))
+
+    def inject_adapter(self, model: nn.Module, adapter_name: str):
+        # XLora only supports a single adapter. It wouldn't make sense to have multiple XLora adapters,
+        # but multiple Lora adapters are essentially a requirement.
+        if len(set(self.peft_config.keys()) | {adapter_name}) > 1:
+            raise ValueError("Trying to add a second XLora adapter, but {self.__class__.__name__} only supports a single adapter.")
+        return super().inject_adapter(model, adapter_name=adapter_name)
 
     def forward(self, *args, **kwargs):
         return self.model(*args, **kwargs)  # Important to *call* the model
