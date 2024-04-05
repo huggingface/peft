@@ -910,22 +910,26 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
         model = get_peft_model(model, config)
 
-        with tempfile.TemporaryDirectory() as tmp_dirname:
-            model.save_pretrained(tmp_dirname)
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.TemporaryDirectory()
+        try:
+            model.save_pretrained(str(tmp_dirname))
             model = ModelEmbConv1D(emb_size=105)
 
             # first check that this raises
             with pytest.raises(RuntimeError) as exc:
-                PeftModel.from_pretrained(model, tmp_dirname)
+                PeftModel.from_pretrained(model, str(tmp_dirname))
             msg = exc.value.args[0]
             assert "size mismatch" in msg and "100" in msg and "105" in msg
 
             # does not raise
-            model = PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
-            # clean up of temp file fails on Windows, try thisfix
-            del model
-            gc.collect()
-            time.sleep(0.5)
+            PeftModel.from_pretrained(model, str(tmp_dirname), ignore_mismatched_sizes=True)
+        finally:
+            try:
+                tmp_dirname.cleanup()
+            except PermissionError:
+                # windows error
+                pass
 
     @parameterized.expand(
         [
