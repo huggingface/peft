@@ -232,15 +232,15 @@ if is_hqq_available():
             rep = super().__repr__()
             return "lora." + rep
 
-    def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
-        new_module = None
+def dispatch_hqq(target: torch.nn.Module, adapter_name: str, **kwargs):
+    new_module = None
 
-        if isinstance(target, BaseTunerLayer):
-            target_base_layer = target.get_base_layer()
-        else:
-            target_base_layer = target
+    if isinstance(target, BaseTunerLayer):
+        target_base_layer = target.get_base_layer()
+    else:
+        target_base_layer = target
 
-        if is_hqq_available() and isinstance(target_base_layer, HQQLinear):
-            new_module = HqqLoraLinear(target_base_layer, adapter_name, **kwargs)
+    if is_hqq_available() and isinstance(target_base_layer, HQQLinear):
+        new_module = HqqLoraLinear(target_base_layer, adapter_name, **kwargs)
 
-        return new_module
+    return new_module
