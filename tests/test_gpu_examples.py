@@ -1903,6 +1903,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         torch.cuda.empty_cache()
 
     @pytest.mark.single_gpu_tests
+    @parameterized.expand([False, True])
     def test_causal_lm_training_hqq(self, use_dora):
         r"""
         Test the CausalLM training on a single GPU device. The test would simply fail if the adapters are not set
