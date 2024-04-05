@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import gc
 import os
 import tempfile
 import time
@@ -921,6 +922,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
             # does not raise
             PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
+            # clean up of temp file fails on Windows, try gc to fix it.
+            gc.collect()
 
     @parameterized.expand(
         [
