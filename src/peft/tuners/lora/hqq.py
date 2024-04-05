@@ -13,8 +13,8 @@
 # limitations under the License.
 from __future__ import annotations
 
-import warnings
 import copy
+import warnings
 from typing import Any, Optional
 
 import torch
@@ -27,7 +27,6 @@ from .layer import LoraLayer
 
 
 if is_hqq_available():
-
     from hqq.core.quantize import HQQLinear
 
     class HqqLoraLinear(torch.nn.Module, LoraLayer):
@@ -82,7 +81,7 @@ if is_hqq_available():
                     continue
 
                 layer = self.get_base_layer()
-                quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
+                quant_config = {**copy.deepcopy(layer.quant_config), "offload_meta": layer.offload_meta}
                 lora_data = self.get_delta_weight(active_adapter)
 
                 output = layer.dequantize()
@@ -104,7 +103,7 @@ if is_hqq_available():
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
                 new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
-                quant_config.pop('offload_meta', None)
+                quant_config.pop("offload_meta", None)
                 new_hqq_layer.quantize(w_data, **quant_config)
                 self.base_layer = new_hqq_layer
                 self.merged_adapters.append(active_adapter)
@@ -124,7 +123,7 @@ if is_hqq_available():
 
                 lora_data = self.get_delta_weight(active_adapter)
                 layer = self.get_base_layer()
-                quant_config = {**copy.deepcopy(layer.quant_config), 'offload_meta': layer.offload_meta}
+                quant_config = {**copy.deepcopy(layer.quant_config), "offload_meta": layer.offload_meta}
                 output = layer.dequantize()
 
                 if not self.use_dora[active_adapter]:
@@ -135,7 +134,7 @@ if is_hqq_available():
                     w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
                 new_hqq_layer = HQQLinear(None, quant_config, compute_dtype=layer.compute_dtype, device=layer.device)
-                quant_config.pop('offload_meta', None)
+                quant_config.pop("offload_meta", None)
                 new_hqq_layer.quantize(w_data, **quant_config)
                 self.base_layer = new_hqq_layer
 
@@ -174,7 +173,7 @@ if is_hqq_available():
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
-                    compute_dtype = lora_A.weight.dtype # lora_A.compute_dtype
+                    compute_dtype = lora_A.weight.dtype  # lora_A.compute_dtype
                     if x.dtype != compute_dtype:
                         x = x.to(compute_dtype)
 
@@ -214,7 +213,7 @@ if is_hqq_available():
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
-                        compute_dtype = lora_A.weight.dtype # lora_A.compute_dtype
+                        compute_dtype = lora_A.weight.dtype  # lora_A.compute_dtype
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
 
