@@ -839,7 +839,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapters_weights = load_peft_weights(model_id, device=torch_device, **hf_hub_download_kwargs)
 
         # load the weights into the model
-        load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
+        ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
+        load_result = set_peft_model_state_dict(
+            self, adapters_weights, adapter_name=adapter_name, ignore_mismatched_sizes=ignore_mismatched_sizes
+        )
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)
