@@ -73,7 +73,7 @@ class VeraLayer(BaseTunerLayer):
         r,
         vera_dropout,
         init_weights,
-        d_initial: float = 1.0,
+        d_initial: float = 0.1,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -116,7 +116,7 @@ class VeraLayer(BaseTunerLayer):
 
         self.set_adapter(self.active_adapters)
 
-    def reset_vera_parameters(self, adapter_name, d_initial: float = 1.0):
+    def reset_vera_parameters(self, adapter_name, d_initial: float = 0.1):
         if adapter_name in self.vera_lambda_d.keys():
             with torch.no_grad():
                 nn.init.zeros_(self.vera_lambda_d[adapter_name]).fill_(d_initial)
@@ -136,7 +136,7 @@ class Linear(nn.Linear, VeraLayer):
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         is_target_conv_1d_layer: bool = False,
         init_weights: bool = True,
-        d_initial: float = 1.0,
+        d_initial: float = 0.1,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e. nn.Module.__init__, which should always be called

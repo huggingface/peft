@@ -28,9 +28,10 @@ class VeraConfig(PeftConfig):
     Paper: https://arxiv.org/abs/2310.11454.
 
     Args:
-        r (`int`):
-            Vera attention dimension.
-        target_modules (`Union[List[str],str]`):
+        r (`int`, *optional*, defaults to `256`):
+            VeRA parameter dimension ("rank"). Choose higher values than LoRA ranks here, since VeRA uses far fewer
+            parameters than LoRA (see Table 1).
+        target_modules (`Union[List[str], str]`):
             The names of the modules to apply Vera to. Only linear layers are supported.
         projection_prng_key (`int`):
             Vera PRNG init key. Used for initialising vera_A and vera_B for new models or when loading a checkpoint
@@ -41,8 +42,9 @@ class VeraConfig(PeftConfig):
             all system configurations. Defaults to `True`.
         vera_dropout (`float`):
             The dropout probability for Vera layers.
-        d_initial (`float`):
-            Initial init value for `vera_lambda_d` vector used when `init_weights`.
+        d_initial (`float`, *optional*, defaults to `0.1`):
+            Initial init value for `vera_lambda_d` vector used when initializing the VeRA parameters. Small values
+            (<=0.1) are recommended (see Table 6c in the paper).
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
@@ -64,7 +66,7 @@ class VeraConfig(PeftConfig):
             pattern is not in the common layers pattern.
     """
 
-    r: int = field(default=8, metadata={"help": "Vera attention dimension"})
+    r: int = field(default=256, metadata={"help": "Vera attention dimension"})
 
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
@@ -96,7 +98,7 @@ class VeraConfig(PeftConfig):
         },
     )
     vera_dropout: float = field(default=0.0, metadata={"help": "Vera dropout"})
-    d_initial: float = field(default=1.0, metadata={"help": "Initial init value for d vector."})
+    d_initial: float = field(default=0.1, metadata={"help": "Initial init value for d vector."})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},

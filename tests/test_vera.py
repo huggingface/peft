@@ -185,8 +185,9 @@ class TestVera:
 
         assert any("vera_A" in key for key in sd_default)
         assert any("vera_B" in key for key in sd_default)
-        assert sd_default["base_model.vera_A"].shape == (8, 20)
-        assert sd_default["base_model.vera_B"].shape == (20, 8)
+        # default rank for VeRA is 256
+        assert sd_default["base_model.vera_A"].shape == (256, 20)
+        assert sd_default["base_model.vera_B"].shape == (20, 256)
 
         sd_other = {}
         with safe_open(save_path / "other" / "adapter_model.safetensors", framework="pt", device="cpu") as f:
@@ -195,8 +196,8 @@ class TestVera:
 
         assert any("vera_A" in key for key in sd_other)
         assert any("vera_B" in key for key in sd_other)
-        assert sd_other["base_model.vera_A"].shape == (8, 20)
-        assert sd_other["base_model.vera_B"].shape == (20, 8)
+        assert sd_other["base_model.vera_A"].shape == (256, 20)
+        assert sd_other["base_model.vera_B"].shape == (20, 256)
 
     def test_multiple_adapters_save_projection_false_contains_no_vera_A_vera_B(self, mlp, tmp_path):
         torch.manual_seed(1)

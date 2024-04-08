@@ -151,7 +151,7 @@ class VeraModel(BaseTuner):
 
             if isinstance(module, (nn.Linear, Conv1D)):
                 module_shape = tuple(module.weight.shape)
-                if isinstance(module, Conv1D):  # TODO: feels fragile, thoughts?
+                if isinstance(module, Conv1D):
                     module_shape = module_shape[::-1]
             else:
                 continue
