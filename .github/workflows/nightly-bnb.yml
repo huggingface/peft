@@ -68,7 +68,7 @@ jobs:
         if: always()
         run: |
           pip install slack_sdk tabulate
-          python scripts/log_reports.py --slack_channel_name bnb-daily-ci >> $GITHUB_STEP_SUMMARY
+          python scripts/log_reports.py --slack_channel_name bnb-daily-ci-collab >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
     strategy:
@@ -130,4 +130,4 @@ jobs:
         if: always()
         run: |
           pip install slack_sdk tabulate
-          python scripts/log_reports.py --slack_channel_name bnb-daily-ci >> $GITHUB_STEP_SUMMARY
+          python scripts/log_reports.py --slack_channel_name bnb-daily-ci-collab >> $GITHUB_STEP_SUMMARY
