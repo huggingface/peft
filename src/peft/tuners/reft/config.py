@@ -19,7 +19,7 @@ from peft.tuners.lycoris_utils import LycorisConfig
 from peft.utils import PeftType
 
 @dataclass
-class ReftConfig(LycorisConfigg):
+class ReftConfig(LycorisConfig):
     """
     This is the configuration class to store the configuration of a [`REFTModel`].
 
