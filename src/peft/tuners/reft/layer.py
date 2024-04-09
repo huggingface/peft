@@ -180,7 +180,7 @@ class ReftLayer(nn.Module, LycorisLayer):
                     output = result + torch.matmul(
                         (learned_source(result) - rotated_base), rotate_layer.weight.T
                     )
-                    output = module_dropout(output)
+                    # output = module_dropout(output)
 
         result = result.to(previous_dtype)
         return result
