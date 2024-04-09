@@ -231,7 +231,8 @@ class XLoraModel(LoraModel):
             if not isinstance(self.peft_config[name], XLoraConfig):
                 active_adapters.append(name)
         self.active_adapter = active_adapters
-        super()._mark_only_adapters_as_trainable(model)
+        if self.xlora_config.use_trainable_adapters:
+            super()._mark_only_adapters_as_trainable(model)
 
         self.active_adapter = copy
 
