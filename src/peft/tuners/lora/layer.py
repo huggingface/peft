@@ -160,28 +160,33 @@ class LoraLayer(BaseTunerLayer):
         if dtype == torch.uint8:
             quant_type = weight.quant_type
             import bitsandbytes as bnb
+
             weight = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).to(torch.float32)
         elif dtype != torch.float32:
             weight = self.get_base_layer().weight.to(torch.float32)
-        
-        if init_lora_weights == 'pissa':
+
+        if init_lora_weights == "pissa":
             U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
-            Ur = U[:,:self.r[adapter_name]]
-            Sr = S[:self.r[adapter_name]]
-            Vhr = Vh[:self.r[adapter_name]]
-        elif len(init_lora_weights.split("_niter_"))==2:
-            Ur, Sr, Vr = svd_lowrank(weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1]))
+            Ur = U[:, : self.r[adapter_name]]
+            Sr = S[: self.r[adapter_name]]
+            Vhr = Vh[: self.r[adapter_name]]
+        elif len(init_lora_weights.split("_niter_")) == 2:
+            Ur, Sr, Vr = svd_lowrank(
+                weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
+            )
             Vhr = Vr.t()
         else:
             raise "init_lora_weights should be pissa or pissa_niter_[number of iters]."
-        
+
         lora_A = torch.diag(torch.sqrt(Sr)) @ Vhr
         lora_B = Ur @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
         res = weight.data - lora_B @ lora_A
         if dtype == torch.uint8:
-            weight = bnb.nn.Params4bit(res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type).to(device)
+            weight = bnb.nn.Params4bit(
+                res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type
+            ).to(device)
         else:
             weight = res.to(dtype)
         self.get_base_layer().weight.data = weight
