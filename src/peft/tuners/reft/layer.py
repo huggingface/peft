@@ -21,6 +21,19 @@ import torch.nn as nn
 
 from peft.tuners.lycoris_utils import LycorisLayer, check_adapters_to_merge
 
+class LowRankRotateLayer(torch.nn.Module):
+    """A linear transformation with orthogonal initialization."""
+
+    def __init__(self, n, m):
+        super().__init__()
+        # n > m
+        self.weight = torch.nn.Parameter(torch.empty(n, m), requires_grad=True)
+        torch.nn.init.orthogonal_(self.weight)
+
+    def forward(self, x):
+        return torch.matmul(x.to(self.weight.dtype), self.weight)
+
+
 
 class ReftLayer(nn.Module, LycorisLayer):
     # All names of layers that may contain adapter weights
