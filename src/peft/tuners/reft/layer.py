@@ -169,13 +169,16 @@ class ReftLayer(nn.Module, LycorisLayer):
                 if active_adapter not in self._available_adapters:
                     continue
 
+                rotate_layer = self.reft_R[active_adapter]
+                learned_source = self.reft_A[active_adapter]
                 module_dropout = self.module_dropout[active_adapter]
 
                 # Modify current execution weights
                 if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    rotated_base = self.reft_R(result)
+
+                    rotated_base = rotate_layer(result)
                     output = result + torch.matmul(
-                        (self.reft_A(result) - rotated_base), self.reft_R.weight.T
+                        (learned_source(result) - rotated_base), rotate_layer.weight.T
                     )
                     output = module_dropout(output)
 
