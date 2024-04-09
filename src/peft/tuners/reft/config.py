@@ -11,28 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from __future__ import annotations
 
-import warnings
-from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional, Union
+from typing import List, Optional, Union
 
-import torch
-import torch.nn as nn
-from tqdm import tqdm
-
-from peft.config import PeftConfig
-from peft.utils import (
-    ModulesToSaveWrapper,
-    _get_submodules,
-)
-
-from .tuners_utils import BaseTuner, BaseTunerLayer, check_adapters_to_merge, check_target_module_exists
-
+from peft.tuners.lycoris_utils import LycorisConfig
+from peft.utils import PeftType
 
 @dataclass
-class ReftConfig(PeftConfig):
+class ReftConfig(LycorisConfigg):
     """
     This is the configuration class to store the configuration of a [`REFTModel`].
 
@@ -63,25 +50,6 @@ class ReftConfig(PeftConfig):
         block_share (`bool`):
             Whether to share the REFT parameters between blocks or not. This is `False` by default.
     """
-
-    rank_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
-            )
-        },
-    )
-    alpha_pattern: Optional[dict] = field(
-        default_factory=dict,
-        metadata={
-            "help": (
-                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
-            )
-        },
-    )
     r: int = field(default=8, metadata={"help": "REFT rank"})
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling REFT modules during training"}
