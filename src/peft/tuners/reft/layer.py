@@ -73,7 +73,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         # FedPara paper proposes to perform He initialization, let's stick with it
         # It is enough to initialize only single matrix with zeros to make adapter do nothing after initialization
         if adapter_name in self.reft_A.keys():
-            nn.init.kaiming_uniform_(self.reft_A[adapter_name], a=math.sqrt(5))
+            nn.init.kaiming_uniform_(self.reft_A[adapter_name].weight, a=math.sqrt(5))
 
 
     def update_layer(
