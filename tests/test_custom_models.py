@@ -751,7 +751,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        if self.torch_device == 'cpu':
+        if self.torch_device == "cpu":
             # LayerNorm is running float32 on cpu, so difference in outputs are smaller
             rtol, atol = 1e-8, 1e-8
         else:
