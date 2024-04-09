@@ -51,6 +51,7 @@ class ReftConfig(LycorisConfig):
             Whether to share the REFT parameters between blocks or not. This is `False` by default.
     """
     r: int = field(default=8, metadata={"help": "REFT rank"})
+    alpha: int = field(default=8, metadata={"help": "Reft alpha"})
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling REFT modules during training"}
     )
