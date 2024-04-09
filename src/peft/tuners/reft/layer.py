@@ -173,9 +173,9 @@ class ReftLayer(nn.Module, LycorisLayer):
 
                 # Modify current execution weights
                 if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    rotated_base = self.rotate_layer(result)
+                    rotated_base = self.reft_R(result)
                     output = result + torch.matmul(
-                        (self.learned_source(result) - rotated_base), self.rotate_layer.weight.T
+                        (self.reft_A(result) - rotated_base), self.reft_R.weight.T
                     )
                     output = module_dropout(output)
 
