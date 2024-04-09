@@ -264,7 +264,7 @@ def set_peft_model_state_dict(
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
-            PeftType.REFT, "reft_",
+            PeftType.REFT: "reft_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
