@@ -64,7 +64,7 @@ class ReftLayer(nn.Module, LycorisLayer):
     def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
         self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r)
         rotate_layer = LowRankRotateLayer(self.out_features, r)
-        self.rotate_layer[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer)
+        self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer)
 
     def reset_adapter_parameters(self, adapter_name: str):
         # Original implementation performs initialization with normal distribution
