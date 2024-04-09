@@ -149,11 +149,11 @@ class XLoraModel(LoraModel):
         # model_peft: PeftModel
         self.xlora_config = peft_config
 
-        if hasattr(model.config, "use_cache"):
-            assert not model.config.use_cache, "`use_cache` must be False"
+        if hasattr(model.config, "use_cache") and not model.config.use_cache:
+            raise ValueError("`use_cache` must be False")
 
         use_trainable_adapters = peft_config.use_trainable_adapters
-        adapters_items = iter(peft_config.adapters.items())
+        adapters_items = peft_config.adapters.items()
 
         # For load_adapter to think we are a LoraModel
         model_peft.peft_type = PeftType.LORA
@@ -263,7 +263,9 @@ class XLoraModel(LoraModel):
         # XLora only supports a single adapter. It wouldn't make sense to have multiple XLora adapters,
         # but multiple Lora adapters are essentially a requirement.
         if len(set(self.peft_config.keys()) | {adapter_name}) > 1:
-            raise ValueError("Trying to add a second XLora adapter, but {self.__class__.__name__} only supports a single adapter.")
+            raise ValueError(
+                "Trying to add a second XLora adapter, but {self.__class__.__name__} only supports a single adapter."
+            )
         return super().inject_adapter(model, adapter_name=adapter_name)
 
     def forward(self, *args, **kwargs):

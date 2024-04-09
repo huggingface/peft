@@ -42,7 +42,6 @@ class TestXlora:
             peft_type=PeftType.XLORA,
             hidden_size=model.config.hidden_size,
             xlora_depth=8,
-            device=self.device,
             adapters=adapters,
         )
         model = get_peft_model(model, peft_config).to("cuda")
