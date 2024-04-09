@@ -252,7 +252,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
 
                 safe_save_file(
-                    output_state_dict,
+                    {k:v.contiguous() for k,v in output_state_dict.items()},
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
                     metadata={"format": "pt"},
                 )
@@ -786,10 +786,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             for lora_key, lora_val in lora_dict.items():
                                 divide = lora_key.rfind(".")
                                 new_key = lora_key[:divide] + f".{adapter_name}" + lora_key[divide:]
-                                safe_dict[new_key] = lora_val
+                                safe_dict[new_key] = lora_val.contiguous()
                         else:
                             final_key = prefix + block_id + safe_key
-                        safe_dict[final_key] = safe_tensor
+                        safe_dict[final_key] = safe_tensor.contiguous()
                     files_seen.add(new_fname)
 
                     # avoid overwriting original safetensors
