@@ -55,6 +55,8 @@ from .tuners import (
     LoHaModel,
     LoKrConfig,
     LoKrModel,
+    ReftConfig,
+    ReftModel,
     IA3Config,
     IA3Model,
     AdaLoraConfig,
