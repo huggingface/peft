@@ -142,15 +142,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         self.set_adapter(self.active_adapters)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        ...
-
-    def _get_delta_activations(
-        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
-    ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
-        # don't add bias here, because the bias is already included in the output of the base_layer
-        return F.linear(input, delta_weight)
-
+        return self.reft_R[active_adapter]
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -174,16 +166,15 @@ class ReftLayer(nn.Module, LycorisLayer):
                 module_dropout = self.module_dropout[active_adapter]
 
                 # Modify current execution weights
-                if (not self.training) or (self.training and torch.rand(1) > module_dropout):
+                # if (not self.training) or (self.training and torch.rand(1) > module_dropout):
+                rotated_base = rotate_layer(result)
+                output = result + torch.matmul(
+                    (learned_source(result) - rotated_base), rotate_layer.weight.T
+                )
+                # output = module_dropout(output)
 
-                    rotated_base = rotate_layer(result)
-                    output = result + torch.matmul(
-                        (learned_source(result) - rotated_base), rotate_layer.weight.T
-                    )
-                    # output = module_dropout(output)
-
-        result = result.to(previous_dtype)
-        return result
+        output = output.to(previous_dtype)
+        return output
 
 
 class Linear(ReftLayer):
@@ -211,15 +202,8 @@ class Linear(ReftLayer):
     ) -> torch.Tensor:
         delta_weight = self.get_delta_weight(adapter_name)
         # don't add bias here, because the bias is already included in the output of the base_layer
-        base_layer = self.get_base_layer()
-        return F.conv2d(
-            input,
-            delta_weight,
-            stride=base_layer.stride,
-            padding=base_layer.padding,
-            dilation=base_layer.dilation,
-            groups=base_layer.groups,
-        )
+        return F.linear(input, delta_weight)
+
 
 
     def __repr__(self) -> str:
@@ -249,6 +233,22 @@ class Conv2d(ReftLayer):
         self.update_layer(
             adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
         )
+
+    def _get_delta_activations(
+        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
+        delta_weight = self.get_delta_weight(adapter_name)
+        # don't add bias here, because the bias is already included in the output of the base_layer
+        base_layer = self.get_base_layer()
+        return F.conv2d(
+            input,
+            delta_weight,
+            stride=base_layer.stride,
+            padding=base_layer.padding,
+            dilation=base_layer.dilation,
+            groups=base_layer.groups,
+        )
+
 
     def __repr__(self) -> str:
         rep = super().__repr__()
