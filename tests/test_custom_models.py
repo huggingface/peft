@@ -734,7 +734,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
-        for _ in range(5):
+        for _ in range(3):
             optimizer.zero_grad()
             y_pred = model(**X)
             y = torch.arange(len(y_pred)).to(self.torch_device) % 2
@@ -751,7 +751,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        assert not torch.allclose(outputs_before, outputs_after)
+        if self.torch_device == 'cpu':
+            # LayerNorm is running float32 on cpu, so difference in outputs are smaller
+            rtol, atol = 1e-8, 1e-8
+        else:
+            rtol, atol = 1e-5, 1e-8
+        assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
         assert torch.allclose(outputs_before, outputs_disabled), f"{config_kwargs}"
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
