@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import os
 import warnings
 from typing import Optional
@@ -186,13 +188,49 @@ def get_peft_model_state_dict(
     return to_return
 
 
-def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="default"):
+def _find_mismatched_keys(
+    model: torch.nn.Module, peft_model_state_dict: dict[str, torch.Tensor], ignore_mismatched_sizes: bool = False
+) -> tuple[dict[str, torch.Tensor], list[tuple[str, tuple[int, ...], tuple[int, ...]]]]:
+    if not ignore_mismatched_sizes:
+        return peft_model_state_dict, []
+
+    mismatched = []
+    state_dict = model.state_dict()
+    for key, tensor in peft_model_state_dict.items():
+        if key not in state_dict:
+            continue
+
+        # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L3858-L3864
+        if (state_dict[key].shape[-1] == 1) and (state_dict[key].numel() * 2 == tensor.numel()):
+            # This skips size mismatches for 4-bit weights. Two 4-bit values share an 8-bit container, causing size
+            # differences. Without matching with module type or paramter type it seems like a practical way to detect
+            # valid 4bit weights.
+            continue
+
+        if state_dict[key].shape != tensor.shape:
+            mismatched.append((key, tensor.shape, state_dict[key].shape))
+
+    for key, _, _ in mismatched:
+        del peft_model_state_dict[key]
+
+    return peft_model_state_dict, mismatched
+
+
+def set_peft_model_state_dict(
+    model, peft_model_state_dict, adapter_name="default", ignore_mismatched_sizes: bool = False
+):
     """
     Set the state dict of the Peft model.
 
     Args:
-        model ([`PeftModel`]): The Peft model.
-        peft_model_state_dict (`dict`): The state dict of the Peft model.
+        model ([`PeftModel`]):
+            The Peft model.
+        peft_model_state_dict (`dict`):
+            The state dict of the Peft model.
+        adapter_name (`str`, *optional*, defaults to `"default"`):
+            The name of the adapter whose state dict should be set.
+        ignore_mismatched_sizes (`bool`, *optional*, defaults to `False`):
+            Whether to ignore mismatched in the state dict.
     """
     config = model.peft_config[adapter_name]
     state_dict = {}
@@ -246,6 +284,9 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
     else:
         raise NotImplementedError
 
+    peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
+        model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
+    )
     load_result = model.load_state_dict(peft_model_state_dict, strict=False)
     if config.is_prompt_learning:
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
@@ -254,6 +295,20 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
 
     if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
         model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)
+
+    if mismatched_keys:
+        # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L4039
+        mismatched_warning = "\n".join(
+            [
+                f"- {key}: found shape {shape1} in the checkpoint and {shape2} in the model instantiated"
+                for key, shape1, shape2 in mismatched_keys
+            ]
+        )
+        msg = (
+            f"Some weights of {model.__class__.__name__} were not initialized from the model checkpoint "
+            f"and are being ignored because you passed `ignore_mismatched_sizes=True`: {mismatched_warning}."
+        )
+        warnings.warn(msg)
     return load_result
 
 

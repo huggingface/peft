@@ -564,7 +564,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             # one needs to multiply the number of parameters by 2 to get
             # the correct number of parameters
             if param.__class__.__name__ == "Params4bit":
-                num_bytes = param.quant_storage.itemsize if hasattr(param, "quant_storage") else 1
+                if hasattr(param, "element_size"):
+                    num_bytes = param.element_size()
+                elif not hasattr(param, "quant_storage"):
+                    num_bytes = 1
+                else:
+                    num_bytes = param.quant_storage.itemsize
                 num_params = num_params * 2 * num_bytes
 
             all_param += num_params
@@ -722,7 +727,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.modules_to_save = set(peft_config.modules_to_save)
             else:
                 self.modules_to_save.update(peft_config.modules_to_save)
-            _set_trainable(self, adapter_name)
+            _set_trainable(self, adapter_name)  # this may add a new ModulesToSaveWrapper
 
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
@@ -738,7 +743,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         return hf_hub_download_kwargs, other_kwargs
 
-    def _update_offload(self, offload_index: dict[dict[str:str]], adapters_weights: dict[str : torch.tensor]):
+    def _update_offload(self, offload_index: dict[str, dict[str, str]], adapters_weights: dict[str, torch.tensor]):
         """
         Update the offload_index and safetensors files for loading and mergine PeftModels with disk-offloaded modules.
 
@@ -818,7 +823,14 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         os.makedirs(base_name)
                     safe_save_file(safe_dict, new_fname, metadata=metadata)
 
-    def load_adapter(self, model_id: str, adapter_name: str, is_trainable: bool = False, **kwargs: Any):
+    def load_adapter(
+        self,
+        model_id: str,
+        adapter_name: str,
+        is_trainable: bool = False,
+        torch_device: Optional[str] = None,
+        **kwargs: Any,
+    ):
         """
         Load a trained adapter into the model.
 
@@ -835,13 +847,16 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_trainable (`bool`, *optional*, defaults to `False`):
                 Whether the adapter should be trainable or not. If `False`, the adapter will be frozen and can only be
                 used for inference.
+            torch_device (`str`, *optional*, defaults to None):
+                The device to load the adapter on. If `None`, the device will be inferred.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
         from .mapping import PEFT_TYPE_TO_CONFIG_MAPPING
 
         hf_hub_download_kwargs, kwargs = self._split_kwargs(kwargs)
-        torch_device = infer_device()
+        if torch_device is None:
+            torch_device = infer_device()
 
         if adapter_name not in self.peft_config:
             # load the config
@@ -863,7 +878,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapters_weights = load_peft_weights(model_id, device=torch_device, **hf_hub_download_kwargs)
 
         # load the weights into the model
-        load_result = set_peft_model_state_dict(self, adapters_weights, adapter_name=adapter_name)
+        ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
+        load_result = set_peft_model_state_dict(
+            self, adapters_weights, adapter_name=adapter_name, ignore_mismatched_sizes=ignore_mismatched_sizes
+        )
         if (
             (getattr(self, "hf_device_map", None) is not None)
             and (len(set(self.hf_device_map.values()).intersection({"cpu", "disk"})) > 0)
@@ -1044,18 +1062,53 @@ class PeftModelForSequenceClassification(PeftModel):
 
     def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
         super().__init__(model, peft_config, adapter_name)
+
+        classifier_module_names = ["classifier", "score"]
         if self.modules_to_save is None:
-            self.modules_to_save = {"classifier", "score"}
+            self.modules_to_save = set(classifier_module_names)
         else:
-            self.modules_to_save.update({"classifier", "score"})
+            self.modules_to_save.update(classifier_module_names)
+
+        if hasattr(peft_config, "modules_to_save"):
+            if peft_config.modules_to_save is None:
+                peft_config.modules_to_save = classifier_module_names[:]
+            else:
+                peft_config.modules_to_save.extend(classifier_module_names)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
                 self.cls_layer_name = name
                 break
 
-        # to make sure classifier layer is trainable
+        # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
+
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+        """
+        Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+        """
+        # ensure that additional adapters also add the classifier layer to modules_to_save
+        if hasattr(peft_config, "modules_to_save"):
+            classifier_module_names = ["classifier", "score"]
+            if peft_config.modules_to_save is None:
+                peft_config.modules_to_save = classifier_module_names[:]
+            else:
+                peft_config.modules_to_save.extend(classifier_module_names)
+
+        return super().add_adapter(adapter_name, peft_config)
 
     def forward(
         self,
@@ -1696,18 +1749,53 @@ class PeftModelForTokenClassification(PeftModel):
 
     def __init__(self, model: torch.nn.Module, peft_config: PeftConfig = None, adapter_name: str = "default") -> None:
         super().__init__(model, peft_config, adapter_name)
+
+        classifier_module_names = ["classifier", "score"]
         if self.modules_to_save is None:
-            self.modules_to_save = {"classifier", "score"}
+            self.modules_to_save = set(classifier_module_names)
         else:
-            self.modules_to_save.update({"classifier", "score"})
+            self.modules_to_save.update(classifier_module_names)
+
+        if hasattr(peft_config, "modules_to_save"):
+            if peft_config.modules_to_save is None:
+                peft_config.modules_to_save = classifier_module_names[:]
+            else:
+                peft_config.modules_to_save.extend(classifier_module_names)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
                 self.cls_layer_name = name
                 break
 
-        # to make sure classifier layer is trainable
+        # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
+
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+        """
+        Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+        """
+        # ensure that additional adapters also add the classifier layer to modules_to_save
+        if hasattr(peft_config, "modules_to_save"):
+            classifier_module_names = ["classifier", "score"]
+            if peft_config.modules_to_save is None:
+                peft_config.modules_to_save = classifier_module_names[:]
+            else:
+                peft_config.modules_to_save.extend(classifier_module_names)
+
+        return super().add_adapter(adapter_name, peft_config)
 
     def forward(
         self,
@@ -1871,18 +1959,53 @@ class PeftModelForQuestionAnswering(PeftModel):
 
     def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
         super().__init__(model, peft_config, adapter_name)
+
+        qa_module_names = ["qa_outputs"]
         if self.modules_to_save is None:
-            self.modules_to_save = {"qa_outputs"}
+            self.modules_to_save = set(qa_module_names)
         else:
-            self.modules_to_save.update({"qa_outputs"})
+            self.modules_to_save.update(qa_module_names)
+
+        if hasattr(peft_config, "modules_to_save"):
+            if peft_config.modules_to_save is None:
+                peft_config.modules_to_save = qa_module_names[:]
+            else:
+                peft_config.modules_to_save.extend(qa_module_names)
 
         for name, _ in self.base_model.named_children():
             if any(module_name in name for module_name in self.modules_to_save):
                 self.cls_layer_name = name
                 break
 
-        # to make sure classifier layer is trainable
+        # to make sure classifier layer is trainable; this may add a new ModulesToSaveWrapper
         _set_trainable(self, adapter_name)
+
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+        """
+        Add an adapter to the model based on the passed configuration.
+
+        This adapter is not trained. To load a trained adapter, check out [`PeftModel.load_adapter`].
+
+        The name for the new adapter should be unique.
+
+        The new adapter is not automatically set as the active adapter. Use [`PeftModel.set_adapter`] to set the active
+        adapter.
+
+        Args:
+            adapter_name (`str`):
+                The name of the adapter to be added.
+            peft_config ([`PeftConfig`]):
+                The configuration of the adapter to be added.
+        """
+        # ensure that additional adapters also add the classifier layer to modules_to_save
+        if hasattr(peft_config, "modules_to_save"):
+            qa_module_names = ["qa_outputs"]
+            if peft_config.modules_to_save is None:
+                peft_config.modules_to_save = qa_module_names[:]
+            else:
+                peft_config.modules_to_save.extend(qa_module_names)
+
+        return super().add_adapter(adapter_name, peft_config)
 
     def forward(
         self,
