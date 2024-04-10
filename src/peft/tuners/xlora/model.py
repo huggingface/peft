@@ -146,6 +146,8 @@ class XLoraModel(BaseTuner):
         self.__dict__["lora_model"] = LoraModel(model, config, adapter_name)
         del conf.target_modules
         super().__init__(model, config, adapter_name)
+        del self.__dict__["xlora_config"]
+        del self.__dict__["lora_model"]
 
     def post_init_lora(
         self,
