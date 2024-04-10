@@ -238,6 +238,28 @@ class XLoraModel(BaseTuner):
 
         self.lora_model.active_adapter = copy
 
+    @staticmethod
+    def _prepare_adapter_config(peft_config, _model_config):
+        # Handle X-LoRA case
+        return peft_config
+
+    def _create_and_replace(
+        self,
+        lora_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        current_key,
+    ):
+        # Does nothing because XLoraModel has no target modules
+        pass
+
+    @staticmethod
+    def _check_target_module_exists(lora_config, key):
+        # Does nothing because XLoraModel has no target modules
+        return False
+
     def _save_pretrained_hook(
         self,
         save_directory: str,
