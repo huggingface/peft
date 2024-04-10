@@ -141,12 +141,12 @@ output = model.generate(**inputs)
 print(tokenizer.decode(output_disabled[0], skip_special_tokens=True))
 ```
 
-To disable the adapter, call the `disable_adapters` method.
+To disable the adapter, call the [`~transformers.integrations.PeftAdapterMixin.disable_adapters`] method.
 
 ```py
 model.disable_adapters()
 ```
 
-The `enable_adapters` can be used to enable the adapters again.
+The [`~transformers.integrations.PeftAdapterMixin.enable_adapters`] can be used to enable the adapters again.
 
 If you're curious, check out the [Load and train adapters with PEFT](https://huggingface.co/docs/transformers/main/peft) tutorial to learn more.
