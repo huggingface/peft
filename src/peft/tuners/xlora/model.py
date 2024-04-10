@@ -87,7 +87,7 @@ def convert_layers_to_xlora(
     return (total_swapped, device)
 
 
-class XLoraModel(LoraModel):
+class XLoraModel:
     """
     Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently,
     this X-LoRA implementation only works with models with a transformer architecture.
@@ -137,7 +137,7 @@ class XLoraModel(LoraModel):
         config: Union[dict[str, XLoraConfig], XLoraConfig],
         adapter_name: str,
     ) -> None:
-        super().__init__(model, config, adapter_name)
+        self.lora_model = LoraModel(model, config, adapter_name)
 
     def post_init_lora(
         self,
@@ -161,9 +161,9 @@ class XLoraModel(LoraModel):
         for name, model_id in adapters_items:
             model_peft.load_adapter(model_id, name, is_trainable=use_trainable_adapters)
 
-        self.delete_adapter(adapter_name)
+        self.lora_model.delete_adapter(adapter_name)
 
-        self.set_adapter(list(peft_config.adapters.keys()))
+        self.lora_model.set_adapter(list(peft_config.adapters.keys()))
         model_peft.active_adapter = name
         model_peft.peft_type = PeftType.XLORA
 
@@ -207,7 +207,7 @@ class XLoraModel(LoraModel):
         xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped, device)
 
         # Setup the model internal state
-        self.__dict__["internal_xlora_classifier"] = xlora_classifier
+        self.internal_xlora_classifier = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
 
     def _freeze_all_adapters(self):
@@ -226,15 +226,15 @@ class XLoraModel(LoraModel):
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
         active_adapters = []
-        copy = self.active_adapters.copy()
-        for name in self.active_adapters:
-            if not isinstance(self.peft_config[name], XLoraConfig):
+        copy = self.lora_model.active_adapters.copy()
+        for name in self.lora_model.active_adapters:
+            if not isinstance(self.lora_model.peft_config[name], XLoraConfig):
                 active_adapters.append(name)
-        self.active_adapter = active_adapters
+        self.lora_model.active_adapter = active_adapters
         if self.xlora_config.use_trainable_adapters:
             super()._mark_only_adapters_as_trainable(model)
 
-        self.active_adapter = copy
+        self.lora_model.active_adapter = copy
 
     def _save_pretrained_hook(
         self,
@@ -243,8 +243,6 @@ class XLoraModel(LoraModel):
         is_main_process: bool = True,
         **kwargs: Any,
     ) -> None:
-        classifier: XLoraClassifier = self.internal_xlora_classifier
-
         conf = self.xlora_config.__dict__.copy()
 
         # So that the adapters are unloadable and the user is forced to set them for from_pretrained
@@ -252,25 +250,8 @@ class XLoraModel(LoraModel):
         with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
             json.dump(conf, f)
 
-        if safe_serialization:
-            # https://github.com/huggingface/peft/blob/main/src/peft/peft_model.py#L223
-            if is_main_process and safe_serialization:
-                save_model(classifier, os.path.join(save_directory, "xlora_classifier.safetensors"))
-        elif is_main_process:
-            state_dict = classifier.state_dict()
-            torch.save(state_dict, os.path.join(save_directory, "xlora_classifier.pt"))
-
-    def inject_adapter(self, model: nn.Module, adapter_name: str):
-        # XLora only supports a single adapter. It wouldn't make sense to have multiple XLora adapters,
-        # but multiple Lora adapters are essentially a requirement.
-        if len(set(self.peft_config.keys()) | {adapter_name}) > 1:
-            raise ValueError(
-                "Trying to add a second XLora adapter, but {self.__class__.__name__} only supports a single adapter."
-            )
-        return super().inject_adapter(model, adapter_name=adapter_name)
-
     def forward(self, *args, **kwargs):
-        return self.model(*args, **kwargs)  # Important to *call* the model
+        return self.lora_model.model(*args, **kwargs)  # Important to *call* the model
 
     def set_topk_lora(self, value: Optional[int]):
         """
