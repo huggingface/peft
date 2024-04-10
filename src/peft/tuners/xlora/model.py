@@ -200,7 +200,7 @@ class XLoraModel(BaseTuner):
 
         model.register_forward_pre_hook(hook, with_kwargs=True, prepend=True)
 
-        self._freeze_all_adapters()
+        self._maybe_freeze_all_adapters()
 
         total_swapped, device = convert_layers_to_xlora(
             model_peft,
@@ -215,7 +215,7 @@ class XLoraModel(BaseTuner):
         self.internal_xlora_classifier = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
 
-    def _freeze_all_adapters(self):
+    def _maybe_freeze_all_adapters(self):
         self.eval()
         if not self.xlora_config.use_trainable_adapters:
             for name, param in self.named_parameters():
@@ -224,8 +224,8 @@ class XLoraModel(BaseTuner):
 
     def generate(self, *args, **kwargs):
         res = self.lora_model.generate(*args, **kwargs)  # type: ignore
-        # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
-        self._freeze_all_adapters()
+        #  This is necessary because we use PeftModel.disable_adapter() which reenables the adapters
+        self._maybe_freeze_all_adapters()
         return res
 
     def __getattr__(self, name: str):
