@@ -142,12 +142,15 @@ class XLoraModel(BaseTuner):
             conf = config[adapter_name]
         else:
             conf = config
+        l = LoraModel(model, config.copy(), adapter_name)
         self.__dict__["xlora_config"] = conf
-        self.__dict__["lora_model"] = LoraModel(model, config, adapter_name)
-        del conf.target_modules
+        del self.xlora_config.target_modules
+        self.__dict__["lora_model"] = l
         super().__init__(model, config, adapter_name)
-        del self.__dict__["xlora_config"]
         del self.__dict__["lora_model"]
+        del self.__dict__["xlora_config"]
+        self.lora_model = l
+        self.xlora_config = conf
 
     def post_init_lora(
         self,
@@ -166,8 +169,6 @@ class XLoraModel(BaseTuner):
 
         for name, model_id in adapters_items:
             self.lora_model.load_adapter(model_id, name)
-
-        self.lora_model.delete_adapter(adapter_name)
 
         self.lora_model.set_adapter(list(peft_config.adapters.keys()))
 

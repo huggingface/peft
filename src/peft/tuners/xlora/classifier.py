@@ -65,7 +65,7 @@ class XLoraClassifier(nn.Module):
     ):
         super().__init__()
 
-        self.model = model
+        self.__dict__["model"] = model  # We want to hide this from Pytorch...
         self.n_classes = n_classes
         self.n_layers = n_layers
         self.config = config
@@ -226,12 +226,12 @@ class XLoraClassifier(nn.Module):
 
         seqlens_map: Dict[int, Tuple[List[int], List[torch.Tensor]]] = {}
         for i, scaling in enumerate(self.log_scalings):
-            seq_len = scaling.shape[0]
+            seq_len = scaling.shape[1]
             if seq_len not in seqlens_map:
-                seqlens_map[seq_len] = ([i], [scaling])
+                seqlens_map[seq_len] = ([i], [scaling.cpu()])
             else:
                 seqlens_map[seq_len][0].append(i)
-                seqlens_map[seq_len][1].append(scaling)
+                seqlens_map[seq_len][1].append(scaling.cpu())
 
         if len(seqlens_map) == 1:
             self._save_scalings(path, [scaling.unsqueeze(0) for scaling in self.log_scalings])
