@@ -138,7 +138,13 @@ class XLoraModel(BaseTuner):
         config: Union[dict[str, XLoraConfig], XLoraConfig],
         adapter_name: str,
     ) -> None:
-        self.lora_model = LoraModel(model, config, adapter_name)
+        if isinstance(config, dict):
+            conf = config[adapter_name]
+        else:
+            conf = config
+        self.__dict__["xlora_config"] = conf
+        self.__dict__["lora_model"] = LoraModel(model, config, adapter_name)
+        del conf.target_modules
         super().__init__(model, config, adapter_name)
 
     def post_init_lora(
@@ -151,23 +157,17 @@ class XLoraModel(BaseTuner):
         # model_peft: PeftModel
         self.xlora_config = peft_config
 
-        if hasattr(model.config, "use_cache") and not model.config.use_cache:
+        if hasattr(model.config, "use_cache") and model.config.use_cache:
             raise ValueError("`use_cache` must be False")
 
-        use_trainable_adapters = peft_config.use_trainable_adapters
         adapters_items = peft_config.adapters.items()
 
-        # For load_adapter to think we are a LoraModel
-        model_peft.peft_type = PeftType.LORA
-
         for name, model_id in adapters_items:
-            model_peft.load_adapter(model_id, name, is_trainable=use_trainable_adapters)
+            self.lora_model.load_adapter(model_id, name)
 
         self.lora_model.delete_adapter(adapter_name)
 
         self.lora_model.set_adapter(list(peft_config.adapters.keys()))
-        model_peft.active_adapter = name
-        model_peft.peft_type = PeftType.XLORA
 
         def hook(module, *args, **kwargs) -> None:
             args_real = args[0]
@@ -220,13 +220,22 @@ class XLoraModel(BaseTuner):
                     param.requires_grad = False
 
     def generate(self, *args, **kwargs):
-        # Rely on LoraModel.__getattr__
-        res = self.model.generate(*args, **kwargs)  # type: ignore
+        res = self.lora_model.generate(*args, **kwargs)  # type: ignore
         # TODO(EricLBuehler): Evaluate effectiveness and performance degradation
         self._freeze_all_adapters()
         return res
 
+    def __getattr__(self, name: str):
+        """Forward missing attributes to the wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self.lora_model, name)
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        # Handle case during init
+        if not hasattr(self, "lora_model"):
+            return
         active_adapters = []
         copy = self.lora_model.active_adapters.copy()
         for name in self.lora_model.active_adapters:
@@ -323,14 +332,14 @@ class XLoraModel(BaseTuner):
         """
         Disable scalings logging, without clearing the log.
         """
-        classifier: XLoraClassifier = self.model.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.scalings_logging = False
 
     def clear_scalings_log(self):
         """
         Clear the scalings log.
         """
-        classifier: XLoraClassifier = self.model.internal_xlora_classifier  # type: ignore
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.log_scalings.clear()
 
     def flush_log_scalings(self, path: str):

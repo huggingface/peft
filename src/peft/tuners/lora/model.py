@@ -179,6 +179,9 @@ class LoraModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
+        # Handle X-LoRA case:
+        if not hasattr(lora_config, "rank_pattern"):
+            return
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
@@ -257,6 +260,9 @@ class LoraModel(BaseTuner):
                 p.requires_grad = False
 
         for active_adapter in self.active_adapters:
+            # Handle X-LoRA case
+            if not hasattr(self.peft_config[active_adapter], "bias"):
+                return
             bias = self.peft_config[active_adapter].bias
             if bias == "none":
                 continue
