@@ -16,16 +16,19 @@
 # limitations under the License.
 import copy
 import os
+import re
+import shutil
 import tempfile
 import time
 import unittest
 from contextlib import contextmanager
+from functools import partial
 
 import pytest
 import torch
 from parameterized import parameterized
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
@@ -37,6 +40,7 @@ from peft import (
     LoraConfig,
     OFTConfig,
     PeftModel,
+    TaskType,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -456,9 +460,9 @@ class DeepMLP(nn.Module):
 
 
 class ModelEmbConv1D(nn.Module):
-    def __init__(self):
+    def __init__(self, emb_size=100):
         super().__init__()
-        self.emb = nn.Embedding(100, 5)
+        self.emb = nn.Embedding(emb_size, 5)
         self.conv1d = Conv1D(1, 5)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
@@ -960,6 +964,131 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert hasattr(model.base_model.model.lin0, "weight")
         assert hasattr(model.base_model.model.lin0, "bias")
 
+    def test_multiple_adapters_automatic_modules_to_save(self):
+        # See issue 1574
+        # When we use certain task types, PeftModel.modules_to_save is automatically updated to include some extra
+        # layers not specified in the PeftConfig. This attribute should be honored for all adapters, not just for
+        # the default adapter.
+        config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        model = get_peft_model(model, config0)
+        # sanity check
+        assert model.modules_to_save
+
+        model.add_adapter("other", config1)
+        assert "default" in model.base_model.classifier.modules_to_save
+        assert "other" in model.base_model.classifier.modules_to_save
+
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
+        # See issue 1574
+        # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
+        # possible to switch between those adapters and to use them.
+        if hasattr(config_cls, "feedforward_modules"):  # IA³
+            config_cls = partial(config_cls, feedforward_modules=["lin0"])
+
+        config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = config_cls(target_modules=["lin0"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        assert "default" in model.base_model.lin1.modules_to_save
+        assert "other" not in model.base_model.lin1.modules_to_save
+
+        # check that switching adapters and predicting does not raise
+        inputs = self.prepare_inputs_for_testing()
+        # "default" adapter is active
+        model(**inputs)
+        # switch to "other" adapter
+        model.set_adapter("other")
+        model(**inputs)
+
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
+        # See issue 1574
+        # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
+        if hasattr(config_cls, "feedforward_modules"):  # IA³
+            config_cls = partial(config_cls, feedforward_modules=["lin0"])
+
+        config0 = config_cls(target_modules=["lin0"])
+        config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        assert "default" not in model.base_model.lin1.modules_to_save
+        assert "other" in model.base_model.lin1.modules_to_save
+
+        # check that switching adapters and predicting does not raise
+        inputs = self.prepare_inputs_for_testing()
+        # "default" adapter is active
+        model(**inputs)
+        # switch to "other" adapter
+        model.set_adapter("other")
+        model(**inputs)
+
+    def test_multiple_adapters_mixed_modules_to_save_merging_adapters(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save, but it also checks that merging adapter
+        # weights works when one adapter has a modules_to_save and the other hasn't
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        # check that this does not raise
+        model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+        # since one of the adapters that was merged has a modules_to_save, that one should be used for the merged
+        # adapter
+        assert "default" in model.base_model.model.lin1.modules_to_save
+        assert "other" not in model.base_model.model.lin1.modules_to_save
+        assert "merged" in model.base_model.model.lin1.modules_to_save
+
+        # check that using the merged adapter does not raise
+        model.set_adapter("merged")
+        inputs = self.prepare_inputs_for_testing()
+        model(**inputs)
+
+    def test_multiple_adapters_same_modules_to_save_merging_adapters_raises(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save_merging_adapters but here the two
+        # adapters target the same module with modules_to_save. In this case, trying to merge the adapter weights
+        # should raise an error.
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        msg = re.escape(
+            "Cannot add weighted adapters if they target the same module with modules_to_save, but found 1 such "
+            "instance(s)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+    def test_multiple_adapters_seq_cls_mixed_modules_to_save_merging_adapters(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save_merging_adapters but uses a SEQ_CLS
+        # model like in test_multiple_adapters_automatic_modules_to_save. This should raise an error because the same
+        # module is implicitly targeted by modules_to_save twice.
+        config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        msg = re.escape(
+            "Cannot add weighted adapters if they target the same module with modules_to_save, but found 1 such "
+            "instance(s)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
         model = MLP()
@@ -1042,6 +1171,35 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             state_dict = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
             assert "base_model.model.emb.base_layer.weight" not in state_dict
             del state_dict
+
+    def test_load_resized_embedding_ignore_mismatched_sizes(self):
+        # issue #1605
+        # Make it possible to load a LoRA layer that targets an embedding layer even if the sizes mismatch by passing
+        # ignore_mismatched_sizes=True
+        model = ModelEmbConv1D(emb_size=100)
+        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.mkdtemp()
+        try:
+            model.save_pretrained(tmp_dirname)
+            model = ModelEmbConv1D(emb_size=105)
+
+            # first check that this raises
+            with pytest.raises(RuntimeError) as exc:
+                PeftModel.from_pretrained(model, tmp_dirname)
+            msg = exc.value.args[0]
+            assert "size mismatch" in msg and "100" in msg and "105" in msg
+
+            # does not raise
+            PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                # windows error
+                pass
 
     @parameterized.expand(
         [
@@ -1128,6 +1286,22 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             unloaded = model.unload()
 
         assert isinstance(unloaded.classifier, nn.Linear)
+
+    def test_gpt2_dora_merge_and_unload(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload()
+
+    def test_gpt2_dora_merge_and_unload_safe_merge(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload(safe_merge=True)
 
 
 class TestMultiRankAdapter(unittest.TestCase):

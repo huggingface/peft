@@ -73,7 +73,7 @@ Learn more about how PEFT supports Diffusers in the [Inference with PEFT](https:
 
 ## Transformers
 
-Transformers is a collection of pretrained models for all types of tasks in all modalities. You can load these models for training or inference. Many of the models are large language models (LLMs), so it makes sense to integrate PEFT with Transformers to manage and train adapters.
+🤗 [Transformers](https://hf.co/docs/transformers) is a collection of pretrained models for all types of tasks in all modalities. You can load these models for training or inference. Many of the models are large language models (LLMs), so it makes sense to integrate PEFT with Transformers to manage and train adapters.
 
 Load a base pretrained model to train.
 
@@ -105,10 +105,19 @@ To use the newly trained model for inference, the [`~transformers.AutoModel`] cl
 ```py
 from transformers import AutoModelForCausalLM
 
-model = AutoModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora")
+model = AutoModelForCausalLM.from_pretrained("peft-internal-testing/opt-350m-lora")
 ```
 
-If you're interested in comparing or using more than one adapter, you can also call the [`~PeftModel.add_adapter`] method to add the adapter configuration to the base model. The only requirement is the adapter type must be the same (you can't mix a LoRA and LoHa adapter).
+Alternatively, you can use transformers [Pipelines](https://huggingface.co/docs/transformers/en/main_classes/pipelines) to load the model for conveniently running inference:
+
+```py
+from transformers import pipeline
+
+model = pipeline("text-generation", "peft-internal-testing/opt-350m-lora")
+print(model("Hello World"))
+```
+
+If you're interested in comparing or using more than one adapter, you can call the [`~PeftModel.add_adapter`] method to add the adapter configuration to the base model. The only requirement is the adapter type must be the same (you can't mix a LoRA and LoHa adapter).
 
 ```py
 from transformers import AutoModelForCausalLM
