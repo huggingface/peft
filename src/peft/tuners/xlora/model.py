@@ -22,6 +22,7 @@ from safetensors.torch import save_model  # type: ignore
 from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
+from peft.tuners.tuners_utils import BaseTuner
 from peft.utils.peft_types import PeftType
 
 from .. import lora
@@ -87,7 +88,7 @@ def convert_layers_to_xlora(
     return (total_swapped, device)
 
 
-class XLoraModel:
+class XLoraModel(BaseTuner):
     """
     Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently,
     this X-LoRA implementation only works with models with a transformer architecture.
@@ -138,6 +139,7 @@ class XLoraModel:
         adapter_name: str,
     ) -> None:
         self.lora_model = LoraModel(model, config, adapter_name)
+        super().__init__(model, config, adapter_name)
 
     def post_init_lora(
         self,
