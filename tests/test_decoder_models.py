@@ -48,6 +48,9 @@ def skip_adalora_and_gpt2(test_list):
 def skip_boft_and_gpt2(test_list):
     return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == BOFTConfig))]
 
+def skip_adalora_or_boft_and_gpt2(test_list):
+    return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and ((test[2] == AdaLoraConfig) or (test[2] == BOFTConfig)))]
+
 
 class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
     r"""
@@ -274,7 +277,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "boft_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_boft_and_gpt2,
+            filter_params_func=skip_adalora_or_boft_and_gpt2,
         )
     )
     def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
