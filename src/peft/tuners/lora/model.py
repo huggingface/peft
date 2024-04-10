@@ -413,6 +413,7 @@ class LoraModel(BaseTuner):
         peft_config.target_modules = set(
             TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
         )
+        return peft_config
 
     def _unload_and_optionally_merge(
         self,
