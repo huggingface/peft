@@ -153,7 +153,6 @@ class LoraLayer(BaseTunerLayer):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def pissa_init(self, adapter_name, init_lora_weights):
-        assert self.scaling[adapter_name] == 1
         weight = self.get_base_layer().weight
         dtype = weight.dtype
         device = weight.device
@@ -169,11 +168,13 @@ class LoraLayer(BaseTunerLayer):
             U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
             Ur = U[:, : self.r[adapter_name]]
             Sr = S[: self.r[adapter_name]]
+            Sr /= self.scaling[adapter_name]
             Vhr = Vh[: self.r[adapter_name]]
         elif len(init_lora_weights.split("_niter_")) == 2:
             Ur, Sr, Vr = svd_lowrank(
                 weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
             )
+            Sr /= self.scaling[adapter_name]
             Vhr = Vr.t()
         else:
             raise "init_lora_weights should be pissa or pissa_niter_[number of iters]."
@@ -182,7 +183,7 @@ class LoraLayer(BaseTunerLayer):
         lora_B = Ur @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        res = weight.data - lora_B @ lora_A
+        res = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         if dtype == torch.uint8:
             weight = bnb.nn.Params4bit(
                 res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type
