@@ -18,15 +18,12 @@ from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
-from safetensors.torch import save_model  # type: ignore
-from transformers import PreTrainedModel
 
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
-from peft.utils.peft_types import PeftType
 
 from .. import lora
-from .classifier import InhibitorFlagPayload, Number, XLoraClassifier
+from .classifier import InhibitorFlagPayload, XLoraClassifier
 from .config import XLoraConfig
 from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALinearLayer
 
@@ -142,14 +139,14 @@ class XLoraModel(BaseTuner):
             conf = config[adapter_name]
         else:
             conf = config
-        l = LoraModel(model, config.copy(), adapter_name)
+        lora_model = LoraModel(model, config.copy(), adapter_name)
         self.__dict__["xlora_config"] = conf
         del self.xlora_config.target_modules
-        self.__dict__["lora_model"] = l
+        self.__dict__["lora_model"] = lora_model
         super().__init__(model, config, adapter_name)
         del self.__dict__["lora_model"]
         del self.__dict__["xlora_config"]
-        self.lora_model = l
+        self.lora_model = lora_model
         self.xlora_config = conf
 
     def post_init_lora(

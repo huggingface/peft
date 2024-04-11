@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
+
 
 model_id = "facebook/opt-125m"
 tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, device_map="cuda:0")
@@ -167,4 +169,4 @@ class TestXlora:
         model.get_use_trainable_adapters()
         assert not model.xlora_config.use_trainable_adapters
 
-        assert str(model) != None
+        assert str(model) is not None
