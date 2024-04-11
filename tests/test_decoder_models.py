@@ -48,8 +48,13 @@ def skip_adalora_and_gpt2(test_list):
 def skip_boft_and_gpt2(test_list):
     return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == BOFTConfig))]
 
+
 def skip_adalora_or_boft_and_gpt2(test_list):
-    return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and ((test[2] == AdaLoraConfig) or (test[2] == BOFTConfig)))]
+    return [
+        test
+        for test in test_list
+        if not (("GPT2LMHeadModel" in test[1]) and ((test[2] == AdaLoraConfig) or (test[2] == BOFTConfig)))
+    ]
 
 
 class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
