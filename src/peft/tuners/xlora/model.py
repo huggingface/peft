@@ -153,7 +153,6 @@ class XLoraModel(BaseTuner):
         self,
         model: nn.Module,
         peft_config: XLoraConfig,
-        adapter_name: str,
         model_peft: nn.Module,
     ) -> None:
         # model_peft: PeftModel
@@ -163,9 +162,17 @@ class XLoraModel(BaseTuner):
             raise ValueError("`use_cache` must be False")
 
         adapters_items = peft_config.adapters.items()
+        if hasattr(self.xlora_config, "_subfolders"):
+            adapters_items = zip(peft_config.adapters.items(), self.xlora_config._subfolders)
+        else:
+            adapters_items = peft_config.adapters.items()
 
-        for name, model_id in adapters_items:
-            self.lora_model.load_adapter(model_id, name)
+        if hasattr(self.xlora_config, "_subfolders"):
+            for (adapter_name, model_id), subfolder in adapters_items:
+                self.lora_model.load_adapter(model_id, adapter_name, subfolder=subfolder)
+        else:
+            for adapter_name, model_id in adapters_items:
+                self.lora_model.load_adapter(model_id, adapter_name)
 
         self.lora_model.set_adapter(list(peft_config.adapters.keys()))
 
@@ -280,6 +287,8 @@ class XLoraModel(BaseTuner):
 
         # So that the adapters are unloadable and the user is forced to set them for from_pretrained
         conf["adapters"] = None
+        if hasattr(conf, "_subfolders"):
+            del conf["_subfolders"]  # It may have been added in from_pretrained
         with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
             json.dump(conf, f)
 
