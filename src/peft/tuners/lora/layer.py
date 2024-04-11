@@ -158,12 +158,10 @@ class LoraLayer(BaseTunerLayer):
         device = weight.device
         if dtype == torch.uint8:
             quant_type = weight.quant_type
-            import bitsandbytes as bnb
+        quant_state = getattr(self.get_base_layer(), "state", None)
+        weight = dequantize_bnb_weight(weight, state=quant_state).to(torch.float32)  # no-op if not bnb
 
-            weight = bnb.functional.dequantize_4bit(weight.data, weight.quant_state).to(torch.float32)
-        elif dtype != torch.float32:
-            weight = self.get_base_layer().weight.to(torch.float32)
-
+                    
         if init_lora_weights == "pissa":
             # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel}, 
             V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
@@ -186,9 +184,13 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = lora_B
         res = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
         if dtype == torch.uint8:
+            import bitsandbytes as bnb
             weight = bnb.nn.Params4bit(
                 res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type
             ).to(device)
+        elif dtype == torch.int8:
+            import bitsandbytes as bnb
+            weight = bnb.nn.Int8Params(res.to("cpu")).to(device)
         else:
             weight = res.to(dtype)
         self.get_base_layer().weight.data = weight
