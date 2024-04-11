@@ -56,12 +56,12 @@ An easier but more limited way to apply LoftQ initialization is to use the conve
 from peft import replace_lora_weights_loftq
 from transformers import BitsAndBytesConfig
 
-bnb_config = BitsAndBytesConfig(load_in_4bit, ...)
+bnb_config = BitsAndBytesConfig(load_in_4bit=True, ...)
 base_model = AutoModelForCausalLM.from_pretrained(..., quantization_config=bnb_config)
 # note: don't pass init_lora_weights="loftq" or loftq_config!
 lora_config = LoraConfig(task_type="CAUSAL_LM")
 peft_model = get_peft_model(base_model, lora_config)
-replace_lora_weights_loft(peft_model)
+replace_lora_weights_loftq(peft_model)
 ```
 
 `replace_lora_weights_loftq` also allows you to pass a `callback` argument to give you more control over which layers should be modified or not, which empirically can improve the results quite a lot. To see a more elaborate example of this, check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/loftq_finetuning/LoftQ_weight_replacement.ipynb).
@@ -101,7 +101,7 @@ config = LoraConfig(use_dora=True, ...)
 
 #### Caveats
 
-- DoRA only supports linear layers at the momement.
+- DoRA only supports linear and Conv2d layers at the momement.
 - DoRA introduces a bigger overhead than pure LoRA, so it is recommended to merge weights for inference, see [`LoraModel.merge_and_unload`]. 
 - DoRA should work with weights quantized with bitsandbytes ("QDoRA"). However, issues have been reported when using QDoRA with DeepSpeed Zero2.
 
@@ -124,7 +124,7 @@ config = LoraConfig(layer_replication=[[0,4], [2,5]], ...)
 Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a model with 7 layers arranged as `[0, 1, 2, 3, 2, 3, 4]`. This follows the [mergekit](https://github.com/arcee-ai/mergekit) pass through merge convention where sequences of layers specified as start inclusive and end exclusive tuples are stacked to build the final model. Each layer in the final model gets its own distinct set of LoRA adpaters.
 
 [Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
-(adapter_config.json)[https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json] shows a sample LoRA adapter config applying this method for fine-tuning.
+[adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
 
 ## Merge adapters
 

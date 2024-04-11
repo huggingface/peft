@@ -144,15 +144,6 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     return model
 
 
-# For backward compatibility
-def prepare_model_for_int8_training(*args, **kwargs):
-    warnings.warn(
-        "prepare_model_for_int8_training is deprecated and will be removed in a future version. Use prepare_model_for_kbit_training instead.",
-        FutureWarning,
-    )
-    return prepare_model_for_kbit_training(*args, **kwargs)
-
-
 # copied from transformers.models.bart.modeling_bart
 def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
     """
@@ -342,7 +333,13 @@ def _set_adapter(model, adapter_name):
         if isinstance(module, ModulesToSaveWrapper):
             # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
             adapter_name = check_adapter_name(adapter_name)
-            module.set_adapter(adapter_name)
+
+            # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
+            # module
+            if adapter_name in module.modules_to_save:
+                module.set_adapter(adapter_name)
+            else:
+                module.enable_adapters(False)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):

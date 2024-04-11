@@ -50,7 +50,6 @@ from peft import (
     PeftModel,
     TaskType,
     get_peft_model,
-    prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
 )
@@ -162,7 +161,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             )
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -473,7 +472,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             setattr(model, "model_parallel", True)
             setattr(model, "is_parallelizable", True)
@@ -536,7 +535,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == {0}
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -597,7 +596,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             tokenizer = AutoTokenizer.from_pretrained(self.seq2seq_model_id)
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             config = LoraConfig(
                 r=16,
@@ -688,7 +687,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model.config.forced_decoder_ids = None
             model.config.suppress_tokens = []
 
-            model = prepare_model_for_int8_training(model)
+            model = prepare_model_for_kbit_training(model)
 
             # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
             # to avoid this, make the inputs trainable
@@ -815,7 +814,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                load_in_4bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
                 device_map="auto",
             )
 
@@ -873,7 +872,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="auto",
-                load_in_4bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
@@ -932,7 +931,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
-                load_in_8bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
                 device_map="auto",
             )
 
@@ -990,7 +989,7 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             model = AutoModelForCausalLM.from_pretrained(
                 self.causal_lm_model_id,
                 device_map="auto",
-                load_in_8bit=True,
+                quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             )
 
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
@@ -1029,6 +1028,57 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
                     output_dir=tmp_dir,
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            model.config.use_cache = False
+            trainer.train()
+
+            model.cpu().save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_gpt2_dora(self):
+        r"""
+        Same as test_causal_lm_training_4bit but with DoRA
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model = AutoModelForCausalLM.from_pretrained("gpt2", device_map="auto")
+
+            tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    fp16=True,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
             )
             model.config.use_cache = False
             trainer.train()
@@ -1306,21 +1356,52 @@ class OffloadSaveTests(unittest.TestCase):
         gc.collect()
         torch.cuda.empty_cache()
 
-    @pytest.mark.single_gpu_tests
-    @require_torch_gpu
-    def test_offload_merge(self):
+    def test_offload_load(self):
         r"""
-        Test merging, unmerging, and unloading of a model with CPU- offloaded modules.
+        Test the loading of a LoRA model with CPU- and disk-offloaded modules
         """
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
         tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
-        # TODO: add disk offload once PeftModel.from_pretrained supports
-        memory_limits = {0: "0.4GIB", "cpu": "5GIB"}
+        memory_limits = {"cpu": "0.4GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
+
+        # offload around half of all transformer modules to the disk
+        device_map = infer_auto_device_map(model, max_memory=memory_limits)
+        assert "cpu" in device_map.values()
+        assert "disk" in device_map.values()
+
+        config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
+
+        model = get_peft_model(model, config)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map="cpu")
+            lora_model = PeftModel.from_pretrained(model, tmp_dir).eval()
+            input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")
+            output = lora_model(input_tokens)[0]
+
+            # load the model with device_map
+            offloaded_model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map)
+            assert len({p.device for p in offloaded_model.parameters()}) == 2  # 'cpu' and 'meta'
+            offloaded_lora_model = PeftModel.from_pretrained(offloaded_model, tmp_dir, max_memory=memory_limits).eval()
+            offloaded_output = offloaded_lora_model(input_tokens)[0]
+        assert torch.allclose(output, offloaded_output, atol=1e-5)
+
+    @pytest.mark.single_gpu_tests
+    @require_torch_gpu
+    def test_offload_merge(self):
+        r"""
+        Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
+        """
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id)
+        tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
+        memory_limits = {0: "0.2GIB", "cpu": "0.2GIB"}  # no "disk" for PeftModel.from_pretrained() compatibility
         # offloads around half of all transformer modules
         device_map = infer_auto_device_map(model, max_memory=memory_limits)
         assert 0 in device_map.values()
         assert "cpu" in device_map.values()
+        assert "disk" in device_map.values()
 
         config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["c_attn"])
 
@@ -1330,6 +1411,7 @@ class OffloadSaveTests(unittest.TestCase):
             # load the model with device_map
             model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, device_map=device_map).eval()
             assert len({p.device for p in model.parameters()}) == 2
+
             model = PeftModel.from_pretrained(model, tmp_dir, max_memory=memory_limits)
 
         input_tokens = tokenizer.encode("Four score and seven years ago", return_tensors="pt")

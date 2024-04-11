@@ -555,9 +555,9 @@ def main():
 
     # preparing peft model
     if args.use_peft:
-        from peft import prepare_model_for_int8_training
+        from peft import prepare_model_for_kbit_training
 
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
 
         # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
         # to avoid this, make the inputs trainable
