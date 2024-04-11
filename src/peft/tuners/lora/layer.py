@@ -178,7 +178,7 @@ class LoraLayer(BaseTunerLayer):
             Sr /= self.scaling[adapter_name]
             Uhr = Ur.t()
         else:
-            raise "init_lora_weights should be pissa or pissa_niter_[number of iters]."
+            raise ValueError(f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead.")
 
         lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
         lora_B = Vr @ torch.diag(torch.sqrt(Sr))
