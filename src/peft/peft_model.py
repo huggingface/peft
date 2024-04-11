@@ -22,7 +22,6 @@ from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Optional, Union
 
-import huggingface_hub
 import packaging.version
 import torch
 import transformers
