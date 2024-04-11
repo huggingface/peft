@@ -165,22 +165,23 @@ class LoraLayer(BaseTunerLayer):
             weight = self.get_base_layer().weight.to(torch.float32)
 
         if init_lora_weights == "pissa":
-            U, S, Vh = torch.linalg.svd(weight.data, full_matrices=False)
-            Ur = U[:, : self.r[adapter_name]]
+            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel}, 
+            V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
+            Vr = V[:, : self.r[adapter_name]]
             Sr = S[: self.r[adapter_name]]
             Sr /= self.scaling[adapter_name]
-            Vhr = Vh[: self.r[adapter_name]]
+            Uhr = Uh[: self.r[adapter_name]]
         elif len(init_lora_weights.split("_niter_")) == 2:
-            Ur, Sr, Vr = svd_lowrank(
+            Vr, Sr, Ur = svd_lowrank(
                 weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
             )
             Sr /= self.scaling[adapter_name]
-            Vhr = Vr.t()
+            Uhr = Ur.t()
         else:
             raise "init_lora_weights should be pissa or pissa_niter_[number of iters]."
 
-        lora_A = torch.diag(torch.sqrt(Sr)) @ Vhr
-        lora_B = Ur @ torch.diag(torch.sqrt(Sr))
+        lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
+        lora_B = Vr @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
         res = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
