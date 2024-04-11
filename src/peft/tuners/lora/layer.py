@@ -18,7 +18,7 @@ import warnings
 from typing import Any, Optional, Union
 
 import torch
-from torch._lowrank import svd_lowrank
+from torch import svd_lowrank
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.pytorch_utils import Conv1D
