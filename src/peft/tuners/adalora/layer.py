@@ -15,12 +15,20 @@
 import warnings
 from typing import Any, List, Optional
 
+import packaging
 import torch
+import transformers
 from torch import nn
 
 from peft.tuners.lora import LoraLayer
 from peft.tuners.tuners_utils import check_adapters_to_merge
 from peft.utils import transpose
+
+
+if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
+    from transformers.integrations import deepspeed_config
+else:
+    from transformers.deepspeed import deepspeed_config
 
 
 class AdaLoraLayer(LoraLayer):
@@ -253,7 +261,13 @@ class RankAllocator:
                     self.exp_avg_ipt[n] = torch.zeros_like(p)
                     self.exp_avg_unc[n] = torch.zeros_like(p)
                 with torch.no_grad():
-                    self.ipt[n] = (p * p.grad).abs().detach()
+                    if deepspeed_config() is not None:
+                        import deepspeed
+
+                        grad = deepspeed.utils.safe_get_full_grad(p)
+                        self.ipt[n] = (p * grad).abs().detach()
+                    else:
+                        self.ipt[n] = (p * p.grad).abs().detach()
                     # Sensitivity smoothing
                     self.exp_avg_ipt[n] = self.beta1 * self.exp_avg_ipt[n] + (1 - self.beta1) * self.ipt[n]
                     # Uncertainty quantification
