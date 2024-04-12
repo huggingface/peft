@@ -14,6 +14,7 @@
 
 import os
 
+from peft.peft_model import PeftModel
 import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -140,3 +141,28 @@ class TestXlora:
         assert not model.xlora_config.use_trainable_adapters
 
         assert str(model) is not None
+
+    def test_save_load_functional(self, tokenizer, model, tmp_dir):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
+        print(text[0])
+
+        model.save_pretrained(save_directory=tmp_dir)
+
+        del model
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        model.config.use_cache = False
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir)
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
+        print(text[0])
