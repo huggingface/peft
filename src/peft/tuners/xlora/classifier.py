@@ -118,6 +118,40 @@ class XLoraClassifier(nn.Module):
                 last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(device).to(dtype)
         self.layers = nn.Sequential(*layers, last)
 
+    def make_dummy_scalingss(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        *args,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Make some dummy scalings
+        """
+        if input_ids is not None:
+            batch_size = input_ids.shape[0]
+            device = input_ids.device
+        else:
+            batch_size = inputs_embeds.shape[0]
+            device = input_ids.device
+
+        if input_ids is not None:
+            seq_len = input_ids.shape[1]
+            device = input_ids.device
+        else:
+            seq_len = inputs_embeds.shape[1]
+            device = input_ids.device
+
+        payload = InhibitorFlagPayload(
+            batch_size=batch_size,
+            seq_len=seq_len,
+            override_scaling_pass_value=self.override_scaling_pass_value,
+        )
+        return torch.full(  # type: ignore
+            (payload.batch_size, payload.seq_len, self.n_layers, self.n_classes),
+            payload.override_scaling_pass_value,
+        ).to(device)
+
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,

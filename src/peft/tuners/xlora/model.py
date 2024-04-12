@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTuner
 from .. import lora
 from .classifier import InhibitorFlagPayload, XLoraClassifier
 from .config import XLoraConfig
-from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALinearLayer
+from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALayer, XLoRALinearLayer
 
 
 @staticmethod
@@ -176,34 +176,6 @@ class XLoraModel(BaseTuner):
 
         self.lora_model.set_adapter(list(peft_config.adapters.keys()))
 
-        def hook(module, *args, **kwargs) -> None:
-            args_real = args[0]
-            kwargs_real: dict = args[1]
-            kwargs_real.update(kwargs)
-
-            xlora_classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-
-            if "_xlora_classifier_inhibitor_flag" in kwargs_real:
-                payload: InhibitorFlagPayload = kwargs_real["_xlora_classifier_inhibitor_flag"]
-
-                del kwargs_real["_xlora_classifier_inhibitor_flag"]
-
-                self.internal_xlora_scalings = torch.full(  # type: ignore
-                    (payload.batch_size, payload.seq_len, xlora_classifier.n_layers, xlora_classifier.n_classes),
-                    payload.override_scaling_pass_value,
-                ).to(model_peft.device)
-
-                return
-
-            xlora_scalings = xlora_classifier.forward(
-                *args_real,
-                **kwargs_real,
-            )
-            # Set the scalings
-            self.internal_xlora_scalings = xlora_scalings
-
-        model.register_forward_pre_hook(hook, with_kwargs=True, prepend=True)
-
         self._maybe_freeze_all_adapters()
 
         total_swapped, device = convert_layers_to_xlora(
@@ -293,7 +265,57 @@ class XLoraModel(BaseTuner):
             json.dump(conf, f)
 
     def forward(self, *args, **kwargs):
-        return self.lora_model.model(*args, **kwargs)  # Important to *call* the model
+        model = self.lora_model.model
+
+        # =========================== Forward pass with "dummy" scalings ==================
+
+        dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args, **kwargs)
+
+        # Inject the dummy scalings to each layer
+        def hook(module, *args, **kwargs):
+            module.scalings = dummy_scalings
+            return args, kwargs
+
+        handles = []
+
+        for module in model.modules():
+            if isinstance(module, XLoRALayer):
+                handle = module.register_forward_pre_hook(hook, with_kwargs=True)
+                handles.append(handle)
+
+        with torch.no_grad():
+            with model.disable_adapter():
+                scaling_pass_kwargs = kwargs.copy()
+                scaling_pass_kwargs["output_hidden_states"] = True
+                scaling_pass_kwargs["return_dict"] = True
+                try:
+                    base_output = self.model(*args, **scaling_pass_kwargs)
+                finally:
+                    for handle in handles:
+                        handle.remove()
+
+        xlora_scalings = self.xlora_classifier(**base_output)
+
+        # =========================== Real forward pass with calculated scalings ==================
+
+        # Inject the *real* scalings to each layer
+        def hook(module, *args, **kwargs):
+            module.scalings = xlora_scalings
+            return args, kwargs
+
+        handles = []
+
+        for module in model.modules():
+            if isinstance(module, XLoRALayer):
+                handle = module.register_forward_pre_hook(hook, with_kwargs=True)
+                handles.append(handle)
+
+        try:
+            output = self.model(*args, **kwargs)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return output
 
     def set_topk_lora(self, value: Optional[int]):
         """
