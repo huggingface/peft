@@ -14,11 +14,11 @@
 
 import os
 
+import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
-import pytest
 
 
 class TestXlora:
