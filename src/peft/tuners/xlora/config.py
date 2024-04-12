@@ -49,13 +49,13 @@ class XLoraConfig(PeftConfig):
             Depth of the X-LoRA classifier.
         xlora_size (`int`, *optional*, defaults to 2048):
             Hidden size of the X-LoRA classifier, irrelevant if `xlora_depth=1`.
-        enable_relu_and_dropout (`bool`, *optional*, defaults to `False`):
+        enable_relu_and_dropout (`bool`, *optional*, defaults to `True`):
             Enable ReLU activation and Dropout application of the X-LoRA classifier.
         use_bias (`bool`, *optional*, defaults to `True`):
             Enable bias in X-LoRA classifier.
         xlora_dropout_p (`float`, *optional*, defaults to 0.2):
             Dropout probability of the X-LoRA classifier, irrelevant if `xlora_depth=1` or
-            `enable_relu_and_dropout=True`.
+            `enable_relu_and_dropout=False`.
         use_trainable_adapters (`bool`, *optional*, defaults to False):
             Make the adapters trainable.
         scaling_pass_value (`float`, *optional*, defaults to 0):
@@ -71,7 +71,7 @@ class XLoraConfig(PeftConfig):
     layerwise_scalings: bool = False
     xlora_depth: int = 1
     xlora_size: int = 2048
-    enable_relu_and_dropout: bool = False
+    enable_relu_and_dropout: bool = True
     use_bias: bool = True
     xlora_dropout_p: float = 0.2
     use_trainable_adapters: bool = False
