@@ -13,16 +13,11 @@
 # limitations under the License.
 
 import builtins
-import json
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
-import numpy
 import torch
 import torch.nn as nn
-from transformers.modeling_outputs import (  # type: ignore
-    ModelOutput,
-)
 
 from .config import XLoraConfig
 
@@ -65,7 +60,6 @@ class XLoraClassifier(nn.Module):
     ):
         super().__init__()
 
-        self.__dict__["model"] = model  # We want to hide this from Pytorch...
         self.n_classes = n_classes
         self.n_layers = n_layers
         self.config = config

@@ -23,9 +23,9 @@ from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
 
 from .. import lora
-from .classifier import InhibitorFlagPayload, XLoraClassifier
+from .classifier import XLoraClassifier
 from .config import XLoraConfig
-from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALayer, XLoRALayer, XLoRALinearLayer
+from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALinearLayer
 
 
 @staticmethod
