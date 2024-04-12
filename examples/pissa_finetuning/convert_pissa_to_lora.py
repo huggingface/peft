@@ -23,7 +23,10 @@ def pissa_to_lora(init_path, finetuned_path, output_path, device='cpu', tensors_
             
     tensors_delta_w = {}
     for name in tensors_init.keys():
-        tensors_delta_w[name] = torch.cat([tensors_finetune[name], -tensors_init[name]], dim=0 if 'lora_A' in name else 1)
+        ## W = W^res + A_0 \times B_0,
+        ## W + \Delta W = W^res + A \times B,
+        ## \Delta W = A \times B - A_0 \times B_0 = [A + A_0] \times [B - B_0]^T.
+        tensors_delta_w[name] = torch.cat([tensors_finetune[name], tensors_init[name]], dim=0) if 'lora_A' in name else torch.cat([tensors_finetune[name], -tensors_init[name]], dim=1)
 
     if not os.path.exists(output_path):
         os.mkdir(output_path)
