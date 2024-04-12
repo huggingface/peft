@@ -135,7 +135,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             if isinstance(self.base_model, XLoraModel):
-                self.base_model.post_init_lora(model, peft_config, adapter_name, self)
+                self.base_model.post_init_lora(model, peft_config, self)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if getattr(model, "is_gradient_checkpointing", True):
