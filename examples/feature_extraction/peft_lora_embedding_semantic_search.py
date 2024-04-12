@@ -27,12 +27,11 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import DatasetDict, load_dataset
-from huggingface_hub import Repository, create_repo
+from huggingface_hub import HfApi
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer, SchedulerType, default_data_collator, get_scheduler
-from transformers.utils import get_full_repo_name
 
 from peft import LoraConfig, TaskType, get_peft_model
 
@@ -236,12 +235,13 @@ def main():
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
-            else:
-                repo_name = args.hub_model_id
-            create_repo(repo_name, exist_ok=True, token=args.hub_token)
-            repo = Repository(args.output_dir, clone_from=repo_name, token=args.hub_token)
+            api = HfApi(token=args.hub_token)
+
+            # Create repo (repo_name from args or inferred)
+            repo_name = args.hub_model_id
+            if repo_name is None:
+                repo_name = Path(args.output_dir).absolute().name
+            repo_id = api.create_repo(repo_name, exist_ok=True).repo_id
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -487,7 +487,12 @@ def main():
                         if epoch < args.num_train_epochs - 1
                         else "End of training"
                     )
-                    repo.push_to_hub(commit_message=commit_message, blocking=False, auto_lfs_prune=True)
+                    api.upload_folder(
+                        repo_id=repo_id,
+                        folder_path=args.output_dir,
+                        commit_message=commit_message,
+                        run_as_future=True,
+                    )
             accelerator.wait_for_everyone()
     accelerator.end_training()
 
