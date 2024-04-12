@@ -27,6 +27,7 @@ from peft.utils import (
     get_auto_gptq_quant_linear,
     get_quantization_config,
 )
+from peft.utils.integrations import gather_params_ctx
 
 from .gptq import SVDQuantLinear
 from .layer import AdaLoraLayer, RankAllocator, SVDLinear
@@ -244,7 +245,11 @@ class AdaLoraModel(LoraModel):
             num_param = 0
             for n, p in self.model.named_parameters():
                 if ("lora_A" in n or "lora_B" in n) and self.trainable_adapter_name in n:
-                    para_cov = p @ p.T if "lora_A" in n else p.T @ p
+                    if p.shape == torch.Size([0]):
+                        with gather_params_ctx(p, fwd_module=self):
+                            para_cov = p @ p.T if "lora_A" in n else p.T @ p
+                    else:
+                        para_cov = p @ p.T if "lora_A" in n else p.T @ p
                     I = torch.eye(*para_cov.size(), out=torch.empty_like(para_cov))  # noqa: E741
                     I.requires_grad = False
                     num_param += 1
