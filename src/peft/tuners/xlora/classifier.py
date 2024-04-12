@@ -191,12 +191,6 @@ class XLoraClassifier(nn.Module):
         and the associated tensors. The positions are paired with the associated tensors and give the position
         in the scaling log. Each scaling is a tensor of shape (batch_size, seq_len, n_layers, n_classes)).
         """
-        if not self.scalings_logging:
-            raise Exception("Scalings logging is disabled!")
-
-        if len(self.log_scalings) == 0:
-            raise ValueError("No log scalings to flush.")
-
         seqlens_map: Dict[int, Tuple[List[int], List[torch.Tensor]]] = {}
         for i, scaling in enumerate(self.log_scalings):
             seq_len = scaling.shape[1]
