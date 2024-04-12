@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTuner
 from .. import lora
 from .classifier import InhibitorFlagPayload, XLoraClassifier
 from .config import XLoraConfig
-from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALayer, XLoRALinearLayer
+from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALayer, XLoRALayer, XLoRALinearLayer
 
 
 @staticmethod
@@ -40,11 +40,12 @@ def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
     xloramodel: nn.Module,  # XLoraModel
     config: XLoraConfig,
-) -> (int, torch.device | None):
+) -> tuple[int, torch.device | None, list[nn.Module]]:
     """
     Returns the number of swapped layers.
     """
     total_swapped = 0
+    all_layers = []
 
     device = None
     for module in base.modules():
@@ -57,6 +58,7 @@ def convert_layers_to_xlora(
                 layer_number=total_swapped,
                 config=config,
             )
+            all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Embedding):
@@ -68,6 +70,7 @@ def convert_layers_to_xlora(
                 layer_number=total_swapped,
                 config=config,
             )
+            all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Conv2d):
@@ -79,10 +82,11 @@ def convert_layers_to_xlora(
                 layer_number=total_swapped,
                 config=config,
             )
+            all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
 
-    return (total_swapped, device)
+    return (total_swapped, device, all_layers)
 
 
 class XLoraModel(BaseTuner):
@@ -178,11 +182,51 @@ class XLoraModel(BaseTuner):
 
         self._maybe_freeze_all_adapters()
 
-        total_swapped, device = convert_layers_to_xlora(
+        total_swapped, device, all_layers = convert_layers_to_xlora(
             model_peft,
             self,
             peft_config,
         )
+
+        # Now replace the old forward function with a new one that implements the X-LoRA architecture
+        old_model_forward = self.lora_model.model.forward
+
+        def new_model_forward(*args, **kwargs) -> None:
+            # =========================== Forward pass with "dummy" scalings ==================
+
+            dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args, **kwargs)
+
+            for layer in all_layers:
+                layer.scalings = dummy_scalings
+
+            with torch.no_grad():
+                with model_peft.disable_adapter():
+                    scaling_pass_kwargs = kwargs.copy()
+                    scaling_pass_kwargs["output_hidden_states"] = True
+                    scaling_pass_kwargs["return_dict"] = True
+                    try:
+                        base_output = old_model_forward(*args, **scaling_pass_kwargs)
+                    finally:
+                        # Clean everything up
+                        for layer in all_layers:
+                            layer.scalings = None
+
+            xlora_scalings = self.internal_xlora_classifier(result=base_output, *args, **kwargs)
+
+            # =========================== Real forward pass with calculated scalings ==================
+
+            for layer in all_layers:
+                layer.scalings = xlora_scalings
+
+            try:
+                output = old_model_forward(*args, **kwargs)
+            finally:
+                # Clean everything up
+                for layer in all_layers:
+                    layer.scalings = None
+            return output
+
+        self.lora_model.model.forward = new_model_forward
 
         n_classes = len(peft_config.adapters)
         xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped, device)
@@ -265,57 +309,7 @@ class XLoraModel(BaseTuner):
             json.dump(conf, f)
 
     def forward(self, *args, **kwargs):
-        model = self.lora_model.model
-
-        # =========================== Forward pass with "dummy" scalings ==================
-
-        dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args, **kwargs)
-
-        # Inject the dummy scalings to each layer
-        def hook(module, *args, **kwargs):
-            module.scalings = dummy_scalings
-            return args, kwargs
-
-        handles = []
-
-        for module in model.modules():
-            if isinstance(module, XLoRALayer):
-                handle = module.register_forward_pre_hook(hook, with_kwargs=True)
-                handles.append(handle)
-
-        with torch.no_grad():
-            with model.disable_adapter():
-                scaling_pass_kwargs = kwargs.copy()
-                scaling_pass_kwargs["output_hidden_states"] = True
-                scaling_pass_kwargs["return_dict"] = True
-                try:
-                    base_output = self.model(*args, **scaling_pass_kwargs)
-                finally:
-                    for handle in handles:
-                        handle.remove()
-
-        xlora_scalings = self.xlora_classifier(**base_output)
-
-        # =========================== Real forward pass with calculated scalings ==================
-
-        # Inject the *real* scalings to each layer
-        def hook(module, *args, **kwargs):
-            module.scalings = xlora_scalings
-            return args, kwargs
-
-        handles = []
-
-        for module in model.modules():
-            if isinstance(module, XLoRALayer):
-                handle = module.register_forward_pre_hook(hook, with_kwargs=True)
-                handles.append(handle)
-
-        try:
-            output = self.model(*args, **kwargs)
-        finally:
-            for handle in handles:
-                handle.remove()
-        return output
+        return self.lora_model.model(*args, **kwargs)
 
     def set_topk_lora(self, value: Optional[int]):
         """

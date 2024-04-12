@@ -118,7 +118,7 @@ class XLoraClassifier(nn.Module):
                 last = nn.Linear(config.xlora_size, n_classes, bias=bias_flag).to(device).to(dtype)
         self.layers = nn.Sequential(*layers, last)
 
-    def make_dummy_scalingss(
+    def make_dummy_scalings(
         self,
         input_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
@@ -154,6 +154,7 @@ class XLoraClassifier(nn.Module):
 
     def forward(
         self,
+        result,
         input_ids: Optional[torch.LongTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         *args,
@@ -171,25 +172,6 @@ class XLoraClassifier(nn.Module):
             seq_len = input_ids.shape[1]
         else:
             seq_len = inputs_embeds.shape[1]
-
-        # For type checking
-        model = self.model
-        with torch.no_grad():
-            with model.disable_adapter():
-                kwargs["output_hidden_states"] = True
-                kwargs["return_dict"] = True
-
-                result: ModelOutput = model.forward(
-                    *args,
-                    input_ids=input_ids,
-                    inputs_embeds=inputs_embeds,
-                    _xlora_classifier_inhibitor_flag=InhibitorFlagPayload(
-                        batch_size=batch_size,
-                        seq_len=seq_len,
-                        override_scaling_pass_value=self.override_scaling_pass_value,
-                    ),
-                    **kwargs,
-                )
 
         hidden_states = result.hidden_states  # type: ignore
 
