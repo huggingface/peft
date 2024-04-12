@@ -159,7 +159,6 @@ class XLoraClassifier(nn.Module):
 
         hidden_states = result.hidden_states  # type: ignore
 
-        assert hidden_states is not None
         hidden_state = hidden_states[-1]  # Get the last hidden state
 
         ### Classifier run
@@ -186,38 +185,12 @@ class XLoraClassifier(nn.Module):
 
         return scalings
 
-    def get_nb_trainable_parameters(self):
-        # https://github.com/huggingface/peft/blob/main/src/peft/mixed_model.py#L156
-        r"""
-        Returns the number of trainable parameters and number of all parameters in the model.
+    def _get_bucketed_scalings(self) -> Dict[int, Tuple[List[int], List[torch.Tensor]]]:
         """
-        trainable_params = 0
-        all_param = 0
-        for _, param in self.named_parameters():
-            num_params = param.numel()
-            # if using DS Zero 3 and the weights are initialized empty
-            if num_params == 0 and hasattr(param, "ds_numel"):
-                num_params = param.ds_numel  # type: ignore
-
-            # Due to the design of 4bit linear layers from bitsandbytes
-            # one needs to multiply the number of parameters by 2 to get
-            # the correct number of parameters
-            if param.__class__.__name__ == "Params4bit":
-                num_params = num_params * 2
-
-            all_param += num_params
-            if param.requires_grad:
-                trainable_params += num_params
-
-        return trainable_params, all_param
-
-    @staticmethod
-    def _save_scalings(file: str, scalings: List[torch.Tensor]):
-        result = torch.cat(scalings, dim=0)
-        npy = result.numpy()
-        numpy.save(file, npy)
-
-    def _flush_log_scalings(self, path: str):
+        Returns bucketed scalings, bucketed by seq_len. Each value consists of the positions (the first)
+        and the associated tensors. The positions are paired with the associated tensors and give the position
+        in the scaling log. Each scaling is a tensor of shape (batch_size, seq_len, n_layers, n_classes)).
+        """
         if not self.scalings_logging:
             raise Exception("Scalings logging is disabled!")
 
@@ -228,24 +201,12 @@ class XLoraClassifier(nn.Module):
         for i, scaling in enumerate(self.log_scalings):
             seq_len = scaling.shape[1]
             if seq_len not in seqlens_map:
-                seqlens_map[seq_len] = ([i], [scaling.cpu()])
+                seqlens_map[seq_len] = ([i], [scaling])
             else:
                 seqlens_map[seq_len][0].append(i)
-                seqlens_map[seq_len][1].append(scaling.cpu())
+                seqlens_map[seq_len][1].append(scaling)
 
-        if len(seqlens_map) == 1:
-            self._save_scalings(path, [scaling.unsqueeze(0) for scaling in self.log_scalings])
-        else:
-            indices_map: Dict[str, List[int]] = {}
-            for seq_len, (indices, scalings_list) in seqlens_map.items():
-                indices_map[f"{path}-{seq_len}.npy"] = indices
-
-                self._save_scalings(f"{path}-{seq_len}", [scaling.unsqueeze(0) for scaling in scalings_list])
-
-            with open(f"{path}-mapping.json", "w") as f:
-                f.write(json.dumps(indices_map))
-
-        self.log_scalings.clear()
+        return seqlens_map
 
     def _set_override_scaling_pass_value(self, value: Union[Number, None]):
         if value is None:

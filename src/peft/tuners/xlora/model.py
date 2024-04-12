@@ -351,18 +351,14 @@ class XLoraModel(BaseTuner):
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.log_scalings.clear()
 
-    def flush_log_scalings(self, path: str):
+    def get_bucketed_scalings_log(self) -> dict[int, tuple[list[int], list[torch.Tensor]]]:
         """
-        Write the scalings log (a tensor of shape (num_logged, batch_size, seq_len, n_layers, n_classes)) to the specified path.
-        If the tensor cannot be constructed, multiple files are written containing tensors of shape
-        (num_logged, batch_size, seq_len, n_layers, n_classes) such that each file contains one sequence length. Additionally a JSON
-        file is outputted containing the mapping from each sequence log file to the index of the contained tensor so that one may reconstruct
-        the log order.
-
-        The file specified should not contain an extension.
+        Returns bucketed scalings, bucketed by seq_len. Each value consists of the positions (the first)
+        and the associated tensors. The positions are paired with the associated tensors and give the position
+        in the scaling log.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
-        classifier._flush_log_scalings(path)
+        return classifier._get_bucketed_scalings()
 
     def set_use_trainable_adapters(self, use_trainable_adapters: bool):
         """

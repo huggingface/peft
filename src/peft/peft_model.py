@@ -424,7 +424,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if not isinstance(config, XLoraConfig):
                 raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
 
-            device = infer_device()  # As in PeftModel.load_adapter, torch_device = infer_device()
+            device = device = kwargs.get("device") if kwargs.get("device") is not None else infer_device()
 
             classifier: XLoraClassifier = model.base_model.internal_xlora_classifier  # type: ignore
             classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore

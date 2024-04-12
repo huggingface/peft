@@ -18,31 +18,39 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
-
-
-model_id = "facebook/opt-125m"
-tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, device_map="cuda:0")
-tmp_path = "/tmp/xlora_test"
-os.makedirs(tmp_path, exist_ok=True)
-
-for i in range(1, 9):
-    torch.manual_seed(i)
-    lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
-    model = AutoModelForCausalLM.from_pretrained(model_id)
-    peft_model = get_peft_model(model, lora_config)
-    peft_model.save_pretrained(f"{tmp_path}/checkpoint-{i}")
-    print(f"finished {i} of 8")
+import pytest
 
 
 class TestXlora:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def test_functional(self):
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, device_map="cuda:0")
+    model_id = "facebook/opt-125m"
+    num_loras = 4
 
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+    @pytest.fixture(scope="class")
+    def tmp_dir(self, tmp_path_factory):
+        # create a class-scoped temp directory
+        return tmp_path_factory.mktemp("xlora")
+
+    @pytest.fixture(scope="class")
+    def saved_lora_adapters(self, tmp_dir):
+        file_names = []
+        for i in range(1, self.num_loras + 1):
+            torch.manual_seed(i)
+            lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
+            model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            peft_model = get_peft_model(model, lora_config)
+            file_name = os.path.join(tmp_dir, f"checkpoint-{i}")
+            peft_model.save_pretrained(file_name)
+            file_names.append(file_name)
+        return file_names
+
+    def test_functional(self, saved_lora_adapters):
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.device)
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        adapters = {str(i): f"{tmp_path}/checkpoint-{i}" for i in range(1, 9)}
+        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
 
         peft_config = XLoraConfig(
             task_type=TaskType.CAUSAL_LM,
@@ -51,7 +59,7 @@ class TestXlora:
             xlora_depth=8,
             adapters=adapters,
         )
-        model = get_peft_model(model, peft_config).to("cuda")
+        model = get_peft_model(model, peft_config).to(self.device)
 
         model.enable_scalings_logging()
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
@@ -60,14 +68,14 @@ class TestXlora:
             max_new_tokens=32,
         )
         text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        # TODO: do any check on the text?
 
-    def test_scalings_logging_methods(self):
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, device_map="cuda:0")
+    def test_scalings_logging_methods(self, saved_lora_adapters):
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map="cuda:0")
 
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        adapters = {str(i): f"{tmp_path}/checkpoint-{i}" for i in range(1, 9)}
+        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
 
         peft_config = XLoraConfig(
             task_type=TaskType.CAUSAL_LM,
@@ -106,40 +114,24 @@ class TestXlora:
         model.clear_scalings_log()
         assert len(model.get_scalings_log()) == 0
 
-    def test_scalings_flush(self):
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, device_map="cuda:0")
+        bucketed = model.get_bucketed_scalings_log()
+        keys = bucketed.keys()
+        assert len(bucketed) == 2
+        # One bucket for prompt (which has 1 elem)
+        assert len(bucketed[max(keys)][0]) == 1
+        assert len(bucketed[max(keys)][1]) == 1
+        assert bucketed[max(keys)][0][0] == 0
+        # One bucket for completions with bucket name 1
+        assert len(bucketed[1][0]) > 1
+        assert len(bucketed[1][1]) > 1
+        assert bucketed[1][0][0] > 0
 
-        model = AutoModelForCausalLM.from_pretrained(model_id)
+    def test_misc_methods(self, saved_lora_adapters):
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map="cuda:0")
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        adapters = {str(i): f"{tmp_path}/checkpoint-{i}" for i in range(1, 9)}
-
-        peft_config = XLoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            peft_type=PeftType.XLORA,
-            hidden_size=model.config.hidden_size,
-            xlora_depth=8,
-            adapters=adapters,
-        )
-        model = get_peft_model(model, peft_config).to("cuda")
-
-        model.enable_scalings_logging()
-
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
-        outputs = model.generate(
-            input_ids=inputs.to("cuda"),
-            max_new_tokens=32,
-        )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
-
-        model.flush_log_scalings("output")  # writes to output.npy and a json file
-
-    def test_misc_methods(self):
-        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True, device_map="cuda:0")
-
-        model = AutoModelForCausalLM.from_pretrained(model_id)
-        model.config.use_cache = False
-        adapters = {str(i): f"{tmp_path}/checkpoint-{i}" for i in range(1, 9)}
+        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
 
         peft_config = XLoraConfig(
             task_type=TaskType.CAUSAL_LM,
