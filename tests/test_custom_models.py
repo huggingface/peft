@@ -33,6 +33,7 @@ from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaLoraConfig,
+    BOFTConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -255,6 +256,80 @@ TEST_CASES = [
     ),
     ("Linear 4 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "lin0"}),
     ("Linear 5 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["lin0"]}),
+    ########
+    # BOFT #
+    ########
+    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "boft_block_size": 2}),
+    (
+        "Vanilla MLP 2 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "modules_to_save": ["lin0"], "boft_block_size": 2},
+    ),
+    (
+        "Vanilla MLP 3 BOFT",
+        "MLP",
+        BOFTConfig,
+        {
+            "target_modules": ["lin1"],
+            "boft_block_size": 2,
+            "boft_dropout": 0.1,
+        },
+    ),
+    (
+        "Vanilla MLP 4 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Vanilla MLP 5 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 2, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Vanilla MLP 6 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
+    ),
+    (
+        "Conv2d 1 BOFT",
+        "Conv2d",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 45, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Conv2d 2 BOFT",
+        "Conv2d",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 0, "boft_block_num": 1, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "MLP2 1 BOFT",
+        "MLP2",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
+    ),
+    (
+        "MLP2 2 BOFT",
+        "MLP2",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 8, "boft_n_butterfly_factor": 3},
+    ),
+    (
+        "Conv2d2 1 BOFT",
+        "Conv2d2",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
+    ),
+    (
+        "Conv2d2 1 BOFT",
+        "Conv2d2",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -324,6 +399,7 @@ PREFIXES = {
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
     LNTuningConfig: "select_new_",
+    BOFTConfig: "boft_",
 }
 
 
@@ -345,7 +421,6 @@ class MLP(nn.Module):
         X = self.sm(X)
         return X
 
-
 class MLP_LayerNorm(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -364,6 +439,25 @@ class MLP_LayerNorm(nn.Module):
         X = self.relu(X)
         X = self.drop(X)
         X = self.layernorm1(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class MLP2(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 32, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(32, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
         X = self.lin1(X)
         X = self.sm(X)
         return X
@@ -468,6 +562,29 @@ class ModelConv2D(nn.Module):
         return X
 
 
+class ModelConv2D2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 40)
+        self.conv2d = nn.Conv2d(8, 32, 3)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin1 = nn.Linear(32, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = X.reshape(-1, 8, 3, 3)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -494,6 +611,12 @@ class MockTransformerWrapper:
 
         if model_id == "MLP_LayerNorm":
             return MLP_LayerNorm().to(torch_dtype)
+
+        if model_id == "MLP2":
+            return MLP2().to(torch_dtype)
+
+        if model_id == "Conv2d2":
+            return ModelConv2D2().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -828,12 +951,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
-        if config_cls != LoraConfig:
+        if config_cls != LoraConfig or config_cls != BOFTConfig:
             # skip this test for other configs as bias is specific to Lora
-            self.skipTest("Testing bias warnings only for LoraConfig")
+            self.skipTest("Testing bias warnings only for LoraConfig or BOFTConfig")
 
-        if not issubclass(config_cls, LoraConfig):
-            self.skipTest("Bias argument is only supported for LoRA models")
+        if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
+            self.skipTest("Bias argument is only supported for LoRA or BOFT models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -847,12 +970,21 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with peft_model.disable_adapter():
                 pass  # there is nothing to be done
 
-        # check that bias=all and bias=lora_only give a warning with the correct message
-        msg_start = "Careful, disabling adapter layers with bias configured to be"
-        with pytest.warns(UserWarning, match=msg_start):
-            run_with_disable(config_kwargs, bias="lora_only")
-        with pytest.warns(UserWarning, match=msg_start):
-            run_with_disable(config_kwargs, bias="all")
+        if config_cls == LoraConfig:
+            # check that bias=all and bias=lora_only give a warning with the correct message
+            msg_start = "Careful, disabling adapter layers with bias configured to be"
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="lora_only")
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="all")
+
+        if config_cls == BOFTConfig:
+            # check that bias=all and bias=boft_only give a warning with the correct message
+            msg_start = "Careful, disabling adapter layers with bias configured to be"
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="boft_only")
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="all")
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
         # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning
@@ -1135,6 +1267,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
+            BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2272,6 +2405,91 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+        )
+
+    def test_requires_grad_boft_different_targets(self):
+        # test two different OFT adapters that target different modules
+        config0 = BOFTConfig(target_modules=["lin0"], boft_block_size=2)
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active pter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.boft_R.default",
+            "base_model.model.lin0.boft_s.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.boft_R.default",
+            "base_model.model.lin0.boft_s.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+    def test_requires_grad_boft_same_targets(self):
+        # same as previous test, except that BOFT adapters target the same layer
+        config0 = BOFTConfig(target_modules=["lin1"], boft_block_size=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.default",
+            "base_model.model.lin1.boft_s.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.default",
+            "base_model.model.lin1.boft_s.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
         )
 
 

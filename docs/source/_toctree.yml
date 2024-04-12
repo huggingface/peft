@@ -57,6 +57,8 @@
     title: Soft prompts
   - local: conceptual_guides/ia3
     title: IA3
+  - local: conceptual_guides/oft
+    title: OFT/BOFT
 
 - sections:
   - sections:
@@ -90,6 +92,8 @@
       title: Multitask Prompt Tuning
     - local: package_reference/oft
       title: OFT
+    - local: package_reference/boft
+      title: BOFT
     - local: package_reference/poly
       title: Polytropon
     - local: package_reference/p_tuning

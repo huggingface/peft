@@ -98,6 +98,23 @@ def get_peft_model_state_dict(
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
 
+    elif config.peft_type == PeftType.BOFT:
+        bias = config.bias
+        if bias == "none":
+            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k}
+        elif bias == "all":
+            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k or "bias" in k}
+        elif bias == "boft_only":
+            to_return = {}
+            for k in state_dict:
+                if "boft_" in k:
+                    to_return[k] = state_dict[k]
+                    bias_name = k.split("boft_")[0] + "bias"
+                    if bias_name in state_dict:
+                        to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
+
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
 
@@ -256,6 +273,7 @@ def set_peft_model_state_dict(
         PeftType.OFT,
         PeftType.POLY,
         PeftType.LN_TUNING,
+        PeftType.BOFT,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -267,6 +285,7 @@ def set_peft_model_state_dict(
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
             PeftType.LN_TUNING: "select_",
+            PeftType.BOFT: "boft_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
