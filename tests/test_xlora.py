@@ -104,9 +104,6 @@ class TestXlora:
 
         assert 32 >= len(model.get_scalings_log()) > 0
 
-        model.clear_scalings_log()
-        assert len(model.get_scalings_log()) == 0
-
         bucketed = model.get_bucketed_scalings_log()
         keys = bucketed.keys()
         assert len(bucketed) == 2
@@ -118,6 +115,9 @@ class TestXlora:
         assert len(bucketed[1][0]) > 1
         assert len(bucketed[1][1]) > 1
         assert bucketed[1][0][0] > 0
+
+        model.clear_scalings_log()
+        assert len(model.get_scalings_log()) == 0
 
     def test_misc_methods(self, tokenizer, model):
         model.set_global_scaling_weight(1.5)
