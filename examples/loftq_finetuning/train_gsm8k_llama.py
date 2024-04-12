@@ -779,8 +779,11 @@ def main():
             )
             if accelerator.is_main_process:
                 tokenizer.save_pretrained(args.output_dir)
-                repo.push_to_hub(
-                    commit_message=f"Training in progress epoch {epoch}", blocking=False, auto_lfs_prune=True
+                api.upload_folder(
+                    repo_id=repo_id,
+                    folder_path=args.output_dir,
+                    commit_message=f"Training in progress epoch {epoch}",
+                    run_as_future=True,
                 )
 
         if args.checkpointing_steps == "epoch":

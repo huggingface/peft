@@ -584,6 +584,7 @@ class PromptDataset(Dataset):
         example["index"] = index
         return example
 
+
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 

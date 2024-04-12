@@ -9,7 +9,6 @@ import threading
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Optional
 
 import datasets
 import diffusers
@@ -574,6 +573,7 @@ class PromptDataset(Dataset):
         example["prompt"] = self.prompt
         example["index"] = index
         return example
+
 
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
