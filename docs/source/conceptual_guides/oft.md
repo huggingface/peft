@@ -23,7 +23,7 @@ To achieve efficient fine-tuning, OFT represents the weight updates with an orth
 Orthogonal Butterfly (BOFT) generalizes OFT with Butterfly factorization and further improves its parameter efficiency and finetuning flexibility. In short, OFT can be viewed as a special case of BOFT. Different from LoRA that uses additive low-rank weight updates, BOFT uses multiplicative orthogonal weight updates. The comparison is shown below.
 
 <div class="flex justify-center">
-    <img src="https://github.com/wy1iu/butterfly-oft/blob/main/assets/BOFT_comparison.png"/>
+    <img src="https://raw.githubusercontent.com/wy1iu/butterfly-oft/main/assets/BOFT_comparison.png"/>
 </div>
 
 
@@ -41,7 +41,7 @@ In principle, BOFT can be applied to any subset of weight matrices in a neural n
 Similar to LoRA, the weights learned by OFT/BOFT can be integrated into the pretrained weight matrices using the merge_and_unload() function. This function merges the adapter weights with the base model which allows you to effectively use the newly merged model as a standalone model.
 
 <div class="flex justify-center">
-    <img src="https://github.com/wy1iu/butterfly-oft/blob/main/assets/boft_merge.png"/>
+    <img src="https://raw.githubusercontent.com/wy1iu/butterfly-oft/main/assets/boft_merge.png"/>
 </div>
 
 This works because during training, the orthogonal weight matrix (R in the diagram above) and the pretrained weight matrices are separate. But once training is complete, these weights can actually be merged (multiplied) into a new weight matrix that is equivalent.
