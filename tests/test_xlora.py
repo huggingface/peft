@@ -45,9 +45,13 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    def test_functional(self, saved_lora_adapters):
+    @pytest.fixture(scope="class")
+    def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.device)
+        return tokenizer
 
+    @pytest.fixture(scope="function")
+    def model(self, saved_lora_adapters):
         model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
         adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
@@ -60,7 +64,9 @@ class TestXlora:
             adapters=adapters,
         )
         model = get_peft_model(model, peft_config).to(self.device)
+        return model
 
+    def test_functional(self, tokenizer, model):
         model.enable_scalings_logging()
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
@@ -68,24 +74,10 @@ class TestXlora:
             max_new_tokens=32,
         )
         text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        # TODO: do any check on the text?
+        # No check on text because of sampling, untrained adapters etc.
+        print(text[0])
 
-    def test_scalings_logging_methods(self, saved_lora_adapters):
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map="cuda:0")
-
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
-        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
-
-        peft_config = XLoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            peft_type=PeftType.XLORA,
-            hidden_size=model.config.hidden_size,
-            xlora_depth=8,
-            adapters=adapters,
-        )
-        model = get_peft_model(model, peft_config).to("cuda")
-
+    def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
@@ -97,7 +89,8 @@ class TestXlora:
         print(text[0])
 
         _ = model.get_latest_scalings()
-        assert 32 >= len(model.get_scalings_log()) > 0
+        # 32 is the numeber of max scalings. 3 is the number of prompt tokens.
+        assert 32 + 3 >= len(model.get_scalings_log()) > 0
 
         model.disable_scalings_logging()
 
@@ -126,22 +119,7 @@ class TestXlora:
         assert len(bucketed[1][1]) > 1
         assert bucketed[1][0][0] > 0
 
-    def test_misc_methods(self, saved_lora_adapters):
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map="cuda:0")
-
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
-        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
-
-        peft_config = XLoraConfig(
-            task_type=TaskType.CAUSAL_LM,
-            peft_type=PeftType.XLORA,
-            hidden_size=model.config.hidden_size,
-            xlora_depth=8,
-            adapters=adapters,
-        )
-        model = get_peft_model(model, peft_config).to("cuda")
-
+    def test_misc_methods(self, tokenizer, model):
         model.set_global_scaling_weight(1.5)
         assert model.internal_xlora_classifier.config.global_scaling_weight == 1.5
         assert model.get_global_scaling_weight() == 1.5
