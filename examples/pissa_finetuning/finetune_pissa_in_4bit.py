@@ -9,8 +9,8 @@ quantization_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=True,
     bnb_4bit_compute_dtype=torch.bfloat16,
 )
-base_model = AutoModelForCausalLM.from_pretrained("fxmeng/pissa-llama-2-7b-r16-alpha-16", quantization_config=quantization_config)
-tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b')
+base_model = AutoModelForCausalLM.from_pretrained("fxmeng/pissa-llama-2-7b-r16-alpha-16", quantization_config=quantization_config, low_cpu_mem_usage=True)
+tokenizer = AutoTokenizer.from_pretrained('fxmeng/pissa-llama-2-7b-r16-alpha-16')
 tokenizer.pad_token_id = tokenizer.eos_token_id
 
 # Wrapping the residual model with PiSSA:
