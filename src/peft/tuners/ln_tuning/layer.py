@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,24 +22,24 @@ import torch.nn as nn
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
-class SelectLayer(nn.Module, BaseTunerLayer):
+class LNTuningLayer(nn.Module, BaseTunerLayer):
     """
     Selects a layer from the model.
     """
 
-    adapter_layer_names = ("select_new_layers",)
+    ln_tuning_layer_names = ("ln_tuning_layers",)
 
     def __init__(self, base_layer: nn.Module, adapter_name: str):
         super().__init__()
         self.base_layer = base_layer
-        self.select_new_layers = nn.ModuleDict({})
+        self.ln_tuning_layers = nn.ModuleDict({})
         self.update_layer(self.base_layer, adapter_name)
         # self.adapter_names = [adapter_name]
         self._active_adapter = adapter_name
         self.merged_adapters = []
 
     def update_layer(self, layer: nn.Module, adapter_name: str):
-        self.select_new_layers[adapter_name] = deepcopy(layer)
+        self.ln_tuning_layers[adapter_name] = deepcopy(layer)
 
     def enable_adapters(self, enabled: bool) -> None:
         """Toggle the enabling and disabling of adapters
@@ -56,7 +56,7 @@ class SelectLayer(nn.Module, BaseTunerLayer):
             if self.merged:
                 self.unmerge()
             # disable grads on all adapter layers
-            for layer_name in self.adapter_layer_names:
+            for layer_name in self.ln_tuning_layer_names:
                 layer = getattr(self, layer_name)
                 layer.requires_grad_(False)
             self._disable_adapters = True
@@ -69,16 +69,16 @@ class SelectLayer(nn.Module, BaseTunerLayer):
 
         if len(adapter_names) > 1:
             raise ValueError(
-                "You can only use one adapter for SelectLayer Adapter. "
-                "Because SelectLayer selects one set of layers from the original arch."
+                f"Trying to merge {len(adapter_names)} adapters, but LN "
+                f"tuning does not allow merging more than one adapter at a time"
             )
         merged_adapters = set(self.merged_adapters)
         if merged_adapters:
             warnings.warn(f"Already merged with {merged_adapters}. Unmerging first.")
             self.unmerge()
 
-        self.base_layer, self.select_new_layers[adapter_names[0]] = (
-            self.select_new_layers[adapter_names[0]],
+        self.base_layer, self.ln_tuning_layers[adapter_names[0]] = (
+            self.ln_tuning_layers[adapter_names[0]],
             self.base_layer,
         )
         self.merged_adapters.append(adapter_names[0])
@@ -87,9 +87,11 @@ class SelectLayer(nn.Module, BaseTunerLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
+        # popping one element (argument 0 should not be necessary) is sufficient because LN
+        # tuning does not allow merging more than one adapter at a time.
         merged_name = self.merged_adapters.pop(0)
-        self.base_layer, self.select_new_layers[merged_name] = (
-            self.select_new_layers[merged_name],
+        self.base_layer, self.ln_tuning_layers[merged_name] = (
+            self.ln_tuning_layers[merged_name],
             self.base_layer,
         )
 
@@ -103,10 +105,14 @@ class SelectLayer(nn.Module, BaseTunerLayer):
         else:
             if len(self.active_adapters) != 1:
                 raise ValueError(
-                    "You can only use one adapter for SelectLayer Adapter."
-                    "Because SelectLayer selects one set of layers from the original arch."
+                    f"Trying to run forward with {len(self.active_adapters)} active "
+                    f"adapters, but LN tuning does not allow inference with more than one adapter at a time"
                 )
             active_adapter = self.active_adapters[0]
-            result = self.select_new_layers[active_adapter](x, *args, **kwargs)
+            result = self.ln_tuning_layers[active_adapter](x, *args, **kwargs)
 
         return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "ln_tuning." + rep

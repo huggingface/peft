@@ -30,11 +30,14 @@ class PeftType(str, enum.Enum):
     - PREFIX_TUNING
     - LORA
     - ADALORA
+    - BOFT
     - ADAPTION_PROMPT
     - IA3
     - LOHA
     - LOKR
     - OFT
+    - POLY
+    - LN_TUNING
     """
 
     PROMPT_TUNING = "PROMPT_TUNING"

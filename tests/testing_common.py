@@ -672,7 +672,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config).eval()
         logits_peft = model(**inputs)[0]
 
-        # LNTuning do not change the logits
+        # Initializing with LN tuning cannot be configured to change the outputs (unlike init_lora_weights=False)
         if not issubclass(config_cls, LNTuningConfig):
             # sanity check that the logits are different
             assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
