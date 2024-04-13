@@ -18,6 +18,7 @@ peft_model = PeftModel.from_pretrained(res_model, "fxmeng/pissa-llama-2-7b-r16-a
 peft_model.print_trainable_parameters()
 peft_model = prepare_model_for_kbit_training(peft_model)
 
+# Training PiSSA with trl on imdb dataset (using a subset for fast evaluation):
 from trl import SFTTrainer
 from datasets import load_dataset
 dataset = load_dataset("imdb", split="train[:1%]")
