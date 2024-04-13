@@ -570,7 +570,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         trainable_params, all_param = self.get_nb_trainable_parameters()
 
         print(
-            f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param}"
+            f"trainable params: {trainable_params:,d} || all params: {all_param:,d} || trainable%: {100 * trainable_params / all_param:.4f}"
         )
 
     def __getattr__(self, name: str):
