@@ -398,8 +398,8 @@ PREFIXES = {
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
-    LNTuningConfig: "select_new_",
     BOFTConfig: "boft_",
+    LNTuningConfig: "ln_tuning_",
 }
 
 
@@ -880,7 +880,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         else:
             rtol, atol = 1e-5, 1e-8
         assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
-        assert torch.allclose(outputs_before, outputs_disabled), f"{config_kwargs}"
+        assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
     @parameterized.expand(TEST_CASES)
@@ -939,7 +939,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
-        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol), f"{config_kwargs}"
+        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)

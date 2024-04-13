@@ -142,7 +142,7 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.POLY:
         to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
     elif config.peft_type == PeftType.LN_TUNING:
-        to_return = {k: state_dict[k] for k in state_dict if "select_" in k}
+        to_return = {k: state_dict[k] for k in state_dict if "ln_tuning_" in k}
     else:
         raise NotImplementedError
     if getattr(model, "modules_to_save", None) is not None:
@@ -284,8 +284,8 @@ def set_peft_model_state_dict(
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
-            PeftType.LN_TUNING: "select_",
             PeftType.BOFT: "boft_",
+            PeftType.LN_TUNING: "ln_tuning",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:

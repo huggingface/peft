@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,10 +27,14 @@ class LNTuningConfig(PeftConfig):
 
     Args:
         target_modules (`Optional[Union[List[str], str]]`):
-            The names of the modules to apply LayerNorm Tuning to. If this is specified, only the modules with the
-            specified names will be replaced. If this is not specified, modules will be chosen according to the model
+            List of module names or regex expression of the module names to replace with LNTuning. For example,
+            '.*decoder.*' or '.*encoder.*'. If this is not specified, modules will be chosen according to the model
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
+        modules_to_save (`Optional[Union[List[str], str]]`):
+            List of modules to be set as trainable and saved in the final checkpoint. For example, in Sequence
+            Classification or Token Classification tasks, the final layer `classifier/score` are randomly initialized
+            and as such need to be trainable and saved.
     """
 
     target_modules: Optional[Union[list[str], str]] = field(

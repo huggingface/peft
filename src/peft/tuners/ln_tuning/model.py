@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ from peft.config import PeftConfig
 from peft.tuners.tuners_utils import BaseTuner, _get_submodules, check_target_module_exists
 from peft.utils import TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING, ModulesToSaveWrapper
 
-from .layer import SelectLayer
+from .layer import LNTuningLayer
 
 
 class LNTuningModel(BaseTuner):
@@ -72,7 +72,7 @@ class LNTuningModel(BaseTuner):
         - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
     """
 
-    prefix: str = "select_"
+    prefix: str = "ln_tuning_"
 
     def __init__(self, model, config, adapter_name) -> None:
         # self.adapter_name = adapter_name
@@ -117,7 +117,7 @@ class LNTuningModel(BaseTuner):
         target: Module,
         adapter_name: str,
     ) -> Module:
-        new_module = SelectLayer(target, adapter_name)
+        new_module = LNTuningLayer(target, adapter_name)
         return new_module
 
     def _replace_module(self, parent: Module, child_name: str, new_module: Module, child: Module) -> None:
@@ -154,7 +154,7 @@ class LNTuningModel(BaseTuner):
 
     def _set_adapter_layers(self, enabled: bool) -> None:
         for module in self.model.modules():
-            if isinstance(module, (SelectLayer, ModulesToSaveWrapper)):
+            if isinstance(module, (LNTuningLayer, ModulesToSaveWrapper)):
                 module.enable_adapters(enabled)
 
     def enable_adapter_layers(self) -> None:
