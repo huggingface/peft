@@ -93,9 +93,7 @@ elif args.bits == 8:
         args.output_path, load_in_8bit=True, low_cpu_mem_usage=True, torch_dtype=torch.bfloat16, device_map="auto"
     )
 else:
-    res_model = AutoModelForCausalLM.from_pretrained(
-        args.output_path, torch_dtype=torch.bfloat16, device_map="auto"
-    )
+    res_model = AutoModelForCausalLM.from_pretrained(args.output_path, torch_dtype=torch.bfloat16, device_map="auto")
 
 tokenizer = AutoTokenizer.from_pretrained(args.output_path)
 # Wrapping the residual model with PiSSA:
@@ -110,10 +108,12 @@ trainer = SFTTrainer(
     model=peft_model, train_dataset=dataset, dataset_text_field="text", max_seq_length=512, tokenizer=tokenizer
 )
 ############################## It's essential to save initial PiSSA parameters for conversion to LoRA. ##############################
-peft_model.save_pretrained(os.path.join(args.output_path, "pissa_init"))
+if not os.path.exists(os.path.join(args.output_path, "pissa_init")):
+    peft_model.save_pretrained(os.path.join(args.output_path, "pissa_init"))
+
 trainer.train()
 ############################## Upon completion, save final PiSSA parameters ##############################
-peft_model.save_pretrained(args.output_path, "pissa_ft")
+peft_model.save_pretrained(os.path.join(args.output_path, "pissa_ft"))
 
 
 ############################## The different of the PiSSA parameters before and after the training corresponding to delta W in LoRA. ##############################
