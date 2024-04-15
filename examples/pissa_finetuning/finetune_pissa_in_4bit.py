@@ -1,7 +1,7 @@
 import torch
 from peft import PeftModel, prepare_model_for_kbit_training
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-from peft.utils.pissa_utils import pre__training_saving, post_training_saving
+from peft.utils.pissa_utils import pissa_pre_training_saving, pissa_post_training_saving
 
 
 # Download and load the llama-2-7b residual model in 4-bit format:
