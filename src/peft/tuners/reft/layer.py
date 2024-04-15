@@ -63,13 +63,8 @@ class ReftLayer(nn.Module, LycorisLayer):
 
     def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
         rotate_layer = LowRankRotateLayer(self.out_features, r)
-        # self.reft_R[adapter_name] = rotate_layer # torch.nn.utils.parametrizations.orthogonal(rotate_layer)
         self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer, orthogonal_map='cayley')
         self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r)
-        # self.reft_A[adapter_name] =  torch.nn.Parameter(torch.empty(r), requires_grad=True)
-        # self.reft_R[adapter_name] = rotate_layer
-        # print(self.reft_R[adapter_name].weight, flush=True)
-        # print(self.reft_R[adapter_name].weight.mean(), flush=True)
 
     def reset_adapter_parameters(self, adapter_name: str):
         # Original implementation performs initialization with normal distribution
@@ -113,7 +108,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
 
-        # Determine shape of LoHa weights
+        # Determine shape of ReFT weights
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             shape = tuple(base_layer.weight.shape)
@@ -168,26 +163,13 @@ class ReftLayer(nn.Module, LycorisLayer):
 
                 rotate_layer = self.reft_R[active_adapter]
                 learned_source = self.reft_A[active_adapter]
-                # print(rotate_layer.weight.T, flush=True)
-                # print(rotate_layer.weight.dtype, learned_source.weight.dtype)
-                # print(rotate_layer.weight.T @ rotate_layer.weight)
-                # print(rotate_layer.parametrizations.weight.original.T @ rotate_layer.parametrizations.weight.original)
 
-                # print(rotate_layer.weight.mean(), learned_source.weight.mean(), flush=True)
                 module_dropout = self.module_dropout[active_adapter]
-                # print('ok')
-                # Modify current execution weights
-                # if (not self.training) or (self.training and torch.rand(1) > module_dropout):
                 rotated_base = rotate_layer(result)
                 offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight.T)
-                
-                # print((learned_source(result) - rotated_base).mean(), flush=True)
-                # print('offset', offset, flush=True)
                 output = result + offset
-                # output = module_dropout(output)
 
         output = output.to(previous_dtype)
-        # print('output', output, flush=True)
         return output
 
 
