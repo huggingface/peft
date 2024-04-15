@@ -3,29 +3,26 @@ from peft import LoraConfig, get_peft_model, PeftModel, prepare_model_for_kbit_t
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft.utils.pissa_utils import pissa_pre_training_saving, pissa_post_training_saving
 
+if False:
+    # Download and load the llama-2-7b residual model in 4-bit format:
+    model_path = "fxmeng/pissa-llama-2-7b-r16-alpha-16"
+else:
+    # DIY one
+    model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.float16, device_map='auto')
+    tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+    lora_config = LoraConfig(r=16,lora_alpha=16,init_lora_weights="pissa", lora_dropout=0, target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"], bias="none", task_type="CAUSAL_LM")
+    peft_model = get_peft_model(model, lora_config)
+    peft_model.print_trainable_parameters()
+    pissa_pre_training_saving(peft_model, tokenizer, save_path = "pissa-llama-2-7b-r16-alpha-16", push_to_hub = None)
+    model_path = "pissa-llama-2-7b-r16-alpha-16"
+    
 quantization_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_use_double_quant=True,
     bnb_4bit_compute_dtype=torch.bfloat16,
-)
-
-DIY = True
-
-if not DIY:
-    # Download and load the llama-2-7b residual model in 4-bit format:
-    model_path = "fxmeng/pissa-llama-2-7b-r16-alpha-16"
-else:
-    res_model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.float16, device_map='auto')
-    tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
-    tokenizer.pad_token_id = tokenizer.eos_token_id
-    lora_config = LoraConfig(r=16,lora_alpha=16,init_lora_weights="pissa", lora_dropout=0, target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"], bias="none", task_type="CAUSAL_LM")
-    model = get_peft_model(res_model, lora_config)
-    model.print_trainable_parameters()
-    pissa_pre_training_saving(res_model, tokenizer, save_path = "pissa-llama-2-7b-r16-alpha-16", push_to_hub = None)
-    model_path = "pissa-llama-2-7b-r16-alpha-16"
-    
-        
+)    
 res_model = AutoModelForCausalLM.from_pretrained(model_path, quantization_config=quantization_config, low_cpu_mem_usage=True)
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 # Wrapping the residual model with PiSSA:
