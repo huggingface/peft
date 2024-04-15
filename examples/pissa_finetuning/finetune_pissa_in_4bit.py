@@ -27,6 +27,12 @@ parser.add_argument(
     help="Including residual model, initial pissa, finetuned pissa",
 )
 parser.add_argument(
+    "--bits",
+    type=int,
+    default=4,
+    help="[4, 8, 16, 32]",
+)
+parser.add_argument(
     "--init_lora_weights",
     type=str,
     default="pissa",
@@ -72,15 +78,25 @@ if args.residual_model_name_or_path is None:
     peft_model = get_peft_model(model, lora_config)
     pissa_pre_training_saving(peft_model, tokenizer, save_path=args.output_path, push_to_hub=None)
 
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_compute_dtype=torch.bfloat16,
-)
-res_model = AutoModelForCausalLM.from_pretrained(
-    args.output_path, quantization_config=quantization_config, low_cpu_mem_usage=True
-)
+if args.bits == 4:
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    res_model = AutoModelForCausalLM.from_pretrained(
+        args.output_path, quantization_config=quantization_config, low_cpu_mem_usage=True
+    )
+elif args.bits == 8:
+    res_model = AutoModelForCausalLM.from_pretrained(
+        args.output_path, load_in_8bit=True, low_cpu_mem_usage=True, torch_dtype=torch.bfloat16, device_map="auto"
+    )
+else:
+    res_model = AutoModelForCausalLM.from_pretrained(
+        args.output_path, torch_dtype=torch.bfloat16, device_map="auto"
+    )
+
 tokenizer = AutoTokenizer.from_pretrained(args.output_path)
 # Wrapping the residual model with PiSSA:
 peft_model = PeftModel.from_pretrained(res_model, args.output_path, subfolder="pissa_init", is_trainable=True)
