@@ -19,13 +19,16 @@ lora_config = LoraConfig(init_lora_weights="pissa", ...)
 
 # Perform PiSSA on the original model according to lora_config:
 peft_model = get_peft_model(model, lora_config)
-
-# Saving the residual model and PiSSA Adapter:
-pissa_pre_training_saving(peft_model, saving_path, ...)
 ```
 To eliminate the errors introduced by Fast SVD, we have modified the computation formula for the residual matrix to $W^{res} = W - AB$. Although the calculation of $A$ and $B$ involves errors, the overall initialization error for the residual is zero.
 
-### Step 2 (Optional)
+### Step 2 
+[Saving the residual model and PiSSA Adapter](https://github.com/fxmeng/peft/blob/51161a52cac3a736d931d90e676b24a32c4f8cd6/src/peft/utils/pissa_utils.py#L27-L51):
+```
+pissa_pre_training_saving(peft_model, saving_path, ...)
+```
+
+### Step 3 (Optional)
 If quantization fine-tuning is desired, reload the pre-processed [residual model](https://github.com/fxmeng/peft/blob/606a69279480bbdea847f4e5247804bdf7e6b898/examples/pissa_finetuning/pissa_finetuning.py#L107-L116) in 4-bit or 8-bit configurations along with the full-precision [PiSSA Adapter](https://github.com/fxmeng/peft/blob/606a69279480bbdea847f4e5247804bdf7e6b898/examples/pissa_finetuning/pissa_finetuning.py#L122):
 ```
 res_model = AutoModelForCausalLM.from_pretrained(saving_path, load_in_4/8bit=True, ...)
@@ -34,15 +37,20 @@ peft_model = PeftModel.from_pretrained(res_model, f"{saving_path}/pissa_init", i
 When SVD is conducted at full precision, the PiSSA adapter retains the high-frequency principal components of the original model. 
 Then quantizing the residual model, rather than the original model, notably decreases the quantization error.
 
-### Step 3. 
-Training the principal singular values and singular vectors results in faster convergence and enhanced performance:
+### Step 4. 
+[Training](https://github.com/fxmeng/peft/blob/51161a52cac3a736d931d90e676b24a32c4f8cd6/examples/pissa_finetuning/pissa_finetuning.py#L131-L139) the principal singular values and singular vectors results in faster convergence and enhanced performance:
 ```
 dataset = load_dataset(...)
 trainer = SFTTrainer(peft_model, dataset, ...)
+peft_model.save_pretrained(os.path.join(args.output_path, "pissa_init"))
+trainer.train()
+peft_model.save_pretrained(os.path.join(args.output_path, "pissa_ft"))
 ```
 
-### Step 4. 
-Upon completion of training, it is recommended to convert PiSSA into LoRA for storage-efficient sharing:
+### Step 5. 
+Upon completion of training, it is recommended to [convert PiSSA into LoRA](https://github.com/fxmeng/peft/blob/51161a52cac3a736d931d90e676b24a32c4f8cd6/src/peft/utils/pissa_utils.py#L60-L99) for storage-efficient sharing:
+
+
 ```
 pissa_post_training_saving(
     init_path = f"{saving_path}/pissa_init",
