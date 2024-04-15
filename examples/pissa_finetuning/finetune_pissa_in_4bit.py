@@ -17,8 +17,8 @@ parser.add_argument(
 parser.add_argument(
     "--residual_model_name_or_path",
     type=str,
-    default="fxmeng/pissa-llama-2-7b-r16-alpha-16",
-    help="The name or path of the fp32/16 residual model.",
+    default=None,
+    help="The name or path of the fp32/16 residual model. e.g. fxmeng/pissa-llama-2-7b-r16-alpha-16",
 )
 parser.add_argument(
     "--output_path",
