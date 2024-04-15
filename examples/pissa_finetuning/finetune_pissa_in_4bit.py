@@ -58,9 +58,8 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-# Load or download pre-processed residual model from:
 if args.residual_model_name_or_path is None:
-    # If a pre-processed model is not available, manually configure and save the model:
+    print("The pre-processed model is not available, manually configure and save the model")
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model_name_or_path, torch_dtype=torch.float16, device_map="auto"
     )
@@ -78,6 +77,7 @@ if args.residual_model_name_or_path is None:
     peft_model = get_peft_model(model, lora_config)
     pissa_pre_training_saving(peft_model, tokenizer, save_path=args.output_path, push_to_hub=None)
 
+print(f"Load pre-processed residual model in {args.bits}bits")
 if args.bits == 4:
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -94,16 +94,15 @@ elif args.bits == 8:
     )
 else:
     res_model = AutoModelForCausalLM.from_pretrained(args.output_path, torch_dtype=torch.bfloat16, device_map="auto")
-
 tokenizer = AutoTokenizer.from_pretrained(args.output_path)
-# Wrapping the residual model with PiSSA:
+
+print("Wrapping the residual model with PiSSA")
 peft_model = PeftModel.from_pretrained(res_model, args.output_path, subfolder="pissa_init", is_trainable=True)
 peft_model.print_trainable_parameters()
 peft_model = prepare_model_for_kbit_training(peft_model)
 
-
-# Training PiSSA with trl on imdb dataset (using a subset for fast evaluation):
-dataset = load_dataset("imdb", split="train[:1%]")
+print("Training PiSSA with trl on imdb dataset")
+dataset = load_dataset("imdb", split="train[:1%]") # using a subset for fast evaluation
 trainer = SFTTrainer(
     model=peft_model, train_dataset=dataset, dataset_text_field="text", max_seq_length=512, tokenizer=tokenizer
 )
