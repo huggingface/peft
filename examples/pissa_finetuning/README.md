@@ -1,4 +1,4 @@
-# PiSSA: Principal Singular values and Singular vectors Adaptation
+# PiSSA: Principal Singular values and Singular vectors Adaptation ([Paper](https://arxiv.org/abs/2404.02948), [code](https://github.com/GraphPKU/PiSSA))
 ## Introduction
 PiSSA initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
 
@@ -25,7 +25,7 @@ pissa_pre_training_saving(peft_model, saving_path, ...)
 ```
 To eliminate the errors introduced by Fast SVD, we have modified the computation formula for the residual matrix to $W^{res} = W - AB$. Although the calculation of $A$ and $B$ involves errors, the overall initialization error for the residual is zero.
 
-### Optional Step 2
+### Step 2 (Optional)
 If quantization fine-tuning is desired, reload the pre-processed [residual model](https://github.com/fxmeng/peft/blob/606a69279480bbdea847f4e5247804bdf7e6b898/examples/pissa_finetuning/pissa_finetuning.py#L107-L116) in 4-bit or 8-bit configurations along with the full-precision [PiSSA Adapter](https://github.com/fxmeng/peft/blob/606a69279480bbdea847f4e5247804bdf7e6b898/examples/pissa_finetuning/pissa_finetuning.py#L122):
 ```
 res_model = AutoModelForCausalLM.from_pretrained(saving_path, load_in_4/8bit=True, ...)
@@ -35,18 +35,30 @@ When SVD is conducted at full precision, the PiSSA adapter retains the high-freq
 Then quantizing the residual model, rather than the original model, notably decreases the quantization error.
 
 ### Step 3. 
-Training the PiSSA adapter results in faster convergence and enhanced performance:
+Training the principal singular values and singular vectors results in faster convergence and enhanced performance:
 ```
 dataset = load_dataset(...)
 trainer = SFTTrainer(peft_model, dataset, ...)
 ```
 
 ### Step 4. 
-Convert PiSSA to LoRA for storage-efficient saving and sharing:
+Upon completion of training, it is recommended to convert PiSSA into LoRA for storage-efficient sharing:
 ```
 pissa_post_training_saving(
     init_path = f"{saving_path}/pissa_init",
     finetuned_path = f"{saving_path}/pissa_ft",
     output_path = f"{saving_path}/pissa_lora",
 )
+```
+Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A \,|\, A_0] \times \begin{bmatrix} B \\ -B_0 \end{bmatrix}=A^{'}B^{'}$.
+Using the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
+
+## Citation
+```
+@article{meng2024pissa,
+  title={PiSSA: Principal Singular Values and Singular Vectors Adaptation of Large Language Models},
+  author={Meng, Fanxu and Wang, Zhaohui and Zhang, Muhan},
+  journal={arXiv preprint arXiv:2404.02948},
+  year={2024}
+}
 ```

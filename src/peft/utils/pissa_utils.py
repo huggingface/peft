@@ -69,9 +69,9 @@ def pissa_post_training_saving(init_path, finetuned_path, output_path, device='c
             tensors_finetune[k] = f.get_tensor(k)
     tensors_delta_w = {}
     for name in tensors_init.keys():
-        ## W = W^res + A_0 \times B_0,
-        ## W + \Delta W = W^res + A \times B,
-        ## \Delta W = A \times B - A_0 \times B_0 = [A + A_0] \times [B - B_0]^T.
+        ## W = W^{res} + A_0 \times B_0,
+        ## W + \Delta W = W^{res} + A \times B,
+        ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | B_0]^T = A'B'.
         tensors_delta_w[name] = torch.cat([tensors_finetune[name], tensors_init[name]], dim=0) if 'lora_A' in name else torch.cat([tensors_finetune[name], -tensors_init[name]], dim=1)
 
     if not os.path.exists(output_path):
