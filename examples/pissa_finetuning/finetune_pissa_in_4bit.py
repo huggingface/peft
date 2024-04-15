@@ -115,14 +115,16 @@ if args.bits in [4, 8]:
     )
 else:
     res_model = AutoModelForCausalLM.from_pretrained(args.output_path, torch_dtype=torch.bfloat16, device_map="auto")
+print(res_model)
 tokenizer = AutoTokenizer.from_pretrained(args.output_path)
 
 print("Wrapping the residual model with PiSSA.")
 peft_model = PeftModel.from_pretrained(res_model, args.output_path, subfolder="pissa_init", is_trainable=True)
+print(peft_model)
 peft_model.print_trainable_parameters()
 peft_model = prepare_model_for_kbit_training(peft_model)
 
-print(f"Training PiSSA with trl on the {args.dataset_split} of {args.dataset} dataset.")
+print(f"Training PiSSA with trl on the {args.dataset}[{args.dataset_split}] dataset.")
 dataset = load_dataset(args.dataset, split=args.dataset_split)
 trainer = SFTTrainer(
     model=peft_model,
