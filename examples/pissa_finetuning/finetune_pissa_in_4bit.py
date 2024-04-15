@@ -31,7 +31,7 @@ parser.add_argument(
     "--bits",
     type=int,
     default=4,
-    help="[4, 8, 16, 32]",
+    help="[4, 8, 16]",
 )
 parser.add_argument(
     "--init_lora_weights",
@@ -102,19 +102,16 @@ if args.residual_model_name_or_path is None:
     pissa_pre_training_saving(peft_model, tokenizer, save_path=args.output_path, push_to_hub=None)
 
 print(f"Load pre-processed residual model in {args.bits}bits.")
-if args.bits == 4:
+if args.bits in [4, 8]:
     quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
+        load_in_4bit=args.bits==4,
+        load_in_8bit=args.bits==8,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
     res_model = AutoModelForCausalLM.from_pretrained(
         args.output_path, quantization_config=quantization_config, low_cpu_mem_usage=True
-    )
-elif args.bits == 8:
-    res_model = AutoModelForCausalLM.from_pretrained(
-        args.output_path, load_in_8bit=True, low_cpu_mem_usage=True, torch_dtype=torch.bfloat16, device_map="auto"
     )
 else:
     res_model = AutoModelForCausalLM.from_pretrained(args.output_path, torch_dtype=torch.bfloat16, device_map="auto")
