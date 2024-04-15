@@ -181,7 +181,7 @@ class LoraLayer(BaseTunerLayer):
         lora_A = self.lora_A[adapter_name]
         lora_B = self.lora_B[adapter_name]
         scaling = self.scaling[adapter_name]
-        with gather_params_ctx(self.get_base_layer()):
+        with gather_params_ctx(self.get_base_layer().parameters()):
             weight = self.get_base_layer().weight
             quant_state = getattr(self.get_base_layer(), "state", None)
             weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb

@@ -27,6 +27,7 @@ from diffusers import StableDiffusionPipeline
 
 from peft import (
     AdaLoraConfig,
+    BOFTConfig,
     IA3Config,
     LoHaConfig,
     LoKrConfig,
@@ -79,6 +80,10 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # BOFT
+    {
+        "target_modules": None,
+    },
     # VeRA
     {
         "r": 8,
@@ -98,6 +103,7 @@ CLASSES_MAPPING = {
     "prompt_encoder": (PromptEncoderConfig, CONFIG_TESTING_KWARGS[3]),
     "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
     "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
+    "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[6]),
     "vera": (VeraConfig, CONFIG_TESTING_KWARGS[6]),
 }
 
@@ -527,6 +533,9 @@ class PeftCommonTester:
         if issubclass(config_cls, PromptLearningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
+        if issubclass(config_cls, BOFTConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -578,7 +587,7 @@ class PeftCommonTester:
         assert torch.allclose(logits_merged, logits_merged_from_pretrained, atol=atol, rtol=rtol)
 
     def _test_merge_layers_multi(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.BOFT]
 
         if ("gpt2" in model_id.lower()) and (config_cls == IA3Config):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
@@ -643,9 +652,6 @@ class PeftCommonTester:
         assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
-        if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
-            self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
-
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -969,6 +975,7 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
+
         for n, param in model.named_parameters():
             if model.prefix in n:
                 assert param.grad is not None
@@ -1021,7 +1028,8 @@ class PeftCommonTester:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.VERA]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.BOFT, PeftType.VERA]
+        # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -1058,7 +1066,7 @@ class PeftCommonTester:
 
     def _test_delete_inactive_adapter(self, model_id, config_cls, config_kwargs):
         # same as test_delete_adapter, but this time an inactive adapter is deleted
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT]
+        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.BOFT]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -1103,7 +1111,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "VERA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
@@ -1392,9 +1400,9 @@ class PeftCommonTester:
         # TODO: add tests to check if disabling adapters works after calling merge_adapter
 
     def _test_adding_multiple_adapters_with_bias_raises(self, model_id, config_cls, config_kwargs):
-        # When trying to add multiple adapters with bias in Lora or AdaLora, an error should be
+        # When trying to add multiple adapters with bias in Lora, AdaLora or BOFTConfig, an error should be
         # raised. Also, the peft model should not be left in a half-initialized state.
-        if not issubclass(config_cls, (LoraConfig, AdaLoraConfig)):
+        if not issubclass(config_cls, (LoraConfig, AdaLoraConfig, BOFTConfig)):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         config_kwargs = config_kwargs.copy()
@@ -1406,8 +1414,14 @@ class PeftCommonTester:
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, "adapter0")
-        with pytest.raises(ValueError):
-            model.add_adapter("adapter1", replace(config, r=20))
+
+        if config_cls == LoraConfig or config_cls == AdaLoraConfig:
+            with pytest.raises(ValueError):
+                model.add_adapter("adapter1", replace(config, r=20))
+
+        if config_cls == BOFTConfig:
+            with pytest.raises(ValueError):
+                model.add_adapter("adapter1", replace(config, boft_block_num=1, boft_block_size=0))
 
         # (superficial) test that the model is not left in a half-initialized state when adding an adapter fails
         assert "adapter1" not in model.peft_config
