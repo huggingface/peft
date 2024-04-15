@@ -155,15 +155,14 @@ class LoraLayer(BaseTunerLayer):
     def pissa_init(self, adapter_name, init_lora_weights):
         weight = self.get_base_layer().weight
         dtype = weight.dtype
-        device = weight.device
-        if dtype == torch.uint8:
-            quant_type = weight.quant_type
-        quant_state = getattr(self.get_base_layer(), "state", None)
-        weight = dequantize_bnb_weight(weight, state=quant_state).to(torch.float32)  # no-op if not bnb
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize PISSA at full precision before quantizing the residual model, which may reduce quantization errors. For more details, see https://github.com/fxmeng/peft/blob/47f8534701ae4c164aa50af0f6e31dc8f37f7857/examples/pissa_finetuning/finetune_pissa_in_4bit.py."
+            )
+        weight = weight.to(torch.float32)
 
-                    
         if init_lora_weights == "pissa":
-            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel}, 
+            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
             V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
             Vr = V[:, : self.r[adapter_name]]
             Sr = S[: self.r[adapter_name]]
@@ -176,23 +175,16 @@ class LoraLayer(BaseTunerLayer):
             Sr /= self.scaling[adapter_name]
             Uhr = Ur.t()
         else:
-            raise ValueError(f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead.")
+            raise ValueError(
+                f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead."
+            )
 
         lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
         lora_B = Vr @ torch.diag(torch.sqrt(Sr))
         self.lora_A[adapter_name].weight.data = lora_A
         self.lora_B[adapter_name].weight.data = lora_B
-        res = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
-        if dtype == torch.uint8:
-            import bitsandbytes as bnb
-            weight = bnb.nn.Params4bit(
-                res.to("cpu"), requires_grad=False, compress_statistics=False, quant_type=quant_type
-            ).to(device)
-        elif dtype == torch.int8:
-            import bitsandbytes as bnb
-            weight = bnb.nn.Int8Params(res.to("cpu")).to(device)
-        else:
-            weight = res.to(dtype)
+        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+        weight = weight.to(dtype)
         self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):
