@@ -59,7 +59,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 if args.residual_model_name_or_path is None:
-    print("The pre-processed model is not available, manually configure and save the model")
+    print(f"No available pre-processed model, manually initialize a PiSSA for {args.base_model_name_or_path}.")
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model_name_or_path, torch_dtype=torch.float16, device_map="auto"
     )
