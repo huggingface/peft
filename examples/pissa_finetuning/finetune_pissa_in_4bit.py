@@ -8,6 +8,7 @@ from datasets import load_dataset
 import argparse
 
 parser = argparse.ArgumentParser(description="Fine-tuning PiSSA with 4bit residual model")
+# model configs
 parser.add_argument(
     "--base_model_name_or_path",
     type=str,
@@ -56,10 +57,33 @@ parser.add_argument(
     default=0,
     help="Dropout ratio of PiSSA",
 )
+# dataset configs
+parser.add_argument(
+    "--dataset",
+    type=str,
+    default="imdb",
+)
+parser.add_argument(
+    "--dataset_split",
+    type=str,
+    default="train[:1%]",
+    help=["train", "test", "eval", "subset_name"],
+)
+parser.add_argument(
+    "--dataset_field",
+    type=str,
+    default="text",
+)
+parser.add_argument(
+    "--max_seq_length",
+    type=int,
+    default=512,
+)
+# training configs
 args = parser.parse_args()
 
 if args.residual_model_name_or_path is None:
-    print(f"No available pre-processed model, manually initialize a PiSSA for {args.base_model_name_or_path}.")
+    print(f"No available pre-processed model, manually initialize a PiSSA using {args.base_model_name_or_path}.")
     model = AutoModelForCausalLM.from_pretrained(
         args.base_model_name_or_path, torch_dtype=torch.float16, device_map="auto"
     )
@@ -77,7 +101,7 @@ if args.residual_model_name_or_path is None:
     peft_model = get_peft_model(model, lora_config)
     pissa_pre_training_saving(peft_model, tokenizer, save_path=args.output_path, push_to_hub=None)
 
-print(f"Load pre-processed residual model in {args.bits}bits")
+print(f"Load pre-processed residual model in {args.bits}bits.")
 if args.bits == 4:
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -96,15 +120,19 @@ else:
     res_model = AutoModelForCausalLM.from_pretrained(args.output_path, torch_dtype=torch.bfloat16, device_map="auto")
 tokenizer = AutoTokenizer.from_pretrained(args.output_path)
 
-print("Wrapping the residual model with PiSSA")
+print("Wrapping the residual model with PiSSA.")
 peft_model = PeftModel.from_pretrained(res_model, args.output_path, subfolder="pissa_init", is_trainable=True)
 peft_model.print_trainable_parameters()
 peft_model = prepare_model_for_kbit_training(peft_model)
 
-print("Training PiSSA with trl on imdb dataset")
-dataset = load_dataset("imdb", split="train[:1%]") # using a subset for fast evaluation
+print(f"Training PiSSA with trl on the {args.dataset_split} of {args.dataset} dataset.")
+dataset = load_dataset(args.dataset, split=args.split)
 trainer = SFTTrainer(
-    model=peft_model, train_dataset=dataset, dataset_text_field="text", max_seq_length=512, tokenizer=tokenizer
+    model=peft_model,
+    train_dataset=dataset,
+    dataset_text_field=args.dataset_field,
+    max_seq_length=args.max_seq_length,
+    tokenizer=tokenizer,
 )
 ############################## It's essential to save initial PiSSA parameters for conversion to LoRA. ##############################
 if not os.path.exists(os.path.join(args.output_path, "pissa_init")):
