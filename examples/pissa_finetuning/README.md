@@ -1,5 +1,5 @@
-# PiSSA: Principal Singular values and Singular vectors Adaptation ([Paper](https://arxiv.org/abs/2404.02948), [code](https://github.com/GraphPKU/PiSSA))
-## Introduction
+# PiSSA: Principal Singular values and Singular vectors Adaptation
+## Introduction ([Paper](https://arxiv.org/abs/2404.02948), [code](https://github.com/GraphPKU/PiSSA))
 PiSSA initializes the LoRA adapter using the principal singular values and singular vectors. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
 
 ## Quick Start
@@ -11,7 +11,7 @@ If the existing settings do not meet your needs, apply [PiSSA initialization](ht
 # Load an original pre-processed dodel:
 model = AutoModelForCausalLM.from_pretrained(...)
 
-# Configure the initialization method to "pissa", which may take several minutes to execute SVD:
+# Configure the initialization method to "pissa", which may take several minutes to execute SVD on the pre-trained model:
 lora_config = LoraConfig(init_lora_weights="pissa", ...) 
 
 # Alternatively, execute fast SVD, which takes only a few seconds. The number of iterations determines the trade-off between the error and computation time:
@@ -50,7 +50,7 @@ pissa_post_training_saving(
     output_path = f"{saving_path}/pissa_lora",
 )
 ```
-Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A \,|\, A_0] \times \begin{bmatrix} B \\ -B_0 \end{bmatrix}=A^{'}B^{'}$.
+Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A \,|\, A_0] \times [B \,|\, -B_0]^T=A^{'}B^{'}$.
 Using the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
 
 ## Citation
