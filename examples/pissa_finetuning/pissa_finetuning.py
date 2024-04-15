@@ -99,7 +99,8 @@ if args.residual_model_name_or_path is None:
         task_type="CAUSAL_LM",
     )
     peft_model = get_peft_model(model, lora_config)
-    pissa_pre_training_saving(peft_model, tokenizer, save_path=args.output_path, push_to_hub=None)
+    args.residual_model_name_or_path = args.output_path
+    pissa_pre_training_saving(peft_model, tokenizer, save_path=args.residual_model_name_or_path, push_to_hub=None)
 
 print(f"Load pre-processed residual model in {args.bits} bits.")
 if args.bits in [4, 8]:
@@ -111,14 +112,14 @@ if args.bits in [4, 8]:
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
     res_model = AutoModelForCausalLM.from_pretrained(
-        args.output_path, quantization_config=quantization_config, low_cpu_mem_usage=True
+        args.residual_model_name_or_path, quantization_config=quantization_config, low_cpu_mem_usage=True
     )
 else:
-    res_model = AutoModelForCausalLM.from_pretrained(args.output_path, torch_dtype=torch.bfloat16, device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained(args.output_path)
+    res_model = AutoModelForCausalLM.from_pretrained(args.residual_model_name_or_path, torch_dtype=torch.bfloat16, device_map="auto")
+tokenizer = AutoTokenizer.from_pretrained(args.residual_model_name_or_path)
 
 print("Wrapping the residual model with PiSSA.")
-peft_model = PeftModel.from_pretrained(res_model, args.output_path, subfolder="pissa_init", is_trainable=True)
+peft_model = PeftModel.from_pretrained(res_model, args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True)
 print(peft_model)
 peft_model.print_trainable_parameters()
 peft_model = prepare_model_for_kbit_training(peft_model)
