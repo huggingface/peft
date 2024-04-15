@@ -26,7 +26,7 @@ from transformers import AutoTokenizer
 import json
 
 
-def pre_training_saving(peft_model: PeftModel, tokenizer: AutoTokenizer, save_path: str, push_to_hub_user: str = None):
+def pissa_pre_training_saving(peft_model: PeftModel, tokenizer: AutoTokenizer, save_path: str, push_to_hub_user: str = None):
     # No need for SVD when we load the PiSSA and residual model saved locally.
     peft_model.peft_config['default'].init_lora_weights = True
     # Save PiSSA adapter.
@@ -58,7 +58,7 @@ def pre_training_saving(peft_model: PeftModel, tokenizer: AutoTokenizer, save_pa
 # LoRA does not modify the parameters of the base model during using. 
 # When multiple converted-LoRAs are needed simultaneously, each adapter works independently without interference, allowing for the adapters to be freely deleted or added.
 
-def post_training_saving(init_path, finetuned_path, output_path, device='cpu', tensors_name="adapter_model.safetensors", config_name="adapter_config.json"):
+def pissa_post_training_saving(init_path, finetuned_path, output_path, device='cpu', tensors_name="adapter_model.safetensors", config_name="adapter_config.json"):
     tensors_init = {}
     
     with safe_open(os.path.join(init_path, tensors_name), framework="pt", device=device) as f:

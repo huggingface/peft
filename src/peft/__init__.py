@@ -81,6 +81,8 @@ from .utils import (
     bloom_model_postprocess_past_key_value,
     get_peft_model_state_dict,
     prepare_model_for_kbit_training,
+    pissa_pre_training_saving,
+    pissa_post_training_saving,
     replace_lora_weights_loftq,
     set_peft_model_state_dict,
     shift_tokens_right,
