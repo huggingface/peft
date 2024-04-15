@@ -58,7 +58,7 @@ pissa_post_training_saving(
     output_path = f"{saving_path}/pissa_lora",
 )
 ```
-Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A \,|\, A_0] \times [B \,|\, -B_0]^T=A^{'}B^{'}$.
+Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$.
 Using the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
 
 ## Citation
