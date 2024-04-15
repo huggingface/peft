@@ -178,19 +178,29 @@ class LoraLayer(BaseTunerLayer):
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
-        lora_A = self.lora_A[adapter_name]
-        lora_B = self.lora_B[adapter_name]
+        lora_A = self.lora_A[adapter_name].weight
+        lora_B = self.lora_B[adapter_name].weight
+        # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
+        dtype_is_fp16 = lora_A.dtype == torch.float16
+        if dtype_is_fp16:
+            lora_A = lora_A.float()
+            lora_B = lora_B.float()
+
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer().parameters()):
             weight = self.get_base_layer().weight
             quant_state = getattr(self.get_base_layer(), "state", None)
             weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
             if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
-                lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+                lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
-                lora_weight = lora_B.weight @ lora_A.weight
+                lora_weight = lora_B @ lora_A
+
+            if dtype_is_fp16:
+                lora_weight = lora_weight.half()
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
+
         self.lora_magnitude_vector = nn.ParameterDict()
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
         # add lora_magnitude_vector to the list of learnable parameters
