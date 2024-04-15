@@ -62,7 +62,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
         elif isinstance(module, lora.Embedding):
-            device = module.lora_A[next(iter(module.lora_A))].weight.device
+            device = module.lora_A[next(iter(module.lora_embedding_A))].weight.device
             new_layer = XLoRAEmbeddingLayer(
                 model=xloramodel,
                 target=module,
