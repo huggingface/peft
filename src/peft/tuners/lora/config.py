@@ -73,11 +73,14 @@ class LoraConfig(PeftConfig):
             Otherwise, it will use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "loftq"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "loftq", "pissa", "pissa_niter_[number of iters]"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization.
+            completely random initialization and is discouraged. Passing 'pissa' results in PiSSA initialization. 
+            Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, 
+            where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer.
+            Pass `'loftq'` to use LoftQ initialization. 
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the

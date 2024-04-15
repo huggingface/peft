@@ -85,7 +85,7 @@ args = parser.parse_args()
 if args.residual_model_name_or_path is None:
     print(f"No available pre-processed model, manually initialize a PiSSA using {args.base_model_name_or_path}.")
     model = AutoModelForCausalLM.from_pretrained(
-        args.base_model_name_or_path, torch_dtype=torch.float16, device_map="auto"
+        args.base_model_name_or_path, torch_dtype=torch.bfloat16, device_map="auto"
     )
     tokenizer = AutoTokenizer.from_pretrained(args.base_model_name_or_path)
     tokenizer.pad_token_id = tokenizer.eos_token_id
