@@ -1028,7 +1028,15 @@ class PeftCommonTester:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.BOFT, PeftType.VERA]
+        supported_peft_types = [
+            PeftType.LORA,
+            PeftType.LOHA,
+            PeftType.LOKR,
+            PeftType.IA3,
+            PeftType.OFT,
+            PeftType.BOFT,
+            PeftType.VERA,
+        ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
