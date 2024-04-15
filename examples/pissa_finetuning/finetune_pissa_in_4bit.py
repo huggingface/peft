@@ -126,7 +126,7 @@ peft_model.print_trainable_parameters()
 peft_model = prepare_model_for_kbit_training(peft_model)
 
 print(f"Training PiSSA with trl on the {args.dataset_split} of {args.dataset} dataset.")
-dataset = load_dataset(args.dataset, split=args.split)
+dataset = load_dataset(args.dataset, split=args.dataset_split)
 trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
