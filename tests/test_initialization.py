@@ -17,11 +17,11 @@ import torch
 from scipy import stats
 from torch import nn
 
-from peft import LoraConfig, PromptTuningConfig, get_peft_model
+from peft import AdaLoraConfig, LoraConfig, PromptTuningConfig, get_peft_model
 from peft.utils import infer_device
 
 
-class TestInitialization:
+class TestLoraInitialization:
     """Test class to check the initialization of adapters."""
 
     torch_device = infer_device()
@@ -251,7 +251,7 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
 
-    def test_rslora_scaling(self):
+    def test_lora_rslora_scaling(self):
         # default is True
         torch.manual_seed(0)
 
@@ -294,7 +294,7 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
-    def test_rslora_scaling_pattern(self):
+    def test_lora_rslora_scaling_pattern(self):
         # default is True
         torch.manual_seed(0)
 
@@ -321,7 +321,7 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
-    def test_use_dora_linear(self, data):
+    def test_lora_use_dora_linear(self, data):
         # check that dora is a no-op when initialized
         torch.manual_seed(0)
         model = self.get_model()
@@ -338,7 +338,7 @@ class TestInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert torch.allclose(output_base, output_dora)
 
-    def test_use_dora_linear_init_false(self, data):
+    def test_lora_use_dora_linear_init_false(self, data):
         # with init_lora_weights=False, dora should not be a no-op
         torch.manual_seed(0)
         model = self.get_model()
@@ -355,11 +355,27 @@ class TestInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert not torch.allclose(output_base, output_dora)
 
-    def test_use_dora_with_megatron_core_raises(self):
+    def test_lora_use_dora_with_megatron_core_raises(self):
         megatron_config = {"does-not": "matter-here"}
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+
+class TestAdaLoraInitialization:
+    def test_adalora_target_modules_set(self):
+        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
+        assert config.target_modules == {"linear", "embed", "conv2d"}
+
+    def test_adalora_use_dora_raises(self):
+        with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
+            AdaLoraConfig(use_dora=True)
+
+    def test_adalora_loftq_config_raises(self):
+        with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
+            AdaLoraConfig(loftq_config={"loftq": "config"})
+
+
+class TestPromptTuningInitialization:
     def test_use_prompt_tuning_init_text_raises(self):
         with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', tokenizer_name_or_path can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", prompt_tuning_init_text="prompt tuning init text")

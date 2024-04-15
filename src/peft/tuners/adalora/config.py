@@ -50,3 +50,20 @@ class AdaLoraConfig(LoraConfig):
 
     def __post_init__(self):
         self.peft_type = PeftType.ADALORA
+
+        if self.use_dora:
+            raise ValueError(f"{self.peft_type} does not support DoRA.")
+
+        if self.loftq_config:
+            raise ValueError(f"{self.peft_type} does not support LOFTQ.")
+
+        self.target_modules = (
+            set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
+        )
+        # if target_modules is a regex expression, then layers_to_transform should be None
+        if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
+        # if target_modules is a regex expression, then layers_pattern should be None
+        if isinstance(self.target_modules, str) and self.layers_pattern is not None:
+            raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
