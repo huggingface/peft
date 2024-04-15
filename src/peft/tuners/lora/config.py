@@ -78,8 +78,7 @@ class LoraConfig(PeftConfig):
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
             completely random initialization and is discouraged. Passing 'pissa' results in PiSSA initialization. 
-            Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, 
-            where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer.
+            Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer.
             Pass `'loftq'` to use LoftQ initialization. 
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
@@ -166,6 +165,8 @@ class LoraConfig(PeftConfig):
                 "initialization from the reference implementation from Microsoft. Passing 'gaussian' results "
                 "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
                 "to False leads to completely random initialization and is discouraged."
+                "Passing 'pissa' results in PiSSA initialization."
+                "Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
         },
