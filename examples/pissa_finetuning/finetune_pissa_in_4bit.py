@@ -3,17 +3,15 @@ from peft import LoraConfig, get_peft_model, PeftModel, prepare_model_for_kbit_t
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft.utils.pissa_utils import pissa_pre_training_saving, pissa_post_training_saving
 
-if False:
-    # Download and load the llama-2-7b residual model in 4-bit format:
-    model_path = "fxmeng/pissa-llama-2-7b-r16-alpha-16"
-else:
-    # DIY one
+# Load or download the model from:
+model_path = "fxmeng/pissa-llama-2-7b-r16-alpha-16"
+if model_path is None:
+    # If a pre-processed model is not available, manually configure and save the model:
     model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf", torch_dtype=torch.float16, device_map='auto')
     tokenizer = AutoTokenizer.from_pretrained('meta-llama/Llama-2-7b-hf')
     tokenizer.pad_token_id = tokenizer.eos_token_id
     lora_config = LoraConfig(r=16,lora_alpha=16,init_lora_weights="pissa", lora_dropout=0, target_modules=["q_proj", "o_proj", "k_proj", "v_proj", "gate_proj", "up_proj", "down_proj"], bias="none", task_type="CAUSAL_LM")
     peft_model = get_peft_model(model, lora_config)
-    peft_model.print_trainable_parameters()
     pissa_pre_training_saving(peft_model, tokenizer, save_path = "pissa-llama-2-7b-r16-alpha-16", push_to_hub = None)
     model_path = "pissa-llama-2-7b-r16-alpha-16"
     
@@ -41,14 +39,14 @@ trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
     dataset_text_field="text",
-    max_seq_length=1024,
+    max_seq_length=512,
     tokenizer=tokenizer
 )
 
-peft_model.save_pretrained('pissa-llama-2-7b-r16-alpha-16/pissa_init')
+peft_model.save_pretrained('pissa-llama-2-7b-4bit-r16/pissa_init')
 trainer.train()
-peft_model.save_pretrained('pissa-llama-2-7b-r16-alpha-16/pissa_ft')
+peft_model.save_pretrained('pissa-llama-2-7b-4bit-r16/pissa_ft')
 
 
 #from convert_pissa_to_lora import pissa_to_lora
-pissa_post_training_saving(init_path="pissa-llama-2-7b-r16-alpha-16/pissa_init", finetuned_path="pissa-llama-2-7b-r16-alpha-16/pissa_ft", output_path="pissa-llama-2-7b-r16-alpha-16/pissa_lora")
+pissa_post_training_saving(init_path="pissa-llama-2-7b-4bit-r16/pissa_init", finetuned_path="pissa-llama-2-7b-4bit-r16/pissa_ft", output_path="pissa-llama-2-7b-4bit-r16/pissa_lora")
