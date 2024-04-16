@@ -2493,6 +2493,96 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.boft_s.adapter1",
         )
 
+    def test_requires_grad_lntuning_different_targets(self):
+        config0 = LNTuningConfig(
+            target_modules=["layernorm0"],
+        )
+        peft_model = get_peft_model(MLP_LayerNorm(), config0)
+
+        config1 = LNTuningConfig(
+            target_modules=["layernorm1"],
+        )
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
+        )
+
+    def test_requires_grad_lntuning_same_targets(self):
+        config0 = LNTuningConfig(
+            target_modules=["layernorm0"],
+        )
+        peft_model = get_peft_model(MLP_LayerNorm(), config0)
+
+        config1 = LNTuningConfig(target_modules=["layernorm0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
+        )
+
 
 class TestMixedAdapterBatches:
     torch_device = infer_device()

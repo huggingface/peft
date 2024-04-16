@@ -27,6 +27,7 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
     Selects a layer from the model.
     """
 
+    adapter_layer_names = ("ln_tuning_layers",)
     ln_tuning_layer_names = ("ln_tuning_layers",)
 
     def __init__(self, base_layer: nn.Module, adapter_name: str):
@@ -34,7 +35,6 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         self.base_layer = base_layer
         self.ln_tuning_layers = nn.ModuleDict({})
         self.update_layer(self.base_layer, adapter_name)
-        # self.adapter_names = [adapter_name]
         self._active_adapter = adapter_name
         self.merged_adapters = []
 
@@ -87,9 +87,9 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-        # popping one element (argument 0 should not be necessary) is sufficient because LN
+        # popping one element is sufficient because LN
         # tuning does not allow merging more than one adapter at a time.
-        merged_name = self.merged_adapters.pop(0)
+        merged_name = self.merged_adapters.pop()
         self.base_layer, self.ln_tuning_layers[merged_name] = (
             self.ln_tuning_layers[merged_name],
             self.base_layer,
