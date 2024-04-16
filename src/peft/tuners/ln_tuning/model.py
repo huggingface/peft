@@ -131,16 +131,11 @@ class LNTuningModel(BaseTuner):
             module.to(weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: Module):
-        target_modules = self.peft_config[self.active_adapter].target_modules
-        if isinstance(target_modules, str):
-            target_modules = [target_modules]
         for n, p in model.named_parameters():
-            flag = False
-            for module_name in target_modules:
-                if module_name in n and self.prefix in n:
-                    flag = True
-                    break
-            p.requires_grad = flag
+            if self.prefix not in n:
+                p.requires_grad = False
+            else:
+                p.requires_grad = True
 
     def _check_target_module_exists(self, peft_config: PeftConfig, key: str) -> bool:
         return check_target_module_exists(peft_config, key)
