@@ -2501,6 +2501,7 @@ class RequiresGradTester(unittest.TestCase):
 
         config1 = LNTuningConfig(
             target_modules=["layernorm1"],
+            inference_mode=True,
         )
         peft_model.add_adapter("adapter1", config1)
 
