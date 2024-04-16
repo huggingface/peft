@@ -421,7 +421,6 @@ class MLP(nn.Module):
         X = self.sm(X)
         return X
 
-
 class MLP_LayerNorm(nn.Module):
     def __init__(self, bias=True):
         super().__init__()
@@ -443,7 +442,6 @@ class MLP_LayerNorm(nn.Module):
         X = self.lin1(X)
         X = self.sm(X)
         return X
-
 
 class MLP2(nn.Module):
     def __init__(self, bias=True):
