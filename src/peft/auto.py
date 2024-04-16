@@ -71,6 +71,7 @@ class _BaseAutoPeftModel:
         """
         peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
+        base_model_revision = peft_config.base_model_revision
 
         task_type = getattr(peft_config, "task_type", None)
 
@@ -101,7 +102,7 @@ class _BaseAutoPeftModel:
                 "Cannot infer the auto class from the config, please make sure that you are loading the correct model for your task type."
             )
 
-        base_model = target_class.from_pretrained(base_model_path, **kwargs)
+        base_model = target_class.from_pretrained(base_model_path, revision=base_model_revision, **kwargs)
 
         tokenizer_exists = False
         if os.path.exists(os.path.join(pretrained_model_name_or_path, TOKENIZER_CONFIG_NAME)):

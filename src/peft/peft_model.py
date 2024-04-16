@@ -264,6 +264,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     if peft_config.is_prompt_learning
                     else self.base_model.model.__dict__.get("name_or_path", None)
                 )
+            if peft_config.base_model_revision is None:
+                peft_config.base_model_revision = (
+                    self.base_model.__dict__.get("revision", None)
+                    if peft_config.is_prompt_learning
+                    else self.base_model.model.__dict__.get("revision", None)
+                )
             inference_mode = peft_config.inference_mode
             peft_config.inference_mode = True
 
