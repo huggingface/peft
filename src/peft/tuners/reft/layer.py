@@ -81,6 +81,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
+        loc: Optional[Union[List[int], int]],
         rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
@@ -103,6 +104,7 @@ class ReftLayer(nn.Module, LycorisLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
+        self.loc[adapter_name] = loc
         self.alpha[adapter_name] = alpha
         self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
@@ -163,11 +165,17 @@ class ReftLayer(nn.Module, LycorisLayer):
 
                 rotate_layer = self.reft_R[active_adapter]
                 learned_source = self.reft_A[active_adapter]
-
                 module_dropout = self.module_dropout[active_adapter]
-                rotated_base = rotate_layer(result)
-                offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight.T)
-                output = result + offset
+                if self.loc[active_adapter] is None:
+                    rotated_base = rotate_layer(result)
+                    offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight.T)
+                    output = result + offset
+                else:
+                    loc = self.loc[active_adapter]
+                    selected_results = tensor.gather(result, 1, loc)
+                    rotated_base = rotate_layer(selected_results)
+                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight.T)
+                    tensor.scatter_(output, 1, loc, offset)
 
         output = output.to(previous_dtype)
         return output

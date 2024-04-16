@@ -52,6 +52,7 @@ class ReftConfig(LycorisConfig):
     """
     r: int = field(default=8, metadata={"help": "REFT rank"})
     alpha: int = field(default=8, metadata={"help": "Reft alpha"})
+    loc: Optional[Union[List[int], int]] = field(default=None, metadata={"help": "token locations are applied ReFT"})
     module_dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling REFT modules during training"}
     )
