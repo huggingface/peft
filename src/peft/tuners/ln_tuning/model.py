@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 from torch import nn
@@ -41,18 +42,6 @@ class LNTuningModel(BaseTuner):
         'torch.nn.Module': The adapted model with LayerNorm tuned on.
 
     Example:
-
-        ```py
-        >>> from transformers import AutoModelForCausalLM
-        >>> from peft import LNTuningModel, LNTuningConfig
-
-        >>> config = LNTuningConfig(
-        ...     task_type="CAUSAL_LM",
-        ... )
-
-        >>> model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-2-7b-hf")
-        >>> ln_model = LNTuningModel(model, config, "default")
-        ```
 
         ```py
         >>> from transformers import AutoModelForCausalLM
@@ -117,7 +106,11 @@ class LNTuningModel(BaseTuner):
         target: Module,
         adapter_name: str,
     ) -> Module:
-        new_module = LNTuningLayer(target, adapter_name)
+        if not isinstance(target, LNTuningLayer):
+            new_module = LNTuningLayer(target, adapter_name)
+        else:
+            new_module = target
+            new_module.update_layer(target.base_layer, adapter_name)
         return new_module
 
     def _replace_module(self, parent: Module, child_name: str, new_module: Module, child: Module) -> None:
@@ -170,6 +163,15 @@ class LNTuningModel(BaseTuner):
         When disabling all adapters, the model output corresponds to the output of the base model.
         """
         self._set_adapter_layers(enabled=False)
+
+    def set_adapter(self, adapter_name: str) -> None:
+        for module in self.model.modules():
+            if isinstance(module, LNTuningLayer):
+                if module.merged:
+                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                    module.unmerge()
+                module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     def _unload_and_optionally_merge(
         self,
