@@ -32,7 +32,7 @@ class TrainingArguments(TrainingArguments):
     dataset_split: str = field(
         default="train[:1%]", metadata={"help": "init_lora_weights (`['train', 'test', 'eval']`):"}
     )
-    dataset_field: List[str] = field(default=None)
+    dataset_field: List[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
     max_seq_length: int = field(
         default=512,
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
