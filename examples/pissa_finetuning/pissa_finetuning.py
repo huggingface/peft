@@ -2,7 +2,7 @@ import torch
 import os
 from peft import LoraConfig, get_peft_model, PeftModel, prepare_model_for_kbit_training
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Union, List
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments, HfArgumentParser
 from peft.utils.pissa_utils import pissa_pre_training_saving, pissa_post_training_saving
 from trl import SFTTrainer
@@ -32,7 +32,7 @@ class TrainingArguments(TrainingArguments):
     dataset_split: str = field(
         default="train[:1%]", metadata={"help": "init_lora_weights (`['train', 'test', 'eval']`):"}
     )
-    dataset_field: str = field(default="text", metadata={"help": "Path to the training data."})
+    dataset_field: List[str] = field(default=None)
     max_seq_length: int = field(
         default=512,
         metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
@@ -96,11 +96,13 @@ if script_args.bits in [4, 8]:
 
 print(f"Training PiSSA with trl on the {script_args.data_path}[{script_args.dataset_split}] dataset.")
 dataset = load_dataset(script_args.data_path, split=script_args.dataset_split)
+dataset = dataset.map(lambda example: {"text": f"### USER: {example[script_args.dataset_field[0]]}\n### ASSISTANT: {example[script_args.dataset_field[1]]}"})
+
 trainer = SFTTrainer(
     model=peft_model,
     args=script_args,
     train_dataset=dataset,
-    dataset_text_field=script_args.dataset_field,
+    dataset_text_field="text",
     max_seq_length=script_args.max_seq_length,
     tokenizer=tokenizer,
 )
