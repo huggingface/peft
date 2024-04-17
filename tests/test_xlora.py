@@ -107,6 +107,7 @@ class TestXlora:
 
         bucketed = model.get_bucketed_scalings_log()
         keys = bucketed.keys()
+        # One bucket for prompt (seqlen=...) and one for the completion (seqlen=1)
         assert len(bucketed) == 2
         # One bucket for prompt (which has 1 elem)
         assert len(bucketed[max(keys)][0]) == 1
