@@ -140,19 +140,16 @@ class XLoraModel(BaseTuner):
         config: Union[dict[str, XLoraConfig], XLoraConfig],
         adapter_name: str,
     ) -> None:
+        nn.Module.__init__(self)
+
         if isinstance(config, dict):
             conf = config[adapter_name]
         else:
             conf = config
         lora_model = LoraModel(model, config.copy(), adapter_name)
-        self.__dict__["xlora_config"] = conf
-        del self.xlora_config.target_modules
-        self.__dict__["lora_model"] = lora_model
-        super().__init__(model, config, adapter_name)
-        del self.__dict__["lora_model"]
-        del self.__dict__["xlora_config"]
-        self.lora_model = lora_model
         self.xlora_config = conf
+        del self.xlora_config.target_modules
+        self.lora_model = lora_model
 
     def post_init_lora(
         self,
