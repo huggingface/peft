@@ -57,7 +57,7 @@ class PolyModel(BaseTuner):
                 adapter_name,
                 target,
             )
-            if adapter_name != self.active_adapter:
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
