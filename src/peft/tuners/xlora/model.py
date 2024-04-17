@@ -18,6 +18,7 @@ from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
+from safetensors.torch import save_model  # type: ignore
 
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
@@ -307,6 +308,16 @@ class XLoraModel(BaseTuner):
             del conf["_subfolders"]  # It may have been added in from_pretrained
         with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
             json.dump(conf, f)
+
+        if safe_serialization:
+            # https://github.com/huggingface/peft/blob/main/src/peft/peft_model.py#L223
+            if is_main_process and safe_serialization:
+                save_model(
+                    self.internal_xlora_classifier, os.path.join(save_directory, "xlora_classifier.safetensors")
+                )
+        elif is_main_process:
+            state_dict = self.internal_xlora_classifier.state_dict()
+            torch.save(state_dict, os.path.join(save_directory, "xlora_classifier.pt"))
 
     def forward(self, *args, **kwargs):
         return self.lora_model.model(*args, **kwargs)
