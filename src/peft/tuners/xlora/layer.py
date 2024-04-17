@@ -11,9 +11,8 @@ from .config import XLoraConfig
 
 class XLoRALayer:
     """
-    A XLoRALayer wraps any LoraLayer and performs the XLoRA operation on the LoRA adaptors specified.
-    Its primary API is the forward method, which uses the scalings to execute the
-    XLoRA algorithm.
+    A XLoRALayer wraps any LoraLayer and performs the XLoRA operation on the LoRA adaptors specified. Its primary API
+    is the forward method, which uses the scalings to execute the XLoRA algorithm.
     """
 
     def __init__(
@@ -71,8 +70,8 @@ class XLoRALinearLayer(XLoRALayer):
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """
-        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the XLoRALayer class).
+        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
+        method must be created (bound to an instance of the XLoRALayer class).
         """
 
         previous_dtype = x.dtype
@@ -115,8 +114,8 @@ class XLoRAEmbeddingLayer(XLoRALayer):
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """
-        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the XLoRALayer class).
+        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
+        method must be created (bound to an instance of the XLoRALayer class).
         """
 
         xlora_scalings = self.get_maybe_topk_scalings()
@@ -155,8 +154,8 @@ class XLoRAConv2dLayer(XLoRALayer):
 
     def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """
-        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method.
-        To use it, a bound method must be created (bound to an instance of the XLoRALayer class).
+        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
+        method must be created (bound to an instance of the XLoRALayer class).
         """
 
         previous_dtype = x.dtype

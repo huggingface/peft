@@ -324,14 +324,16 @@ class XLoraModel(BaseTuner):
 
     def set_topk_lora(self, value: Optional[int]):
         """
-        Sparsely select the specified top_k LoRA experts instead of the default dense method. Set to None to use dense. This is reflected in the config.
+        Sparsely select the specified top_k LoRA experts instead of the default dense method. Set to None to use dense.
+        This is reflected in the config.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.config.top_k_lora = value
 
     def set_global_scaling_weight(self, weight: float):
         """
-        Set the global LoRA weight, a scalar to multiply the output of each LoRA adapter by. This is by default 1. This is reflected in the config.
+        Set the global LoRA weight, a scalar to multiply the output of each LoRA adapter by. This is by default 1. This
+        is reflected in the config.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.config.global_scaling_weight = weight
@@ -345,14 +347,16 @@ class XLoraModel(BaseTuner):
 
     def get_latest_scalings(self) -> Optional[torch.Tensor]:
         """
-        Returns the latest scalings prediction, or None if no scalings have been predicted. The tensor is of shape (batch_size, seq_len, n_layers, n_classes).
+        Returns the latest scalings prediction, or None if no scalings have been predicted. The tensor is of shape
+        (batch_size, seq_len, n_layers, n_classes).
         """
         return self.internal_xlora_scalings
 
     def get_scalings_log(self) -> List[torch.Tensor]:
         """
-        Returns a shallow (only copying the list itself not the tensors) copy of the list containing the scalings log. Editing the list does not change the underlying log.
-        The tensors are of shape (batch_size, seq_len, n_layers, n_classes). The seq_len dim may vary with input dimension.
+        Returns a shallow (only copying the list itself not the tensors) copy of the list containing the scalings log.
+        Editing the list does not change the underlying log. The tensors are of shape (batch_size, seq_len, n_layers,
+        n_classes). The seq_len dim may vary with input dimension.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier.log_scalings.copy()
@@ -380,9 +384,9 @@ class XLoraModel(BaseTuner):
 
     def get_bucketed_scalings_log(self) -> dict[int, tuple[list[int], list[torch.Tensor]]]:
         """
-        Returns bucketed scalings, bucketed by seq_len. Each value consists of the positions (the first)
-        and the associated tensors. The positions are paired with the associated tensors and give the position
-        in the scaling log.
+        Returns bucketed scalings, bucketed by seq_len. Each value consists of the positions (the first) and the
+        associated tensors. The positions are paired with the associated tensors and give the position in the scaling
+        log.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier._get_bucketed_scalings()

@@ -23,22 +23,22 @@ from peft.utils.peft_types import PeftType
 @dataclass
 class XLoraConfig(PeftConfig):
     r"""
-    This is the configuration class to store the configuration of a `XLoraModel`.
-    When the config is reloaded, the paths of the `adapters` field is disregarded in favor of the
-    saved adapters. As such, only the keys matter during loading.
+    This is the configuration class to store the configuration of a `XLoraModel`. When the config is reloaded, the
+    paths of the `adapters` field is disregarded in favor of the saved adapters. As such, only the keys matter during
+    loading.
 
     Args:
         hidden_size (`int`):
             Hidden size of the base model.
         adapters (`dict`):
-            Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter.
-            *They will be automatically loaded*, to use as LoRA experts. When using from_pretrained, pass the new adapters dict
-            as a keyword argument.
+            Mapping of adapter names to the LoRA adapter id, as per PeftModel.load_adapter. *They will be automatically
+            loaded*, to use as LoRA experts. When using from_pretrained, pass the new adapters dict as a keyword
+            argument.
         enable_softmax (`bool`, *optional*, defaults to `True`):
             Enable softmax application for the X-LoRA classifier.
         enable_softmax_topk (`bool`, *optional*, defaults to `False`):
-            Enable softmax application for the top-k LoRA adapters. Mutually exclusive to
-            `enable_softmax` and must only be set if `top_k_lora` is.
+            Enable softmax application for the top-k LoRA adapters. Mutually exclusive to `enable_softmax` and must
+            only be set if `top_k_lora` is.
         softmax_temperature (`float`, *optional*, defaults to 1.0):
             Softmax temperature, lower yields sharper predictions
         layerwise_scalings (`bool`, *optional*, defaults to `False`):

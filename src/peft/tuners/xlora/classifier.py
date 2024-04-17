@@ -197,9 +197,9 @@ class XLoraClassifier(nn.Module):
 
     def _get_bucketed_scalings(self) -> Dict[int, Tuple[List[int], List[torch.Tensor]]]:
         """
-        Returns bucketed scalings, bucketed by seq_len. Each value consists of the positions (the first)
-        and the associated tensors. The positions are paired with the associated tensors and give the position
-        in the scaling log. Each scaling is a tensor of shape (batch_size, seq_len, n_layers, n_classes)).
+        Returns bucketed scalings, bucketed by seq_len. Each value consists of the positions (the first) and the
+        associated tensors. The positions are paired with the associated tensors and give the position in the scaling
+        log. Each scaling is a tensor of shape (batch_size, seq_len, n_layers, n_classes)).
         """
         seqlens_map: Dict[int, Tuple[List[int], List[torch.Tensor]]] = {}
         for i, scaling in enumerate(self.log_scalings):
