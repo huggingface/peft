@@ -116,7 +116,7 @@ class BOFTModel(BaseTuner):
         # If it is not a BOFTLayer, create a new module, else update it with new adapters
         if not isinstance(target, BOFTLayer):
             new_module = self._create_new_module(boft_config, adapter_name, target, **kwargs)
-            if adapter_name != self.active_adapter:
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
@@ -244,6 +244,7 @@ class BOFTModel(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
