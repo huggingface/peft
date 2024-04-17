@@ -157,7 +157,7 @@ class TestXlora:
 
         model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir)
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir).to(self.device)
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
