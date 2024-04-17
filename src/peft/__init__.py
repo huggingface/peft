@@ -59,6 +59,8 @@ from .tuners import (
     IA3Model,
     AdaLoraConfig,
     AdaLoraModel,
+    BOFTConfig,
+    BOFTModel,
     PrefixEncoder,
     PrefixTuningConfig,
     PromptEmbedding,

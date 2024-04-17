@@ -88,7 +88,7 @@ Next, add an adapter configuration to specify how to adapt the model parameters.
 ```py
 from peft import LoraConfig
 
-config = LoraConfig(
+peft_config = LoraConfig(
     lora_alpha=16,
     lora_dropout=0.1,
     r=64,
@@ -141,10 +141,12 @@ output = model.generate(**inputs)
 print(tokenizer.decode(output_disabled[0], skip_special_tokens=True))
 ```
 
-To disable the adapter, call the [`~PeftModel.disable_adapter`] method.
+To disable the adapter, call the [disable_adapters](https://github.com/huggingface/transformers/blob/4e3490f79b40248c53ee54365a9662611e880892/src/transformers/integrations/peft.py#L313) method.
 
 ```py
-model.disable_adapter()
+model.disable_adapters()
 ```
+
+The [enable_adapters](https://github.com/huggingface/transformers/blob/4e3490f79b40248c53ee54365a9662611e880892/src/transformers/integrations/peft.py#L336) can be used to enable the adapters again.
 
 If you're curious, check out the [Load and train adapters with PEFT](https://huggingface.co/docs/transformers/main/peft) tutorial to learn more.
