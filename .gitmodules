@@ -1,0 +1,3 @@
+[submodule "dreambooth"]
+    path = examples/boft_dreambooth/data/dreambooth
+    url = https://github.com/google/dreambooth
