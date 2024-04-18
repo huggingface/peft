@@ -83,40 +83,12 @@ class VeraModel(BaseTuner):
     Example:
 
         ```py
-        >>> from transformers import AutoModelForSeq2SeqLM
-        >>> from peft import VeraModel, VeraConfig
+        >>> from transformers import AutoModelForCausalLM
+        >>> from peft import VeraConfig, get_peft_model
 
-        >>> config = VeraConfig(
-        ...     task_type="SEQ_2_SEQ_LM",
-        ...     r=8,
-        ...     target_modules=["q", "v"],
-        ...     vera_dropout=0.01,
-        ... )
-
-        >>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-base")
-        >>> vera_model = VeraModel(model, config)
-        ```
-
-        ```py
-        >>> import transformers
-        >>> from peft import VeraConfig, PeftModel, get_peft_model
-
-        >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
-        >>> config = VeraConfig(
-        ...     r=4, target_modules=target_modules, vera_dropout=0.1, bias="none", task_type="CAUSAL_LM"
-        ... )
-
-        >>> model = transformers.GPTJForCausalLM.from_pretrained(
-        ...     "kakaobrain/kogpt",
-        ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
-        ...     pad_token_id=tokenizer.eos_token_id,
-        ...     use_cache=False,
-        ...     device_map={"": rank},
-        ...     torch_dtype=torch.float16,
-        ...     load_in_8bit=True,
-        ... )
-        >>> model = prepare_model_for_int8_training(model)
-        >>> vera_model = get_peft_model(model, config)
+        >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        >>> config = VeraConfig(r=128)
+        >>> model = get_peft_model(base_model, config)
         ```
 
     **Attributes**:
