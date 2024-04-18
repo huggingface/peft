@@ -21,7 +21,7 @@ from peft.utils import PeftType
 @dataclass
 class ReftConfig(LycorisConfig):
     """
-    This is the configuration class to store the configuration of a [`REFTModel`].
+    This is the configuration class to store the configuration of a [`ReftModel`].
 
     Args:
         r (`int`): REFT rank.
