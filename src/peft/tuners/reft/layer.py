@@ -13,13 +13,13 @@
 # limitations under the License.
 
 import math
-import warnings
 from typing import Any, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
 
-from peft.tuners.lycoris_utils import LycorisLayer, check_adapters_to_merge
+from peft.tuners.lycoris_utils import LycorisLayer
+
 
 class LowRankRotateLayer(torch.nn.Module):
     """A linear transformation with orthogonal initialization."""
@@ -61,7 +61,7 @@ class ReftLayer(nn.Module, LycorisLayer):
     def _available_adapters(self) -> Set[str]:
         return {*self.reft_A, *self.reft_R}
 
-    def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...]):
+    def create_adapter_parameters(self, adapter_name: str, r: int):
         rotate_layer = LowRankRotateLayer(self.out_features, r)
         self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer, orthogonal_map='cayley')
         self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r)
@@ -110,24 +110,8 @@ class ReftLayer(nn.Module, LycorisLayer):
         self.rank_dropout[adapter_name] = rank_dropout
         self.module_dropout[adapter_name] = module_dropout
 
-        # Determine shape of ReFT weights
-        base_layer = self.get_base_layer()
-        if isinstance(base_layer, nn.Linear):
-            shape = tuple(base_layer.weight.shape)
-        elif isinstance(base_layer, nn.Conv2d):
-            use_effective_conv2d = use_effective_conv2d and base_layer.kernel_size != (1, 1)
-            if use_effective_conv2d:
-                shape = (base_layer.out_channels, base_layer.in_channels, *base_layer.kernel_size)
-            else:
-                shape = (
-                    base_layer.out_channels,
-                    base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
-                )
-        else:
-            raise TypeError(f"REFT is not implemented for base layers of type {type(base_layer).__name__}")
-
         # Create weights with provided shape
-        self.create_adapter_parameters(adapter_name, r, shape)
+        self.create_adapter_parameters(adapter_name, r)
 
         # Initialize weights
         if init_weights:
@@ -172,10 +156,10 @@ class ReftLayer(nn.Module, LycorisLayer):
                     output = result + offset
                 else:
                     loc = self.loc[active_adapter]
-                    selected_results = tensor.gather(result, 1, loc)
+                    selected_results = torch.gather(result, 1, loc)
                     rotated_base = rotate_layer(selected_results)
                     offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight.T)
-                    tensor.scatter_(output, 1, loc, offset)
+                    output.scatter_(1, loc, offset)
 
         output = output.to(previous_dtype)
         return output

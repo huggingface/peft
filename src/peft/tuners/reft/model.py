@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import re
-from typing import Dict, Type, Union
+from typing import Union
 
 import torch
 from torch import nn
@@ -24,7 +24,7 @@ from .layer import Conv2d, Linear, ReftLayer
 
 class ReftModel(LycorisTuner):
     """
-    REFT model from a pretrained model. 
+    ReFT model from a pretrained model.
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
@@ -77,7 +77,7 @@ class ReftModel(LycorisTuner):
         torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,
     }
- 
+
     def _create_and_replace(
         self,
         config: LycorisConfig,
