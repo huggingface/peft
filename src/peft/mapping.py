@@ -52,7 +52,6 @@ from .tuners import (
 )
 from .utils import _prepare_prompt_learning_config
 
-
 if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
@@ -124,7 +123,7 @@ def get_peft_model(
         model_config = model_config.to_dict()
 
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
-    peft_config.base_model_revision = model.__dict__.get("revision", None)
+    peft_config.revision = model.__dict__.get("revision", None)
 
     if mixed:
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)

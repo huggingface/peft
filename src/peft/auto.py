@@ -71,7 +71,7 @@ class _BaseAutoPeftModel:
         """
         peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
-        base_model_revision = peft_config.base_model_revision
+        base_model_revision = peft_config.revision
 
         task_type = getattr(peft_config, "task_type", None)
 
