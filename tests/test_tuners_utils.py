@@ -383,6 +383,7 @@ class TestModelAndLayerStatus:
     corresponding features like merging).
 
     """
+
     @pytest.fixture
     def small_model(self):
         class SmallModel(nn.Module):
@@ -559,11 +560,11 @@ class TestModelAndLayerStatus:
 
     def test_peft_types_small(self, small_model):
         model_status = small_model.get_model_status()
-        assert model_status.peft_types == {'default': 'LORA'}
+        assert model_status.peft_types == {"default": "LORA"}
 
     def test_peft_types_large(self, large_model):
         model_status = large_model.get_model_status()
-        assert model_status.peft_types == {'default': 'LORA', "other": "LORA"}
+        assert model_status.peft_types == {"default": "LORA", "other": "LORA"}
 
     def test_nb_params_small(self, small_model):
         model_status = small_model.get_model_status()
