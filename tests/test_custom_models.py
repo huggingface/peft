@@ -39,6 +39,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     OFTConfig,
+    ReftConfig,
     PeftModel,
     TaskType,
     get_peft_model,
@@ -316,6 +317,29 @@ TEST_CASES = [
         BOFTConfig,
         {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
     ),
+    ########
+    # ReFT #
+    ########
+    ("Vanilla MLP 1 REFT", "MLP", ReftConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 REFT", "MLP", ReftConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 REFT", "MLP", ReftConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 REFT", "MLP", ReftConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 REFT", "MLP", ReftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    (
+        "Vanilla MLP 6 REFT",
+        "MLP",
+        ReftConfig,
+        {
+            "target_modules": ["lin0"],
+            "alpha": 4,
+            "module_dropout": 0.1,
+        },
+    ),
+    ("Vanilla MLP 7 REFT", "MLP", ReftConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
+    ("Conv2d 1 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    ("Conv2d 4 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -385,6 +409,7 @@ PREFIXES = {
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
     BOFTConfig: "boft_",
+    ReftConfig: "reft_",
 }
 
 
@@ -980,7 +1005,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, ReftConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1005,7 +1030,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, ReftConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -1210,6 +1235,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
+            ReftConfig(target_modules=["lin0"], init_weights=False),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2432,6 +2458,91 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin1.boft_R.adapter1",
             "base_model.model.lin1.boft_s.adapter1",
+        )
+
+
+    def test_requires_grad_reft_different_targets(self):
+        # test two different ReFT adapters that target different modules
+        config0 = ReftConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = ReftConfig(target_modules=["lin1"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.reft_A.default.weight",
+            "base_model.model.lin0.reft_R.default.weight",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.reft_A.default.weight",
+            "base_model.model.lin0.reft_B.default.weight",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.reft_A.adapter1.weight",
+            "base_model.model.lin1.reft_B.adapter1.weight",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.reft_A.adapter1.weight",
+            "base_model.model.lin1.reft_B.adapter1.weight",
+        )
+
+    def test_requires_grad_reft_same_targets(self):
+        # same as previous test, except that ReFT adapters target the same layer
+        config0 = ReftConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = ReftConfig(target_modules=["lin0"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.reft_A.default.weight",
+            "base_model.model.lin0.reft_B.default.weight",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.reft_A.default.weight",
+            "base_model.model.lin0.reft_B.default.weight",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.reft_A.adapter1.weight",
+            "base_model.model.lin0.reft_B.adapter1.weight",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.reft_A.adapter1.weight",
+            "base_model.model.lin0.reft_B.adapter1.weight",
         )
 
 
