@@ -265,6 +265,20 @@ class BaseTuner(nn.Module, ABC):
         """
         ...
 
+    @abstractmethod
+    def disable_adapter_layers(self) -> None:
+        """
+        Disable all adapters in-place.
+        """
+        ...
+
+    @abstractmethod
+    def enable_adapter_layers(self) -> None:
+        """
+        Enable all adapters in-place
+        """
+        ...
+
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -347,6 +361,10 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
+        # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
+        # added, and it targets different layer(s) than the first adapter (which is active), then those different
+        # layers will be activated, which we don't want.
+        self.set_adapter(self.active_adapters)
         self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
@@ -480,6 +498,16 @@ class BaseTunerLayer(ABC):
     def active_adapter(self) -> str | list[str]:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
+
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        adapters = set()
+        for layer_name in self.adapter_layer_names:
+            module = getattr(self, layer_name)
+            if not isinstance(module, (nn.ModuleDict, nn.ParameterDict)):
+                continue
+            adapters.update(set(module.keys()))
+        return adapters
 
     @property
     def active_adapters(self):
@@ -697,6 +725,8 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
     """
     if adapter_names is None:
         adapter_names = module.active_adapters
+    if isinstance(adapter_names, str):
+        raise ValueError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
 
     if module.merged:
         merged_adapters = set(module.merged_adapters)

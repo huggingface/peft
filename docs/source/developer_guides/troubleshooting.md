@@ -135,3 +135,49 @@ model.save_adapter("my_adapter", save_embedding_layers=True)
 For inference, load the base model first and resize it the same way you did before you trained the model. After you've resized the base model, you can load the PEFT checkpoint.
 
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
+
+### Investigating the status of the PEFT model
+
+Sometimes, the PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, you can call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. The first one gives you a detailed overview about the adapters for each targeted layer. The latter one gives you a high-level overview about the model status.
+
+```python
+>>> from transformers import AutoModel
+>>> from peft import get_peft_model, LoraConfig
+
+>>> model_id = "google/flan-t5-small"
+>>> model = AutoModel.from_pretrained(model_id)
+>>> model = get_peft_model(model, LoraConfig())
+
+>>> model.get_layer_status()
+[TunerLayerStatus(name='model.encoder.block.0.layer.0.SelfAttention.q',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['default'],
+                  merged_adapters=[],
+                  available_adapters=['default']),
+ TunerLayerStatus(name='model.encoder.block.0.layer.0.SelfAttention.v',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['default'],
+                  merged_adapters=[],
+                  available_adapters=['default']),
+...]
+
+>>> model.get_model_status()
+TunerModelStatus(
+    base_model_type='T5Model',
+    adapter_model_type='LoraModel',
+    peft_types={'default': 'LORA'},
+    trainable_params=344064,
+    total_params=60855680,
+    num_adapter_layers=48,
+    enabled=True,
+    active_adapters=['default'],
+    merged_adapters=[],
+    available_adapters=['default'],
+)
+```
+
+In the model state output, you should look out especially for entries that say `"irregular"`. This means that PEFT has detected an inconsistent state in the model. For instance, when it says `merged_adapters="irregular"`, it means that for at least one adapter, it was found that it was merged on some target modules but not on others that it targets. If you see this, the inference results will most likely be incorrect.
+
+The best way to resolve this issue is to reload the whole model and the adapter checkpoint(s). Ensure that you don't perform any incorrect operations on the model, e.g. manually merging adapters on some modules but not others.

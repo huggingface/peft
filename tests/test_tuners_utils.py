@@ -14,6 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import re
 import unittest
 from copy import deepcopy
 
@@ -23,8 +24,9 @@ from parameterized import parameterized
 from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
 
-from peft import IA3Config, LoHaConfig, LoraConfig, get_peft_model
+from peft import IA3Config, LoHaConfig, LoraConfig, PromptTuningConfig, get_peft_model
 from peft.tuners.tuners_utils import (
+    BaseTunerLayer,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
@@ -372,3 +374,355 @@ class TestTargetedModuleNames(unittest.TestCase):
             f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
         ]
         assert model.targeted_module_names == expected
+
+
+class TestModelAndLayerStatus:
+    """Check the methods `get_layer_status` and `get_model_status`.`
+
+    Note that we only test LoRA here but the same logic should work for other tuner types (if they support the
+    corresponding features like merging).
+
+    """
+    @pytest.fixture
+    def small_model(self):
+        class SmallModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+
+        config = LoraConfig(target_modules="lin0")
+        return get_peft_model(SmallModel(), config)
+
+    @pytest.fixture
+    def large_model(self):
+        class LargeModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.conv0 = nn.Conv2d(3, 10, 3)
+                self.emb0 = nn.Embedding(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+                self.conv1 = nn.Conv2d(3, 10, 3)
+                self.emb1 = nn.Embedding(10, 10)
+
+        config0 = LoraConfig(target_modules=["lin0", "conv1", "emb0"])
+        config1 = LoraConfig(target_modules=["lin0", "lin1"], r=16)
+        model = get_peft_model(LargeModel(), config0)
+        model.add_adapter("other", config1)
+        return model
+
+    ################
+    # layer status #
+    ################
+
+    def test_layer_names_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        expected = ["model.lin0"]
+        assert [status.name for status in layer_status] == expected
+
+    def test_layer_names_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = sorted([status.name for status in layer_status])
+        expected = ["model.conv1", "model.emb0", "model.lin0", "model.lin1"]
+        assert result == expected
+
+    def test_module_type_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        assert [status.module_type for status in layer_status] == ["lora.Linear"]
+
+    def test_module_type_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = sorted([status.module_type for status in layer_status])
+        expected = ["lora.Conv2d", "lora.Embedding", "lora.Linear", "lora.Linear"]
+        assert result == expected
+
+    def test_enabled_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        assert [status.enabled for status in layer_status] == [True]
+
+    def test_enabled_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.enabled for status in layer_status]
+        expected = [True, True, True, True]
+        assert result == expected
+
+    def test_enabled_irregular(self, large_model):
+        # this is an invalid state, but we should still test it
+        # disable a single layer
+        for module in large_model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.enable_adapters(False)
+                break
+
+        layer_status = large_model.get_layer_status()
+        result = [status.enabled for status in layer_status]
+        expected = [False, True, True, True]
+        assert result == expected
+
+    def test_active_adapters_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        assert [status.active_adapters for status in layer_status] == [["default"]]
+
+    def test_active_adapters_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.active_adapters for status in layer_status]
+        # note: as currently implemented, the active adapter can be an adapter that does not exist on this specific
+        # layer, for instance, layer 3 (i.e. index 2) only has the "other" adapter but "default" is still shown as the
+        # active adapter
+        expected = [["default"], ["default"], ["default"], ["default"]]
+        assert result == expected
+
+        # switch to "other"
+        large_model.set_adapter("other")
+        layer_status = large_model.get_layer_status()
+        result = [status.active_adapters for status in layer_status]
+        expected = [["other"], ["other"], ["other"], ["other"]]
+
+    def test_merge_adapters_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        assert [status.merged_adapters for status in layer_status] == [[]]
+        assert [status.available_adapters for status in layer_status] == [["default"]]
+
+        # now merge "default"
+        small_model.merge_adapter(["default"])
+        layer_status = small_model.get_layer_status()
+        assert [status.merged_adapters for status in layer_status] == [["default"]]
+        assert [status.available_adapters for status in layer_status] == [["default"]]
+
+    def test_merge_adapters_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.merged_adapters for status in layer_status]
+        assert result == [[], [], [], []]
+
+        # now merge "default"
+        large_model.merge_adapter(["default"])
+        layer_status = large_model.get_layer_status()
+        result = [status.merged_adapters for status in layer_status]
+        # default is on layer 0, 1, and 3
+        assert result == [["default"], ["default"], [], ["default"]]
+
+        # now merge "other"
+        large_model.unmerge_adapter()
+        large_model.merge_adapter(["other"])
+        layer_status = large_model.get_layer_status()
+        result = [status.merged_adapters for status in layer_status]
+        # other is on layer 0 and 2
+        assert result == [["other"], [], ["other"], []]
+
+        # now merge both
+        large_model.merge_adapter(["default", "other"])
+        layer_status = large_model.get_layer_status()
+        result = [status.merged_adapters for status in layer_status]
+        # default is on layer 0, 1, and 3, other is on layer 0 and 2
+        assert result == [["other", "default"], ["default"], ["other"], ["default"]]
+
+    def test_available_adapters_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        result = [status.available_adapters for status in layer_status]
+        expected = [["default"]]
+        assert result == expected
+
+    def test_available_adapters_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.available_adapters for status in layer_status]
+        expected = [["default", "other"], ["default"], ["other"], ["default"]]
+        assert result == expected
+
+    ################
+    # model status #
+    ################
+
+    def test_base_model_type_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.base_model_type == "SmallModel"
+
+    def test_base_model_type_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.base_model_type == "LargeModel"
+
+    def test_base_model_type_transformers_automodel(self):
+        # ensure that this also works with transformers AutoModels
+        model_id = "google/flan-t5-small"
+        model = AutoModel.from_pretrained(model_id)
+        model = get_peft_model(model, LoraConfig())
+        model_status = model.get_model_status()
+        assert model_status.base_model_type == "T5Model"
+
+    def test_adapter_model_type_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.adapter_model_type == "LoraModel"
+
+    def test_adapter_model_type_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.adapter_model_type == "LoraModel"
+
+    def test_peft_types_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.peft_types == {'default': 'LORA'}
+
+    def test_peft_types_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.peft_types == {'default': 'LORA', "other": "LORA"}
+
+    def test_nb_params_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.trainable_params == 160
+        assert model_status.total_params == 380
+
+    def test_nb_params_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.trainable_params == 616
+        assert model_status.total_params == 2236
+
+    def test_num_adapter_layers_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.num_adapter_layers == 1
+
+    def test_num_adapter_layers_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.num_adapter_layers == 4
+
+    def test_model_enabled_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.enabled is True
+
+    def test_model_enabled_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.enabled is True
+
+    def test_model_disabled_small(self, small_model):
+        small_model.disable_adapter_layers()
+        model_status = small_model.get_model_status()
+        assert model_status.enabled is False
+
+    def test_model_disabled_large(self, large_model):
+        large_model.disable_adapter_layers()
+        model_status = large_model.get_model_status()
+        assert model_status.enabled is False
+
+    def test_model_enabled_irregular(self, large_model):
+        # this is an invalid state, but we should still test it
+        # disable a single layer
+        for module in large_model.modules():
+            if isinstance(module, BaseTunerLayer):
+                module.enable_adapters(False)
+                break
+
+        model_status = large_model.get_model_status()
+        assert model_status.enabled == "irregular"
+
+    def test_model_active_adapters_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.active_adapters == ["default"]
+
+    def test_model_active_adapters_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.active_adapters == ["default"]
+
+        large_model.set_adapter("other")
+        model_status = large_model.get_model_status()
+        assert model_status.active_adapters == ["other"]
+
+    def test_model_active_adapters_irregular(self, large_model):
+        # this is an invalid state, but we should still test it
+        # disable a single layer
+        for module in large_model.modules():
+            if isinstance(module, BaseTunerLayer):
+                # switch a single layer's active adapter from default to other
+                if module.active_adapters == ["default"]:
+                    module._active_adapter = "other"
+                    assert module.active_adapters == ["other"]
+                    break
+
+        model_status = large_model.get_model_status()
+        assert model_status.active_adapters == "irregular"
+
+    def test_model_merged_adapters_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.merged_adapters == []
+
+        small_model.merge_adapter()
+        model_status = small_model.get_model_status()
+        assert model_status.merged_adapters == ["default"]
+
+        small_model.unmerge_adapter()
+        model_status = small_model.get_model_status()
+        assert model_status.merged_adapters == []
+
+    def test_model_merged_adapters_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.merged_adapters == []
+
+        large_model.merge_adapter(["default"])
+        model_status = large_model.get_model_status()
+        assert model_status.merged_adapters == ["default"]
+
+        large_model.unmerge_adapter()
+        large_model.merge_adapter(["other"])
+        model_status = large_model.get_model_status()
+        assert model_status.merged_adapters == ["other"]
+
+        large_model.unmerge_adapter()
+        large_model.merge_adapter(["default", "other"])
+        model_status = large_model.get_model_status()
+        assert model_status.merged_adapters == ["default", "other"]
+
+    def test_model_merged_adapters_irregular(self, large_model):
+        # this is an invalid state, but we should still test it
+        # by merging only lin0 of "default", we end up in a irregular state, because not all "default" layers are merged
+        large_model.base_model.lin0.merge(["default"])
+
+        model_status = large_model.get_model_status()
+        assert model_status.merged_adapters == "irregular"
+
+    def test_model_available_adapters_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.available_adapters == ["default"]
+
+    def test_model_available_adapters_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.available_adapters == ["default", "other"]
+
+    ###############
+    # wrong types #
+    ###############
+
+    def test_prefix_tuning(self):
+        model = AutoModelForSeq2SeqLM.from_pretrained("hf-internal-testing/tiny-random-BartForConditionalGeneration")
+        config = PromptTuningConfig(task_type="SEQ_2_SEQ_LM", num_virtual_tokens=10)
+        model = get_peft_model(model, config)
+
+        with pytest.raises(TypeError, match=re.escape("get_layer_status() expects a PeftModel instance")):
+            model.get_layer_status()
+
+        with pytest.raises(TypeError, match=re.escape("get_model_status() expects a PeftModel instance")):
+            model.get_model_status()
+
+    def test_mixed_model_raises(self):
+        class SimpleNet(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                # note: out_features must be > rank or else OFT will be an identity transform
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.relu = nn.ReLU()
+                self.lin1 = nn.Linear(20, 16, bias=bias)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                return X
+
+        base_model = SimpleNet()
+        config0 = LoraConfig(target_modules=["lin0"], init_lora_weights=False)
+        config1 = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False)
+        model = get_peft_model(base_model, config0, adapter_name="adapter0", mixed="mixed")
+        model.add_adapter("adapter1", config1)
+
+        with pytest.raises(TypeError, match="get_layer_status is not supported for PeftMixedModel"):
+            model.get_layer_status()
+
+        with pytest.raises(TypeError, match="get_model_status is not supported for PeftMixedModel"):
+            model.get_model_status()
