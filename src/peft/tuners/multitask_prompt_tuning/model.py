@@ -66,11 +66,15 @@ class MultitaskPromptEmbedding(PromptEmbedding):
                     "init method"
                 )
 
-            # TODO: There should be an option for safetensors
-            state_dict: dict = torch.load(
-                config.prompt_tuning_init_state_dict_path,
-                map_location=word_embeddings.weight.device,
-            )
+            if config.prompt_tuning_init_state_dict_path.endswith(".safetensors"):
+                from safetensors.torch import load_file
+
+                state_dict: dict = load_file(config.prompt_tuning_init_state_dict_path)
+            else:
+                state_dict: dict = torch.load(
+                    config.prompt_tuning_init_state_dict_path,
+                    map_location=word_embeddings.weight.device,
+                )
 
         if config.prompt_tuning_init in [
             MultitaskPromptTuningInit.AVERAGE_SOURCE_TASKS,
