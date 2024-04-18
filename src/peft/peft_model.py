@@ -2425,10 +2425,10 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
             A dataclass containing the status of the model.
 
     """
-    if not isinstance(model, PeftModel):
+    if not isinstance(model, PeftModel) or not isinstance(model.base_model, BaseTuner):
         raise TypeError(
             "get_model_status() expects a PeftModel instance; you can get this e.g. by calling `get_peft_model` "
-            "or `PeftModel.from_pretrained()`."
+            "or `PeftModel.from_pretrained()`; prefix tuning is not supported."
         )
 
     base_model_type = model.get_base_model().__class__.__name__
