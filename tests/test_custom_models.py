@@ -966,6 +966,36 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             self.fail("There should be no warning when bias is set to 'none'")
 
     @parameterized.expand(TEST_CASES)
+    def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        assert model.active_adapters == ["default"]
+        assert model.active_adapter == "default"
+
+        # at this stage, "default" is still the activate adapter, "other" is disabled
+        model.add_adapter("other", config)
+        assert model.active_adapters == ["default"]
+        assert model.active_adapter == "default"
+
+        # set "other" as the active adapter
+        model.set_adapter("other")
+        assert model.active_adapters == ["other"]
+        assert model.active_adapter == "other"
+
+        # set both adapters as active
+        # Note: On the PeftModel, there cannot be multiple active adapters, so we have to go through model.base_model
+        # instead.
+        model.base_model.set_adapter(["default", "other"])
+        # model.active_adapters works, as it delegates to the base_model
+        assert model.active_adapters == ["default", "other"]
+        # model.active_adapter would not work, thus we have to check the base_model directly
+        assert model.base_model.active_adapter == ["default", "other"]
+
+    @parameterized.expand(TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 

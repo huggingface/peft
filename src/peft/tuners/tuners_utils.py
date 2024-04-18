@@ -161,7 +161,7 @@ class BaseTuner(nn.Module, ABC):
                 # user is adding a dict of PeftConfigs
                 self.peft_config.update(peft_config)
 
-        self.active_adapter = adapter_name
+        self.active_adapter: str | list[str] = adapter_name
         self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
         self.inject_adapter(self.model, adapter_name)
 
@@ -493,7 +493,7 @@ class BaseTunerLayer(ABC):
         return self._disable_adapters
 
     @property
-    def active_adapter(self) -> str:
+    def active_adapter(self) -> str | list[str]:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
 

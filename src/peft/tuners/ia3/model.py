@@ -179,7 +179,7 @@ class IA3Model(BaseTuner):
             )
         else:
             new_module = self._create_new_module(ia3_config, adapter_name, target, **kwargs)
-            if adapter_name != self.active_adapter:
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
@@ -277,6 +277,7 @@ class IA3Model(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     def _prepare_adapter_config(self, peft_config, model_config):
         if peft_config.target_modules is None:
