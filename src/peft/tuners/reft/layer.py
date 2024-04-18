@@ -124,7 +124,7 @@ class ReftLayer(nn.Module, LycorisLayer):
                     base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
                 )
         else:
-            raise TypeError(f"LoHa is not implemented for base layers of type {type(base_layer).__name__}")
+            raise TypeError(f"REFT is not implemented for base layers of type {type(base_layer).__name__}")
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r, shape)
