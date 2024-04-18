@@ -257,7 +257,7 @@ batch_size = 128
 args = TrainingArguments(
     peft_model_id,
     remove_unused_columns=False,
-    evaluation_strategy="epoch",
+    eval_strategy="epoch",
     save_strategy="epoch",
     learning_rate=5e-3,
     per_device_train_batch_size=batch_size,
