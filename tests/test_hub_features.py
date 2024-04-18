@@ -18,6 +18,7 @@ from transformers import AutoModelForCausalLM
 
 from peft import AutoPeftModelForCausalLM, LoraConfig, PeftConfig, PeftModel, get_peft_model
 
+
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
 
 BASE_REVISION_MODELS_TO_TEST = [("peft-internal-testing/tiny-random-BertModel", "v2.0.0")]
