@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import math
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
@@ -81,7 +82,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        loc: Optional[Union[List[int], int]],
+        loc: Optional[List[int] | int],
         rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
@@ -128,7 +129,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         self.set_adapter(self.active_adapters)
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        return self.reft_R[active_adapter]
+        return self.reft_R[adapter_name]
 
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
@@ -160,6 +161,7 @@ class ReftLayer(nn.Module, LycorisLayer):
                     rotated_base = rotate_layer(selected_results)
                     offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight.T)
                     output.scatter_(1, loc, offset)
+                    output = module_dropout(output)
 
         output = output.to(previous_dtype)
         return output
