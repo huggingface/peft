@@ -2357,16 +2357,17 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
     """
     if isinstance(model, PeftModel):
-        model = model.base_model
-
-    if not isinstance(model, BaseTuner):
-        raise TypeError(
-            "get_layer_status() expects a PeftModel instance; for instance, you can get this by calling "
-            "`get_peft_model` or `PeftModel.from_pretrained()`"
-        )
+        base_model = model.base_model
+        if not isinstance(base_model, BaseTuner):
+            raise TypeError(
+                "get_layer_status() got an invalid PeftModel instance; prefix tuning and adaption prompt are not "
+                "supported."
+            )
+    else:
+        base_model = model
 
     layer_status: list[TunerLayerStatus] = []
-    for name, module in model.named_modules():
+    for name, module in base_model.named_modules():
         if not isinstance(module, BaseTunerLayer):
             continue
 
@@ -2379,6 +2380,9 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             available_adapters=sorted(module._get_available_adapters()),
         )
         layer_status.append(status)
+
+    if not layer_status:
+        raise ValueError("No adapter layers found in the model, please ensure that it's a PEFT model")
 
     return layer_status
 
@@ -2435,20 +2439,30 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
             A dataclass containing the status of the model.
 
     """
-    if not isinstance(model, PeftModel) or not isinstance(model.base_model, BaseTuner):
+    if isinstance(model, PeftModel):
+        if not isinstance(model.base_model, BaseTuner):
+            raise TypeError(
+                "get_model_status() got an invalid PeftModel instance; prefix tuning and adaption prompt are not "
+                "supported."
+            )
+        base_model_type = model.get_base_model().__class__.__name__
+        trainable_params, total_params = model.get_nb_trainable_parameters()
+        base_model = model.base_model
+        peft_types = {key: str(config.peft_type).partition(".")[-1] for key, config in base_model.peft_config.items()}
+        adapter_model_type = base_model.__class__.__name__
+    elif isinstance(model, PreTrainedModel):
+        base_model_type = model.__class__.__name__
+        trainable_params, total_params = PeftModel.get_nb_trainable_parameters(model)
+        base_model = model
+        peft_types = {}
+        adapter_model_type = "None"
+    else:
         raise TypeError(
-            "get_model_status() expects a PeftModel instance; you can get this e.g. by calling `get_peft_model` "
-            "or `PeftModel.from_pretrained()`; prefix tuning is not supported."
+            f"get_model_status() expects a PeftModel or a PreTrainedModel instance; got {model.__class__.__name__} "
+            "instead."
         )
 
-    base_model_type = model.get_base_model().__class__.__name__
-    trainable_params, total_params = model.get_nb_trainable_parameters()
-    layer_status = model.get_layer_status()
-
-    model = model.base_model
-
-    peft_types = {key: str(config.peft_type).partition(".")[-1] for key, config in model.peft_config.items()}
-    adapter_model_type = model.__class__.__name__
+    layer_status = get_layer_status(model)
     num_adapter_layers = len(layer_status)
 
     enabled_set: set[bool] = {status.enabled for status in layer_status}  # must be {True}, {False}, or {True, False}

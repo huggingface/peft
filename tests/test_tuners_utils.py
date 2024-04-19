@@ -25,6 +25,7 @@ from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
 
 from peft import AdaptionPromptConfig, IA3Config, LoHaConfig, LoraConfig, PromptTuningConfig, get_peft_model
+from peft.peft_model import get_layer_status, get_model_status
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
@@ -685,9 +686,58 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.available_adapters == ["default", "other"]
 
+    ######################
+    # transformers model #
+    ######################
+
+    def test_transformers_model(self):
+        model_id = "peft-internal-testing/gpt2-lora-random"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model_status = get_model_status(model)
+        layer_status = get_layer_status(model)
+
+        assert model_status.base_model_type == "GPT2LMHeadModel"
+        assert model_status.adapter_model_type == "None"
+        assert model_status.peft_types == {}
+        assert model_status.trainable_params == 0
+        assert model_status.total_params == 124734720
+        assert model_status.num_adapter_layers == 12
+        assert model_status.enabled is True
+        assert model_status.active_adapters == ["default"]
+        assert model_status.merged_adapters == []
+        assert model_status.available_adapters == ["default"]
+
+        layer_status0 = layer_status[0]
+        assert len(layer_status) == 12
+        assert layer_status0.name == "transformer.h.0.attn.c_attn"
+        assert layer_status0.module_type == "lora.Linear"
+        assert layer_status0.enabled is True
+        assert layer_status0.active_adapters == ["default"]
+        assert layer_status0.merged_adapters == []
+        assert layer_status0.available_adapters == ["default"]
+
     ###############
     # wrong types #
     ###############
+
+    def test_vanilla_model_raises(self):
+        model = nn.Linear(10, 10)
+        # note: full error message is longer
+        with pytest.raises(ValueError, match="No adapter layers found in the model"):
+            get_layer_status(model)
+
+        msg = re.escape("get_model_status() expects a PeftModel or a PreTrainedModel instance")
+        with pytest.raises(TypeError, match=msg):
+            get_model_status(model)
+
+    def test_transformer_model_without_adapter_raises(self):
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        # note: full error message is longer
+        with pytest.raises(ValueError, match="No adapter layers found in the model"):
+            get_layer_status(model)
+
+        with pytest.raises(ValueError, match="No adapter layers found in the model"):
+            get_model_status(model)
 
     def test_prefix_tuning(self):
         model = AutoModelForSeq2SeqLM.from_pretrained("hf-internal-testing/tiny-random-BartForConditionalGeneration")
@@ -695,10 +745,10 @@ class TestModelAndLayerStatus:
         model = get_peft_model(model, config)
 
         # note: full error message is longer
-        with pytest.raises(TypeError, match=re.escape("get_layer_status() expects a PeftModel instance")):
+        with pytest.raises(TypeError, match=re.escape("get_layer_status() got an invalid PeftModel instance")):
             model.get_layer_status()
 
-        with pytest.raises(TypeError, match=re.escape("get_model_status() expects a PeftModel instance")):
+        with pytest.raises(TypeError, match=re.escape("get_model_status() got an invalid PeftModel instance")):
             model.get_model_status()
 
     def test_adaption_prompt(self):
@@ -707,10 +757,10 @@ class TestModelAndLayerStatus:
         model = get_peft_model(model, config)
 
         # note: full error message is longer
-        with pytest.raises(TypeError, match=re.escape("get_layer_status() expects a PeftModel instance")):
+        with pytest.raises(TypeError, match=re.escape("get_layer_status() got an invalid PeftModel instance")):
             model.get_layer_status()
 
-        with pytest.raises(TypeError, match=re.escape("get_model_status() expects a PeftModel instance")):
+        with pytest.raises(TypeError, match=re.escape("get_model_status() got an invalid PeftModel instance")):
             model.get_model_status()
 
     def test_mixed_model_raises(self):
