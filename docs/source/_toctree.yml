@@ -104,6 +104,8 @@
       title: Prompt tuning
     - local: package_reference/layernorm_tuning
       title: Layernorm tuning
+    - local: package_reference/vera
+      title: VeRA
     title: Adapters
   - sections:
     - local: package_reference/merge_utils

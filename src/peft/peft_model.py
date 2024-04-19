@@ -53,6 +53,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VeraModel,
 )
 from .tuners.tuners_utils import BaseTunerLayer
 from .utils import (
@@ -88,6 +89,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
     PeftType.LN_TUNING: LNTuningModel,
+    PeftType.VERA: VeraModel,
 }
 
 

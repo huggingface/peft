@@ -54,6 +54,7 @@ class PeftType(str, enum.Enum):
     OFT = "OFT"
     POLY = "POLY"
     LN_TUNING = "LN_TUNING"
+    VERA = "VERA"
 
 
 class TaskType(str, enum.Enum):

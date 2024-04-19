@@ -77,6 +77,8 @@ from .tuners import (
     PolyModel,
     LNTuningConfig,
     LNTuningModel,
+    VeraConfig,
+    VeraModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

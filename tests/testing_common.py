@@ -39,6 +39,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_kbit_training,
@@ -84,6 +85,16 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # VeRA
+    {
+        "r": 8,
+        "target_modules": None,
+        "vera_dropout": 0.05,
+        "projection_prng_key": 0xFF,
+        "d_initial": 0.1,
+        "save_projection": True,
+        "bias": "none",
+    },
 )
 
 CLASSES_MAPPING = {
@@ -94,6 +105,7 @@ CLASSES_MAPPING = {
     "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
     "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
     "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[6]),
+    "vera": (VeraConfig, CONFIG_TESTING_KWARGS[6]),
 }
 
 
@@ -280,6 +292,9 @@ class PeftCommonTester:
         if issubclass(config_cls, IA3Config):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_ia3_weights"] = False
+        if issubclass(config_cls, VeraConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_weights"] = False
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -341,9 +356,11 @@ class PeftCommonTester:
         if issubclass(config_cls, LoraConfig):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_lora_weights"] = False
-        if issubclass(config_cls, IA3Config):
+        elif issubclass(config_cls, IA3Config):
             config_kwargs = config_kwargs.copy()
             config_kwargs["init_ia3_weights"] = False
+        elif hasattr(config_cls, "init_weights"):
+            config_kwargs["init_weights"] = False
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -461,7 +478,7 @@ class PeftCommonTester:
         _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VeraConfig):
             # Merge layers only supported for LoRA and IA³
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -496,7 +513,7 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda" in name:
                 module.data[0] = torch.nan
 
         with pytest.raises(
@@ -505,7 +522,7 @@ class PeftCommonTester:
             model = model.merge_and_unload(safe_merge=True)
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name:
+            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda" in name:
                 module.data[0] = torch.inf
 
         with pytest.raises(
@@ -961,16 +978,9 @@ class PeftCommonTester:
 
         loss = output.sum()
         loss.backward()
-        # parameter_prefix = "ia3" if config_cls == IA3Config else "lora"
-        if config_cls == IA3Config:
-            parameter_prefix = "ia3"
-        elif config_cls == BOFTConfig:
-            parameter_prefix = "boft"
-        else:
-            parameter_prefix = "lora"
 
         for n, param in model.named_parameters():
-            if parameter_prefix in n:
+            if model.prefix in n:
                 assert param.grad is not None
             else:
                 assert param.grad is None
@@ -1021,7 +1031,15 @@ class PeftCommonTester:
             assert param.grad is not None
 
     def _test_delete_adapter(self, model_id, config_cls, config_kwargs):
-        supported_peft_types = [PeftType.LORA, PeftType.LOHA, PeftType.LOKR, PeftType.IA3, PeftType.OFT, PeftType.BOFT]
+        supported_peft_types = [
+            PeftType.LORA,
+            PeftType.LOHA,
+            PeftType.LOKR,
+            PeftType.IA3,
+            PeftType.OFT,
+            PeftType.BOFT,
+            PeftType.VERA,
+        ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
         config = config_cls(
@@ -1104,7 +1122,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:

@@ -53,7 +53,10 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VeraConfig,
+    VeraModel,
 )
+from .tuners.tuners_utils import BaseTuner as _BaseTuner
 from .utils import _prepare_prompt_learning_config
 
 
@@ -61,7 +64,7 @@ if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
 
-MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, PeftModel] = {
+MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, type[PeftModel]] = {
     "SEQ_CLS": PeftModelForSequenceClassification,
     "SEQ_2_SEQ_LM": PeftModelForSeq2SeqLM,
     "CAUSAL_LM": PeftModelForCausalLM,
@@ -70,7 +73,7 @@ MODEL_TYPE_TO_PEFT_MODEL_MAPPING: dict[str, PeftModel] = {
     "FEATURE_EXTRACTION": PeftModelForFeatureExtraction,
 }
 
-PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
+PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "ADAPTION_PROMPT": AdaptionPromptConfig,
     "PROMPT_TUNING": PromptTuningConfig,
     "PREFIX_TUNING": PrefixTuningConfig,
@@ -85,9 +88,10 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, PeftConfig] = {
     "OFT": OFTConfig,
     "POLY": PolyConfig,
     "LN_TUNING": LNTuningConfig,
+    "VERA": VeraConfig,
 }
 
-PEFT_TYPE_TO_TUNER_MAPPING = {
+PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
     "LORA": LoraModel,
     "LOHA": LoHaModel,
     "LOKR": LoKrModel,
@@ -97,6 +101,7 @@ PEFT_TYPE_TO_TUNER_MAPPING = {
     "OFT": OFTModel,
     "POLY": PolyModel,
     "LN_TUNING": LNTuningModel,
+    "VERA": VeraModel,
 }
 
 
