@@ -2543,7 +2543,6 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.boft_s.adapter1",
         )
 
-
     def test_requires_grad_lntuning_different_targets(self):
         config0 = LNTuningConfig(
             target_modules=["layernorm0"],
