@@ -24,7 +24,7 @@ from parameterized import parameterized
 from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
 
-from peft import IA3Config, LoHaConfig, LoraConfig, PromptTuningConfig, get_peft_model
+from peft import AdaptionPromptConfig, IA3Config, LoHaConfig, LoraConfig, PromptTuningConfig, get_peft_model
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
@@ -694,6 +694,19 @@ class TestModelAndLayerStatus:
         config = PromptTuningConfig(task_type="SEQ_2_SEQ_LM", num_virtual_tokens=10)
         model = get_peft_model(model, config)
 
+        # note: full error message is longer
+        with pytest.raises(TypeError, match=re.escape("get_layer_status() expects a PeftModel instance")):
+            model.get_layer_status()
+
+        with pytest.raises(TypeError, match=re.escape("get_model_status() expects a PeftModel instance")):
+            model.get_model_status()
+
+    def test_adaption_prompt(self):
+        model = AutoModelForCausalLM.from_pretrained("HuggingFaceH4/tiny-random-LlamaForCausalLM")
+        config = AdaptionPromptConfig(adapter_layers=1, adapter_len=4)
+        model = get_peft_model(model, config)
+
+        # note: full error message is longer
         with pytest.raises(TypeError, match=re.escape("get_layer_status() expects a PeftModel instance")):
             model.get_layer_status()
 
@@ -722,6 +735,7 @@ class TestModelAndLayerStatus:
         model = get_peft_model(base_model, config0, adapter_name="adapter0", mixed="mixed")
         model.add_adapter("adapter1", config1)
 
+        # note: full error message is longer
         with pytest.raises(TypeError, match="get_layer_status is not supported for PeftMixedModel"):
             model.get_layer_status()
 

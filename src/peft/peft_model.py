@@ -627,30 +627,40 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         ...     model(inputs)
         ```
         """
-        try:
-            if self.peft_config[self.active_adapter].is_prompt_learning:
+        if self.peft_config[self.active_adapter].is_prompt_learning:
+            try:
                 # TODO: consider replacing this patching of methods with a more robust mechanism: setting a flag and
                 # letting the underlying methods deal with it, same as how LoRA does it.
                 old_forward = self.forward
                 self.forward = self.base_model.forward
                 old_prepare_inputs_for_generation = self.prepare_inputs_for_generation
                 self.prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
-            else:
-                model_status = self.get_model_status()
-                if model_status.enabled == "irregular":
-                    warnings.warn(
-                        "The model contains some adapter layers that are enabled and others that are disabled. "
-                        "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
-                        "will be enabled"
-                    )
-                self.base_model.disable_adapter_layers()
-            yield
-        finally:
-            if self.peft_config[self.active_adapter].is_prompt_learning:
+                yield
+            finally:
                 self.forward = old_forward
                 self.prepare_inputs_for_generation = old_prepare_inputs_for_generation
-            else:
+
+        elif self.peft_config[self.active_adapter].is_adaption_prompt:
+            try:
+                self.base_model.disable_adapter_layers()
+                yield
+            finally:
+                self.base_model.enable_adapter_layers()
+
+        else:  # LoRA, LoHa, etc.
+            model_status = self.get_model_status()
+            if model_status.enabled == "irregular":
+                warnings.warn(
+                    "The model contains some adapter layers that are enabled and others that are disabled. "
+                    "This is most likely unintentional. After exiting the disable_adapter context, all adapters "
+                    "will be enabled"
+                )
+            try:
+                self.base_model.disable_adapter_layers()
+                yield
+            finally:
                 if model_status.enabled is not False:
+                    # model_status.enabled is `True` or `"irregular"`
                     self.base_model.enable_adapter_layers()
 
     def get_base_model(self) -> torch.nn.Module:
