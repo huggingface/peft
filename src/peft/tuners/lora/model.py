@@ -28,7 +28,13 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, onload_layer
+from peft.tuners.tuners_utils import (
+    BaseTuner,
+    BaseTunerLayer,
+    check_target_module_exists,
+    onload_layer,
+    replicate_layers,
+)
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -79,14 +85,26 @@ class LoraModel(BaseTuner):
         ```
 
         ```py
+        >>> import torch
         >>> import transformers
         >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
 
+        >>> rank = ...
         >>> target_modules = ["q_proj", "k_proj", "v_proj", "out_proj", "fc_in", "fc_out", "wte"]
         >>> config = LoraConfig(
         ...     r=4, lora_alpha=16, target_modules=target_modules, lora_dropout=0.1, bias="none", task_type="CAUSAL_LM"
         ... )
+        >>> quantization_config = transformers.BitsAndBytesConfig(load_in_8bit=True)
 
+        >>> tokenizer = transformers.AutoTokenizer.from_pretrained(
+        ...     "kakaobrain/kogpt",
+        ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
+        ...     bos_token="[BOS]",
+        ...     eos_token="[EOS]",
+        ...     unk_token="[UNK]",
+        ...     pad_token="[PAD]",
+        ...     mask_token="[MASK]",
+        ... )
         >>> model = transformers.GPTJForCausalLM.from_pretrained(
         ...     "kakaobrain/kogpt",
         ...     revision="KoGPT6B-ryan1.5b-float16",  # or float32 version: revision=KoGPT6B-ryan1.5b
@@ -94,7 +112,7 @@ class LoraModel(BaseTuner):
         ...     use_cache=False,
         ...     device_map={"": rank},
         ...     torch_dtype=torch.float16,
-        ...     load_in_8bit=True,
+        ...     quantization_config=quantization_config,
         ... )
         >>> model = prepare_model_for_int8_training(model)
         >>> lora_model = get_peft_model(model, config)
@@ -129,6 +147,19 @@ class LoraModel(BaseTuner):
     def _check_target_module_exists(lora_config, key):
         return check_target_module_exists(lora_config, key)
 
+    def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
+        r"""
+        A private method to modify the model structure before adapter is applied.
+
+        Args:
+            peft_config (`PeftConfig`):
+                The prepared adapter config.
+            model (`nn.Module`):
+                The model that is going to be adapted.
+        """
+        if peft_config.layer_replication:
+            replicate_layers(model, peft_config.layer_replication)
+
     def _create_and_replace(
         self,
         lora_config,
@@ -154,6 +185,7 @@ class LoraModel(BaseTuner):
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
+            "use_dora": lora_config.use_dora,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -171,10 +203,11 @@ class LoraModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 r,
-                alpha,
-                lora_config.lora_dropout,
-                lora_config.init_lora_weights,
-                lora_config.use_rslora,
+                lora_alpha=alpha,
+                lora_dropout=lora_config.lora_dropout,
+                init_lora_weights=lora_config.init_lora_weights,
+                use_rslora=lora_config.use_rslora,
+                use_dora=lora_config.use_dora,
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
@@ -331,6 +364,16 @@ class LoraModel(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
+    def _check_merge_allowed(self):
+        """Verify that the configuration supports merging.
+
+        Currently gptq quantization and replicated layers do not support merging.
+        """
+        if getattr(self.model, "quantization_method", None) == "gptq":
+            raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+        if self.peft_config.get("layer_replication"):
+            raise ValueError("Cannot merge LORA layers when base model layers are replicated")
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
@@ -349,8 +392,7 @@ class LoraModel(BaseTuner):
         adapter_names: Optional[list[str]] = None,
     ):
         if merge:
-            if getattr(self.model, "quantization_method", None) == "gptq":
-                raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
+            self._check_merge_allowed()
 
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"

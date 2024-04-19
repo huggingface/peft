@@ -101,6 +101,17 @@ class LoraConfig(PeftConfig):
             The configuration of LoftQ. If this is not None, then LoftQ will be used to quantize the backbone weights
             and initialize Lora layers. Also pass `init_lora_weights='loftq'`. Note that you should not pass a
             quantized model in this case, as LoftQ will quantize the model itself.
+        use_dora (`bool`):
+            Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the weights
+            into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the magnitude is
+            handled by a separate learnable parameter. This can improve the performance of LoRA especially at low
+            ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
+            LoRA, so it is recommended to merge weights for inference. For more information, see
+            https://arxiv.org/abs/2402.09353.
+        layer_replication(`List[Tuple[int, int]]`):
+            Build a new stack of layers by stacking the original model layers according to the ranges specified. This
+            allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
+            all have separate LoRA adapters attached to them.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -224,6 +235,39 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_dora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
+                "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
+                "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
+                "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
+                "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
+                "see  https://arxiv.org/abs/2402.09353."
+            )
+        },
+    )
+    # Enables replicating layers in a model to expand it to a larger model.
+    layer_replication: Optional[list[tuple[int, int]]] = field(
+        default=None,
+        metadata={
+            "help": (
+                "This enables using LoRA to effectively expand a transformer model to a larger size by repeating some layers. "
+                "The transformation handles models (currently Llama, Bert or Falcon compatible architectures) with "
+                "a module list in the model which it modifies to expand the number of modules. "
+                "Base weights are shared so the memory usage is close to the original model. The intended use is these base weights "
+                "remain fixed during finetuning but each layer has a separate LoRA adapter so the layers can be specialed via "
+                "the adapter layers fit during fine tuning."
+                "The format is a list of [start, end) pairs which specify the layer ranges to stack. For example:\n"
+                "   Original model has 5 layers labelled by their position in the model: `[0, 1, 2, 3, 4]`\n"
+                "   layer_replication: `[[0, 4], [2, 5]]`\n"
+                "   Final model will have this arrangement of original layers: `[0, 1, 2, 3, 2, 3, 4]`\n"
+                "This format is based on what is used for pass-through merges in mergekit. It makes it simple to select sequential "
+                "ranges of a model and stack them while reusing layers at either end of each sequence."
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
@@ -237,6 +281,9 @@ class LoraConfig(PeftConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        if self.use_dora and self.megatron_config:
+            raise ValueError("DoRA does not support megatron_core, please set `use_dora=False`.")
 
         # handle init_lora_weights and loftq_config
         if self.init_lora_weights == "loftq":

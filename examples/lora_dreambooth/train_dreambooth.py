@@ -1052,18 +1052,14 @@ def main(args):
             accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
             accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
             accelerator.print(
-                "GPU Total Peak Memory consumed during the train (max): {}".format(
-                    tracemalloc.peaked + b2mb(tracemalloc.begin)
-                )
+                f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
             )
 
             accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")
             accelerator.print(f"CPU Memory consumed at the end of the train (end-begin): {tracemalloc.cpu_used}")
             accelerator.print(f"CPU Peak Memory consumed during the train (max-begin): {tracemalloc.cpu_peaked}")
             accelerator.print(
-                "CPU Total Peak Memory consumed during the train (max): {}".format(
-                    tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
-                )
+                f"CPU Total Peak Memory consumed during the train (max): {tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)}"
             )
 
     # Create the pipeline using using the trained modules and save it.

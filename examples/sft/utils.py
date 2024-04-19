@@ -84,10 +84,8 @@ def create_datasets(tokenizer, data_args, training_args, apply_chat_template=Fal
 def create_and_prepare_model(args, data_args, training_args):
     if args.use_unsloth:
         from unsloth import FastLanguageModel
-    device_map = None
     bnb_config = None
-    load_in_8bit = args.use_8bit_qunatization
-    load_in_4bit = args.use_4bit_quantization
+    quant_storage_dtype = None
 
     if (
         torch.distributed.is_available()
@@ -99,12 +97,14 @@ def create_and_prepare_model(args, data_args, training_args):
 
     if args.use_4bit_quantization:
         compute_dtype = getattr(torch, args.bnb_4bit_compute_dtype)
+        quant_storage_dtype = getattr(torch, args.bnb_4bit_quant_storage_dtype)
 
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=args.use_4bit_quantization,
             bnb_4bit_quant_type=args.bnb_4bit_quant_type,
             bnb_4bit_compute_dtype=compute_dtype,
             bnb_4bit_use_double_quant=args.use_nested_quant,
+            bnb_4bit_quant_storage=quant_storage_dtype,
         )
 
         if compute_dtype == torch.float16 and args.use_4bit_quantization:
@@ -113,13 +113,8 @@ def create_and_prepare_model(args, data_args, training_args):
                 print("=" * 80)
                 print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
-
-    if args.use_4bit_quantization or args.use_8bit_qunatization:
-        device_map = (
-            int(os.environ.get("LOCAL_RANK", -1))
-            if torch.distributed.is_available() and torch.distributed.is_initialized()
-            else "auto"
-        )  # {"": 0}
+        elif args.use_8bit_quantization:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=args.use_8bit_quantization)
 
     if args.use_unsloth:
         # Load model
@@ -127,16 +122,15 @@ def create_and_prepare_model(args, data_args, training_args):
             model_name=args.model_name_or_path,
             max_seq_length=data_args.max_seq_length,
             dtype=None,
-            load_in_4bit=load_in_4bit,
+            load_in_4bit=args.use_4bit_quantization,
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             args.model_name_or_path,
-            load_in_8bit=load_in_8bit,
             quantization_config=bnb_config,
-            device_map=device_map,
             trust_remote_code=True,
             attn_implementation="flash_attention_2" if args.use_flash_attn else "eager",
+            torch_dtype=quant_storage_dtype or torch.float32,
         )
 
     peft_config = None

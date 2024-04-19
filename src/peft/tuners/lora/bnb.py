@@ -20,6 +20,7 @@ import torch
 
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import dequantize_bnb_weight
 from peft.utils.other import transpose
 
 from .layer import LoraLayer
@@ -38,13 +39,23 @@ if is_bnb_available():
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
             use_rslora: bool = False,
+            use_dora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
+            self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+            self.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                use_dora=use_dora,
+            )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
@@ -67,6 +78,7 @@ if is_bnb_available():
             for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
                     continue
+
                 warnings.warn(
                     "Merge lora module to 8-bit linear may get different generations due to rounding errors."
                 )
@@ -79,15 +91,20 @@ if is_bnb_available():
 
                 # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
                 # dequantization directly
-                im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
-                if state.CxB is None:
-                    state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
-                out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-                output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+                output = dequantize_bnb_weight(weight, state=state)
+                if not self.use_dora[active_adapter]:
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
+                else:
+                    # handle dora
+                    # since output already includes scaling, set it to 1 here
+                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    # We need to cache weight_norm because it has to be based on the original weights. We
+                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                    # different value
+                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
 
-                w_data = output.to(lora_data.dtype).to(lora_data.device) + lora_data
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -120,16 +137,15 @@ if is_bnb_available():
                 state = self.get_base_layer().state
                 if state.SCB is None:
                     state.SCB = weight.SCB
-                im = torch.eye(weight.data.shape[-1]).contiguous().half().to(weight.device)
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
+                output = dequantize_bnb_weight(weight, state=state)
 
-                if state.CxB is None:
-                    state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
-                out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-                output = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+                if not self.use_dora[active_adapter]:
+                    w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
-                w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
                 self.get_base_layer().weight = bnb.nn.Int8Params(
                     w_data.to("cpu"), requires_grad=False, has_fp16_weights=weight.has_fp16_weights
                 ).to(weight.device)
@@ -167,10 +183,14 @@ if is_bnb_available():
                         compute_dtype = lora_A.weight.dtype
                         if x.dtype != compute_dtype:
                             x = x.to(compute_dtype)
-                    output = lora_B(lora_A(dropout(x)))
+
+                    if not self.use_dora[active_adapter]:
+                        output = lora_B(lora_A(dropout(x))) * scaling
+                    else:
+                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
                     if requires_conversion:
                         output = output.to(expected_dtype)
-                    output = output * scaling
+
                     result = result + output
 
             return result
@@ -216,13 +236,23 @@ if is_bnb_4bit_available():
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
             use_rslora: bool = False,
+            use_dora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
             LoraLayer.__init__(self, base_layer)
+            self.fan_in_fan_out = False
 
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+            self.update_layer(
+                adapter_name,
+                r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                init_lora_weights=init_lora_weights,
+                use_rslora=use_rslora,
+                use_dora=use_dora,
+            )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
             """
@@ -245,6 +275,7 @@ if is_bnb_4bit_available():
             for active_adapter in adapter_names:
                 if active_adapter not in self.lora_A.keys():
                     continue
+
                 warnings.warn(
                     "Merge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
@@ -253,7 +284,20 @@ if is_bnb_4bit_available():
                 kwargs = weight.__dict__
                 lora_data = self.get_delta_weight(active_adapter)
 
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) + lora_data
+                output = dequantize_bnb_weight(weight, state=weight.quant_state)
+                if not self.use_dora[active_adapter]:
+                    w_data = output + lora_data
+                else:
+                    # handle dora
+                    # since output already includes scaling, set it to 1 here
+                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    # We need to cache weight_norm because it has to be based on the original weights. We
+                    # cannot calculate it on the fly based on the merged weights when unmerging because its a
+                    # different value
+                    self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = dora_factor.view(-1, 1) * (output + lora_data)
+
                 if safe_merge and not torch.isfinite(w_data).all():
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -280,10 +324,19 @@ if is_bnb_4bit_available():
                 warnings.warn(
                     "Unmerge lora module to 4-bit linear may get different generations due to rounding errors."
                 )
+
+                lora_data = self.get_delta_weight(active_adapter)
                 weight = self.get_base_layer().weight
                 kwargs = weight.__dict__
-                lora_data = self.get_delta_weight(active_adapter)
-                w_data = bnb.functional.dequantize_4bit(weight.data, weight.quant_state) - lora_data
+                output = dequantize_bnb_weight(weight, state=weight.quant_state)
+
+                if not self.use_dora[active_adapter]:
+                    w_data = output - lora_data
+                else:
+                    weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
+                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    w_data = output.data / dora_factor.view(-1, 1) - lora_data
+
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
                 self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
@@ -328,10 +381,13 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         x = x.to(lora_A.weight.dtype)
 
-                    output = lora_B(lora_A(dropout(x)))
+                    if not self.use_dora[active_adapter]:
+                        output = lora_B(lora_A(dropout(x))) * scaling
+                    else:
+                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
                     if requires_conversion:
                         output = output.to(expected_dtype)
-                    output = output * scaling
+
                     result = result + output
 
             return result

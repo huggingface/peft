@@ -55,11 +55,21 @@ TEST_CASES = [
             "lora_dropout": 0.1,
         },
     ),
+    ("Vanilla MLP 7 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_dora": True}),
+    ("Vanilla MLP 8 LoRA with DoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_dora": True}),
+    (
+        "Vanilla MLP 9 LoRA with DoRA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
+    ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
+    ("Conv2d 2 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"], "use_dora": True}),
     #######
     # IA³ #
     #######
@@ -558,7 +568,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_only_params_are_updated(self, test_name, model_id, config_cls, config_kwargs):
-        # An explicit test that when using LoRA on a custom model, only the LoRA parameters are updated during training
+        # An explicit test that when using an adapter on a custom model, only the adapter parameters are updated during
+        # training
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
         config = config_cls(
@@ -606,7 +617,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -637,6 +649,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
+
         outputs_base = model(**X)
 
         config = config_cls(
@@ -706,6 +719,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             optimizer.step()
 
         model.eval()
+        outputs_unmerged = model(**X)
         model.merge_adapter()
         outputs_after = model(**X)
 
@@ -722,6 +736,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
+
+        # unmerged or merged should make no difference
+        assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
         # check that disabling adapters gives the same results as before training
         assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
@@ -790,6 +807,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
+
+    def test_weight_bias_attributes(self):
+        model = MLP()
+        config = LoraConfig(target_modules=["lin0"])
+        model = get_peft_model(model, config)
+        assert hasattr(model.base_model.model.lin0, "weight")
+        assert hasattr(model.base_model.model.lin0, "bias")
 
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten

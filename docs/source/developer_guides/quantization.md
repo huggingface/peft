@@ -56,7 +56,7 @@ from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", quantization_config=config)
 ```
 
-Next, you should call the [`~peft.utils.prepare_model_for_kbit_training`] function to preprocess the quantized model for traininng.
+Next, you should call the [`~peft.utils.prepare_model_for_kbit_training`] function to preprocess the quantized model for training.
 
 ```py
 from peft import prepare_model_for_kbit_training
@@ -77,7 +77,7 @@ config = LoraConfig(
     r=16,
     lora_alpha=8,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05
+    lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM"
 )
@@ -138,7 +138,7 @@ QLoRA adds trainable weights to all the linear layers in the transformer archite
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-## AQLM quantizaion
+## AQLM quantization
 
 Additive Quantization of Language Models ([AQLM](https://arxiv.org/abs/2401.06118)) is a Large Language Models compression method. It quantizes multiple weights together and takes advantage of interdependencies between them. AQLM represents groups of 8-16 weights as a sum of multiple vector codes. This allows it to compress models down to as low as 2-bit with considerably low accuracy losses.
 

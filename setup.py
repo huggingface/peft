@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.8.2"
+VERSION = "0.9.1.dev0"
 
 extras = {}
 extras["quality"] = [

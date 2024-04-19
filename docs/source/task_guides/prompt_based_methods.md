@@ -188,7 +188,7 @@ prompt_tuning_init_text = "Classify if the tweet is a complaint or no complaint.
 peft_config = PromptTuningConfig(
     task_type="CAUSAL_LM",
     prompt_tuning_init=PromptTuningInit.TEXT,
-    num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),,
+    num_virtual_tokens=len(tokenizer(prompt_tuning_init_text)["input_ids"]),
     prompt_tuning_init_text=prompt_tuning_init_text,
     tokenizer_name_or_path="bigscience/bloomz-560m",
 )

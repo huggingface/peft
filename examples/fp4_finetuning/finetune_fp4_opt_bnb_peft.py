@@ -165,11 +165,11 @@ You can also directly load adapters from the Hub using the commands below:
 
 # import torch
 # from peft import PeftModel, PeftConfig
-# from transformers import AutoModelForCausalLM, AutoTokenizer
+# from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 #
 # peft_model_id = "ybelkada/opt-6.7b-lora"
 # config = PeftConfig.from_pretrained(peft_model_id)
-# model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, return_dict=True, load_in_8bit=True, device_map='auto')
+# model = AutoModelForCausalLM.from_pretrained(config.base_model_name_or_path, return_dict=True, quantization_config=BitsAndBytesConfig(load_in_8bit=True), device_map='auto')
 # tokenizer = AutoTokenizer.from_pretrained(config.base_model_name_or_path)
 #
 ## Load the Lora model

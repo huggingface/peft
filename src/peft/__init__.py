@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.8.2"
+__version__ = "0.9.1.dev0"
 
 from .auto import (
     AutoPeftModel,
