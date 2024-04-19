@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import inspect
 import torch.nn as nn
 
-from __future__ import annotations
 from copy import deepcopy
 from functools import reduce, update_wrapper
 from operator import attrgetter
