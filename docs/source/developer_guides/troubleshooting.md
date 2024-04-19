@@ -181,3 +181,12 @@ TunerModelStatus(
 In the model state output, you should look out especially for entries that say `"irregular"`. This means that PEFT has detected an inconsistent state in the model. For instance, when it says `merged_adapters="irregular"`, it means that for at least one adapter, it was found that it was merged on some target modules but not on others that it targets. If you see this, the inference results will most likely be incorrect.
 
 The best way to resolve this issue is to reload the whole model and the adapter checkpoint(s). Ensure that you don't perform any incorrect operations on the model, e.g. manually merging adapters on some modules but not others.
+
+Tip: You can easily convert the layer status into a pandas `DataFrame` for easier inspection:
+
+```python
+from dataclasses import asdict
+import pandas as pd
+
+df = pd.DataFrame(asdict(layer) for layer in model.get_layer_status())
+```
