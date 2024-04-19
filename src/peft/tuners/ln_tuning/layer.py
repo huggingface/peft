@@ -28,7 +28,6 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
     """
 
     adapter_layer_names = ("ln_tuning_layers",)
-    ln_tuning_layer_names = ("ln_tuning_layers",)
 
     def __init__(self, base_layer: nn.Module, adapter_name: str):
         super().__init__()
@@ -56,7 +55,7 @@ class LNTuningLayer(nn.Module, BaseTunerLayer):
             if self.merged:
                 self.unmerge()
             # disable grads on all adapter layers
-            for layer_name in self.ln_tuning_layer_names:
+            for layer_name in self.adapter_layer_names:
                 layer = getattr(self, layer_name)
                 layer.requires_grad_(False)
             self._disable_adapters = True

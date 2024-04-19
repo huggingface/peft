@@ -58,7 +58,7 @@ class LNTuningModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`LoraConfig`]): The configuration of the Lora model.
+        - **peft_config** ([`LNTuningConfig`]): The configuration of the Lora model.
     """
 
     prefix: str = "ln_tuning_"
