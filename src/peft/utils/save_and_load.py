@@ -142,7 +142,7 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.POLY:
         to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
     elif config.peft_type == PeftType.REFT:
-        to_return = {k: state_dict[k] for k in state_dict if "reft_" in k}
+        to_return = {k: state_dict[k].contiguous() for k in state_dict if "reft_" in k}
     else:
         raise NotImplementedError
     if getattr(model, "modules_to_save", None) is not None:

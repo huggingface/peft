@@ -254,7 +254,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
 
                 safe_save_file(
-                    {k:v.contiguous() for k,v in output_state_dict.items()},
+                    output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
                     metadata={"format": "pt"},
                 )

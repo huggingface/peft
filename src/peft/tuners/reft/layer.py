@@ -21,33 +21,32 @@ import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
-
-class LowRankRotateLayer(torch.nn.Module):
-    """A linear transformation with orthogonal initialization."""
-
-    def __init__(self, n, m):
-        super().__init__()
-        # n > m
-        self.weight = torch.nn.Parameter(torch.empty(n, m), requires_grad=True)
-        torch.nn.init.orthogonal_(self.weight)
-
-    def forward(self, x):
-        return torch.matmul(x.to(self.weight.dtype), self.weight)
-
-
+def parse_positions(positions: str):
+    # parse position
+    first_n, last_n = 0, 0
+    if "+" in positions:
+        first_n = int(positions.split("+")[0].strip("f"))
+        last_n = int(positions.split("+")[1].strip("l"))
+    else:
+        if "f" in positions:
+            first_n = int(positions.strip("f"))
+        elif "l" in positions:
+            last_n = int(positions.strip("l"))
+    return first_n, last_n
 
 class ReftLayer(nn.Module, LycorisLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("reft_A", "reft_R")
-    # other_param_names is defined on parent class
+    # other_param_names is defined on parent class   
 
     def __init__(self, base_layer: nn.Module):
         super().__init__()
         LycorisLayer.__init__(self, base_layer)
 
-        # LoHa info
+        # ReFT info
         self.reft_A = nn.ModuleDict({})
         self.reft_R = nn.ModuleDict({})
+        self.loc = dict()
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
@@ -63,7 +62,8 @@ class ReftLayer(nn.Module, LycorisLayer):
         return {*self.reft_A, *self.reft_R}
 
     def create_adapter_parameters(self, adapter_name: str, r: int):
-        rotate_layer = LowRankRotateLayer(self.out_features, r)
+        rotate_layer = torch.nn.Linear(self.out_features, r, bias=False)
+        torch.nn.init.orthogonal_(rotate_layer.weight)
         self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer, orthogonal_map='cayley')
         self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r)
 
@@ -153,13 +153,13 @@ class ReftLayer(nn.Module, LycorisLayer):
                 module_dropout = self.module_dropout[active_adapter]
                 if self.loc[active_adapter] is None:
                     rotated_base = rotate_layer(result)
-                    offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight.T)
+                    offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight)
                     output = result + offset
                 else:
                     loc = self.loc[active_adapter]
                     selected_results = torch.gather(result, 1, loc)
                     rotated_base = rotate_layer(selected_results)
-                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight.T)
+                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight)
                     output.scatter_(1, loc, offset)
                     output = module_dropout(output)
 
@@ -176,6 +176,7 @@ class Linear(ReftLayer):
         adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
+        loc: str = None,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         init_weights: bool = True,
@@ -185,7 +186,7 @@ class Linear(ReftLayer):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, loc, rank_dropout, module_dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -210,6 +211,7 @@ class Conv2d(ReftLayer):
         adapter_name: str = "default",
         r: int = 0,
         alpha: float = 0.0,
+        loc: str = None,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
         use_effective_conv2d: bool = False,
@@ -221,7 +223,7 @@ class Conv2d(ReftLayer):
         # Create adapter and set it active
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, r, alpha, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+            adapter_name, r, alpha, loc, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
         )
 
     def _get_delta_activations(
