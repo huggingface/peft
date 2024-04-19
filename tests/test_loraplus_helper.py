@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import bitsandbytes as bnb
 
-from peft import LoraPlusConfig
 from peft.helpers import create_loraplus_optimizer
 from transformers import TrainingArguments
 from transformers.trainer_pt_utils import get_parameter_names
@@ -37,4 +36,4 @@ def test_lora_plus_helper_sucess():
     }
     optim = create_loraplus_optimizer(model=model, optimizer_cls=optimizer_cls, optimizer_kwargs=optim_config)
     assert optim is not None
-    assert len(optim.optimizer_grouped_parameters) == 4
+    assert len(optim.param_groups) == 4
