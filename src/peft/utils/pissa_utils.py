@@ -19,36 +19,35 @@ from __future__ import annotations
 
 import os
 import torch
+from copy import deepcopy
 from safetensors import safe_open
 from safetensors.torch import save_file
 import json
 
 
-def pissa_pre_training_saving(peft_model, tokenizer, save_path, push_to_hub=None):
+def save_pissa_initialization(peft_model, pissa_initial_dir, pissa_residual_dir = None):
+    residual_model = deepcopy(peft_model).to('cpu')
     # No need for SVD when we load the PiSSA and residual model saved locally.
-    peft_model.peft_config["default"].init_lora_weights = True
+    residual_model.peft_config["default"].init_lora_weights = True
     # Save PiSSA adapter.
-    peft_model.save_pretrained(os.path.join(save_path, "pissa_init"))
+    residual_model.save_pretrained(pissa_initial_dir)
 
-    # Directly delete default adapter with `peft_model.delete_adapter("default")` and save as base model with `peft_model.get_base_model()` will raise an error (At least one adapter is needed):
-    # File ~/peft/src/peft/peft_model.py:926, in PeftModel.active_peft_config(self)
-    #     925 def active_peft_config(self):
-    # --> 926     return self.peft_config[self.active_adapter]
-    # KeyError: 'default'
+    if pissa_residual_dir is not None:
+        
+        # Directly delete default adapter with `residual_model.delete_adapter("default")` and save as base model with `residual_model.get_base_model()` will raise an error (At least one adapter is needed):
+        # File ~/peft/src/peft/peft_model.py:926, in PeftModel.active_peft_config(self)
+        #     925 def active_peft_config(self):
+        # --> 926     return self.peft_config[self.active_adapter]
+        # KeyError: 'default'
 
-    # Therefore, we merging the residual with a zero initialized lora, which will not influence its value.
-    peft_model.add_adapter(adapter_name="zero_initialized_lora", peft_config=peft_model.peft_config["default"])
-    peft_model.merge_and_unload(adapter_names=["zero_initialized_lora"])
-    model = peft_model.get_base_model()
+        # Therefore, we merging the residual with a zero initialized lora, which will not influence its value.
+        residual_model.add_adapter(adapter_name="zero_initialized_lora", peft_config=residual_model.peft_config["default"])
+        residual_model.merge_and_unload(adapter_names=["zero_initialized_lora"])
+        residual_model = residual_model.get_base_model()
 
-    # Save the residual model and the tokenizer.
-    model.save_pretrained(save_path)
-    tokenizer.save_pretrained(save_path)
-
-    # (Optional) shareing the residual model to huggingface hub.
-    if push_to_hub is not None:
-        model.push_to_hub(os.path.join(push_to_hub, save_path))
-        tokenizer.push_to_hub(os.path.join(push_to_hub, save_path))
+        # Save the residual model and the tokenizer.
+        residual_model.save_pretrained(pissa_residual_dir)
+        del residual_model
 
 
 # A PiSSA of rank r can be equivalently represented by a LoRA of rank 2r.
@@ -57,7 +56,7 @@ def pissa_pre_training_saving(peft_model, tokenizer, save_path, push_to_hub=None
 # When multiple converted-LoRAs are needed simultaneously, each adapter works independently without interference, allowing for the adapters to be freely deleted or added.
 
 
-def pissa_post_training_saving(
+def pissa_to_lora(
     init_path,
     finetuned_path,
     output_path,

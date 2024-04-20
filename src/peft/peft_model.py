@@ -69,6 +69,8 @@ from .utils import (
     load_peft_weights,
     set_peft_model_state_dict,
     shift_tokens_right,
+    save_pissa_initialization,
+    pissa_to_lora,
 )
 
 
@@ -130,6 +132,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
+        if str(peft_config.init_lora_weights).startswith("pissa"):
+            save_pissa_initialization(self, peft_config.pissa_initial_dir, peft_config.pissa_residual_dir)
 
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
@@ -170,6 +174,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
+        pissa_initial_dir: str = "pissa/init",
+        pissa_to_lora_dir: str = "pissa/lora",
         **kwargs: Any,
     ) -> None:
         r"""
@@ -284,6 +290,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if is_main_process:
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
+
+        if str(peft_config.init_lora_weights).startswith("pissa"):
+            if pissa_initial_dir is not None and pissa_to_lora_dir is not None:
+                pissa_to_lora(pissa_initial_dir, save_directory, pissa_to_lora_dir)
 
     @classmethod
     def from_pretrained(

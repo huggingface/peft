@@ -171,6 +171,16 @@ class LoraConfig(PeftConfig):
             ),
         },
     )
+    pissa_initial_dir: str = field(
+        default="pissa/init",
+        metadata={
+            "help": "The path to save the initial PiSSA modules."}
+    )
+    pissa_residual_dir: str = field(
+        default="pissa/res",
+        metadata={
+            "help": "The path to save the initial residual model. If the value is None, do not save the residual model."}
+    )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={

@@ -19,7 +19,7 @@
 
 # from .config import PeftConfig, PeftType, PromptLearningConfig, TaskType
 from .loftq_utils import replace_lora_weights_loftq
-from .pissa_utils import pissa_pre_training_saving, pissa_post_training_saving
+from .pissa_utils import save_pissa_initialization, pissa_to_lora
 from .peft_types import PeftType, TaskType
 from .other import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
