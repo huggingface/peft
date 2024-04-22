@@ -253,18 +253,23 @@ class LoraConfig(PeftConfig):
         default=None,
         metadata={
             "help": (
-                "This enables using LoRA to effectively expand a transformer model to a larger size by repeating some layers. "
-                "The transformation handles models (currently Llama, Bert or Falcon compatible architectures) with "
-                "a module list in the model which it modifies to expand the number of modules. "
-                "Base weights are shared so the memory usage is close to the original model. The intended use is these base weights "
-                "remain fixed during finetuning but each layer has a separate LoRA adapter so the layers can be specialed via "
-                "the adapter layers fit during fine tuning."
-                "The format is a list of [start, end) pairs which specify the layer ranges to stack. For example:\n"
-                "   Original model has 5 layers labelled by their position in the model: `[0, 1, 2, 3, 4]`\n"
-                "   layer_replication: `[[0, 4], [2, 5]]`\n"
-                "   Final model will have this arrangement of original layers: `[0, 1, 2, 3, 2, 3, 4]`\n"
-                "This format is based on what is used for pass-through merges in mergekit. It makes it simple to select sequential "
-                "ranges of a model and stack them while reusing layers at either end of each sequence."
+                "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
+                "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
+                "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
+                "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
+                "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
+                "see  https://arxiv.org/abs/2402.09353."
+            )
+        },
+    )
+    use_wlora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable learning the combination weights of pre-trained LoRAs. This technique adds a learnable weight "
+                "to each of the pre-trained LoRA module in each layer to learn the weighted sum of those moduels. "
+                "This can allow to learn the best combination of pre-trained LoRA for few-shot adaptation. Right now,"
+                "WLoRA only supports linear layers. For more information, see https://arxiv.org/abs/2402.15414."
             )
         },
     )

@@ -51,6 +51,8 @@ class LoraLayer(BaseTunerLayer):
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
         self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
+        self.use_wlora: dict[str, bool] = {}
+        self.wlora_weights: Optional[torch.nn.ParameterDict] = None  # for WLoRA
         self._caches: dict[str, Any] = {}
         self.kwargs = kwargs
 
@@ -84,7 +86,15 @@ class LoraLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False
+        self,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+        use_rslora,
+        use_dora: bool = False,
+        use_wlora: bool = False,
     ):
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -125,8 +135,24 @@ class LoraLayer(BaseTunerLayer):
         if use_dora:
             self.dora_init(adapter_name)
             self.use_dora[adapter_name] = True
+
         else:
             self.use_dora[adapter_name] = False
+
+        if use_wlora:
+            # initialize wlora_weights
+            if not self.wlora_weights:
+                self.wlora_weights = nn.ParameterDict()
+            self.wlora_weights[adapter_name] = nn.Parameter(torch.tensor([1.0]))
+            # add `wlora_weights`` to the list of learnable parameters
+            self.adapter_layer_names = self.adapter_layer_names[:] + ("wlora_weights",)
+            self.use_wlora[adapter_name] = True
+            # remove `lora_A` and `lora_B` from the list of trainable parameters
+            self.adapter_layer_names = tuple(
+                layer for layer in self.adapter_layer_names if layer != "lora_A" and layer != "lora_B"
+            )
+        else:
+            self.use_wlora[adapter_name] = False
 
         self.set_adapter(self.active_adapters)
 
@@ -239,6 +265,22 @@ class LoraLayer(BaseTunerLayer):
 
         return result_dora
 
+    def _cal_wlora_scale(self, active_adapter: str) -> torch.Tensor:
+        """
+        calculate softmax over `wlora_weights` and return the weight of `active_adapter`.
+
+        Args:
+            active_adapter (`str`):
+                Name of the adaptor to calculate the wlora_scale
+        """
+        active_wlora_weights = torch.cat(
+            [t.data for name, t in self.wlora_weights.items() if name in self.active_adapters]
+        )
+
+        # Softmax
+        wlora_scale = torch.exp(self.wlora_weights[active_adapter]) / torch.sum(torch.exp(active_wlora_weights))
+        return wlora_scale
+
     def set_scale(self, adapter, scale):
         if adapter not in self.scaling:
             # Ignore the case where the adapter is not in the layer
@@ -347,6 +389,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_wlora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -362,6 +405,7 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_wlora=use_wlora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -391,9 +435,10 @@ class Linear(nn.Module, LoraLayer):
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
-                    if not self.use_dora[active_adapter]:
-                        orig_weights = orig_weights + delta_weight
-                    else:
+                    if self.use_wlora[active_adapter]:
+                        # handle wlora
+                        orig_weights = orig_weights + self._cal_wlora_scale(active_adapter) * delta_weight
+                    elif self.use_dora[active_adapter]:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
                         weight_norm = self._get_weight_norm(
@@ -406,7 +451,8 @@ class Linear(nn.Module, LoraLayer):
                         dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
                         dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
                         orig_weights = dora_factor * (orig_weights + delta_weight)
-
+                    else:
+                        orig_weights = orig_weights + delta_weight
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
@@ -415,9 +461,10 @@ class Linear(nn.Module, LoraLayer):
                     base_layer.weight.data = orig_weights
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
-                    if not self.use_dora[active_adapter]:
-                        base_layer.weight.data = base_layer.weight.data + delta_weight
-                    else:
+                    if self.use_wlora[active_adapter]:
+                        # handle wlora
+                        base_layer.weight.data += self._cal_wlora_scale(active_adapter) * delta_weight
+                    elif self.use_dora[active_adapter]:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
                         weight_norm = self._get_weight_norm(
@@ -431,7 +478,8 @@ class Linear(nn.Module, LoraLayer):
                         dora_factor = transpose(dora_factor.view(-1, 1), self.fan_in_fan_out)
                         new_weight = dora_factor * (base_layer.weight.data + delta_weight)
                         base_layer.weight.data = new_weight
-
+                    else:
+                        base_layer.weight.data = base_layer.weight.data + delta_weight
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -512,11 +560,15 @@ class Linear(nn.Module, LoraLayer):
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
 
-                if not self.use_dora[active_adapter]:
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
-                else:
+                if self.use_dora[active_adapter]:
                     x = dropout(x)
                     result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
+                elif self.use_wlora[active_adapter]:
+                    wlora_scale = self._cal_wlora_scale(active_adapter)
+                    result = result + lora_B(lora_A(dropout(x))) * scaling * wlora_scale
+
+                else:
+                    result = result + lora_B(lora_A(dropout(x))) * scaling
 
             result = result.to(torch_result_dtype)
 
@@ -995,7 +1047,6 @@ class Conv2d(nn.Module, LoraLayer):
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -1007,7 +1058,6 @@ class Conv2d(nn.Module, LoraLayer):
         else:
             result = self.base_layer(x, *args, **kwargs)
             torch_result_dtype = result.dtype
-
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.lora_A.keys():
                     continue
@@ -1016,7 +1066,6 @@ class Conv2d(nn.Module, LoraLayer):
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
-
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
