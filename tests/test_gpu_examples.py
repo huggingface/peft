@@ -1384,6 +1384,206 @@ class OffloadSaveTests(unittest.TestCase):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+class TestPiSSA:
+    r"""
+    Tests for PiSSA to ensure that it reduces the quantization error compared to normal LoRA quantization.
+    """
+
+    # The error factor indicates by how much the quantization error should be decreased when using PiSSA compared to
+    # quantization without PiSSA. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
+    # conservative value to prevent flakiness, in practice most gains are > 1.5
+    error_factor = 1.03
+
+    def get_input(self, model_id, device):
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        inputs = tokenizer("All I want is", padding=True, return_tensors="pt")
+        if device == "cuda":
+            inputs = inputs.to("cuda")
+        return inputs
+
+    def get_base_model(self, model_id, device, **kwargs):
+        cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
+        model = cls.from_pretrained(model_id, **kwargs).eval()
+        if device == "cuda":
+            model = model.to("cuda")
+        return model
+
+    def get_logits(self, model, inputs):
+        if model.config.is_encoder_decoder:
+            input_ids = inputs["input_ids"]
+            return model(input_ids=input_ids, decoder_input_ids=input_ids).logits
+        return model(**inputs).logits
+
+    def get_errors(
+        self,
+        tmp_path,
+        bits=4,
+        device="cuda",
+        model_id="hf-internal-testing/tiny-random-BloomForCausalLM",
+    ):
+        # Helper function that returns the quantization errors (MAE and MSE) when comparing the quantized LoRA model
+        # to the base model, vs the PiSSA quantized model to the base model. We expect the PiSSA quantized model to
+        # have less error than the normal LoRA quantized model. Since we compare logits, the observed error is
+        # already somewhat dampened because of the softmax.
+        torch.manual_seed(0)
+        model = self.get_base_model(model_id, device)
+        task_type = (
+            TaskType.SEQ_2_SEQ_LM
+            if model.config.is_encoder_decoder
+            else TaskType.CAUSAL_LM
+        )
+        inputs = self.get_input(model_id, device)
+        # the base logits are the reference, we try to match those as closely as possible
+        logits_base = self.get_logits(model, inputs)
+        # clean up
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # logits from the normal quantized LoRA model
+        target_modules = (
+            "all-linear"
+            if task_type != TaskType.SEQ_2_SEQ_LM
+            else ["o", "k", "wi", "q", "v"]
+        )
+        lora_config = LoraConfig(task_type=task_type, target_modules=target_modules)
+        kwargs = {}
+        if bits == 4:
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_quant_type="nf4"
+            )
+        elif bits == 8:
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("bits must be 4 or 8")
+
+        quantized_model = get_peft_model(
+            self.get_base_model(model_id, device=None, **kwargs),
+            lora_config,
+        )
+        torch.manual_seed(0)
+        logits_quantized = self.get_logits(quantized_model, inputs)
+        del quantized_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # logits from quantized LoRA model using PiSSA
+        lora_config = LoraConfig(
+            task_type=task_type,
+            init_lora_weights="pissa",
+            target_modules=target_modules,
+        )
+        model = self.get_base_model(model_id, device)
+        if device == "cuda":
+            model = model.to("cuda")
+        pissa_model = get_peft_model(model, lora_config)
+        if device == "cuda":
+            pissa_model = pissa_model.to("cuda")
+
+        # save LoRA weights, they should be initialized such that they minimize the quantization error
+        pissa_model.base_model.peft_config["default"].init_lora_weights = True
+        pissa_model.save_pretrained(tmp_path / "pissa_model")
+
+        pissa_model = pissa_model.unload()
+        pissa_model.save_pretrained(tmp_path / "residual_model")
+
+        del pissa_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # now load quantized model and apply PiSSA-initialized weights on top
+        base_model = self.get_base_model(
+            tmp_path / "residual_model",
+            device=None,
+            **kwargs,
+            torch_dtype=torch.float32,
+        )
+        pissa_model = PeftModel.from_pretrained(
+            base_model, tmp_path / "pissa_model", is_trainable=True
+        )
+        # TODO sanity check: model is quantized
+        torch.manual_seed(0)
+        logits_pissa = self.get_logits(pissa_model, inputs)
+        del pissa_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        mae_quantized = torch.abs(logits_base - logits_quantized).mean()
+        mse_quantized = torch.pow(logits_base - logits_quantized, 2).mean()
+        mae_pissa = torch.abs(logits_base - logits_pissa).mean()
+        mse_pissa = torch.pow(logits_base - logits_pissa, 2).mean()
+        return mae_quantized, mse_quantized, mae_pissa, mse_pissa
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_bloomz_pissa_4bit(self, device, tmp_path):
+        # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
+        # using PiSSA. When quantizing, we expect a certain level of error. However, we expect the PiSSA quantized
+        # model to have less error than the normal LoRA quantized model. Note that when using normal LoRA, the
+        # quantization error is simply the error from quantization without LoRA, as LoRA is a no-op before training.
+        # We still apply LoRA for the test for consistency.
+
+        mae_quantized, mse_quantized, mae_pissa, mse_pissa = self.get_errors(
+            bits=4, device=device, tmp_path=tmp_path
+        )
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_pissa > 0.0
+        assert mse_pissa > 0.0
+
+        # next, check that PiSSA quantization errors are smaller than LoRA errors by a certain margin
+        assert mse_pissa < (mse_quantized / self.error_factor)
+        assert mae_pissa < (mae_quantized / self.error_factor)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_bloomz_pissa_8bit(self, device, tmp_path):
+        # Same test as test_bloomz_pissa_4bit but with 8 bits.
+        mae_quantized, mse_quantized, mae_pissa, mse_pissa = self.get_errors(
+            bits=8, device=device, tmp_path=tmp_path
+        )
+
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_pissa > 0.0
+        assert mse_pissa > 0.0
+
+        # next, check that PiSSA quantization errors are smaller than LoRA errors by a certain margin
+        assert mse_pissa < (mse_quantized / self.error_factor)
+        assert mae_pissa < (mae_quantized / self.error_factor)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_t5_pissa_4bit(self, device, tmp_path):
+        mae_quantized, mse_quantized, mae_pissa, mse_pissa = self.get_errors(
+            bits=4, device=device, model_id="google/flan-t5-base", tmp_path=tmp_path
+        )
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_pissa > 0.0
+        assert mse_pissa > 0.0
+        print(mse_pissa, mse_quantized)
+        print(mae_pissa, mae_quantized)
+        # next, check that PiSSA quantization errors are smaller than LoRA errors by a certain margin
+        assert mse_pissa < (mse_quantized / self.error_factor)
+        assert mae_pissa < (mae_quantized / self.error_factor)
+
+    @pytest.mark.parametrize("device", ["cuda", "cpu"])
+    def test_t5_pissa_8bit(self, device, tmp_path):
+        mae_quantized, mse_quantized, mae_pissa, mse_pissa = self.get_errors(
+            bits=8, device=device, model_id="google/flan-t5-base", tmp_path=tmp_path
+        )
+        # first, sanity check that all errors are > 0.0
+        assert mae_quantized > 0.0
+        assert mse_quantized > 0.0
+        assert mae_pissa > 0.0
+        assert mse_pissa > 0.0
+        # next, check that PiSSA quantization errors are smaller than LoRA errors by a certain margin
+        assert mse_pissa < (mse_quantized / self.error_factor)
+        assert mae_pissa < (mae_quantized / self.error_factor)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 class TestLoftQ:
     r"""
     Tests for LoftQ to ensure that it reduces the quantization error compared to normal LoRA quantization.
