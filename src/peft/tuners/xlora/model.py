@@ -12,13 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import os
-from typing import Any, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
-from safetensors.torch import save_model  # type: ignore
 
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
@@ -278,32 +275,6 @@ class XLoraModel(BaseTuner):
     def _check_target_module_exists(lora_config, key):
         # Does nothing because XLoraModel has no target modules
         return False
-
-    def _save_pretrained_hook(
-        self,
-        save_directory: str,
-        safe_serialization: bool = True,
-        is_main_process: bool = True,
-        **kwargs: Any,
-    ) -> None:
-        conf = self.xlora_config.__dict__.copy()
-
-        # So that the adapters are unloadable and the user is forced to set them for from_pretrained
-        conf["adapters"] = None
-        if hasattr(conf, "_subfolders"):
-            del conf["_subfolders"]  # It may have been added in from_pretrained
-        with open(os.path.join(save_directory, "peft_config.json"), "w") as f:
-            json.dump(conf, f)
-
-        if safe_serialization:
-            # https://github.com/huggingface/peft/blob/main/src/peft/peft_model.py#L223
-            if is_main_process and safe_serialization:
-                save_model(
-                    self.internal_xlora_classifier, os.path.join(save_directory, "xlora_classifier.safetensors")
-                )
-        elif is_main_process:
-            state_dict = self.internal_xlora_classifier.state_dict()
-            torch.save(state_dict, os.path.join(save_directory, "xlora_classifier.pt"))
 
     def forward(self, *args, **kwargs):
         return self.lora_model.model(*args, **kwargs)

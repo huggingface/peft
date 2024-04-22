@@ -57,8 +57,6 @@ from .tuners import (
     XLoraModel,
 )
 from .tuners.tuners_utils import BaseTunerLayer
-from .tuners.xlora.classifier import XLoraClassifier
-from .tuners.xlora.util import _load_classifier_weights as xlora_load_classifier_weights
 from .utils import (
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -294,9 +292,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 
-        if hasattr(self.base_model, "_save_pretrained_hook"):
-            self.base_model._save_pretrained_hook(save_directory, safe_serialization, is_main_process)
-
     @classmethod
     def from_pretrained(
         cls,
@@ -422,7 +417,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
 
-        if isinstance(model.base_model, XLoraModel):
+        """if isinstance(model.base_model, XLoraModel):
             if not isinstance(config, XLoraConfig):
                 raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
 
@@ -431,7 +426,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             classifier: XLoraClassifier = model.base_model.internal_xlora_classifier  # type: ignore
             classifier.load_state_dict(xlora_load_classifier_weights(model_id, device))  # type: ignore
         else:
-            model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+        """
+        model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
 
         return model
 
