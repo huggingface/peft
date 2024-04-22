@@ -52,7 +52,7 @@ Alternatively, execute fast SVD, which takes only a few seconds. The number of i
 ```python
 lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...) 
 ```
-For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/389327607fd326713f5c90639b8da0ce52a03bee/examples/pissa_finetuning).
+For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/main/examples/pissa_finetuning).
 
 
 

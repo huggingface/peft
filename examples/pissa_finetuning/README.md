@@ -69,18 +69,20 @@ python pissa_finetuning.py \
 ```
 
 ### Convert PiSSA to LoRA
+Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$:
 ```
 peft_model.save_pretrained(
     "output_dir",
     save_as_lora="pissa_init_dir",  # the preprocessed initial parameters for PiSSA are required.
 )
 ```
-Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$.
+
 Using the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
 
 
 
-### quantization fine-tuning in 4-bit or 8-bit
+### Fine-tune in 4-bit or 8-bit
+If quantization fine-tuning is desired, it is necessary to first decompose the original model at full precision and then reload the residual model in either 4-bit or 8-bit configurations.
 ```
 python pissa_finetuning.py \
     --residual_model_name_or_path fxmeng/pissa-llama-2-7b-r16-alpha-16 \
@@ -104,7 +106,7 @@ python pissa_finetuning.py \
     --report_to none \
     --save_as_lora # Convert PiSSA to LoRA
 ```
-If quantization fine-tuning is desired, it is necessary to first decompose the original model at full precision and then reload the residual model in either 4-bit or 8-bit configurations.
+
 This approach ensures the preservation of high-frequency, out-of-distribution parameters in the low-rank PiSSA modules, resulting in reduced quantization errors during the quantization of the residual model.
 
 ## Citation
