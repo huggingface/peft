@@ -167,3 +167,68 @@ class TestXlora:
         )
         text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
         print(text[0])
+
+    def test_save_load_functional_pt(self, tokenizer, model, tmp_dir):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
+        print(text[0])
+
+        model.save_pretrained(save_directory=tmp_dir, safe_serialization=False)
+
+        del model
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        model.config.use_cache = False
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir, safe_serialization=False).to(self.device)
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
+        print(text[0])
+
+    def test_topk_lora(self, tokenizer, model):
+        model.set_topk_lora(2)
+        assert model.internal_xlora_classifier.config.top_k_lora == 2
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
+        print(text[0])
+
+    def test_softmax_topk(self, tokenizer, model):
+        # Just reach in to set the config
+        model.internal_xlora_classifier.config.top_k_lora = 2
+        model.internal_xlora_classifier.config.enable_softmax = False
+        model.internal_xlora_classifier.config.enable_softmax_topk = True
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
+        print(text[0])
+
+    def test_set_override_scaling_pass_value(self, model):
+        # Defaults to 0
+        assert model.internal_xlora_classifier.override_scaling_pass_value == 0.0
+
+        # Set it to 2 and make sure it actually is
+        model.set_scaling_pass_value(2)
+        assert model.internal_xlora_classifier.override_scaling_pass_value == 2
+        assert model.internal_xlora_classifier.config.scaling_pass_value == 2
+
+        # Set it to 2 and make sure it is 1/a
+        model.set_scaling_pass_value(None)
+        assert model.internal_xlora_classifier.override_scaling_pass_value == 1 / self.num_loras
+        assert model.internal_xlora_classifier.config.scaling_pass_value == 1 / self.num_loras

@@ -29,14 +29,6 @@ from .config import XLoraConfig
 from .layer import XLoraConv2dLayer, XLoraEmbeddingLayer, XLoraLinearLayer
 
 
-@staticmethod
-def apply_scalings_to_x(x: torch.Tensor, scalings_layer: torch.Tensor, adapter: int) -> torch.Tensor:
-    # scalings_layer = [batch_size, seq_len, n_classes]
-    scalings = scalings_layer[:, :, adapter].unsqueeze(-1)
-    # scalings_layer = [batch_size, seq_len, 1]
-    return x * scalings
-
-
 def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
     xloramodel: nn.Module,  # XLoraModel
@@ -331,6 +323,14 @@ class XLoraModel(BaseTuner):
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier.config.global_scaling_weight = weight
+
+    def set_scaling_pass_value(self, value: float | None):
+        """
+        Set the scaling pass value, the value to set the scalings to during the scaling pass. If the value is None,
+        the scaling pass value will be 1/n where n is the number of adapters.
+        """
+        classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
+        classifier._set_override_scaling_pass_value(value)
 
     def get_global_scaling_weight(self) -> float:
         """
