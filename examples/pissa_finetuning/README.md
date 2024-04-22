@@ -8,7 +8,7 @@ Utilize the decomposed models directly from the [Hugging Face Collections](https
 If the existing settings do not meet your needs, apply [PiSSA initialization](https://github.com/fxmeng/peft/blob/606a69279480bbdea847f4e5247804bdf7e6b898/examples/pissa_finetuning/pissa_finetuning.py#L85-L103) to a pre-trained model and save the decomposed parameters:
 
 ```
-# Load an original pre-processed dodel:
+# Load an original pre-processed model:
 model = AutoModelForCausalLM.from_pretrained(...)
 
 # Configure the initialization method to "pissa", which may take several minutes to execute SVD on the pre-trained model:

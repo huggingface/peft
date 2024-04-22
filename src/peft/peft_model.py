@@ -269,7 +269,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
-                if save_as_lora is not None and str(peft_config.init_lora_weights).startswith("pissa"):
+                if save_as_lora is not None:
                     output_state_dict = self.subtract_pissa_init(save_as_lora, output_state_dict, kwargs)
 
                 safe_save_file(
@@ -278,7 +278,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     metadata={"format": "pt"},
                 )
             elif is_main_process:
-                if save_as_lora is not None and str(peft_config.init_lora_weights).startswith("pissa"):
+                if save_as_lora is not None:
                     output_state_dict = self.subtract_pissa_init(save_as_lora, output_state_dict, kwargs)
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
@@ -307,7 +307,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 auto_mapping_dict = None
 
             if is_main_process:
-                if save_as_lora is not None and str(peft_config.init_lora_weights).startswith("pissa"):
+                if save_as_lora is not None:
                     peft_config.init_lora_weights = True
                     peft_config.r *= 2
                     peft_config.lora_alpha *= 2

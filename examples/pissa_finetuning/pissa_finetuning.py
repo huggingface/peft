@@ -116,12 +116,15 @@ trainer = SFTTrainer(
 )
 trainer.train()
 ############################## Upon training completion, convert and save PiSSA in LoRA format ##############################
-peft_model.save_pretrained(
-    os.path.join(script_args.output_dir, "pissa_lora"),
-    save_as_lora=(
-        os.path.join(script_args.residual_model_name_or_path, "pissa_init") if script_args.save_as_lora else None
-    ),
-)
+if script_args.save_as_lora:
+    peft_model.save_pretrained(
+        os.path.join(script_args.output_dir, "pissa_lora"),
+        save_as_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
+    )
+else:
+    peft_model.save_pretrained(
+        os.path.join(script_args.output_dir, "pissa_ft"),
+    )
 
 if script_args.merge_and_save:
     model = peft_model.merge_and_unload()
