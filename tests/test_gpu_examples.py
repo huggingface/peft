@@ -1452,26 +1452,26 @@ class TestPiSSA:
 
         # save LoRA weights, they should be initialized such that they minimize the quantization error
         pissa_model.base_model.peft_config["default"].init_lora_weights = True
-        pissa_model.save_pretrained(f"{tmp_path}/pissa_model")
+        pissa_model.save_pretrained(tmp_path / "pissa_model")
 
         pissa_model = pissa_model.unload()
-        pissa_model.save_pretrained(f"{tmp_path}/residual_model")
+        pissa_model.save_pretrained(tmp_path / "residual_model")
 
         gc.collect()
         torch.cuda.empty_cache()
 
         # now load quantized model and apply PiSSA-initialized weights on top
         base_model = self.get_base_model(
-            f"{tmp_path}/residual_model",
+            tmp_path / "residual_model",
             device,
         )
-        pissa_model = PeftModel.from_pretrained(base_model, f"{tmp_path}/pissa_model", is_trainable=True)
+        pissa_model = PeftModel.from_pretrained(base_model, tmp_path / "pissa_model", is_trainable=True)
 
         torch.manual_seed(0)
         logits_pissa = self.get_logits(pissa_model, inputs)
 
         # Convert PiSSA -> LoRA
-        pissa_model.save_pretrained(f"{tmp_path}/lora_model", save_as_lora=f"{tmp_path}/pissa_model")
+        pissa_model.save_pretrained(tmp_path / "lora_model", save_as_lora=tmp_path / "pissa_model")
         del pissa_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -1481,7 +1481,7 @@ class TestPiSSA:
             device,
         )
 
-        lora_model = PeftModel.from_pretrained(base_model, f"{tmp_path}/lora_model", is_trainable=True)
+        lora_model = PeftModel.from_pretrained(base_model, tmp_path / "lora_model", is_trainable=True)
         torch.manual_seed(0)
         logits_lora = self.get_logits(lora_model, inputs)
 
@@ -1669,6 +1669,7 @@ class TestPiSSA:
         assert mse_lora < self.convert_error
         assert mae_additional_lora < self.convert_error
         assert mse_additional_lora < self.convert_error
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 class TestLoftQ:
