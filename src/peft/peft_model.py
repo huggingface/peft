@@ -164,11 +164,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model.peft_config = value
 
     def subtract_pissa_init(self, pissa_initial_dir, output_state_dict, kwargs):
-        self.load_adapter(os.path.dirname(pissa_initial_dir), adapter_name="pissa_init", subfolder=os.path.basename(pissa_initial_dir))
+        adapter_name = os.path.basename(pissa_initial_dir)
+        self.load_adapter(os.path.dirname(pissa_initial_dir), adapter_name=adapter_name, subfolder=adapter_name)
         pissa_init_state_dict = get_peft_model_state_dict(
             self,
             state_dict=kwargs.get("state_dict", None),
-            adapter_name="pissa_init",
+            adapter_name=adapter_name,
         )
         tensors_lora = {}
         for name in pissa_init_state_dict.keys():
@@ -180,7 +181,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if "lora_A" in name
                 else torch.cat([output_state_dict[name], -pissa_init_state_dict[name]], dim=1)
             )
-        self.delete_adapter("pissa_init")
+        self.delete_adapter(adapter_name)
         return tensors_lora
 
     def save_pretrained(
@@ -213,6 +214,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
+            save_as_lora (`str`):
+                The initial path for the PISSA adapter.
+                When `save_as_lora` is not None, the difference in PISSA before and after fine-tuning is calculated.
+                This difference can be represented as the parameters of a LoRA adapter.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """

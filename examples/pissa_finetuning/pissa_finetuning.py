@@ -21,8 +21,8 @@ class TrainingArguments(TrainingArguments):
             "help": "The name or path of the fp32/16 residual model. (`['fxmeng/pissa-llama-2-7b-r16-alpha-16']`)"
         },
     )
-    bits: int = field(default=4, metadata={"help": "(`['4', '8', '16']`)"})
-    init_lora_weights: str = field(default="gaussian", metadata={"help": "(`['gaussian', 'pissa', 'pissa_niter_4']`)"})
+    bits: str = field(default="bf16", metadata={"help": "(`['fp4', 'nf4', 'int8', 'bf16', 'fp16', fp32]`)"})
+    init_lora_weights: str = field(default="pissa", metadata={"help": "(`['gaussian', 'pissa', 'pissa_niter_4']`)"})
     lora_r: int = field(default=16)
     lora_alpha: int = field(default=16)
     lora_dropout: float = field(default=0)
@@ -47,13 +47,11 @@ script_args = parser.parse_args_into_dataclasses()[0]
 print(script_args)
 
 print(f"Load pre-processed residual model in {script_args.bits} bits.")
-if script_args.bits in [4, 8]:
-    if script_args.residual_model_name_or_path is None:
-        raise ValueError("")
+if script_args.bits in ["nf4", "fp4", "int8"]:
     quantization_config = BitsAndBytesConfig(
-        load_in_4bit=script_args.bits == 4,
-        load_in_8bit=script_args.bits == 8,
-        bnb_4bit_quant_type="nf4",
+        load_in_4bit=(script_args.bits == "nf4" or script_args.bits == "fp4"),
+        load_in_8bit=script_args.bits == "int8",
+        bnb_4bit_quant_type=script_args.bits,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.bfloat16,
     )
@@ -69,7 +67,13 @@ if script_args.bits in [4, 8]:
 
 elif script_args.residual_model_name_or_path is not None:
     res_model = AutoModelForCausalLM.from_pretrained(
-        script_args.residual_model_name_or_path, torch_dtype=torch.bfloat16, device_map="auto"
+        script_args.residual_model_name_or_path,
+        torch_dtype=(
+            torch.float16
+            if script_args.bits == "fp16"
+            else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)
+        ),
+        device_map="auto",
     )
     print("Wrapping the residual model with PiSSA.")
     peft_model = PeftModel.from_pretrained(
@@ -82,7 +86,13 @@ elif script_args.base_model_name_or_path is not None:
         f"No available pre-processed model, manually initialize a PiSSA using {script_args.base_model_name_or_path}."
     )
     model = AutoModelForCausalLM.from_pretrained(
-        script_args.base_model_name_or_path, torch_dtype=torch.bfloat16, device_map="auto"
+        script_args.base_model_name_or_path,
+        torch_dtype=(
+            torch.float16
+            if script_args.bits == "fp16"
+            else (torch.bfloat16 if script_args.bits == "bf16" else torch.float32)
+        ),
+        device_map="auto",
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.base_model_name_or_path)
     tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -108,7 +118,7 @@ elif script_args.base_model_name_or_path is not None:
         # Save the tokenizer:
         tokenizer.save_pretrained(script_args.output_dir)
 else:
-    raise ValueError("")
+    raise ValueError("At least one of `base_model_name_or_path` and `residual_model_name_or_path` must not be None.")
 
 print(peft_model)
 peft_model.print_trainable_parameters()
