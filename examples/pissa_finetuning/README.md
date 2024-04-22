@@ -3,7 +3,7 @@
 PiSSA represents a matrix $W\in\mathbb{R}^{m\times n}$ within the model by the product of two trainable matrices $A \in \mathbb{R}^{m\times r}$ and $B \in \mathbb{R}^{r\times n}$, where $r \ll \min(m, n)$, plus a residual matrix $W^{res}\in\mathbb{R}^{m\times n}$ for error correction. Singular value decomposition (SVD) is employed to factorize $W$, and the principal singular values and vectors of $W$ are utilized to initialize $A$ and $B$. The residual singular values and vectors initialize the residual matrix $W^{res}$, which keeps frozen during fine-tuning. This straightforward modification allows PiSSA to converge more rapidly than LoRA and ultimately attain superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements.
 
 ## Quick Start
-```
+```python
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -37,7 +37,7 @@ When utilizing fast SVD, reducing the rank and the number of iterations decrease
 
 
 To utilize the fine-tuned PiSSA modules, simply run the following command:
-```
+```python
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM
@@ -55,7 +55,7 @@ peft_model = PeftModel.from_pretrained(model, "pissa-llama-2-7b")
 Download the decomposed models directly from the [Hugging Face Collections](https://huggingface.co/collections/fxmeng/pissa-661ce700721235e542a5d7a8).
 If the existing models do not meet your needs, apply PiSSA initialization to a pre-trained model and store the decomposed model locally to prevent the necessity of re-decomposition across multiple fine-tuning experiments:
 
-```
+```bash
 python pissa_finetuning.py \
     --base_model_name_or_path meta-llama/Llama-2-7b-hf \
     --init_lora_weights pissa \
@@ -69,21 +69,26 @@ python pissa_finetuning.py \
 ```
 
 ### Convert PiSSA to LoRA
-Convert PiSSA to LoRA according to $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$:
-```
-peft_model.save_pretrained(
-    "output_dir",
-    save_as_lora="pissa_init_dir",  # the preprocessed initial parameters for PiSSA are required.
-)
-```
+When using `peft_model.save_pretrained`, if `save_as_lora=None`, the fine-tuned matrices $A$ and $B$ are saved and should be combined with the residual model. However, when specifying `save_as_lora="pissa_init_dir"`, the saving function converts PiSSA to LoRA by $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$. This conversion enables the loading of LoRA on top of a standard base model:
 
-Using the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
+```python
+import torch
+from peft import PeftModel
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf", torch_dtype=torch.bfloat16, device_map="auto"
+)
+# No SVD is performed during this step, and the base model remains unaltered.
+peft_model = PeftModel.from_pretrained(model, "pissa-llama-2-7b-lora")
+```
+Utilizing the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
 
 
 
 ### Fine-tune in 4-bit or 8-bit
 If quantization fine-tuning is desired, it is necessary to first decompose the original model at full precision and then reload the residual model in either 4-bit or 8-bit configurations.
-```
+```shell
 python pissa_finetuning.py \
     --residual_model_name_or_path fxmeng/pissa-llama-2-7b-r16-alpha-16 \
     --output_dir output/pissa-llama-2-7b-r16-alpha-16-metamath-10k \
