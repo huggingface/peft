@@ -166,10 +166,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def subtract_pissa_init(self, pissa_initial_dir, output_state_dict, kwargs):
         self.load_adapter(pissa_initial_dir, adapter_name="pissa_init")
         pissa_init_state_dict = get_peft_model_state_dict(
-                self,
-                state_dict=kwargs.get("state_dict", None),
-                adapter_name="pissa_init",
-            )
+            self,
+            state_dict=kwargs.get("state_dict", None),
+            adapter_name="pissa_init",
+        )
         tensors_lora = {}
         for name in pissa_init_state_dict.keys():
             ## W = W^{res} + A_0 \times B_0,
@@ -180,9 +180,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if "lora_A" in name
                 else torch.cat([output_state_dict[name], -pissa_init_state_dict[name]], dim=1)
             )
-        self.delete_adapter('pissa_init')
+        self.delete_adapter("pissa_init")
         return tensors_lora
-    
+
     def save_pretrained(
         self,
         save_directory: str,

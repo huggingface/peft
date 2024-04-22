@@ -25,6 +25,7 @@ class TrainingArguments(TrainingArguments):
     lora_r: int = field(default=16)
     lora_alpha: int = field(default=16)
     lora_dropout: float = field(default=0)
+    save_as_lora: bool = field(default=False)
     merge_and_save: bool = field(default=False)
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
@@ -59,7 +60,7 @@ if script_args.bits in [4, 8]:
     res_model = prepare_model_for_kbit_training(res_model)
     print("Wrapping the residual model with PiSSA.")
     peft_model = PeftModel.from_pretrained(
-        res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
+        res_model, os.path.join(script_args.residual_model_name_or_path, "pissa_init"), is_trainable=True
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
 
@@ -69,11 +70,11 @@ elif script_args.residual_model_name_or_path is not None:
     )
     print("Wrapping the residual model with PiSSA.")
     peft_model = PeftModel.from_pretrained(
-        res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
+        res_model, os.path.join(script_args.residual_model_name_or_path, "pissa_init"), is_trainable=True
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
 
-elif script_args.base_model_name_or_path is not None:    
+elif script_args.base_model_name_or_path is not None:
     print(
         f"No available pre-processed model, manually initialize a PiSSA using {script_args.base_model_name_or_path}."
     )
@@ -99,7 +100,11 @@ print(peft_model)
 peft_model.print_trainable_parameters()
 print(f"Training PiSSA with trl on the {script_args.data_path}[{script_args.dataset_split}] dataset.")
 dataset = load_dataset(script_args.data_path, split=script_args.dataset_split)
-dataset = dataset.map(lambda example: {"text": f"### USER: {example[script_args.dataset_field[0]]}\n### ASSISTANT: {example[script_args.dataset_field[1]]}"})
+dataset = dataset.map(
+    lambda example: {
+        "text": f"### USER: {example[script_args.dataset_field[0]]}\n### ASSISTANT: {example[script_args.dataset_field[1]]}"
+    }
+)
 
 trainer = SFTTrainer(
     model=peft_model,
@@ -110,11 +115,15 @@ trainer = SFTTrainer(
     tokenizer=tokenizer,
 )
 trainer.train()
-############################## Upon completion, save final PiSSA parameters ##############################
-peft_model.save_pretrained(os.path.join(script_args.output_dir, "pissa_ft"), pissa_to_lora_dir=os.path.join(script_args.output_dir, "pissa_lora"))
+############################## Upon training completion, convert and save PiSSA in LoRA format ##############################
+peft_model.save_pretrained(
+    os.path.join(script_args.output_dir, "pissa_lora"),
+    save_as_lora=(
+        os.path.join(script_args.residual_model_name_or_path, "pissa_init") if script_args.save_as_lora else None
+    ),
+)
 
 if script_args.merge_and_save:
-    peft_model.merge_and_unload(adapter_names=["default"])
-    model = peft_model.get_base_model()
+    model = peft_model.merge_and_unload()
     model.save_pretrained(os.path.join(script_args.output_dir, "pissa_merged"))
     tokenizer.save_pretrained(os.path.join(script_args.output_dir, "pissa_merged"))
