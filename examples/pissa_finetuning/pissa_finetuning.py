@@ -4,7 +4,6 @@ from peft import LoraConfig, get_peft_model, PeftModel, prepare_model_for_kbit_t
 from dataclasses import dataclass, field
 from typing import Optional, Union, List
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments, HfArgumentParser
-from peft.utils.pissa_utils import pissa_pre_training_saving, pissa_post_training_saving
 from trl import SFTTrainer
 from datasets import load_dataset
 
@@ -13,7 +12,7 @@ from datasets import load_dataset
 class TrainingArguments(TrainingArguments):
     # model configs
     base_model_name_or_path: Optional[str] = field(
-        default="meta-llama/Llama-2-7b-hf", metadata={"help": "The name or path of the fp32/16 base model."}
+        default=None, metadata={"help": "The name or path of the fp32/16 base model."}
     )
     residual_model_name_or_path: Optional[str] = field(
         default=None,
@@ -43,7 +42,38 @@ parser = HfArgumentParser(TrainingArguments)
 script_args = parser.parse_args_into_dataclasses()[0]
 print(script_args)
 
-if script_args.residual_model_name_or_path is None:
+print(f"Load pre-processed residual model in {script_args.bits} bits.")
+if script_args.bits in [4, 8]:
+    if script_args.residual_model_name_or_path is None:
+        raise ValueError("")
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=script_args.bits == 4,
+        load_in_8bit=script_args.bits == 8,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    res_model = AutoModelForCausalLM.from_pretrained(
+        script_args.residual_model_name_or_path, quantization_config=quantization_config, low_cpu_mem_usage=True
+    )
+    res_model = prepare_model_for_kbit_training(res_model)
+    print("Wrapping the residual model with PiSSA.")
+    peft_model = PeftModel.from_pretrained(
+        res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
+    )
+    tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
+
+elif script_args.residual_model_name_or_path is not None:
+    res_model = AutoModelForCausalLM.from_pretrained(
+        script_args.residual_model_name_or_path, torch_dtype=torch.bfloat16, device_map="auto"
+    )
+    print("Wrapping the residual model with PiSSA.")
+    peft_model = PeftModel.from_pretrained(
+        res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
+    )
+    tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
+
+elif script_args.base_model_name_or_path is not None:    
     print(
         f"No available pre-processed model, manually initialize a PiSSA using {script_args.base_model_name_or_path}."
     )
@@ -62,38 +92,11 @@ if script_args.residual_model_name_or_path is None:
         task_type="CAUSAL_LM",
     )
     peft_model = get_peft_model(model, lora_config)
-    script_args.residual_model_name_or_path = script_args.output_dir
-    pissa_pre_training_saving(
-        peft_model, tokenizer, save_path=script_args.residual_model_name_or_path, push_to_hub=None
-    )
-
-print(f"Load pre-processed residual model in {script_args.bits} bits.")
-if script_args.bits in [4, 8]:
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=script_args.bits == 4,
-        load_in_8bit=script_args.bits == 8,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-    res_model = AutoModelForCausalLM.from_pretrained(
-        script_args.residual_model_name_or_path, quantization_config=quantization_config, low_cpu_mem_usage=True
-    )
 else:
-    res_model = AutoModelForCausalLM.from_pretrained(
-        script_args.residual_model_name_or_path, torch_dtype=torch.bfloat16, device_map="auto"
-    )
-tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
+    raise ValueError("")
 
-print("Wrapping the residual model with PiSSA.")
-peft_model = PeftModel.from_pretrained(
-    res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
-)
 print(peft_model)
 peft_model.print_trainable_parameters()
-if script_args.bits in [4, 8]:
-    peft_model = prepare_model_for_kbit_training(peft_model)
-
 print(f"Training PiSSA with trl on the {script_args.data_path}[{script_args.dataset_split}] dataset.")
 dataset = load_dataset(script_args.data_path, split=script_args.dataset_split)
 dataset = dataset.map(lambda example: {"text": f"### USER: {example[script_args.dataset_field[0]]}\n### ASSISTANT: {example[script_args.dataset_field[1]]}"})
@@ -106,21 +109,9 @@ trainer = SFTTrainer(
     max_seq_length=script_args.max_seq_length,
     tokenizer=tokenizer,
 )
-############################## It's essential to save initial PiSSA parameters for conversion to LoRA. ##############################
-if not os.path.exists(os.path.join(script_args.output_dir, "pissa_init")):
-    peft_model.save_pretrained(os.path.join(script_args.output_dir, "pissa_init"))
-
 trainer.train()
 ############################## Upon completion, save final PiSSA parameters ##############################
-peft_model.save_pretrained(os.path.join(script_args.output_dir, "pissa_ft"))
-
-
-############################## The different of the PiSSA parameters before and after the training corresponding to delta W in LoRA. ##############################
-pissa_post_training_saving(
-    init_path=os.path.join(script_args.output_dir, "pissa_init"),
-    finetuned_path=os.path.join(script_args.output_dir, "pissa_ft"),
-    output_path=os.path.join(script_args.output_dir, "pissa_lora"),
-)
+peft_model.save_pretrained(os.path.join(script_args.output_dir, "pissa_ft"), pissa_to_lora_dir=os.path.join(script_args.output_dir, "pissa_lora"))
 
 if script_args.merge_and_save:
     peft_model.merge_and_unload(adapter_names=["default"])

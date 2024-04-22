@@ -69,8 +69,6 @@ from .utils import (
     load_peft_weights,
     set_peft_model_state_dict,
     shift_tokens_right,
-    save_pissa_initialization,
-    pissa_to_lora,
 )
 
 
@@ -132,8 +130,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
-        if str(peft_config.init_lora_weights).startswith("pissa"):
-            save_pissa_initialization(self, peft_config.pissa_initial_dir, peft_config.pissa_residual_dir)
 
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
@@ -167,6 +163,25 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         else:
             self.base_model.peft_config = value
 
+    def subtract_pissa_init(self, pissa_initial_dir, output_state_dict, kwargs):
+        self.load_adapter(pissa_initial_dir, adapter_name="pissa_init")
+        pissa_init_state_dict = get_peft_model_state_dict(
+                self,
+                state_dict=kwargs.get("state_dict", None),
+                adapter_name="pissa_init",
+            )
+        tensors_lora = {}
+        for name in pissa_init_state_dict.keys():
+            ## W = W^{res} + A_0 \times B_0,
+            ## W + \Delta W = W^{res} + A \times B,
+            ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | B_0]^T = A'B'.
+            tensors_lora[name] = (
+                torch.cat([output_state_dict[name], pissa_init_state_dict[name]], dim=0)
+                if "lora_A" in name
+                else torch.cat([output_state_dict[name], -pissa_init_state_dict[name]], dim=1)
+            )
+        return tensors_lora
+    
     def save_pretrained(
         self,
         save_directory: str,
@@ -174,8 +189,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
-        pissa_initial_dir: str = "pissa/init",
-        pissa_to_lora_dir: str = "pissa/lora",
+        save_as_lora: str = None,
         **kwargs: Any,
     ) -> None:
         r"""
@@ -254,6 +268,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
+                if save_as_lora is not None and str(peft_config.init_lora_weights).startswith("pissa"):
+                    output_state_dict = self.subtract_pissa_init(save_as_lora, output_state_dict, kwargs)
 
                 safe_save_file(
                     output_state_dict,
@@ -261,6 +277,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     metadata={"format": "pt"},
                 )
             elif is_main_process:
+                if save_as_lora is not None and str(peft_config.init_lora_weights).startswith("pissa"):
+                    output_state_dict = self.subtract_pissa_init(save_as_lora, output_state_dict, kwargs)
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
@@ -288,12 +306,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 auto_mapping_dict = None
 
             if is_main_process:
+                if save_as_lora is not None and str(peft_config.init_lora_weights).startswith("pissa"):
+                    peft_config.init_lora_weights = True
+                    peft_config.r *= 2
+                    peft_config.lora_alpha *= 2
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
-
-        if str(peft_config.init_lora_weights).startswith("pissa"):
-            if pissa_initial_dir is not None and pissa_to_lora_dir is not None:
-                pissa_to_lora(pissa_initial_dir, save_directory, pissa_to_lora_dir)
 
     @classmethod
     def from_pretrained(
