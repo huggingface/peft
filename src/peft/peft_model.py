@@ -180,6 +180,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if "lora_A" in name
                 else torch.cat([output_state_dict[name], -pissa_init_state_dict[name]], dim=1)
             )
+        self.delete_adapter('pissa_init')
         return tensors_lora
     
     def save_pretrained(
