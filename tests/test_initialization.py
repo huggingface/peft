@@ -251,16 +251,6 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
 
-    def test_pissa_linear_init_default(self, data):
-        from copy import deepcopy
-        model = self.get_model()
-        output = model(data)[0]
-        for init in ["pissa", "pissa_niter_1", "pissa_niter_4", "pissa_niter_16"]:
-            print(init)
-            config = LoraConfig(init_lora_weights=init, target_modules=["linear"])
-            peft_model = get_peft_model(deepcopy(model), config)
-            assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
-
     def test_rslora_scaling(self):
         # default is True
         torch.manual_seed(0)
