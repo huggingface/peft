@@ -26,7 +26,7 @@ from peft.tuners.tuners_utils import BaseTuner
 from .. import lora
 from .classifier import XLoraClassifier
 from .config import XLoraConfig
-from .layer import XLoRAConv2dLayer, XLoRAEmbeddingLayer, XLoRALinearLayer
+from .layer import XLoraConv2dLayer, XLoraEmbeddingLayer, XLoraLinearLayer
 
 
 @staticmethod
@@ -52,7 +52,7 @@ def convert_layers_to_xlora(
     for module in base.modules():
         if isinstance(module, lora.Linear):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
-            new_layer = XLoRALinearLayer(
+            new_layer = XLoraLinearLayer(
                 model=xloramodel,
                 target=module,
                 target_forward=module.forward,
@@ -64,7 +64,7 @@ def convert_layers_to_xlora(
             total_swapped += 1
         elif isinstance(module, lora.Embedding):
             device = module.lora_A[next(iter(module.lora_embedding_A))].weight.device
-            new_layer = XLoRAEmbeddingLayer(
+            new_layer = XLoraEmbeddingLayer(
                 model=xloramodel,
                 target=module,
                 target_forward=module.forward,
@@ -76,7 +76,7 @@ def convert_layers_to_xlora(
             total_swapped += 1
         elif isinstance(module, lora.Conv2d):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
-            new_layer = XLoRAConv2dLayer(
+            new_layer = XLoraConv2dLayer(
                 model=xloramodel,
                 target=module,
                 target_forward=module.forward,
@@ -147,43 +147,34 @@ class XLoraModel(BaseTuner):
         else:
             conf = config
         lora_model = LoraModel(model, config.copy(), adapter_name)
-        self.xlora_config = conf
-        del self.xlora_config.target_modules
+        self.peft_config = conf
+        del self.peft_config.target_modules
         self.lora_model = lora_model
-
-    def post_init_lora(
-        self,
-        model: nn.Module,
-        peft_config: XLoraConfig,
-        model_peft: nn.Module,
-    ) -> None:
-        # model_peft: PeftModel
-        self.xlora_config = peft_config
 
         if hasattr(model.config, "use_cache") and model.config.use_cache:
             raise ValueError("`use_cache` must be False")
 
-        adapters_items = peft_config.adapters.items()
-        if hasattr(self.xlora_config, "_subfolders"):
-            adapters_items = zip(peft_config.adapters.items(), self.xlora_config._subfolders)
+        adapters_items = self.peft_config.adapters.items()
+        if hasattr(self.peft_config, "_subfolders"):
+            adapters_items = zip(self.peft_config.adapters.items(), self.peft_config._subfolders)
         else:
-            adapters_items = peft_config.adapters.items()
+            adapters_items = self.peft_config.adapters.items()
 
-        if hasattr(self.xlora_config, "_subfolders"):
+        if hasattr(self.peft_config, "_subfolders"):
             for (adapter_name, model_id), subfolder in adapters_items:
                 self.lora_model.load_adapter(model_id, adapter_name, subfolder=subfolder)
         else:
             for adapter_name, model_id in adapters_items:
                 self.lora_model.load_adapter(model_id, adapter_name)
 
-        self.lora_model.set_adapter(list(peft_config.adapters.keys()))
+        self.lora_model.set_adapter(list(self.peft_config.adapters.keys()))
 
         self._maybe_freeze_all_adapters()
 
         total_swapped, device, all_layers = convert_layers_to_xlora(
-            model_peft,
+            model,
             self,
-            peft_config,
+            self.peft_config,
         )
 
         # Now replace the old forward function with a new one that implements the X-LoRA architecture
@@ -198,7 +189,9 @@ class XLoraModel(BaseTuner):
                 layer.scalings = dummy_scalings
 
             with torch.no_grad():
-                with model_peft.disable_adapter():
+                self.lora_model.disable_adapters()
+
+                try:
                     scaling_pass_kwargs = kwargs.copy()
                     scaling_pass_kwargs["output_hidden_states"] = True
                     scaling_pass_kwargs["return_dict"] = True
@@ -208,6 +201,8 @@ class XLoraModel(BaseTuner):
                         # Clean everything up
                         for layer in all_layers:
                             layer.scalings = None
+                finally:
+                    self.lora_model.enable_adapters()
 
             xlora_scalings = self.internal_xlora_classifier(result=base_output, *args, **kwargs)
 
@@ -226,8 +221,8 @@ class XLoraModel(BaseTuner):
 
         self.lora_model.model.forward = new_model_forward
 
-        n_classes = len(peft_config.adapters)
-        xlora_classifier = XLoraClassifier(model_peft, peft_config, n_classes, total_swapped, device)
+        n_classes = len(self.peft_config.adapters)
+        xlora_classifier = XLoraClassifier(model, self.peft_config, n_classes, total_swapped, device)
 
         # Setup the model internal state
         self.internal_xlora_classifier = xlora_classifier
@@ -235,7 +230,7 @@ class XLoraModel(BaseTuner):
 
     def _maybe_freeze_all_adapters(self):
         self.eval()
-        if not self.xlora_config.use_trainable_adapters:
+        if not self.peft_config.use_trainable_adapters:
             for name, param in self.named_parameters():
                 if "lora_" in name:
                     param.requires_grad = False
@@ -263,7 +258,7 @@ class XLoraModel(BaseTuner):
             if not isinstance(self.lora_model.peft_config[name], XLoraConfig):
                 active_adapters.append(name)
         self.lora_model.active_adapter = active_adapters
-        if self.xlora_config.use_trainable_adapters:
+        if self.peft_config.use_trainable_adapters:
             super()._mark_only_adapters_as_trainable(model)
 
         self.lora_model.active_adapter = copy
@@ -297,13 +292,13 @@ class XLoraModel(BaseTuner):
         is_main_process: bool = True,
         **kwargs: Any,
     ) -> None:
-        conf = self.xlora_config.__dict__.copy()
+        conf = self.peft_config.__dict__.copy()
 
         # So that the adapters are unloadable and the user is forced to set them for from_pretrained
         conf["adapters"] = None
         if hasattr(conf, "_subfolders"):
             del conf["_subfolders"]  # It may have been added in from_pretrained
-        with open(os.path.join(save_directory, "xlora_config.json"), "w") as f:
+        with open(os.path.join(save_directory, "peft_config.json"), "w") as f:
             json.dump(conf, f)
 
         if safe_serialization:
@@ -398,10 +393,10 @@ class XLoraModel(BaseTuner):
             if "lora_" in name:
                 param.requires_grad = use_trainable_adapters
 
-        self.xlora_config.use_trainable_adapters = use_trainable_adapters
+        self.peft_config.use_trainable_adapters = use_trainable_adapters
 
     def get_use_trainable_adapters(self) -> bool:
         """
         Get the trainable or not trainable state of the adapters.
         """
-        return self.xlora_config.use_trainable_adapters
+        return self.peft_config.use_trainable_adapters
