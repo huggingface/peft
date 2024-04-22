@@ -75,6 +75,8 @@ from .tuners import (
     OFTModel,
     PolyConfig,
     PolyModel,
+    VeraConfig,
+    VeraModel,
     XLoraConfig,
     XLoraModel,
 )

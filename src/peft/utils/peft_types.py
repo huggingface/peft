@@ -51,6 +51,7 @@ class PeftType(str, enum.Enum):
     LOKR = "LOKR"
     OFT = "OFT"
     POLY = "POLY"
+    VERA = "VERA"
     XLORA = "XLORA"
 
 

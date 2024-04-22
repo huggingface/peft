@@ -52,6 +52,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VeraModel,
     XLoraConfig,
     XLoraModel,
 )
@@ -90,6 +91,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
+    PeftType.VERA: VeraModel,
     PeftType.XLORA: XLoraModel,
 }
 
