@@ -164,7 +164,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             self.base_model.peft_config = value
 
     def subtract_pissa_init(self, pissa_initial_dir, output_state_dict, kwargs):
-        self.load_adapter(pissa_initial_dir, adapter_name="pissa_init")
+        self.load_adapter(os.path.dirname(pissa_initial_dir), adapter_name="pissa_init", subfolder=os.path.basename(pissa_initial_dir))
         pissa_init_state_dict = get_peft_model_state_dict(
             self,
             state_dict=kwargs.get("state_dict", None),

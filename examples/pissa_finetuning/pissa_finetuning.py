@@ -25,6 +25,7 @@ class TrainingArguments(TrainingArguments):
     lora_r: int = field(default=16)
     lora_alpha: int = field(default=16)
     lora_dropout: float = field(default=0)
+    save_for_reuse: bool = field(default=False)
     save_as_lora: bool = field(default=False)
     merge_and_save: bool = field(default=False)
     # dataset configs
@@ -60,7 +61,7 @@ if script_args.bits in [4, 8]:
     res_model = prepare_model_for_kbit_training(res_model)
     print("Wrapping the residual model with PiSSA.")
     peft_model = PeftModel.from_pretrained(
-        res_model, os.path.join(script_args.residual_model_name_or_path, "pissa_init"), is_trainable=True
+        res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
 
@@ -70,7 +71,7 @@ elif script_args.residual_model_name_or_path is not None:
     )
     print("Wrapping the residual model with PiSSA.")
     peft_model = PeftModel.from_pretrained(
-        res_model, os.path.join(script_args.residual_model_name_or_path, "pissa_init"), is_trainable=True
+        res_model, script_args.residual_model_name_or_path, subfolder="pissa_init", is_trainable=True
     )
     tokenizer = AutoTokenizer.from_pretrained(script_args.residual_model_name_or_path)
 
@@ -115,6 +116,7 @@ trainer = SFTTrainer(
     tokenizer=tokenizer,
 )
 trainer.train()
+trainer.save_state()
 ############################## Upon training completion, convert and save PiSSA in LoRA format ##############################
 if script_args.save_as_lora:
     peft_model.save_pretrained(
