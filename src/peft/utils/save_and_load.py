@@ -182,25 +182,26 @@ def get_peft_model_state_dict(
 
         # For some models e.g. diffusers the text config file is stored in a subfolder
         # we need to make sure we can download that config.
-        has_remote_config = False
+        has_base_config = False
 
         # ensure that this check is not performed in HF offline mode, see #1452
         if model_id is not None:
-            exists = check_file_exists_on_hf_hub(model_id, "config.json")
+            exists = os.path.exists(os.path.join(model_id, "config.json")) or \
+              check_file_exists_on_hf_hub(model_id, "config.json")
             if exists is None:
                 # check failed, could not determine if it exists or not
                 warnings.warn(
                     f"Could not find a config file in {model_id} - will assume that the vocabulary was not modified."
                 )
-                has_remote_config = False
+                has_base_config = False
             else:
-                has_remote_config = exists
+                has_base_config = exists
 
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
         if (
             vocab_size
             and model_id
-            and has_remote_config
+            and has_base_config
             and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size)
         ):
             warnings.warn(
