@@ -147,34 +147,36 @@ class XLoraModel(BaseTuner):
         else:
             conf = config
         lora_model = LoraModel(model, config.copy(), adapter_name)
-        self.peft_config = conf
-        del self.peft_config.target_modules
+        self.xlora_config = conf
+        del self.xlora_config.target_modules
         self.lora_model = lora_model
+
+        peft_config = conf
 
         if hasattr(model.config, "use_cache") and model.config.use_cache:
             raise ValueError("`use_cache` must be False")
 
-        adapters_items = self.peft_config.adapters.items()
-        if hasattr(self.peft_config, "_subfolders"):
-            adapters_items = zip(self.peft_config.adapters.items(), self.peft_config._subfolders)
+        adapters_items = peft_config.adapters.items()
+        if hasattr(self.xlora_config, "_subfolders"):
+            adapters_items = zip(peft_config.adapters.items(), self.xlora_config._subfolders)
         else:
-            adapters_items = self.peft_config.adapters.items()
+            adapters_items = peft_config.adapters.items()
 
-        if hasattr(self.peft_config, "_subfolders"):
+        if hasattr(self.xlora_config, "_subfolders"):
             for (adapter_name, model_id), subfolder in adapters_items:
                 self.lora_model.load_adapter(model_id, adapter_name, subfolder=subfolder)
         else:
             for adapter_name, model_id in adapters_items:
                 self.lora_model.load_adapter(model_id, adapter_name)
 
-        self.lora_model.set_adapter(list(self.peft_config.adapters.keys()))
+        self.lora_model.set_adapter(list(peft_config.adapters.keys()))
 
         self._maybe_freeze_all_adapters()
 
         total_swapped, device, all_layers = convert_layers_to_xlora(
             model,
             self,
-            self.peft_config,
+            peft_config,
         )
 
         # Now replace the old forward function with a new one that implements the X-LoRA architecture
@@ -221,8 +223,8 @@ class XLoraModel(BaseTuner):
 
         self.lora_model.model.forward = new_model_forward
 
-        n_classes = len(self.peft_config.adapters)
-        xlora_classifier = XLoraClassifier(model, self.peft_config, n_classes, total_swapped, device)
+        n_classes = len(peft_config.adapters)
+        xlora_classifier = XLoraClassifier(model, peft_config, n_classes, total_swapped, device)
 
         # Setup the model internal state
         self.internal_xlora_classifier = xlora_classifier
@@ -230,7 +232,7 @@ class XLoraModel(BaseTuner):
 
     def _maybe_freeze_all_adapters(self):
         self.eval()
-        if not self.peft_config.use_trainable_adapters:
+        if not self.xlora_config.use_trainable_adapters:
             for name, param in self.named_parameters():
                 if "lora_" in name:
                     param.requires_grad = False
@@ -258,7 +260,7 @@ class XLoraModel(BaseTuner):
             if not isinstance(self.lora_model.peft_config[name], XLoraConfig):
                 active_adapters.append(name)
         self.lora_model.active_adapter = active_adapters
-        if self.peft_config.use_trainable_adapters:
+        if self.xlora_config.use_trainable_adapters:
             super()._mark_only_adapters_as_trainable(model)
 
         self.lora_model.active_adapter = copy
@@ -292,7 +294,7 @@ class XLoraModel(BaseTuner):
         is_main_process: bool = True,
         **kwargs: Any,
     ) -> None:
-        conf = self.peft_config.__dict__.copy()
+        conf = self.xlora_config.__dict__.copy()
 
         # So that the adapters are unloadable and the user is forced to set them for from_pretrained
         conf["adapters"] = None
@@ -393,10 +395,10 @@ class XLoraModel(BaseTuner):
             if "lora_" in name:
                 param.requires_grad = use_trainable_adapters
 
-        self.peft_config.use_trainable_adapters = use_trainable_adapters
+        self.xlora_config.use_trainable_adapters = use_trainable_adapters
 
     def get_use_trainable_adapters(self) -> bool:
         """
         Get the trainable or not trainable state of the adapters.
         """
-        return self.peft_config.use_trainable_adapters
+        return self.xlora_config.use_trainable_adapters

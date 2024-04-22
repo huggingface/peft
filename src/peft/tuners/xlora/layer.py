@@ -37,24 +37,24 @@ class XLoraLayer:
         return x * scalings
 
     def get_maybe_topk_scalings(self) -> torch.Tensor:
-        # xlora_scalings = [batch_size, seq_len, n_classes]
-        xlora_scalings: Tensor = self.scalings[:, :, self.layer_number, :]  # type: ignore
+        # XLora_scalings = [batch_size, seq_len, n_classes]
+        XLora_scalings: Tensor = self.scalings[:, :, self.layer_number, :]  # type: ignore
 
         if self.config.top_k_lora is not None:
-            _, topk_indices = torch.topk(xlora_scalings, k=self.config.top_k_lora, dim=-1)
+            _, topk_indices = torch.topk(XLora_scalings, k=self.config.top_k_lora, dim=-1)
 
             # Mask the topk to True, the rest to False
-            mask = torch.zeros_like(xlora_scalings, dtype=torch.bool)
+            mask = torch.zeros_like(XLora_scalings, dtype=torch.bool)
             mask.scatter_(-1, topk_indices, True)
 
-            xlora_scalings = xlora_scalings * mask.to(xlora_scalings.dtype)
+            XLora_scalings = XLora_scalings * mask.to(XLora_scalings.dtype)
 
         if self.config.enable_softmax_topk:
-            nonzero_mask = xlora_scalings != 0
-            softmax_res_nonzero = torch.softmax(xlora_scalings[nonzero_mask], dim=-1)
-            xlora_scalings[nonzero_mask] = softmax_res_nonzero
+            nonzero_mask = XLora_scalings != 0
+            softmax_res_nonzero = torch.softmax(XLora_scalings[nonzero_mask], dim=-1)
+            XLora_scalings[nonzero_mask] = softmax_res_nonzero
 
-        return xlora_scalings
+        return XLora_scalings
 
 
 class XLoraLinearLayer(XLoraLayer):
@@ -75,7 +75,7 @@ class XLoraLinearLayer(XLoraLayer):
         """
 
         previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings()
+        XLora_scalings = self.get_maybe_topk_scalings()
 
         # Ignore if disabled. We want to make sure this is always run.
         if self.target.merged:
@@ -94,7 +94,7 @@ class XLoraLinearLayer(XLoraLayer):
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)  # type: ignore
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                x_mod = self.apply_scalings_to_x(x, XLora_scalings, adapter_n)
                 result += lora_B(lora_A(dropout(x_mod))) * scaling * self.config.global_scaling_weight
 
         result = result.to(previous_dtype)
@@ -118,7 +118,7 @@ class XLoraEmbeddingLayer(XLoraLayer):
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
-        xlora_scalings = self.get_maybe_topk_scalings()
+        XLora_scalings = self.get_maybe_topk_scalings()
 
         # Ignore if disabled. We want to make sure this is always run.
         if self.target.merged:
@@ -134,7 +134,7 @@ class XLoraEmbeddingLayer(XLoraLayer):
                 embedding_A = self.target.lora_embedding_A[active_adapter].T
                 embedding_B = self.target.lora_embedding_B[active_adapter].T
                 scaling = self.target.scaling[active_adapter]
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                x_mod = self.apply_scalings_to_x(x, XLora_scalings, adapter_n)
                 after_A = self.target._embed(x_mod, embedding_A)  # type: ignore
                 result += (after_A @ embedding_B) * scaling * self.config.global_scaling_weight
 
@@ -159,7 +159,7 @@ class XLoraConv2dLayer(XLoraLayer):
         """
 
         previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings()
+        XLora_scalings = self.get_maybe_topk_scalings()
 
         # Ignore if disabled. We want to make sure this is always run.
         if self.target.merged:
@@ -177,7 +177,7 @@ class XLoraConv2dLayer(XLoraLayer):
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)  # type: ignore
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                x_mod = self.apply_scalings_to_x(x, XLora_scalings, adapter_n)
                 result += lora_B(lora_A(dropout(x_mod))) * scaling * self.config.global_scaling_weight
 
         result = result.to(previous_dtype)
