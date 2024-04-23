@@ -404,6 +404,7 @@ class LycorisTuner(BaseTuner):
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
                 module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
 
     def delete_adapter(self, adapter_name: str) -> None:
         """

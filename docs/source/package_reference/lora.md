@@ -29,3 +29,7 @@ The abstract from the paper is:
 ## LoraModel
 
 [[autodoc]] tuners.lora.model.LoraModel
+
+## Utility
+
+[[autodoc]] utils.loftq_utils.replace_lora_weights_loftq

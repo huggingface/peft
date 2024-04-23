@@ -25,7 +25,7 @@ from torch.testing import assert_close
 from peft.mapping import get_peft_model
 from peft.peft_model import PeftModel
 from peft.tuners.adaption_prompt import AdaptionPromptConfig
-from peft.utils.other import prepare_model_for_int8_training
+from peft.utils.other import prepare_model_for_kbit_training
 from peft.utils.save_and_load import get_peft_model_state_dict
 from tests.testing_common import PeftCommonTester
 
@@ -143,7 +143,7 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
 
     def test_prepare_for_int8_training(self) -> None:
         model = LlamaForCausalLM(self._create_test_llama_config())
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
         model = model.to(self.torch_device)
 
         for param in model.parameters():
@@ -168,9 +168,9 @@ class AdaptionPromptTester(TestCase, PeftCommonTester):
         assert dummy_output.requires_grad
 
     @unittest.skipIf(not is_mistral_available(), "Mistral is not available")
-    def test_prepare_model_for_int8_training_mistral(self) -> None:
+    def test_prepare_model_for_kbit_training_mistral(self) -> None:
         model_mistral = MistralForCausalLM(self._create_test_mistral_config())
-        model_mistral = prepare_model_for_int8_training(model_mistral)
+        model_mistral = prepare_model_for_kbit_training(model_mistral)
         model_mistral = model_mistral.to(self.torch_device)
 
         for param in model_mistral.parameters():

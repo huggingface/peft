@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.9.1.dev0"
+__version__ = "0.10.1.dev0"
 
 from .auto import (
     AutoPeftModel,
@@ -59,6 +59,8 @@ from .tuners import (
     IA3Model,
     AdaLoraConfig,
     AdaLoraModel,
+    BOFTConfig,
+    BOFTModel,
     PrefixEncoder,
     PrefixTuningConfig,
     PromptEmbedding,
@@ -73,6 +75,8 @@ from .tuners import (
     OFTModel,
     PolyConfig,
     PolyModel,
+    VeraConfig,
+    VeraModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
@@ -80,8 +84,8 @@ from .utils import (
     TaskType,
     bloom_model_postprocess_past_key_value,
     get_peft_model_state_dict,
-    prepare_model_for_int8_training,
     prepare_model_for_kbit_training,
+    replace_lora_weights_loftq,
     set_peft_model_state_dict,
     shift_tokens_right,
     load_peft_weights,

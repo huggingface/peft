@@ -95,40 +95,9 @@ You're all set for training with whichever training method you prefer!
 
 ### LoftQ initialization
 
-[LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized, and it can improve performance when training quantized models. To get started, create a [`LoftQConfig`] and set `loftq_bits=4` for 4-bit quantization.
+[LoftQ](https://hf.co/papers/2310.08659) initializes LoRA weights such that the quantization error is minimized, and it can improve performance when training quantized models. To get started, follow [these instructions](https://github.com/huggingface/peft/tree/main/examples/loftq_finetuning).
 
-<Tip warning={true}>
-
-LoftQ initialization does not require quantizing the base model with the `load_in_4bits` parameter in the [`~transformers.AutoModelForCausalLM.from_pretrained`] method! Learn more about LoftQ initialization in the [Initialization options](../developer_guides/lora#initialization) section.
-
-Note: You can only perform LoftQ initialization on a GPU.
-
-</Tip>
-
-```py
-from transformers import AutoModelForCausalLM
-from peft import LoftQConfig, LoraConfig, get_peft_model
-
-model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", device_map="auto")
-loftq_config = LoftQConfig(loftq_bits=4)
-```
-
-Now pass the `loftq_config` to the [`LoraConfig`] to enable LoftQ initialization, and create a [`PeftModel`] for training.
-
-```py
-lora_config = LoraConfig(
-    init_lora_weights="loftq",
-    loftq_config=loftq_config,
-    r=16,
-    lora_alpha=8,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM"
-)
-
-model = get_peft_model(model, lora_config)
-```
+In general, for LoftQ to work best, it is recommended to target as many layers with LoRA as possible, since those not targeted cannot have LoftQ applied. This means that passing `LoraConfig(..., target_modules="all-linear")` will most likely give the best results. Also, you should use `nf4` as quant type in your quantization config when using 4bit quantization, i.e. `BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")`.
 
 ### QLoRA-style training
 
