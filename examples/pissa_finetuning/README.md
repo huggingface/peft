@@ -64,7 +64,7 @@ python pissa_finetuning.py \
     --lora_alpha 32 \
     --lora_dropout 0 \
     --do_train False \
-    --bits 16
+    --bits bf16
 ```
 
 ### Convert PiSSA to LoRA
@@ -91,7 +91,7 @@ If quantization fine-tuning is desired, it is necessary to first decompose the o
 python pissa_finetuning.py \
     --residual_model_name_or_path fxmeng/pissa-llama-2-7b-r16-alpha-16 \
     --output_dir output/pissa-llama-2-7b-r16-alpha-16-metamath-10k \
-    --bits 4 \
+    --bits nf4 \
     --data_path meta-math/MetaMathQA \
     --dataset_split train[:100000] \
     --dataset_field query response \
