@@ -186,7 +186,7 @@ class LoraLayer(BaseTunerLayer):
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer().parameters()):
             base_layer = self.get_base_layer()
-            if hasattr(base_layer, "W_q"): # For handling HQQ quantized weight
+            if hasattr(base_layer, "W_q"):  # For handling HQQ quantized weight
                 weight = base_layer.dequantize()
             else:
                 weight = base_layer.weight
