@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
+
 import os
 import warnings
 from typing import Optional
@@ -96,6 +98,23 @@ def get_peft_model_state_dict(
                 config.rank_pattern = rank_pattern
                 to_return = model.resize_state_dict_by_rank_pattern(rank_pattern, to_return, adapter_name)
 
+    elif config.peft_type == PeftType.BOFT:
+        bias = config.bias
+        if bias == "none":
+            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k}
+        elif bias == "all":
+            to_return = {k: state_dict[k] for k in state_dict if "boft_" in k or "bias" in k}
+        elif bias == "boft_only":
+            to_return = {}
+            for k in state_dict:
+                if "boft_" in k:
+                    to_return[k] = state_dict[k]
+                    bias_name = k.split("boft_")[0] + "bias"
+                    if bias_name in state_dict:
+                        to_return[bias_name] = state_dict[bias_name]
+        else:
+            raise NotImplementedError
+
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
 
@@ -104,6 +123,7 @@ def get_peft_model_state_dict(
 
     elif config.peft_type == PeftType.ADAPTION_PROMPT:
         to_return = {k: state_dict[k] for k in state_dict if k.split(".")[-1].startswith("adaption_")}
+
     elif config.is_prompt_learning:
         to_return = {}
         if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
@@ -116,14 +136,32 @@ def get_peft_model_state_dict(
             else:
                 prompt_embeddings = model.get_prompt_embedding_to_save(adapter_name)
         to_return["prompt_embeddings"] = prompt_embeddings
+
     elif config.peft_type == PeftType.IA3:
         to_return = {k: state_dict[k] for k in state_dict if "ia3_" in k}
+
     elif config.peft_type == PeftType.OFT:
         to_return = {k: state_dict[k] for k in state_dict if "oft_" in k}
+
     elif config.peft_type == PeftType.POLY:
         to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
+
+    elif config.peft_type == PeftType.VERA:
+        to_return = {k: state_dict[k] for k in state_dict if "vera_lambda_" in k}
+        if config.save_projection:
+            # TODO: adding vera_A and vera_B to `self.get_base_layer` would
+            # make name to match here difficult to predict.
+            if f"base_model.vera_A.{adapter_name}" not in state_dict:
+                raise ValueError(
+                    "Model was initialised to not save vera_A and vera_B but config now specifies to save projection!"
+                    " Set `config.save_projection` to `False`."
+                )
+            to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
+            to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
+
     else:
-        raise NotImplementedError
+        raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
+
     if getattr(model, "modules_to_save", None) is not None:
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
@@ -186,13 +224,49 @@ def get_peft_model_state_dict(
     return to_return
 
 
-def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="default"):
+def _find_mismatched_keys(
+    model: torch.nn.Module, peft_model_state_dict: dict[str, torch.Tensor], ignore_mismatched_sizes: bool = False
+) -> tuple[dict[str, torch.Tensor], list[tuple[str, tuple[int, ...], tuple[int, ...]]]]:
+    if not ignore_mismatched_sizes:
+        return peft_model_state_dict, []
+
+    mismatched = []
+    state_dict = model.state_dict()
+    for key, tensor in peft_model_state_dict.items():
+        if key not in state_dict:
+            continue
+
+        # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L3858-L3864
+        if (state_dict[key].shape[-1] == 1) and (state_dict[key].numel() * 2 == tensor.numel()):
+            # This skips size mismatches for 4-bit weights. Two 4-bit values share an 8-bit container, causing size
+            # differences. Without matching with module type or paramter type it seems like a practical way to detect
+            # valid 4bit weights.
+            continue
+
+        if state_dict[key].shape != tensor.shape:
+            mismatched.append((key, tensor.shape, state_dict[key].shape))
+
+    for key, _, _ in mismatched:
+        del peft_model_state_dict[key]
+
+    return peft_model_state_dict, mismatched
+
+
+def set_peft_model_state_dict(
+    model, peft_model_state_dict, adapter_name="default", ignore_mismatched_sizes: bool = False
+):
     """
     Set the state dict of the Peft model.
 
     Args:
-        model ([`PeftModel`]): The Peft model.
-        peft_model_state_dict (`dict`): The state dict of the Peft model.
+        model ([`PeftModel`]):
+            The Peft model.
+        peft_model_state_dict (`dict`):
+            The state dict of the Peft model.
+        adapter_name (`str`, *optional*, defaults to `"default"`):
+            The name of the adapter whose state dict should be set.
+        ignore_mismatched_sizes (`bool`, *optional*, defaults to `False`):
+            Whether to ignore mismatched in the state dict.
     """
     config = model.peft_config[adapter_name]
     state_dict = {}
@@ -215,6 +289,8 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
         PeftType.IA3,
         PeftType.OFT,
         PeftType.POLY,
+        PeftType.BOFT,
+        PeftType.VERA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -225,6 +301,8 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
             PeftType.LOKR: "lokr_",
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
+            PeftType.BOFT: "boft_",
+            PeftType.VERA: "vera_lambda_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
@@ -237,15 +315,36 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
                 peft_model_state_dict[k] = v
             else:
                 peft_model_state_dict[k] = v
+
         if config.peft_type == PeftType.ADALORA:
             rank_pattern = config.rank_pattern
             if rank_pattern is not None:
                 model.resize_modules_by_rank_pattern(rank_pattern, adapter_name)
+        elif config.peft_type == PeftType.VERA:
+            if config.save_projection and "base_model.vera_A" not in peft_model_state_dict:
+                raise ValueError(
+                    "Specified to load vera_A and vera_B from state dictionary however they were not present!"
+                )
+            elif not config.save_projection and "base_model.vera_A" in peft_model_state_dict:
+                warnings.warn(
+                    "Specified to not load vera_A and vera_B from state dictionary however they are present in state"
+                    " dictionary! Consider using them to ensure checkpoint loading is correct on all platforms using"
+                    " `peft_config.save_projection = True`"
+                )
+            elif not config.save_projection:  # and no vera_A in state dictionary
+                warnings.warn(
+                    "Specified to not load vera_A and vera_B from state dictionary. This means we will be relying on"
+                    " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
+                    " not be accurate on all system configurations."
+                )
     elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
 
+    peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
+        model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
+    )
     load_result = model.load_state_dict(peft_model_state_dict, strict=False)
     if config.is_prompt_learning:
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
@@ -254,6 +353,20 @@ def set_peft_model_state_dict(model, peft_model_state_dict, adapter_name="defaul
 
     if config.peft_type == PeftType.MULTITASK_PROMPT_TUNING:
         model.prompt_encoder[adapter_name].load_state_dict(peft_model_state_dict, strict=False)
+
+    if mismatched_keys:
+        # see https://github.com/huggingface/transformers/blob/09f9f566de83eef1f13ee83b5a1bbeebde5c80c1/src/transformers/modeling_utils.py#L4039
+        mismatched_warning = "\n".join(
+            [
+                f"- {key}: found shape {shape1} in the checkpoint and {shape2} in the model instantiated"
+                for key, shape1, shape2 in mismatched_keys
+            ]
+        )
+        msg = (
+            f"Some weights of {model.__class__.__name__} were not initialized from the model checkpoint "
+            f"and are being ignored because you passed `ignore_mismatched_sizes=True`: {mismatched_warning}."
+        )
+        warnings.warn(msg)
     return load_result
 
 

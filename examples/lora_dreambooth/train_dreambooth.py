@@ -9,7 +9,6 @@ import threading
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Optional
 
 import datasets
 import diffusers
@@ -32,7 +31,7 @@ from diffusers import (
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
-from huggingface_hub import HfFolder, Repository, whoami
+from huggingface_hub import HfApi
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -576,16 +575,6 @@ class PromptDataset(Dataset):
         return example
 
 
-def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
-    if token is None:
-        token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
-        return f"{organization}/{model_id}"
-
-
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -678,11 +667,13 @@ def main(args):
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
-            else:
-                repo_name = args.hub_model_id
-            repo = Repository(args.output_dir, clone_from=repo_name)  # noqa: F841
+            api = HfApi(token=args.hub_token)
+
+            # Create repo (repo_name from args or inferred)
+            repo_name = args.hub_model_id
+            if repo_name is None:
+                repo_name = Path(args.output_dir).absolute().name
+            repo_id = api.create_repo(repo_name, exist_ok=True).repo_id
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -1086,7 +1077,12 @@ def main(args):
             pipeline.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
-            repo.push_to_hub(commit_message="End of training", blocking=False, auto_lfs_prune=True)
+            api.upload_folder(
+                repo_id=repo_id,
+                folder_path=args.output_dir,
+                commit_message="End of training",
+                run_as_future=True,
+            )
 
     accelerator.end_training()
 
