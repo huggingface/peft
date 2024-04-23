@@ -128,6 +128,20 @@ quantized_model = get_peft_model(quantized_model, peft_config)
 
 You can refer to the [Google Colab](https://colab.research.google.com/drive/12GTp1FCj5_0SnnNQH18h_2XFh9vS_guX?usp=sharing) example for an overview of AQLM+LoRA finetuning.
 
+## HQQ quantization
+
+The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
+
+```py
+from hqq.engine.hf import HQQModelForCausalLM
+
+quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
+
+peft_config = LoraConfig(...)
+
+quantized_model = get_peft_model(quantized_model, peft_config)
+```
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:
