@@ -58,10 +58,8 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME
 from .testing_utils import (
     require_aqlm,
     require_auto_awq,
-    require_auto_gptq,
     require_bitsandbytes,
     require_eetq,
-    require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
 )
@@ -2116,7 +2114,6 @@ class PeftEetqGPUTests(unittest.TestCase):
             )
 
             model = prepare_model_for_kbit_training(model)
-            model.enable_input_require_grads()
 
             config = LoraConfig(
                 r=16,
@@ -2177,7 +2174,6 @@ class PeftEetqGPUTests(unittest.TestCase):
             assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
 
             model = prepare_model_for_kbit_training(model)
-            model.enable_input_require_grads()
 
             setattr(model, "model_parallel", True)
             setattr(model, "is_parallelizable", True)
