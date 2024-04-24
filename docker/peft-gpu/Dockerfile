@@ -46,6 +46,8 @@ RUN source activate peft && \
 RUN source activate peft && \
     python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.4/autoawq_kernels-0.0.4-cp38-cp38-linux_x86_64.whl
 
+RUN python3 -m pip install --no-cache-dir https://github.com/NetEase-FuXi/EETQ/releases/download/v1.0.0/EETQ-1.0.0+cu121+torch2.1.2-cp38-cp38-linux_x86_64.whl
+
 # Install apt libs
 RUN apt-get update && \
     apt-get install -y curl git wget && \
