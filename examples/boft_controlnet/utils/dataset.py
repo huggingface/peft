@@ -10,7 +10,6 @@ from torchvision import transforms
 from utils.pipeline_controlnet import LightControlNetPipeline
 
 
-
 def image_grid(imgs, rows, cols):
     assert len(imgs) == rows * cols
 
