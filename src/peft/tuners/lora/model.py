@@ -47,6 +47,7 @@ from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task
 
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
+from .eetq import dispatch_eetq
 from .config import LoraConfig
 from .gptq import dispatch_gptq
 from .layer import Conv2d, LoraLayer, dispatch_default
@@ -288,7 +289,7 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
-        dispatchers.extend([dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
+        dispatchers.extend([dispatch_eetq, dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
 
         new_module = None
         for dispatcher in dispatchers:
