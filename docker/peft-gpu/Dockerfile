@@ -46,14 +46,15 @@ RUN source activate peft && \
 RUN source activate peft && \
     python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.4/autoawq_kernels-0.0.4-cp38-cp38-linux_x86_64.whl
 
-# Add eetq for quantization testing
-RUN python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
-
 # Install apt libs
 RUN apt-get update && \
     apt-get install -y curl git wget && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
+
+# Add eetq for quantization testing
+RUN source activate peft && \
+    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
 
 # Activate the conda env and install transformers + accelerate from source
 RUN source activate peft && \
