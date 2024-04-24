@@ -58,8 +58,10 @@ from peft.utils import SAFETENSORS_WEIGHTS_NAME
 from .testing_utils import (
     require_aqlm,
     require_auto_awq,
+    require_auto_gptq,
     require_bitsandbytes,
     require_eetq,
+    require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
 )
