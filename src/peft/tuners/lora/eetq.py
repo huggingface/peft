@@ -73,7 +73,10 @@ class EetqLoraLinear(torch.nn.Module, LoraLayer):
         return result
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
-        raise ValueError("Merging LoRA layers is not supported for Eetq layers.")
+        raise AttributeError("Merging LoRA layers is not supported for Eetq layers.")
+
+    def unmerge(self) -> None:
+        raise AttributeError("Unmerging LoRA layers is not supported for Eetq layers.")
 
     def __repr__(self) -> str:
         rep = super().__repr__()
