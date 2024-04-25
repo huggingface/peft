@@ -136,9 +136,11 @@ For inference, load the base model first and resize it the same way you did befo
 
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
 
-### Investigating the status of the PEFT model
+### Check layer and model status
 
-Sometimes, the PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, you can call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. The first one gives you a detailed overview about the adapters for each targeted layer. The latter one gives you a high-level overview about the model status.
+Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. 
+
+The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of each targeted layer's active, merged, and available adapters.
 
 ```python
 >>> from transformers import AutoModel
@@ -178,11 +180,11 @@ TunerModelStatus(
 )
 ```
 
-In the model state output, you should look out especially for entries that say `"irregular"`. This means that PEFT has detected an inconsistent state in the model. For instance, when it says `merged_adapters="irregular"`, it means that for at least one adapter, it was found that it was merged on some target modules but not on others that it targets. If you see this, the inference results will most likely be incorrect.
+In the model state output, you should look out for entries that say `"irregular"`. This means PEFT detected an inconsistent state in the model. For instance, if `merged_adapters="irregular"`, it means that for at least one adapter, it was merged on some target modules but not on others. The inference results will most likely be incorrect as a result.
 
-The best way to resolve this issue is to reload the whole model and the adapter checkpoint(s). Ensure that you don't perform any incorrect operations on the model, e.g. manually merging adapters on some modules but not others.
+The best way to resolve this issue is to reload the whole model and adapter checkpoint(s). Ensure that you don't perform any incorrect operations on the model, e.g. manually merging adapters on some modules but not others.
 
-Tip: You can easily convert the layer status into a pandas `DataFrame` for easier inspection:
+Convert the layer status into a pandas `DataFrame` for an easier visual inspection.
 
 ```python
 from dataclasses import asdict
