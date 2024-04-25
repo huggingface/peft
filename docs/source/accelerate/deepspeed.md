@@ -22,8 +22,6 @@ For DeepSpeed Stage 3 + QLoRA, please refer to the section [Use PEFT QLoRA and D
 
 For confirming these observations, we ran the SFT (Supervised Fine-tuning) [offical example scripts](https://github.com/huggingface/trl/tree/main/examples) of the [Transformers Reinforcement Learning (TRL) library](https://github.com/huggingface/trl) using QLoRA + PEFT and the accelerate configs available [here](https://github.com/huggingface/trl/tree/main/examples/accelerate_configs). We ran these experiments on a 2x NVIDIA T4 GPU.
 
-Note DeepSpeed-Zero3 and `bitsandbytes` are currently **not** compatible.
-
 # Use PEFT and DeepSpeed with ZeRO3 for finetuning large models on multiple devices and multiple nodes
 
 This section of guide will help you learn how to use our DeepSpeed [training script](https://github.com/huggingface/peft/blob/main/examples/sft/train.py) for performing SFT. You'll configure the script to do SFT (supervised fine-tuning) of Llama-70B model with LoRA and ZeRO-3 on 8xH100 80GB GPUs on a single machine. You can configure it to scale to multiple machines by changing the accelerate config.
