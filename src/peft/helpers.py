@@ -27,6 +27,7 @@ def update_forward_signature(model: PeftModel) -> None:
 
     # Only update signature when the current forward signature only has *args and **kwargs
     current_signature = inspect.signature(model.forward)
+    print(current_signature)
     if (
         len(current_signature.parameters) == 2
         and "args" in current_signature.parameters
