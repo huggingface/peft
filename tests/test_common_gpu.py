@@ -469,7 +469,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_adaption_prompt_8bit(self):
         model = LlamaForCausalLM.from_pretrained(
-            "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float16,
             device_map="auto",
@@ -492,7 +492,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_bitsandbytes
     def test_adaption_prompt_4bit(self):
         model = LlamaForCausalLM.from_pretrained(
-            "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=BitsAndBytesConfig(load_in_4bit=True),
             torch_dtype=torch.float16,
             device_map="auto",
@@ -982,7 +982,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             bnb_4bit_compute_dtype=torch.float32,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
             quantization_config=bnb_config,
             torch_dtype=torch.float32,
         ).eval()
