@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 import torch
 
@@ -72,7 +72,7 @@ class EetqLoraLinear(torch.nn.Module, LoraLayer):
             result = result + output
         return result
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         raise ValueError("Merging LoRA layers is not supported for Eetq layers.")
 
     def __repr__(self) -> str:
