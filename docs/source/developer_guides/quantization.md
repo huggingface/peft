@@ -130,7 +130,7 @@ You can refer to the [Google Colab](https://colab.research.google.com/drive/12GT
 
 ## EETQ quantization
 
-You can also perform LoRA fine-tuning on EETQ quantized models. [EETQ](https://github.com/NetEase-FuXi/EETQ) package offers simple and efficient way to perform 8-bit quantization, which is claimed to be faster than the LLM.int8() algorithm.
+You can also perform LoRA fine-tuning on EETQ quantized models. [EETQ](https://github.com/NetEase-FuXi/EETQ) package offers simple and efficient way to perform 8-bit quantization, which is claimed to be faster than the `LLM.int8()` algorithm.
 
 ```py
 import torch
