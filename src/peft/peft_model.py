@@ -2325,6 +2325,7 @@ class TunerLayerStatus:
     enabled: bool
     active_adapters: list[str]
     merged_adapters: list[str]
+    requires_grad: dict[str, bool | Literal["irregular"]]
     available_adapters: list[str]
 
 
@@ -2344,6 +2345,10 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
        The names of the active adapters, if any, e.g. `["default"]`.
     - `merged_adapters` (`list[str]`):
        The names of the merged adapters, if any, e.g. `["default"]`.
+    - requires_grad : dict[str, bool | Literal["irregular"]]
+       The requires_grad status of the parameters for each adapter module. Ideally, it should be either `True` or
+       `False`. If the requires_grad status is not consistent across all parameters, the value will be set to
+       `"irregular"`.
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
 
@@ -2371,12 +2376,37 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
         if not isinstance(module, BaseTunerLayer):
             continue
 
+        # determine if all submodules/parameters if this module require grad or not
+        mapping_requires_grad_list: dict[str, list[bool]] = collections.defaultdict(list)
+        for adapter_module_name in module.adapter_layer_names:
+            adapter_module = getattr(module, adapter_module_name)
+            if isinstance(adapter_module, torch.nn.ModuleDict):
+                for key, submodule in adapter_module.items():
+                    for param in submodule.parameters():
+                        mapping_requires_grad_list[key].append(param.requires_grad)
+            elif isinstance(adapter_module, torch.nn.ParameterDict):
+                for key, param in adapter_module.items():
+                    mapping_requires_grad_list[key].append(param.requires_grad)
+            else:
+                # strange, we don't know how to handle this, ignore for now
+                pass
+
+        def check_irrgular(vals: list[bool]) -> bool | Literal["irregular"]:
+            if all(vals):
+                return True
+            if not any(vals):
+                return False
+            return "irregular"
+
+        requires_grad = {key: check_irrgular(vals) for key, vals in mapping_requires_grad_list.items()}
+
         status = TunerLayerStatus(
             name=name,
             module_type=repr(module).partition("(")[0],
             enabled=not module.disable_adapters,
             active_adapters=module.active_adapters,
             merged_adapters=module.merged_adapters,
+            requires_grad=requires_grad,
             available_adapters=sorted(module._get_available_adapters()),
         )
         layer_status.append(status)
@@ -2398,6 +2428,7 @@ class TunerModelStatus:
     enabled: bool | Literal["irregular"]
     active_adapters: list[str] | Literal["irregular"]
     merged_adapters: list[str] | Literal["irregular"]
+    requires_grad: dict[str, bool | Literal["irregular"]]
     available_adapters: list[str]
 
 
@@ -2427,6 +2458,10 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
     - `merged_adapters` (`list[str]`, `Literal["irregular"]`):
        The names of the merged adapters. If the merged adapters are not consistent across all layers, this will be
        `"irregular"`, which means that your model is in an inconsistent state and might not work as expected.
+    - `requires_grad` (`dict[str, bool | Literal["irregular"]]`):
+       Whether for the given adapter, all adapter layers have `requires_grad` set to `True` or `False`. If there is a
+       mix, this will be set to `"irregular"`, which means that your model is in an inconsistent state and might not
+       work as expected.
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
 
@@ -2502,6 +2537,23 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
             merged_adapters = "irregular"
             break
 
+    # check status of requires_grad
+    # first, merge the values for all layers
+    requires_grad_all: dict[str, list[bool | Literal["irregular"]]] = collections.defaultdict(list)
+    for status in layer_status:
+        for key, val in status.requires_grad.items():
+            requires_grad_all[key].append(val)
+
+    # then, check if the values are consistent
+    def check_irrgular(vals: list[bool | Literal["irregular"]]) -> bool | Literal["irregular"]:
+        if all(val is True for val in vals):
+            return True
+        if all(val is False for val in vals):
+            return False
+        return "irregular"
+
+    requires_grad = {key: check_irrgular(vals) for key, vals in requires_grad_all.items()}
+
     adapter_model_status = TunerModelStatus(
         base_model_type=base_model_type,
         adapter_model_type=adapter_model_type,
@@ -2512,6 +2564,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
         enabled=enabled,
         active_adapters=active_adapters,
         merged_adapters=merged_adapters,
+        requires_grad=requires_grad,
         available_adapters=available_adapters,
     )
     return adapter_model_status

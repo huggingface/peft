@@ -156,12 +156,14 @@ The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of
                   enabled=True,
                   active_adapters=['default'],
                   merged_adapters=[],
+                  requires_grad={'default': True},
                   available_adapters=['default']),
  TunerLayerStatus(name='model.encoder.block.0.layer.0.SelfAttention.v',
                   module_type='lora.Linear',
                   enabled=True,
                   active_adapters=['default'],
                   merged_adapters=[],
+                  requires_grad={'default': True},
                   available_adapters=['default']),
 ...]
 
@@ -176,6 +178,7 @@ TunerModelStatus(
     enabled=True,
     active_adapters=['default'],
     merged_adapters=[],
+    requires_grad={'default': True},
     available_adapters=['default'],
 )
 ```

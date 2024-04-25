@@ -19,6 +19,7 @@ import unittest
 from copy import deepcopy
 
 import pytest
+import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
@@ -519,6 +520,39 @@ class TestModelAndLayerStatus:
         # default is on layer 0, 1, and 3, other is on layer 0 and 2
         assert result == [["other", "default"], ["default"], ["other"], ["default"]]
 
+    def test_requires_grad_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        assert [status.requires_grad for status in layer_status] == [{"default": True}]
+
+    def test_requires_grad_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.requires_grad for status in layer_status]
+        # default is on layer 0, 1, and 3, other is on layer 0 and 2
+        expected = [{"default": True, "other": False}, {"default": True}, {"other": False}, {"default": True}]
+        assert result == expected
+
+        # now activate "other"
+        large_model.set_adapter("other")
+        layer_status = large_model.get_layer_status()
+        result = [status.requires_grad for status in layer_status]
+        expected = [{"default": False, "other": True}, {"default": False}, {"other": True}, {"default": False}]
+        assert result == expected
+
+    def test_requires_grad_irregular(self, large_model):
+        # inject an embedding layer with requires_grad=False
+        # this is an invalid state, but we should still test it
+        lora_embedding_A = nn.Parameter(torch.zeros(10, 10))
+        lora_embedding_B = nn.Parameter(torch.zeros(10, 10))
+        lora_embedding_A.requires_grad = False
+        lora_embedding_B.requires_grad = False
+        large_model.base_model.model.lin0.lora_embedding_A["default"] = lora_embedding_A
+        large_model.base_model.model.lin0.lora_embedding_B["default"] = lora_embedding_B
+
+        layer_status = large_model.get_layer_status()
+        result = [status.requires_grad for status in layer_status]
+        expected = [{"default": "irregular", "other": False}, {"default": True}, {"other": False}, {"default": True}]
+        assert result == expected
+
     def test_available_adapters_small(self, small_model):
         layer_status = small_model.get_layer_status()
         result = [status.available_adapters for status in layer_status]
@@ -678,6 +712,31 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.merged_adapters == "irregular"
 
+    def test_model_requires_grad_model_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.requires_grad == {"default": True}
+
+    def test_model_requires_grad_model_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.requires_grad == {"default": True, "other": False}
+
+        large_model.set_adapter("other")
+        model_status = large_model.get_model_status()
+        assert model_status.requires_grad == {"default": False, "other": True}
+
+    def test_model_requires_grad_model_irregular(self, large_model):
+        # inject an embedding layer with requires_grad=False
+        # this is an invalid state, but we should still test it
+        lora_embedding_A = nn.Parameter(torch.zeros(10, 10))
+        lora_embedding_B = nn.Parameter(torch.zeros(10, 10))
+        lora_embedding_A.requires_grad = False
+        lora_embedding_B.requires_grad = False
+        large_model.base_model.model.lin0.lora_embedding_A["default"] = lora_embedding_A
+        large_model.base_model.model.lin0.lora_embedding_B["default"] = lora_embedding_B
+
+        model_status = large_model.get_model_status()
+        assert model_status.requires_grad == {"default": "irregular", "other": False}
+
     def test_model_available_adapters_small(self, small_model):
         model_status = small_model.get_model_status()
         assert model_status.available_adapters == ["default"]
@@ -692,6 +751,8 @@ class TestModelAndLayerStatus:
 
     def test_transformers_model(self):
         model_id = "peft-internal-testing/gpt2-lora-random"
+        # note that loading through AutoModelForCausalLM.from_pretrained does not enable training mode, hence
+        # requires_grad=False
         model = AutoModelForCausalLM.from_pretrained(model_id)
         model_status = get_model_status(model)
         layer_status = get_layer_status(model)
@@ -705,6 +766,7 @@ class TestModelAndLayerStatus:
         assert model_status.enabled is True
         assert model_status.active_adapters == ["default"]
         assert model_status.merged_adapters == []
+        assert model_status.requires_grad == {"default": False}
         assert model_status.available_adapters == ["default"]
 
         layer_status0 = layer_status[0]
@@ -714,6 +776,7 @@ class TestModelAndLayerStatus:
         assert layer_status0.enabled is True
         assert layer_status0.active_adapters == ["default"]
         assert layer_status0.merged_adapters == []
+        assert layer_status0.requires_grad == {"default": False}
         assert layer_status0.available_adapters == ["default"]
 
     ###############
