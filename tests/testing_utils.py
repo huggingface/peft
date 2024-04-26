@@ -18,7 +18,13 @@ import numpy as np
 import pytest
 import torch
 
-from peft.import_utils import is_aqlm_available, is_auto_awq_available, is_auto_gptq_available, is_optimum_available
+from peft.import_utils import (
+    is_aqlm_available,
+    is_auto_awq_available,
+    is_auto_gptq_available,
+    is_eetq_available,
+    is_optimum_available,
+)
 
 
 def require_torch_gpu(test_case):
@@ -73,6 +79,13 @@ def require_auto_awq(test_case):
     Decorator marking a test that requires auto-awq. These tests are skipped when auto-awq isn't installed.
     """
     return unittest.skipUnless(is_auto_awq_available(), "test requires auto-awq")(test_case)
+
+
+def require_eetq(test_case):
+    """
+    Decorator marking a test that requires eetq. These tests are skipped when eetq isn't installed.
+    """
+    return unittest.skipUnless(is_eetq_available(), "test requires eetq")(test_case)
 
 
 def require_optimum(test_case):

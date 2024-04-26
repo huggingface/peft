@@ -52,6 +52,10 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
+# Add eetq for quantization testing
+RUN source activate peft && \
+    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
+
 # Activate the conda env and install transformers + accelerate from source
 RUN source activate peft && \
     python3 -m pip install -U --no-cache-dir \
