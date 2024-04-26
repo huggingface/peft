@@ -186,8 +186,8 @@ def get_peft_model_state_dict(
 
         # ensure that this check is not performed in HF offline mode, see #1452
         if model_id is not None:
-            exists = os.path.exists(os.path.join(model_id, "config.json")) or \
-              check_file_exists_on_hf_hub(model_id, "config.json")
+            local_config_exists = os.path.exists(os.path.join(model_id, "config.json"))
+            exists = local_config_exists or check_file_exists_on_hf_hub(model_id, "config.json")
             if exists is None:
                 # check failed, could not determine if it exists or not
                 warnings.warn(
