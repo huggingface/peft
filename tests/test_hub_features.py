@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import copy
 import unittest
 
 import torch
@@ -46,15 +47,17 @@ class TestBaseModelRevision:
         test_inputs = torch.arange(10).reshape(-1, 1)
 
         base_model_id = "peft-internal-testing/tiny-random-BertModel"
-        base_model_revision = "v2.0.0"
+        revision = "v2.0.0"
 
-        base_model_revision = AutoModelForCausalLM.from_pretrained(base_model_id, revision=base_model_revision).eval()
-        peft_model_revision = get_peft_model(base_model_revision, lora_config)
+        base_model_revision = AutoModelForCausalLM.from_pretrained(base_model_id, revision=revision).eval()
+        peft_model_revision = get_peft_model(base_model_revision, lora_config, revision=revision)
         output_revision = peft_model_revision(test_inputs).logits
 
         # sanity check: the model without revision should be different
         base_model_no_revision = AutoModelForCausalLM.from_pretrained(base_model_id, revision="main").eval()
-        peft_model_no_revision = get_peft_model(base_model_no_revision, lora_config)
+        # we need a copy of the config because otherwise, we are changing in-place the `revision` of the previous config and model
+        lora_config_no_revision = copy.deepcopy(lora_config)
+        peft_model_no_revision = get_peft_model(base_model_no_revision, lora_config_no_revision, revision="main")
         output_no_revision = peft_model_no_revision(test_inputs).logits
         assert not torch.allclose(output_no_revision, output_revision)
 
@@ -62,10 +65,7 @@ class TestBaseModelRevision:
         peft_model_revision.save_pretrained(tmp_path / "peft_model_revision")
         peft_model_revision_loaded = AutoPeftModelForCausalLM.from_pretrained(tmp_path / "peft_model_revision").eval()
 
-        import pdb
-
-        pdb.set_trace()
-        assert peft_model_revision_loaded.peft_config["default"].revision == base_model_revision
+        assert peft_model_revision_loaded.peft_config["default"].revision == revision
 
         output_revision_loaded = peft_model_revision_loaded(test_inputs).logits
         assert torch.allclose(output_revision, output_revision_loaded)

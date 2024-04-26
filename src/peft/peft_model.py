@@ -71,7 +71,6 @@ from .utils import (
     shift_tokens_right,
 )
 
-
 PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
     PeftType.LOHA: LoHaModel,
@@ -263,12 +262,6 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     self.base_model.__dict__.get("name_or_path", None)
                     if peft_config.is_prompt_learning
                     else self.base_model.model.__dict__.get("name_or_path", None)
-                )
-            if peft_config.revision is None:
-                peft_config.revision = (
-                    self.base_model.__dict__.get("revision", None)
-                    if peft_config.is_prompt_learning
-                    else self.base_model.model.__dict__.get("revision", None)
                 )
             inference_mode = peft_config.inference_mode
             peft_config.inference_mode = True
