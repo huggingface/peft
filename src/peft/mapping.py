@@ -53,6 +53,7 @@ from .tuners import (
 )
 from .utils import _prepare_prompt_learning_config
 
+
 if TYPE_CHECKING:
     from transformers import PreTrainedModel
 
@@ -123,7 +124,8 @@ def get_peft_model(
         mixed (`bool`, `optional`, defaults to `False`):
             Whether to allow mixing different (compatible) adapter types.
         revision (`str`, `optional`, defaults to `None`):
-            The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for the base model
+            The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
+            the base model
     """
     model_config = getattr(model, "config", {"model_type": "custom"})
     if hasattr(model_config, "to_dict"):
