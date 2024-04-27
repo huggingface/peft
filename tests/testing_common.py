@@ -438,6 +438,23 @@ class PeftCommonTester:
             assert "default" in model_from_pretrained.peft_config.keys()
             assert "new_adapter" not in model_from_pretrained.peft_config.keys()
 
+    def _test_save_pretrained_find_local_config(self, model_id, config_cls, config_kwargs, recwarn):
+        model = self.transformers_class.from_pretrained(model_id)
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            del model
+            model = self.transformers_class.from_pretrained(tmp_dirname)
+            config = config_cls(
+                base_model_name_or_path=tmp_dirname,
+                **config_kwargs,
+            )
+            model = get_peft_model(model, config)
+            model = model.to(self.torch_device)
+            model.save_pretrained(tmp_dirname)
+
+            for warning in recwarn.list:
+                assert "Could not find a config file" not in warning.message.args[0]
+
     def _test_from_pretrained_config_construction(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(base_model_name_or_path=model_id, **config_kwargs)
