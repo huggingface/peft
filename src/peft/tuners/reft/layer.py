@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from peft.tuners.lycoris_utils import LycorisLayer
 
 def parse_positions(positions: str):
-    # parse position
+    # Code borrow from https://github.com/stanfordnlp/pyreft/pyreft/dataset.py
     first_n, last_n = 0, 0
     if "+" in positions:
         first_n = int(positions.split("+")[0].strip("f"))
@@ -105,7 +105,9 @@ class ReftLayer(nn.Module, LycorisLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
-        self.loc[adapter_name] = loc
+        first_n, last_n = parse_positions(loc)
+        self.first_n[adapter_name] = first_n
+        self.last_n[adapter_name] = last_n
         self.alpha[adapter_name] = alpha
         self.scaling[adapter_name] = alpha / r
         self.rank_dropout[adapter_name] = rank_dropout
