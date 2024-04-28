@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from .config import LoReftConfig
-from .layer import Conv2d, Linear, ReftLayer
+from .layer import Conv2d, Linear, LoReftLayer
 from .model import LoReftModel
 
 
