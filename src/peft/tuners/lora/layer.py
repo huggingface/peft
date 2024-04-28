@@ -157,7 +157,8 @@ class LoraLayer(BaseTunerLayer):
         dtype = weight.dtype
         if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
             raise TypeError(
-                "Please initialize PISSA at full precision before quantizing the residual model, which may reduce quantization errors."
+                "Please initialize PiSSA under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
         weight = weight.to(torch.float32)
 
