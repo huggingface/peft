@@ -20,17 +20,17 @@ from peft.utils import PeftType
 
 
 @dataclass
-class ReftConfig(LycorisConfig):
+class LoReftConfig(LycorisConfig):
     """
-    This is the configuration class to store the configuration of a [`ReftModel`].
+    This is the configuration class to store the configuration of a [`LoReftModel`].
 
     Args:
-        r (`int`): ReFT rank.
-        alpha (`int`): ReFT alpha.
+        r (`int`): LoReFT rank.
+        alpha (`int`): LoReFT alpha.
         loc (`List[int]`):
-            Token locations are applied ReFT.
+            Token locations are applied LoReFT.
         module_dropout (`int`):
-            The dropout probability for disabling ReFT modules during training.
+            The dropout probability for disabling LoReFT modules during training.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -40,7 +40,7 @@ class ReftConfig(LycorisConfig):
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
         init_weights (`bool`):
-            Whether to perform initialization of ReFT weights.
+            Whether to perform initialization of LoReFT weights.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -53,18 +53,18 @@ class ReftConfig(LycorisConfig):
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
         block_share (`bool`):
-            Whether to share the ReFT parameters between blocks or not. This is `False` by default.
+            Whether to share the LoReFT parameters between blocks or not. This is `False` by default.
     """
-    r: int = field(default=8, metadata={"help": "ReFT rank"})
-    alpha: int = field(default=8, metadata={"help": "ReFT alpha"})
-    loc: Optional[Union[List[int], int]] = field(default=None, metadata={"help": "token locations are applied ReFT"})
+    r: int = field(default=8, metadata={"help": "LoReFT rank"})
+    alpha: int = field(default=8, metadata={"help": "LoReFT alpha"})
+    loc: Optional[str] = field(default=None, metadata={"help": "token locations are applied LoReFT. e.g., f2+l2"})
     module_dropout: float = field(
-        default=0.0, metadata={"help": "The dropout probability for disabling ReFT modules during training"}
+        default=0.0, metadata={"help": "The dropout probability for disabling LoReFT modules during training"}
     )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with ReFT."
+            "help": "List of module names or regex expression of the module names to replace with LoReFT."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
@@ -73,7 +73,7 @@ class ReftConfig(LycorisConfig):
         default=True,
         metadata={
             "help": (
-                "Whether to initialize the weights of the ReFT layers with their default initialization. Don't change "
+                "Whether to initialize the weights of the LoReFT layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
             ),
         },

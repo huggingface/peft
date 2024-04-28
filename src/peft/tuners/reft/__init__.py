@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import ReftConfig
+from .config import LoReftConfig
 from .layer import Conv2d, Linear, ReftLayer
-from .model import ReftModel
+from .model import LoReftModel
 
 
-__all__ = ["ReftConfig", "ReftModel", "Conv2d", "Linear", "ReftLayer"]
+__all__ = ["LoReftConfig", "LoReftModel", "Conv2d", "Linear", "LoReftLayer"]

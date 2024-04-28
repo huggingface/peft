@@ -46,7 +46,7 @@ from .tuners import (
     LoHaModel,
     LoKrModel,
     LoraModel,
-    ReftModel,
+    LoReftModel,
     MultitaskPromptEmbedding,
     OFTModel,
     PolyModel,
@@ -87,7 +87,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
-    PeftType.REFT: ReftModel,
+    PeftType.REFT: LoReftModel,
 }
 
 

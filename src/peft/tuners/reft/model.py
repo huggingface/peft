@@ -22,30 +22,30 @@ from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 from .layer import Conv2d, Linear, ReftLayer
 
 
-class ReftModel(LycorisTuner):
+class LoReftModel(LycorisTuner):
     """
-    ReFT model from a pretrained model.
+    LoReFT model from a pretrained model.
 
     Args:
         model (`torch.nn.Module`): The model to which the adapter tuner layers will be attached.
-        config ([`ReftConfig`]): The configuration of the Reft model.
+        config ([`LoReftConfig`]): The configuration of the LoReft model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
-        `torch.nn.Module`: The Reft model.
+        `torch.nn.Module`: The LoReft model.
 
     Example:
         ```py
         >>> from diffusers import StableDiffusionPipeline
-        >>> from peft import ReftModel, ReftConfig
+        >>> from peft import LoReftModel, LoReftConfig
 
-        >>> config_te = ReftConfig(
+        >>> config_te = LoReftConfig(
         ...     r=8,
         ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
         ...     module_dropout=0.0,
         ...     init_weights=True,
         ... )
-        >>> config_unet = ReftConfig(
+        >>> config_unet = LoReftConfig(
         ...     r=8,
         ...     target_modules=[
         ...         "proj_in",
@@ -62,18 +62,18 @@ class ReftModel(LycorisTuner):
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")
-        >>> model.text_encoder = ReftModel(model.text_encoder, config_te, "default")
-        >>> model.unet = ReftModel(model.unet, config_unet, "default")
+        >>> model.text_encoder = LoReftModel(model.text_encoder, config_te, "default")
+        >>> model.unet = LoReftModel(model.unet, config_unet, "default")
         ```
 
     **Attributes**:
         - **model** ([`~torch.nn.Module`]) -- The model to be adapted.
-        - **peft_config** ([`ReftConfig`]): The configuration of the OFT model.
+        - **peft_config** ([`LoReftConfig`]): The configuration of the LoReFT model.
     """
 
 
     prefix: str = "reft_"
-    layers_mapping: dict[type[torch.nn.Module], type[ReftLayer]] = {
+    layers_mapping: dict[type[torch.nn.Module], type[LoReftLayer]] = {
         torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,
     }

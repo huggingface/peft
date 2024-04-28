@@ -39,7 +39,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     OFTConfig,
-    ReftConfig,
+    LoReftConfig,
     PeftModel,
     TaskType,
     get_peft_model,
@@ -318,28 +318,28 @@ TEST_CASES = [
         {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
     ),
     ########
-    # ReFT #
+    # LoReFT #
     ########
-    ("Vanilla MLP 1 REFT", "MLP", ReftConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 REFT", "MLP", ReftConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 REFT", "MLP", ReftConfig, {"target_modules": ["lin1"]}),
-    ("Vanilla MLP 4 REFT", "MLP", ReftConfig, {"target_modules": ["lin0", "lin1"]}),
-    ("Vanilla MLP 5 REFT", "MLP", ReftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Vanilla MLP 1 LOREFT", "MLP", LoReftConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 LOREFT", "MLP", LoReftConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 LOREFT", "MLP", LoReftConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 LOREFT", "MLP", LoReftConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 LOREFT", "MLP", LoReftConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     (
         "Vanilla MLP 6 REFT",
         "MLP",
-        ReftConfig,
+        LoReftConfig,
         {
             "target_modules": ["lin0"],
             "alpha": 4,
             "module_dropout": 0.1,
         },
     ),
-    ("Vanilla MLP 7 REFT", "MLP", ReftConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
-    ("Conv2d 1 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d 2 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d", "lin0"]}),
-    ("Conv2d 3 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
-    ("Conv2d 4 REFT", "Conv2d", ReftConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
+    ("Vanilla MLP 7 LOREFT", "MLP", LoReftConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
+    ("Conv2d 1 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d"]}),
+    ("Conv2d 2 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d", "lin0"]}),
+    ("Conv2d 3 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
+    ("Conv2d 4 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -409,7 +409,7 @@ PREFIXES = {
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
     BOFTConfig: "boft_",
-    ReftConfig: "reft_",
+    LoReftConfig: "reft_",
 }
 
 
@@ -1005,7 +1005,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, ReftConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, LoReftConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1030,7 +1030,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, ReftConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, LoReftConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -1235,7 +1235,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
-            ReftConfig(target_modules=["lin0"], init_weights=False),
+            LoReftConfig(target_modules=["lin0"], init_weights=False),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2461,12 +2461,12 @@ class RequiresGradTester(unittest.TestCase):
         )
 
 
-    def test_requires_grad_reft_different_targets(self):
-        # test two different ReFT adapters that target different modules
-        config0 = ReftConfig(target_modules=["lin0"])
+    def test_requires_grad_loreft_different_targets(self):
+        # test two different LoReFT adapters that target different modules
+        config0 = LoReftConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = ReftConfig(target_modules=["lin1"])
+        config1 = LoReftConfig(target_modules=["lin1"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"
@@ -2503,12 +2503,12 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.reft_B.adapter1.weight",
         )
 
-    def test_requires_grad_reft_same_targets(self):
-        # same as previous test, except that ReFT adapters target the same layer
-        config0 = ReftConfig(target_modules=["lin0"])
+    def test_requires_grad_loreft_same_targets(self):
+        # same as previous test, except that LoReFT adapters target the same layer
+        config0 = LoReftConfig(target_modules=["lin0"])
         peft_model = get_peft_model(MLP(), config0)
 
-        config1 = ReftConfig(target_modules=["lin0"])
+        config1 = LoReftConfig(target_modules=["lin0"])
         peft_model.add_adapter("adapter1", config1)
 
         # active adapter is still "default"

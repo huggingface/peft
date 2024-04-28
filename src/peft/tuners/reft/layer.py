@@ -82,7 +82,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         adapter_name: str,
         r: int,
         alpha: float,
-        loc: Optional[List[int] | int],
+        loc: Optional[str],
         rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
