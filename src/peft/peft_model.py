@@ -258,9 +258,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if convert_pissa_to_lora is not None:
                     if not str(peft_config.init_lora_weights).startswith("pissa"):
                         warnings.warn("`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter", UserWarning)
-                    adapter_name = os.path.basename(convert_pissa_to_lora)
-                    self.load_adapter(os.path.dirname(convert_pissa_to_lora), subfolder=adapter_name, adapter_name=adapter_name)
-                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, adapter_name, kwargs)
+                    initial_adapter = os.path.basename(convert_pissa_to_lora)
+                    self.load_adapter(os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter)
+                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
 
                 safe_save_file(
                     output_state_dict,
@@ -269,9 +269,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             elif is_main_process:
                 if convert_pissa_to_lora is not None:
-                    adapter_name = os.path.basename(convert_pissa_to_lora)
-                    self.load_adapter(os.path.dirname(convert_pissa_to_lora), subfolder=adapter_name, adapter_name=adapter_name)
-                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, adapter_name, kwargs)
+                    initial_adapter = os.path.basename(convert_pissa_to_lora)
+                    self.load_adapter(os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter)
+                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
