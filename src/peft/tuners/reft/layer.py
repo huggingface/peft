@@ -153,15 +153,17 @@ class ReftLayer(nn.Module, LycorisLayer):
                 rotate_layer = self.reft_R[active_adapter]
                 learned_source = self.reft_A[active_adapter]
                 module_dropout = self.module_dropout[active_adapter]
-                if self.loc[active_adapter] is None:
+                if self.first_n[active_adapter] == 0 and self.last_n[active_adapter] == 0:
                     rotated_base = rotate_layer(result)
                     offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight)
                     output = result + offset
                 else:
-                    loc = self.loc[active_adapter]
+                    first_n = self.first_n[active_adapter]
+                    last_n = self.last_n[active_adapter]
+                    loc = torch.cat([torch.arange(first_n), torch.arange(result.shape[1]-last_n, result.shape[1])])
                     selected_results = torch.gather(result, 1, loc)
                     rotated_base = rotate_layer(selected_results)
-                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight)
+                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight) 
                     output.scatter_(1, loc, offset)
                     output = module_dropout(output)
 
