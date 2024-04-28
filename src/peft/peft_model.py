@@ -256,7 +256,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if convert_pissa_to_lora is not None:
-                    output_state_dict = self.base_model.subtract_pissa_init(convert_pissa_to_lora, output_state_dict, kwargs)
+                    if not str(peft_config.init_lora_weights).startswith("pissa"):
+                        warnings.warn("`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter", UserWarning)
+                    adapter_name = os.path.basename(convert_pissa_to_lora)
+                    self.load_adapter(os.path.dirname(convert_pissa_to_lora), subfolder=adapter_name, adapter_name=adapter_name)
+                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, adapter_name, kwargs)
 
                 safe_save_file(
                     output_state_dict,
@@ -265,7 +269,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             elif is_main_process:
                 if convert_pissa_to_lora is not None:
-                    output_state_dict = self.base_model.subtract_pissa_init(convert_pissa_to_lora, output_state_dict, kwargs)
+                    adapter_name = os.path.basename(convert_pissa_to_lora)
+                    self.load_adapter(os.path.dirname(convert_pissa_to_lora), subfolder=adapter_name, adapter_name=adapter_name)
+                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, adapter_name, kwargs)
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`

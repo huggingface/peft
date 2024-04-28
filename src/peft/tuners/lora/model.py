@@ -794,23 +794,25 @@ class LoraModel(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def subtract_pissa_init(self, pissa_initial_dir, output_state_dict, kwargs):
-        adapter_name = os.path.basename(pissa_initial_dir)
-        self.load_adapter(os.path.dirname(pissa_initial_dir), adapter_name=adapter_name, subfolder=adapter_name)
+    def subtract_pissa_init(self, output_state_dict: str, adapter_name:str="pissa_init",kwargs=None):
+        """
+        This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter 
+        in `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
+        """
         pissa_init_state_dict = get_peft_model_state_dict(
             self,
             state_dict=kwargs.get("state_dict", None),
             adapter_name=adapter_name,
         )
         tensors_lora = {}
-        for name in pissa_init_state_dict.keys():
+        for name in output_state_dict.keys():
             ## W = W^{res} + A_0 \times B_0,
             ## W + \Delta W = W^{res} + A \times B,
-            ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | B_0]^T = A'B'.
-            tensors_lora[name] = (
-                torch.cat([output_state_dict[name], pissa_init_state_dict[name]], dim=0)
-                if "lora_A" in name
-                else torch.cat([output_state_dict[name], -pissa_init_state_dict[name]], dim=1)
-            )
+            ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | -B_0]^T = A'B'.
+            if "lora_A" in name:
+                tensors_lora[name] = torch.cat([output_state_dict[name], pissa_init_state_dict['.'.join(name.split('.')[1:])]], dim=0)
+            else:
+                tensors_lora[name] = torch.cat([output_state_dict[name], -pissa_init_state_dict['.'.join(name.split('.')[1:])]], dim=1)
+
         self.delete_adapter(adapter_name)
         return tensors_lora
