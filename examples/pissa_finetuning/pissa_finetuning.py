@@ -40,10 +40,8 @@ class TrainingArguments(TrainingArguments):
     lora_r: int = field(default=16)
     lora_alpha: int = field(default=16)
     lora_dropout: float = field(default=0)
-    save_for_reuse: bool = field(default=True)
     save_as_lora: bool = field(default=False)
     merge_and_save: bool = field(default=False)
-    do_train: bool = field(default=True)
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
     dataset_split: str = field(
@@ -121,52 +119,39 @@ elif script_args.base_model_name_or_path is not None:
     )
     peft_model = get_peft_model(model, lora_config)
 
-    if script_args.save_for_reuse:
-        init_model = deepcopy(peft_model)
-        # Save PiSSA modules:
-        init_model.peft_config["default"].init_lora_weights = True
-        init_model.save_pretrained(os.path.join(script_args.output_dir, "pissa_init"))
-        # Save residual model:
-        init_model = init_model.unload()
-        init_model.save_pretrained(script_args.output_dir)
-        # Save the tokenizer:
-        tokenizer.save_pretrained(script_args.output_dir)
-else:
-    raise ValueError("At least one of `base_model_name_or_path` and `residual_model_name_or_path` must not be None.")
-
 print(peft_model)
 peft_model.print_trainable_parameters()
-if script_args.do_train:
-    print(f"Training PiSSA with trl on the {script_args.data_path}[{script_args.dataset_split}] dataset.")
-    dataset = load_dataset(script_args.data_path, split=script_args.dataset_split)
-    dataset = dataset.map(
-        lambda example: {
-            "text": f"### USER: {example[script_args.dataset_field[0]]}\n### ASSISTANT: {example[script_args.dataset_field[1]]}"
-        }
+
+print(f"Training PiSSA with trl on the {script_args.data_path}[{script_args.dataset_split}] dataset.")
+dataset = load_dataset(script_args.data_path, split=script_args.dataset_split)
+dataset = dataset.map(
+    lambda example: {
+        "text": f"### USER: {example[script_args.dataset_field[0]]}\n### ASSISTANT: {example[script_args.dataset_field[1]]}"
+    }
+)
+
+trainer = SFTTrainer(
+    model=peft_model,
+    args=script_args,
+    train_dataset=dataset,
+    dataset_text_field="text",
+    max_seq_length=script_args.max_seq_length,
+    tokenizer=tokenizer,
+)
+trainer.train()
+trainer.save_state()
+############################## Upon training completion, convert and save PiSSA in LoRA format ##############################
+if script_args.save_as_lora:
+    peft_model.save_pretrained(
+        os.path.join(script_args.output_dir, "pissa_lora"),
+        save_as_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
+    )
+else:
+    peft_model.save_pretrained(
+        os.path.join(script_args.output_dir, "pissa_ft"),
     )
 
-    trainer = SFTTrainer(
-        model=peft_model,
-        args=script_args,
-        train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=script_args.max_seq_length,
-        tokenizer=tokenizer,
-    )
-    trainer.train()
-    trainer.save_state()
-    ############################## Upon training completion, convert and save PiSSA in LoRA format ##############################
-    if script_args.save_as_lora:
-        peft_model.save_pretrained(
-            os.path.join(script_args.output_dir, "pissa_lora"),
-            save_as_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
-        )
-    else:
-        peft_model.save_pretrained(
-            os.path.join(script_args.output_dir, "pissa_ft"),
-        )
-
-    if script_args.merge_and_save:
-        model = peft_model.merge_and_unload()
-        model.save_pretrained(os.path.join(script_args.output_dir, "pissa_merged"))
-        tokenizer.save_pretrained(os.path.join(script_args.output_dir, "pissa_merged"))
+if script_args.merge_and_save:
+    model = peft_model.merge_and_unload()
+    model.save_pretrained(os.path.join(script_args.output_dir, "pissa_merged"))
+    tokenizer.save_pretrained(os.path.join(script_args.output_dir, "pissa_merged"))
