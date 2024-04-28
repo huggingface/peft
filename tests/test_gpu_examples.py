@@ -1425,7 +1425,7 @@ class TestPiSSA:
         # to the base model, vs the PiSSA quantized model to the base model. We expect the PiSSA quantized model to
         # have less error than the normal LoRA quantized model. Since we compare logits, the observed error is
         # already somewhat dampened because of the softmax.
-        
+
         torch.manual_seed(0)
         model = self.get_base_model(model_id, device)
         task_type = TaskType.SEQ_2_SEQ_LM if model.config.is_encoder_decoder else TaskType.CAUSAL_LM
@@ -1437,7 +1437,7 @@ class TestPiSSA:
             init_lora_weights="pissa",
             target_modules=target_modules,
         )
-                    
+
         if device == "cuda":
             model = model.to("cuda")
         pissa_model = get_peft_model(model, pissa_config)
@@ -1445,13 +1445,13 @@ class TestPiSSA:
         pissa_model.base_model.peft_config["default"].init_lora_weights = True
         pissa_model.save_pretrained(tmp_path + "pissa_model")
         logits_pissa = self.get_logits(pissa_model, inputs)
-        
+
         # Convert PiSSA -> LoRA
         pissa_model.save_pretrained(tmp_path + "lora_model", convert_pissa_to_lora=tmp_path + "pissa_model")
         del pissa_model
         gc.collect()
         torch.cuda.empty_cache()
-        
+
         torch.manual_seed(0)
         base_model = self.get_base_model(
             model_id,
@@ -1621,13 +1621,11 @@ class TestPiSSA:
 
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_bloomz_pissa_convert(self, device, tmp_path):
-        mae_pissa_lora, mse_pissa_lora = self.get_convert(
-            device=device, tmp_path=tmp_path
-        )
+        mae_pissa_lora, mse_pissa_lora = self.get_convert(device=device, tmp_path=tmp_path)
         # Check that errors are smaller than a certain margin
         assert mae_pissa_lora < self.convert_error
         assert mse_pissa_lora < self.convert_error
-        
+
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_t5_pissa_convert(self, device, tmp_path):
         mae_pissa_lora, mse_pissa_lora = self.get_convert(

@@ -55,7 +55,7 @@ peft_model = PeftModel.from_pretrained(model, "pissa-llama-2-7b")
 We recommend downloading decomposed models directly from the [Hugging Face Collections](https://huggingface.co/collections/fxmeng/pissa-661ce700721235e542a5d7a8) instead of performing SVD every time.
 If the existing models do not meet your needs, apply PiSSA initialization to a pre-trained model and store the decomposed model locally:
 ```bash
-python pissa_finetuning.py \
+python preprocess.py \
     --base_model_name_or_path meta-llama/Llama-2-7b-hf \
     --init_lora_weights pissa \
     --output_dir pissa-llama-2-7b-r32-alpha-32 \
@@ -68,7 +68,7 @@ python pissa_finetuning.py \
 ```
 
 ### Convert PiSSA to LoRA
-When using `peft_model.save_pretrained`, if `save_as_lora=None`, the fine-tuned matrices $A$ and $B$ are saved and should be combined with the residual model. However, when specifying `save_as_lora="pissa_init_dir"`, the saving function converts PiSSA to LoRA by $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$. This conversion enables the loading of LoRA on top of a standard base model:
+When using `peft_model.save_pretrained`, if `convert_pissa_to_lora=None`, the fine-tuned matrices $A$ and $B$ are saved and should be combined with the residual model. However, when specifying `convert_pissa_to_lora="pissa_init_dir"`, the saving function converts PiSSA to LoRA by $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$. This conversion enables the loading of LoRA on top of a standard base model:
 
 ```python
 import torch
@@ -108,7 +108,7 @@ python pissa_finetuning.py \
     --warmup_ratio 0.03 \
     --tf32 True \
     --report_to none \
-    --save_as_lora # Convert PiSSA to LoRA
+    --convert_pissa_to_lora
 ```
 
 This approach ensures the preservation of high-frequency, out-of-distribution parameters in the low-rank PiSSA modules, resulting in reduced quantization errors during the quantization of the residual model.

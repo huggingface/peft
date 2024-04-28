@@ -44,9 +44,7 @@ class TrainingArguments(TrainingArguments):
     merge_and_save: bool = field(default=False)
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
-    dataset_split: str = field(
-        default="train[:1%]", metadata={"help": "(`['train', 'test', 'eval']`):"}
-    )
+    dataset_split: str = field(default="train[:1%]", metadata={"help": "(`['train', 'test', 'eval']`):"})
     dataset_field: List[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
     max_seq_length: int = field(
         default=512,
