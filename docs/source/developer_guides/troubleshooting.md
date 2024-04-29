@@ -135,3 +135,108 @@ model.save_adapter("my_adapter", save_embedding_layers=True)
 For inference, load the base model first and resize it the same way you did before you trained the model. After you've resized the base model, you can load the PEFT checkpoint.
 
 For a complete example, please check out [this notebook](https://github.com/huggingface/peft/blob/main/examples/causal_language_modeling/peft_lora_clm_with_additional_tokens.ipynb).
+
+### Check layer and model status
+
+Sometimes a PEFT model can end up in a bad state, especially when handling multiple adapters. There can be some confusion around what adapters exist, which one is active, which one is merged, etc. To help investigate this issue, call the [`~peft.PeftModel.get_layer_status`] and the [`~peft.PeftModel.get_model_status`] methods. 
+
+The [`~peft.PeftModel.get_layer_status`] method gives you a detailed overview of each targeted layer's active, merged, and available adapters.
+
+```python
+>>> from transformers import AutoModel
+>>> from peft import get_peft_model, LoraConfig
+
+>>> model_id = "google/flan-t5-small"
+>>> model = AutoModel.from_pretrained(model_id)
+>>> model = get_peft_model(model, LoraConfig())
+
+>>> model.get_layer_status()
+[TunerLayerStatus(name='model.encoder.block.0.layer.0.SelfAttention.q',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['default'],
+                  merged_adapters=[],
+                  requires_grad={'default': True},
+                  available_adapters=['default']),
+ TunerLayerStatus(name='model.encoder.block.0.layer.0.SelfAttention.v',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['default'],
+                  merged_adapters=[],
+                  requires_grad={'default': True},
+                  available_adapters=['default']),
+...]
+
+>>> model.get_model_status()
+TunerModelStatus(
+    base_model_type='T5Model',
+    adapter_model_type='LoraModel',
+    peft_types={'default': 'LORA'},
+    trainable_params=344064,
+    total_params=60855680,
+    num_adapter_layers=48,
+    enabled=True,
+    active_adapters=['default'],
+    merged_adapters=[],
+    requires_grad={'default': True},
+    available_adapters=['default'],
+)
+```
+
+In the model state output, you should look out for entries that say `"irregular"`. This means PEFT detected an inconsistent state in the model. For instance, if `merged_adapters="irregular"`, it means that for at least one adapter, it was merged on some target modules but not on others. The inference results will most likely be incorrect as a result.
+
+The best way to resolve this issue is to reload the whole model and adapter checkpoint(s). Ensure that you don't perform any incorrect operations on the model, e.g. manually merging adapters on some modules but not others.
+
+Convert the layer status into a pandas `DataFrame` for an easier visual inspection.
+
+```python
+from dataclasses import asdict
+import pandas as pd
+
+df = pd.DataFrame(asdict(layer) for layer in model.get_layer_status())
+```
+
+It is possible to get this information for non-PEFT models if they are using PEFT layers under the hood, but some information like the `base_model_type` or the `peft_types` cannot be determined in that case. As an example, you can call this on a [diffusers](https://huggingface.co/docs/diffusers/index) model like so:
+
+```python
+>>> import torch
+>>> from diffusers import StableDiffusionPipeline
+>>> from peft import get_model_status, get_layer_status
+
+>>> path = "runwayml/stable-diffusion-v1-5"
+>>> lora_id = "takuma104/lora-test-text-encoder-lora-target"
+>>> pipe = StableDiffusionPipeline.from_pretrained(path, torch_dtype=torch.float16)
+>>> pipe.load_lora_weights(lora_id, adapter_name="adapter-1")
+>>> pipe.load_lora_weights(lora_id, adapter_name="adapter-2")
+>>> get_layer_status(pipe.text_encoder)
+[TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.k_proj',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['adapter-2'],
+                  merged_adapters=[],
+                  requires_grad={'adapter-1': False, 'adapter-2': True},
+                  available_adapters=['adapter-1', 'adapter-2']),
+ TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.v_proj',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['adapter-2'],
+                  merged_adapters=[],
+                  requires_grad={'adapter-1': False, 'adapter-2': True},
+                  available_adapters=['adapter-1', 'adapter-2']),
+...]
+
+>>> get_model_status(pipe.unet)
+TunerModelStatus(
+    base_model_type='other',
+    adapter_model_type='None',
+    peft_types={},
+    trainable_params=797184,
+    total_params=861115332,
+    num_adapter_layers=128,
+    enabled=True,
+    active_adapters=['adapter-2'],
+    merged_adapters=[],
+    requires_grad={'adapter-1': False, 'adapter-2': True},
+    available_adapters=['adapter-1', 'adapter-2'],
+)
+```

@@ -996,6 +996,66 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert model.base_model.active_adapter == ["default", "other"]
 
     @parameterized.expand(TEST_CASES)
+    def test_disable_adapters_exiting_context_restores_previous_state(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        # Test that when we exit the disable_adapter context, we correctly restore the enabled state of the modules as
+        # they were before the context.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        tuner_modules = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+
+        # all layers should be enabled
+        assert all(not module.disable_adapters for module in tuner_modules)
+        with model.disable_adapter():
+            pass
+        # this should not change after exiting the context
+        assert all(not module.disable_adapters for module in tuner_modules)
+
+        # now disable all layers
+        model.disable_adapter_layers()
+        assert all(module.disable_adapters for module in tuner_modules)
+        with model.disable_adapter():
+            pass
+        assert all(module.disable_adapters for module in tuner_modules)
+
+    @parameterized.expand(TEST_CASES)
+    def test_disable_adapters_exiting_context_irregular_state(self, test_name, model_id, config_cls, config_kwargs):
+        # When we have a model where some adapters are enabled and others are disabled, we should get a warning when
+        # entering the disable_adapter context because we cannot correctly restore the state of the adapters from
+        # before the context. After exiting the context, all adapters will be enabled, which is the status quo of how
+        # we deal with this.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        tuner_modules = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+
+        # now we mix the states, some enabled some not
+        if len(tuner_modules) < 2:
+            # next check only works with more than 1 tuner module
+            return
+
+        # disable a single layer
+        tuner_modules[0].enable_adapters(False)
+        # sanity check that we have both enabled and disabled layers
+        assert {module.disable_adapters for module in tuner_modules} == {True, False}
+        # check that we get a warning with irregular states
+        msg = "The model contains some adapter layers that are enabled and others that are disabled"
+        with self.assertWarnsRegex(UserWarning, expected_regex=msg):
+            with model.disable_adapter():
+                pass
+
+        # when encountering irregular adapters, we enable all adapters at the end of the context
+        assert all(not module.disable_adapters for module in tuner_modules)
+
+    @parameterized.expand(TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
