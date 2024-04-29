@@ -3,7 +3,6 @@ import os
 import sys
 import threading
 
-import numpy as np
 import psutil
 import torch
 from accelerate import Accelerator
@@ -17,23 +16,23 @@ from peft import LoraConfig, TaskType, get_peft_model
 
 def levenshtein_distance(str1, str2):
     # TC: O(N^2)
-    # SC: O(N^2)
+    # SC: O(N)
     if str1 == str2:
         return 0
     num_rows = len(str1) + 1
     num_cols = len(str2) + 1
-    dp_matrix = np.empty((num_rows, num_cols))
-    dp_matrix[0, :] = range(num_cols)
-    dp_matrix[:, 0] = range(num_rows)
-
+    dp_matrix = list(range(num_cols))
     for i in range(1, num_rows):
+        prev = dp_matrix[0]
+        dp_matrix[0] = i
         for j in range(1, num_cols):
+            temp = dp_matrix[j]
             if str1[i - 1] == str2[j - 1]:
-                dp_matrix[i, j] = dp_matrix[i - 1, j - 1]
+                dp_matrix[j] = prev
             else:
-                dp_matrix[i, j] = min(dp_matrix[i - 1, j - 1], dp_matrix[i - 1, j], dp_matrix[i, j - 1]) + 1
-
-    return dp_matrix[num_rows - 1, num_cols - 1]
+                dp_matrix[j] = min(prev, dp_matrix[j], dp_matrix[j - 1]) + 1
+            prev = temp
+    return dp_matrix[num_cols - 1]
 
 
 def get_closest_label(eval_pred, classes):
@@ -201,22 +200,18 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
+        accelerator.print(f"GPU Memory before entering the train : {b2mb(tracemalloc.begin)}")
+        accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
+        accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
         accelerator.print(
-            "GPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
-            )
+            f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
 
-        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
+        accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")
+        accelerator.print(f"CPU Memory consumed at the end of the train (end-begin): {tracemalloc.cpu_used}")
+        accelerator.print(f"CPU Peak Memory consumed during the train (max-begin): {tracemalloc.cpu_peaked}")
         accelerator.print(
-            "CPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
-            )
+            f"CPU Total Peak Memory consumed during the train (max): {tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)}"
         )
         train_epoch_loss = total_loss / len(train_dataloader)
         train_ppl = torch.exp(train_epoch_loss)
@@ -236,22 +231,18 @@ def main():
                 eval_preds.extend(tokenizer.batch_decode(preds, skip_special_tokens=True))
 
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the eval : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.peaked))
+        accelerator.print(f"GPU Memory before entering the eval : {b2mb(tracemalloc.begin)}")
+        accelerator.print(f"GPU Memory consumed at the end of the eval (end-begin): {tracemalloc.used}")
+        accelerator.print(f"GPU Peak Memory consumed during the eval (max-begin): {tracemalloc.peaked}")
         accelerator.print(
-            "GPU Total Peak Memory consumed during the eval (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
-            )
+            f"GPU Total Peak Memory consumed during the eval (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
         )
 
-        accelerator.print("CPU Memory before entering the eval : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the eval (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the eval (max-begin): {}".format(tracemalloc.cpu_peaked))
+        accelerator.print(f"CPU Memory before entering the eval : {b2mb(tracemalloc.cpu_begin)}")
+        accelerator.print(f"CPU Memory consumed at the end of the eval (end-begin): {tracemalloc.cpu_used}")
+        accelerator.print(f"CPU Peak Memory consumed during the eval (max-begin): {tracemalloc.cpu_peaked}")
         accelerator.print(
-            "CPU Total Peak Memory consumed during the eval (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
-            )
+            f"CPU Total Peak Memory consumed during the eval (max): {tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)}"
         )
 
         correct = 0
@@ -298,12 +289,22 @@ def main():
         pred_df.to_csv(f"data/{dataset_name}/predictions.csv", index=False)
 
     accelerator.wait_for_everyone()
-    model.push_to_hub(
-        "smangrul/"
-        + f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
-        state_dict=accelerator.get_state_dict(model),
-        use_auth_token=True,
+    # Option1: Pushing the model to Hugging Face Hub
+    # model.push_to_hub(
+    #     f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace("/", "_"),
+    #     token = "hf_..."
+    # )
+    # token (`bool` or `str`, *optional*):
+    #     `token` is to be used for HTTP Bearer authorization when accessing remote files. If `True`, will use the token generated
+    #     when running `huggingface-cli login` (stored in `~/.huggingface`). Will default to `True` if `repo_url`
+    #     is not specified.
+    #     Or you can get your token from https://huggingface.co/settings/token
+
+    # Option2: Saving the model locally
+    peft_model_id = f"{dataset_name}_{model_name_or_path}_{peft_config.peft_type}_{peft_config.task_type}".replace(
+        "/", "_"
     )
+    model.save_pretrained(peft_model_id)
     accelerator.wait_for_everyone()
 
 

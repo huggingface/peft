@@ -1,0 +1,82 @@
+name: integration tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to test on'
+        required: true
+
+jobs:
+  run_transformers_integration_tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        transformers-version: ['main', 'latest']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: "setup.py"
+      - name: print environment variables
+        run: |
+          echo "env.CI_BRANCH = ${{ env.CI_BRANCH }}"
+          echo "env.CI_SHA = ${{ env.CI_SHA }}"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test]
+          if [ "${{ matrix.transformers-version }}" == "main" ]; then
+              pip install -U git+https://github.com/huggingface/transformers.git
+          else
+              echo "Nothing to do as transformers latest already installed"
+          fi
+
+      - name: Test transformers integration
+        run: |
+          cd .. && git clone https://github.com/huggingface/transformers.git && cd transformers/ && git rev-parse HEAD
+          RUN_SLOW=1 pytest tests/peft_integration/test_peft_integration.py
+  run_diffusers_integration_tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        # For now diffusers integration is not on PyPI
+        diffusers-version: ['main']
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: "setup.py"
+      - name: print environment variables
+        run: |
+          echo "env.CI_BRANCH = ${{ env.CI_BRANCH }}"
+          echo "env.CI_SHA = ${{ env.CI_SHA }}"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test]
+          
+          if [ "${{ matrix.diffusers-version }}" == "main" ]; then
+              pip install -U git+https://github.com/huggingface/diffusers.git
+          else
+              echo "Nothing to do as diffusers latest already installed"
+          fi
+
+      - name: Test diffusers integration
+        run: |
+          cd .. && git clone https://github.com/huggingface/diffusers.git && cd diffusers/ && git rev-parse HEAD
+          pytest tests/lora/test_lora_layers_peft.py

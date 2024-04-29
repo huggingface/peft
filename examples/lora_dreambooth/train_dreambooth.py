@@ -7,8 +7,8 @@ import math
 import os
 import threading
 import warnings
+from contextlib import nullcontext
 from pathlib import Path
-from typing import Optional
 
 import datasets
 import diffusers
@@ -31,7 +31,7 @@ from diffusers import (
 from diffusers.optimization import get_scheduler
 from diffusers.utils import check_min_version
 from diffusers.utils.import_utils import is_xformers_available
-from huggingface_hub import HfFolder, Repository, whoami
+from huggingface_hub import HfApi
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -211,6 +211,17 @@ def parse_args(input_args=None):
         type=str,
         default="none",
         help="Bias type for Lora. Can be 'none', 'all' or 'lora_only', only used if use_lora and `train_text_encoder` are True",
+    )
+
+    parser.add_argument(
+        "--num_dataloader_workers", type=int, default=1, help="Num of workers for the training dataloader."
+    )
+
+    parser.add_argument(
+        "--no_tracemalloc",
+        default=False,
+        action="store_true",
+        help="Flag to stop memory allocation tracing during training. This could speed up training on Windows.",
     )
 
     parser.add_argument(
@@ -564,16 +575,6 @@ class PromptDataset(Dataset):
         return example
 
 
-def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
-    if token is None:
-        token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
-        return f"{organization}/{model_id}"
-
-
 def main(args):
     logging_dir = Path(args.output_dir, args.logging_dir)
 
@@ -666,11 +667,13 @@ def main(args):
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
-            else:
-                repo_name = args.hub_model_id
-            repo = Repository(args.output_dir, clone_from=repo_name)  # noqa: F841
+            api = HfApi(token=args.hub_token)
+
+            # Create repo (repo_name from args or inferred)
+            repo_name = args.hub_model_id
+            if repo_name is None:
+                repo_name = Path(args.output_dir).absolute().name
+            repo_id = api.create_repo(repo_name, exist_ok=True).repo_id
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -799,7 +802,7 @@ def main(args):
         batch_size=args.train_batch_size,
         shuffle=True,
         collate_fn=lambda examples: collate_fn(examples, args.with_prior_preservation),
-        num_workers=1,
+        num_workers=args.num_dataloader_workers,
     )
 
     # Scheduler and math around the number of training steps.
@@ -893,7 +896,7 @@ def main(args):
         unet.train()
         if args.train_text_encoder:
             text_encoder.train()
-        with TorchTracemalloc() as tracemalloc:
+        with TorchTracemalloc() if not args.no_tracemalloc else nullcontext() as tracemalloc:
             for step, batch in enumerate(train_dataloader):
                 # Skip steps until we reach the resumed step
                 if args.resume_from_checkpoint and epoch == first_epoch and step < resume_step:
@@ -1034,23 +1037,21 @@ def main(args):
                 if global_step >= args.max_train_steps:
                     break
         # Printing the GPU memory usage details such as allocated memory, peak memory, and total memory usage
-        accelerator.print("GPU Memory before entering the train : {}".format(b2mb(tracemalloc.begin)))
-        accelerator.print("GPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.used))
-        accelerator.print("GPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.peaked))
-        accelerator.print(
-            "GPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.peaked + b2mb(tracemalloc.begin)
-            )
-        )
 
-        accelerator.print("CPU Memory before entering the train : {}".format(b2mb(tracemalloc.cpu_begin)))
-        accelerator.print("CPU Memory consumed at the end of the train (end-begin): {}".format(tracemalloc.cpu_used))
-        accelerator.print("CPU Peak Memory consumed during the train (max-begin): {}".format(tracemalloc.cpu_peaked))
-        accelerator.print(
-            "CPU Total Peak Memory consumed during the train (max): {}".format(
-                tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)
+        if not args.no_tracemalloc:
+            accelerator.print(f"GPU Memory before entering the train : {b2mb(tracemalloc.begin)}")
+            accelerator.print(f"GPU Memory consumed at the end of the train (end-begin): {tracemalloc.used}")
+            accelerator.print(f"GPU Peak Memory consumed during the train (max-begin): {tracemalloc.peaked}")
+            accelerator.print(
+                f"GPU Total Peak Memory consumed during the train (max): {tracemalloc.peaked + b2mb(tracemalloc.begin)}"
             )
-        )
+
+            accelerator.print(f"CPU Memory before entering the train : {b2mb(tracemalloc.cpu_begin)}")
+            accelerator.print(f"CPU Memory consumed at the end of the train (end-begin): {tracemalloc.cpu_used}")
+            accelerator.print(f"CPU Peak Memory consumed during the train (max-begin): {tracemalloc.cpu_peaked}")
+            accelerator.print(
+                f"CPU Total Peak Memory consumed during the train (max): {tracemalloc.cpu_peaked + b2mb(tracemalloc.cpu_begin)}"
+            )
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
@@ -1076,7 +1077,12 @@ def main(args):
             pipeline.save_pretrained(args.output_dir)
 
         if args.push_to_hub:
-            repo.push_to_hub(commit_message="End of training", blocking=False, auto_lfs_prune=True)
+            api.upload_folder(
+                repo_id=repo_id,
+                folder_path=args.output_dir,
+                commit_message="End of training",
+                run_as_future=True,
+            )
 
     accelerator.end_training()
 

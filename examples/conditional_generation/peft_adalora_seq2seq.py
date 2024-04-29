@@ -98,7 +98,7 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_warmup_steps=0,
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
-model.base_model.peft_config.total_step = len(train_dataloader) * num_epochs
+model.base_model.peft_config["default"].total_step = len(train_dataloader) * num_epochs
 
 
 # training and evaluation

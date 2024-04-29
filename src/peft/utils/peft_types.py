@@ -20,16 +20,53 @@ import enum
 
 
 class PeftType(str, enum.Enum):
+    """
+    Enum class for the different types of adapters in PEFT.
+
+    Supported PEFT types:
+    - PROMPT_TUNING
+    - MULTITASK_PROMPT_TUNING
+    - P_TUNING
+    - PREFIX_TUNING
+    - LORA
+    - ADALORA
+    - ADAPTION_PROMPT
+    - IA3
+    - LOHA
+    - LOKR
+    - OFT
+    """
+
     PROMPT_TUNING = "PROMPT_TUNING"
+    MULTITASK_PROMPT_TUNING = "MULTITASK_PROMPT_TUNING"
     P_TUNING = "P_TUNING"
     PREFIX_TUNING = "PREFIX_TUNING"
     LORA = "LORA"
     ADALORA = "ADALORA"
+    BOFT = "BOFT"
     ADAPTION_PROMPT = "ADAPTION_PROMPT"
     IA3 = "IA3"
+    LOHA = "LOHA"
+    LOKR = "LOKR"
+    OFT = "OFT"
+    POLY = "POLY"
+    VERA = "VERA"
 
 
 class TaskType(str, enum.Enum):
+    """
+    Enum class for the different types of tasks supported by PEFT.
+
+    Overview of the supported task types:
+    - SEQ_CLS: Text classification.
+    - SEQ_2_SEQ_LM: Sequence-to-sequence language modeling.
+    - CAUSAL_LM: Causal language modeling.
+    - TOKEN_CLS: Token classification.
+    - QUESTION_ANS: Question answering.
+    - FEATURE_EXTRACTION: Feature extraction. Provides the hidden states which can be used as embeddings or features
+      for downstream tasks.
+    """
+
     SEQ_CLS = "SEQ_CLS"
     SEQ_2_SEQ_LM = "SEQ_2_SEQ_LM"
     CAUSAL_LM = "CAUSAL_LM"

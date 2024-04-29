@@ -1,0 +1,43 @@
+name: torch compile tests
+
+# see peft/tests/__init__.py
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to test on'
+        required: true
+      pytorch_nightly:
+        description: 'Whether to use PyTorch nightly (true/false)'
+        required: false
+        default: false
+
+jobs:
+  run_tests_with_compile:
+    runs-on: ubuntu-latest
+    env:
+      PEFT_DEBUG_WITH_TORCH_COMPILE: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: "setup.py"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[test]
+          if [ "${{ github.event.inputs.pytorch_nightly }}" = "true" ]; then
+            python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+          fi
+      - name: Test compile with pytest
+        run: |
+          echo "PEFT_DEBUG_WITH_TORCH_COMPILE=$PEFT_DEBUG_WITH_TORCH_COMPILE"
+          git status
+          make test

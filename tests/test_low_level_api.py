@@ -19,6 +19,7 @@ import unittest
 import torch
 
 from peft import LoraConfig, get_peft_model_state_dict, inject_adapter_in_model
+from peft.utils import ModulesToSaveWrapper
 
 
 class DummyModel(torch.nn.Module):
@@ -55,11 +56,38 @@ class TestPeft(unittest.TestCase):
 
         for name, module in self.model.named_modules():
             if name == "linear":
-                self.assertTrue(hasattr(module, "lora_A"))
-                self.assertTrue(hasattr(module, "lora_B"))
+                assert hasattr(module, "lora_A")
+                assert hasattr(module, "lora_B")
 
     def test_get_peft_model_state_dict(self):
         peft_state_dict = get_peft_model_state_dict(self.model)
 
         for key in peft_state_dict.keys():
-            self.assertTrue("lora" in key)
+            assert "lora" in key
+
+    def test_modules_to_save(self):
+        self.model = DummyModel()
+
+        lora_config = LoraConfig(
+            lora_alpha=16,
+            lora_dropout=0.1,
+            r=64,
+            bias="none",
+            target_modules=["linear"],
+            modules_to_save=["embedding"],
+        )
+
+        self.model = inject_adapter_in_model(lora_config, self.model)
+
+        for name, module in self.model.named_modules():
+            if name == "linear":
+                assert hasattr(module, "lora_A")
+                assert hasattr(module, "lora_B")
+            elif name == "embedding":
+                assert isinstance(module, ModulesToSaveWrapper)
+
+        state_dict = get_peft_model_state_dict(self.model)
+
+        assert "embedding.weight" in state_dict.keys()
+
+        assert hasattr(self.model.embedding, "weight")

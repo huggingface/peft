@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,12 +27,11 @@ from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from datasets import DatasetDict, load_dataset
-from huggingface_hub import Repository, create_repo
+from huggingface_hub import HfApi
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer, SchedulerType, default_data_collator, get_scheduler
-from transformers.utils import get_full_repo_name
 
 from peft import LoraConfig, TaskType, get_peft_model
 
@@ -42,7 +40,7 @@ logger = get_logger(__name__)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Training a PEFT model for Sematic Search task")
+    parser = argparse.ArgumentParser(description="Training a PEFT model for Semantic Search task")
     parser.add_argument("--dataset_name", type=str, default=None, help="dataset name on HF hub")
     parser.add_argument(
         "--max_length",
@@ -138,12 +136,12 @@ def parse_args():
     parser.add_argument(
         "--sanity_test",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to enable sanity test.",
     )
     parser.add_argument(
         "--use_peft",
         action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        help="Whether to use PEFT.",
     )
     args = parser.parse_args()
 
@@ -170,9 +168,11 @@ def load_model_hook(models, input_dir):
 
 class AutoModelForSentenceEmbedding(nn.Module):
     def __init__(self, model_name, tokenizer, normalize=True):
-        super(AutoModelForSentenceEmbedding, self).__init__()
+        super().__init__()
 
-        self.model = AutoModel.from_pretrained(model_name)  # , load_in_8bit=True, device_map={"":0})
+        self.model = AutoModel.from_pretrained(
+            model_name
+        )  # , quantizaton_config=BitsAndBytesConfig(load_in_8bit=True), device_map={"":0})
         self.normalize = normalize
         self.tokenizer = tokenizer
 
@@ -207,9 +207,13 @@ def get_loss(cosine_score, labels):
 
 def main():
     args = parse_args()
-    accelerator = (
-        Accelerator(log_with=args.report_to, project_dir=args.output_dir) if args.with_tracking else Accelerator()
-    )
+
+    accelerator_kwargs = {"gradient_accumulation_steps": args.gradient_accumulation_steps}
+    if args.with_tracking:
+        accelerator_kwargs["log_with"] = args.report_to
+        accelerator_kwargs["project_dir"] = args.output_dir
+    accelerator = Accelerator(**accelerator_kwargs)
+
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -231,12 +235,13 @@ def main():
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
-            else:
-                repo_name = args.hub_model_id
-            create_repo(repo_name, exist_ok=True, token=args.hub_token)
-            repo = Repository(args.output_dir, clone_from=repo_name, token=args.hub_token)
+            api = HfApi(token=args.hub_token)
+
+            # Create repo (repo_name from args or inferred)
+            repo_name = args.hub_model_id
+            if repo_name is None:
+                repo_name = Path(args.output_dir).absolute().name
+            repo_id = api.create_repo(repo_name, exist_ok=True).repo_id
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -402,7 +407,7 @@ def main():
             resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
             starting_epoch = resume_step // len(train_dataloader)
             resume_step -= starting_epoch * len(train_dataloader)
-            completed_steps = resume_step // args.gradient_accumulation_stepp
+            completed_steps = resume_step // args.gradient_accumulation_steps
 
     # update the progress_bar if load from checkpoint
     progress_bar.update(completed_steps)
@@ -482,7 +487,12 @@ def main():
                         if epoch < args.num_train_epochs - 1
                         else "End of training"
                     )
-                    repo.push_to_hub(commit_message=commit_message, blocking=False, auto_lfs_prune=True)
+                    api.upload_folder(
+                        repo_id=repo_id,
+                        folder_path=args.output_dir,
+                        commit_message=commit_message,
+                        run_as_future=True,
+                    )
             accelerator.wait_for_everyone()
     accelerator.end_training()
 

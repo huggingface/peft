@@ -8,28 +8,30 @@ on:
 env:
   RUN_SLOW: "yes"
   IS_GITHUB_CI: "1"
+  # To be able to run tests on CUDA 12.2
+  NVIDIA_DISABLE_REQUIRE: "1"
   SLACK_API_TOKEN: ${{ secrets.SLACK_API_TOKEN }}
 
 
 jobs:
   run_all_tests_single_gpu:
-    runs-on: [self-hosted, docker-gpu, multi-gpu]
+    strategy:
+      fail-fast: false
+    runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0"
       TEST_TYPE: "single_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
-        working-directory: peft/
         shell: bash
     steps:
-      - name: Update clone & pip install
+      - uses: actions/checkout@v3
+      - name: Pip install
         run: |
           source activate peft
-          git config --global --add safe.directory '*'
-          git fetch && git checkout ${{ github.sha }} 
           pip install -e . --no-deps
           pip install pytest-reportlog
       
@@ -47,6 +49,11 @@ jobs:
         run: |
           source activate peft
           make tests_core_single_gpu
+
+      - name: Run regression tests on single GPU
+        run: |
+          source activate peft
+          make tests_regression
           
       - name: Generate Report
         if: always()
@@ -55,23 +62,23 @@ jobs:
           python scripts/log_reports.py >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
-    runs-on: [self-hosted, docker-gpu, multi-gpu]
+    strategy:
+      fail-fast: false
+    runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
       TEST_TYPE: "multi_gpu"
     container:
       image: huggingface/peft-gpu:latest
-      options: --gpus all --shm-size "16gb"
+      options: --gpus all --shm-size "16gb" -e NVIDIA_DISABLE_REQUIRE=true
     defaults:
       run:
-        working-directory: peft/
         shell: bash
     steps:
-      - name: Update clone
+      - uses: actions/checkout@v3
+      - name: Pip install
         run: |
           source activate peft
-          git config --global --add safe.directory '*'
-          git fetch && git checkout ${{ github.sha }}
           pip install -e . --no-deps
           pip install pytest-reportlog
 

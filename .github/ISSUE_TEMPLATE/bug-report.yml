@@ -15,17 +15,17 @@ body:
     attributes:
       label: Who can help?
       description: |
-        Your issue will be replied to more quickly if you can figure out the right person to tag with @
+        Your issue will be replied to more quickly if you can figure out the right person to tag with @.
         If you know how to use git blame, that is the easiest way, otherwise, here is a rough guide of **who to tag**.
-        
+
         All issues are read by one of the core maintainers, so if you don't know who to tag, just leave this blank and
         a core maintainer will ping the right person.
-        
+
         Please tag fewer than 3 people.
-        
-        Library: @pacman100 @younesbelkada @sayakpaul
-        
-        Documentation: @stevhliu and @MKhalusova
+
+        Library: @pacman100 @younesbelkada @benjaminbossan @sayakpaul
+
+        Documentation: @stevhliu
 
       placeholder: "@Username ..."
 
@@ -55,12 +55,11 @@ body:
       label: Reproduction
       description: |
         Please provide a code sample that reproduces the problem you ran into. It can be a Colab link or just a code snippet.
-        Please provide the simplest reproducer as possible so that we can quickly fix the issue. 
+        Please provide the simplest reproducer as possible so that we can quickly fix the issue. When you paste
+        the error message, please include the full traceback.
 
       placeholder: |
-        Reproducer: 
-        
-          
+        Reproducer:
 
   - type: textarea
     id: expected-behavior

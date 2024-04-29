@@ -26,10 +26,11 @@ from accelerate.logging import get_logger
 from datasets import Audio, DatasetDict, IterableDatasetDict, interleave_datasets, load_dataset
 
 # hf imports
-from huggingface_hub import Repository
+from huggingface_hub import HfApi
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
+    BitsAndBytesConfig,
     SchedulerType,
     WhisperForConditionalGeneration,
     WhisperProcessor,
@@ -37,7 +38,6 @@ from transformers import (
     set_seed,
 )
 from transformers.models.whisper.english_normalizer import BasicTextNormalizer
-from transformers.utils import get_full_repo_name
 
 # peft imports
 from peft import AdaLoraConfig, LoraConfig, PeftModel, get_peft_model
@@ -422,16 +422,11 @@ def evaluation_loop(model, eval_dataloader, processor, normalizer, metric, force
 def main():
     args = parse_args()
 
-    # initialize accelerator
-    accelerator = (
-        Accelerator(
-            log_with=args.report_to,
-            project_dir=args.output_dir,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
-        )
-        if args.with_tracking
-        else Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps)
-    )
+    accelerator_kwargs = {"gradient_accumulation_steps": args.gradient_accumulation_steps}
+    if args.with_tracking:
+        accelerator_kwargs["log_with"] = args.report_to
+        accelerator_kwargs["project_dir"] = args.output_dir
+    accelerator = Accelerator(**accelerator_kwargs)
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
@@ -454,11 +449,13 @@ def main():
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
-            else:
-                repo_name = args.hub_model_id
-            repo = Repository(args.output_dir, clone_from=repo_name)
+            api = HfApi(token=args.hub_token)
+
+            # Create repo (repo_name from args or inferred)
+            repo_name = args.hub_model_id
+            if repo_name is None:
+                repo_name = Path(args.output_dir).absolute().name
+            repo_id = api.create_repo(repo_name, exist_ok=True).repo_id
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
@@ -538,7 +535,9 @@ def main():
     metric = evaluate.load("wer")
 
     # model
-    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, load_in_8bit=True)
+    model = WhisperForConditionalGeneration.from_pretrained(
+        args.model_name_or_path, quantization_config=BitsAndBytesConfig(load_in_8bit=True)
+    )
     model.config.forced_decoder_ids = None
     model.config.suppress_tokens = []
     if len(set(model.hf_device_map.values()).intersection({"cpu", "disk"})) > 0:
@@ -557,9 +556,9 @@ def main():
 
     # preparing peft model
     if args.use_peft:
-        from peft import prepare_model_for_int8_training
+        from peft import prepare_model_for_kbit_training
 
-        model = prepare_model_for_int8_training(model)
+        model = prepare_model_for_kbit_training(model)
 
         # as Whisper model uses Conv layer in encoder, checkpointing disables grad computation
         # to avoid this, make the inputs trainable
@@ -741,8 +740,11 @@ def main():
 
             if accelerator.is_main_process:
                 processor.tokenizer.save_pretrained(args.output_dir)
-                repo.push_to_hub(
-                    commit_message=f"Training in progress epoch {epoch}", blocking=False, auto_lfs_prune=True
+                api.upload_folder(
+                    repo_id=repo_id,
+                    folder_path=args.output_dir,
+                    commit_message=f"Training in progress epoch {epoch}",
+                    run_as_future=True,
                 )
 
     if args.load_best_model:
@@ -762,7 +764,11 @@ def main():
     if accelerator.is_main_process:
         processor.tokenizer.save_pretrained(args.output_dir)
         if args.push_to_hub:
-            repo.push_to_hub(commit_message="End of training", auto_lfs_prune=True)
+            api.upload_folder(
+                repo_id=repo_id,
+                folder_path=args.output_dir,
+                commit_message="End of training",
+            )
 
     with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
         eval_metrics.pop("eval_samples")
