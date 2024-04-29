@@ -96,6 +96,7 @@ def dispatch_eetq(
 
     if is_eetq_available() and isinstance(target_base_layer, EetqLinear):
         new_module = EetqLoraLinear(target, adapter_name, **kwargs)
+        new_module.train()
         target.weight = target_base_layer.weight
 
         if hasattr(target, "bias"):
