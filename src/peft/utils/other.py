@@ -20,7 +20,6 @@ from typing import Optional, Tuple
 
 import accelerate
 import torch
-import torch_mlu
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available, is_mlu_available
 from huggingface_hub import file_exists
