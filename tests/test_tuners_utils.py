@@ -753,6 +753,43 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.available_adapters == ["default", "other"]
 
+    def test_loha_model(self):
+        # ensure that this also works with non-LoRA, it's enough to test one other tuner
+        class SmallModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+
+        base_model = SmallModel()
+        config = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False)
+        model = get_peft_model(base_model, config)
+
+        model_status = get_model_status(model)
+        layer_status = get_layer_status(model)
+
+        assert model_status.base_model_type == "SmallModel"
+        assert model_status.adapter_model_type == "LoHaModel"
+        assert model_status.peft_types == {"default": "LOHA"}
+        assert model_status.trainable_params == 640
+        assert model_status.total_params == 860
+        assert model_status.num_adapter_layers == 2
+        assert model_status.enabled is True
+        assert model_status.active_adapters == ["default"]
+        assert model_status.merged_adapters == []
+        assert model_status.requires_grad == {"default": True}
+        assert model_status.available_adapters == ["default"]
+
+        layer_status0 = layer_status[0]
+        assert len(layer_status) == 2
+        assert layer_status0.name == "model.lin0"
+        assert layer_status0.module_type == "loha.Linear"
+        assert layer_status0.enabled is True
+        assert layer_status0.active_adapters == ["default"]
+        assert layer_status0.merged_adapters == []
+        assert layer_status0.requires_grad == {"default": True}
+        assert layer_status0.available_adapters == ["default"]
+
     ###################
     # non-PEFT models #
     ###################
