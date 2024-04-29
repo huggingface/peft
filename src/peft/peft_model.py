@@ -2353,7 +2353,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
        The names of the available adapters, e.g. `["default"]`.
 
     Args:
-        model ([Union[`~PeftModel`, `nn.Module`]]):
+        model ([Union[`~PeftModel`, `~transformers.PreTrainedModel`, `nn.Module`]]):
             The model to get the adapter layer status from.
 
     Returns:
@@ -2469,7 +2469,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
        The names of the available adapters, e.g. `["default"]`.
 
     Args:
-        model ([Union[`~PeftModel`, `nn.Module`]]):
+        model ([Union[`~PeftModel`, `~transformers.PreTrainedModel`, `nn.Module`]]):
             The model to get the adapter layer status from.
 
     Returns:
