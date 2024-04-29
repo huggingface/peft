@@ -90,7 +90,7 @@ def preprocess_function(examples, text_column="Tweet text", label_column="text_l
         model_inputs["attention_mask"][i] = [0] * (max_length - len(sample_input_ids)) + model_inputs[
             "attention_mask"
         ][i]
-        labels["input_ids"][i] = [-100] * (max_length - len(sample_input_ids)) + label_input_ids
+        labels["input_ids"][i] = [-100] * (max_length - len(label_input_ids)) + label_input_ids
         model_inputs["input_ids"][i] = torch.tensor(model_inputs["input_ids"][i][:max_length])
         model_inputs["attention_mask"][i] = torch.tensor(model_inputs["attention_mask"][i][:max_length])
         labels["input_ids"][i] = torch.tensor(labels["input_ids"][i][:max_length])
