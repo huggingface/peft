@@ -111,6 +111,7 @@ class Linear(nn.Module, IA3Layer):
             if active_adapter in self.ia3_l.keys():
                 base_layer = self.get_base_layer()
                 ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out)
+                orig_dtype = base_layer.weight.data.dtype
                 if safe_merge:
                     orig_weights = base_layer.weight.data
                     orig_weights = torch.mul(orig_weights, ia3_l)
@@ -119,13 +120,14 @@ class Linear(nn.Module, IA3Layer):
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
-                    base_layer.weight.data = orig_weights
+                    base_layer.weight.data = orig_weights.to(orig_dtype)
                 else:
-                    base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_l)
+                    base_layer.weight.data = torch.mul(base_layer.weight.data, ia3_l).to(orig_dtype)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data)
+                    orig_dtype = base_layer.bias.data.dtype
+                    base_layer.bias.data = torch.mul(base_layer.bias.data, scaling.data).to(orig_dtype)
 
                 self.merged_adapters.append(active_adapter)
 
@@ -144,15 +146,16 @@ class Linear(nn.Module, IA3Layer):
                 base_layer = self.get_base_layer()
                 # Add tolerace to avoid division by zero
                 ia3_l = transpose(self.ia3_l[active_adapter].data, self.fan_in_fan_out) + 1e-8
-                base_layer.weight.data = torch.div(base_layer.weight.data, ia3_l)
+                orig_dtype = base_layer.weight.data.dtype
+                base_layer.weight.data = torch.div(base_layer.weight.data, ia3_l).to(orig_dtype)
 
                 if not self.is_feedforward and (base_layer.bias is not None):
                     scaling = self.ia3_l[active_adapter].reshape(base_layer.bias.shape)
-                    base_layer.bias.data = torch.div(base_layer.bias.data, scaling.data + 1e-8)
+                    orig_dtype = base_layer.bias.data.dtype
+                    base_layer.bias.data = torch.div(base_layer.bias.data, scaling.data + 1e-8).to(orig_dtype)
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         dtype = previous_dtype = x.dtype
-
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -171,13 +174,13 @@ class Linear(nn.Module, IA3Layer):
                 x = x.to(dtype)
                 # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
                 # e.g. bf16 vs fp32. Is that okay?
-                interm = (x * ia3_scaling).to(self.get_base_layer().weight.dtype)
+                interm = (x * ia3_scaling).to(previous_dtype)
                 result = self.base_layer(interm, *args, **kwargs)
             else:
                 result = self.base_layer(x, *args, **kwargs)
-                result = result.to(dtype) * ia3_scaling
+                result_dtype = result.dtype
+                result = (result * ia3_scaling).to(result_dtype)
 
-        result = result.to(previous_dtype)
         return result
 
 
