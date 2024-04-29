@@ -2412,7 +2412,10 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
         layer_status.append(status)
 
     if not layer_status:
-        raise ValueError("No adapter layers found in the model, please ensure that it's a PEFT model or that you have PEFT adapters injected in the model")
+        raise ValueError(
+            "No adapter layers found in the model, please ensure that it's a PEFT model or that you have PEFT adapters "
+            "injected in the model."
+        )
 
     return layer_status
 
@@ -2466,7 +2469,7 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
        The names of the available adapters, e.g. `["default"]`.
 
     Args:
-        model ([`~PeftModel`]):
+        model ([Union[`~PeftModel`, `nn.Module`]]):
             The model to get the adapter layer status from.
 
     Returns:
@@ -2492,10 +2495,11 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
         peft_types = {}
         adapter_model_type = "None"
     else:
-        raise TypeError(
-            f"get_model_status() expects a PeftModel or a PreTrainedModel instance; got {model.__class__.__name__} "
-            "instead."
-        )
+        base_model_type = "other"
+        trainable_params, total_params = PeftModel.get_nb_trainable_parameters(model)
+        base_model = model
+        peft_types = {}
+        adapter_model_type = "None"
 
     layer_status = get_layer_status(model)
     num_adapter_layers = len(layer_status)

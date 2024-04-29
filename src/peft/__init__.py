@@ -44,6 +44,8 @@ from .peft_model import (
     PeftModelForTokenClassification,
     PeftModelForQuestionAnswering,
     PeftModelForFeatureExtraction,
+    get_layer_status,
+    get_model_status,
 )
 from .tuners import (
     AdaptionPromptConfig,

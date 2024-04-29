@@ -25,8 +25,16 @@ from parameterized import parameterized
 from torch import nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
 
-from peft import AdaptionPromptConfig, IA3Config, LoHaConfig, LoraConfig, PromptTuningConfig, get_peft_model
-from peft.peft_model import get_layer_status, get_model_status
+from peft import (
+    AdaptionPromptConfig,
+    IA3Config,
+    LoHaConfig,
+    LoraConfig,
+    PromptTuningConfig,
+    get_layer_status,
+    get_model_status,
+    get_peft_model,
+)
 from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
@@ -745,9 +753,9 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.available_adapters == ["default", "other"]
 
-    ######################
-    # transformers model #
-    ######################
+    ###################
+    # non-PEFT models #
+    ###################
 
     def test_transformers_model(self):
         model_id = "peft-internal-testing/gpt2-lora-random"
@@ -779,8 +787,35 @@ class TestModelAndLayerStatus:
         assert layer_status0.requires_grad == {"default": False}
         assert layer_status0.available_adapters == ["default"]
 
+    def test_model_with_injected_layers(self, large_model):
+        model = large_model.base_model.model
+        model_status = get_model_status(model)
+        layer_status = get_layer_status(model)
+
+        assert model_status.base_model_type == "other"
+        assert model_status.adapter_model_type == "None"
+        assert model_status.peft_types == {}
+        assert model_status.trainable_params == 616
+        assert model_status.total_params == 2236
+        assert model_status.num_adapter_layers == 4
+        assert model_status.enabled is True
+        assert model_status.active_adapters == ["default"]
+        assert model_status.merged_adapters == []
+        assert model_status.requires_grad == {"default": True, "other": False}
+        assert model_status.available_adapters == ["default", "other"]
+
+        layer_status1 = layer_status[1]
+        assert len(layer_status) == 4
+        assert layer_status1.name == "emb0"
+        assert layer_status1.module_type == "lora.Embedding"
+        assert layer_status1.enabled is True
+        assert layer_status1.active_adapters == ["default"]
+        assert layer_status1.merged_adapters == []
+        assert layer_status1.requires_grad == {"default": True}
+        assert layer_status1.available_adapters == ["default"]
+
     ###############
-    # wrong types #
+    # error cases #
     ###############
 
     def test_vanilla_model_raises(self):
@@ -789,8 +824,7 @@ class TestModelAndLayerStatus:
         with pytest.raises(ValueError, match="No adapter layers found in the model"):
             get_layer_status(model)
 
-        msg = re.escape("get_model_status() expects a PeftModel or a PreTrainedModel instance")
-        with pytest.raises(TypeError, match=msg):
+        with pytest.raises(ValueError, match="No adapter layers found in the model"):
             get_model_status(model)
 
     def test_transformer_model_without_adapter_raises(self):

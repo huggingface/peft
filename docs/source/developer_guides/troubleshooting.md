@@ -195,3 +195,48 @@ import pandas as pd
 
 df = pd.DataFrame(asdict(layer) for layer in model.get_layer_status())
 ```
+
+It is possible to get this information for non-PEFT models if they are using PEFT layers under the hood, but some information like the `base_model_type` or the `peft_types` cannot be determined in that case. As an example, you can call this on a [diffusers](https://huggingface.co/docs/diffusers/index) model like so:
+
+```python
+>>> import torch
+>>> from diffusers import StableDiffusionPipeline
+>>> from peft import get_model_status, get_layer_status
+
+>>> path = "runwayml/stable-diffusion-v1-5"
+>>> lora_id = "takuma104/lora-test-text-encoder-lora-target"
+>>> pipe = StableDiffusionPipeline.from_pretrained(path, torch_dtype=torch.float16)
+>>> pipe.load_lora_weights(lora_id, adapter_name="adapter-1")
+>>> pipe.load_lora_weights(lora_id, adapter_name="adapter-2")
+>>> get_layer_status(pipe.text_encoder)
+[TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.k_proj',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['adapter-2'],
+                  merged_adapters=[],
+                  requires_grad={'adapter-1': False, 'adapter-2': True},
+                  available_adapters=['adapter-1', 'adapter-2']),
+ TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.v_proj',
+                  module_type='lora.Linear',
+                  enabled=True,
+                  active_adapters=['adapter-2'],
+                  merged_adapters=[],
+                  requires_grad={'adapter-1': False, 'adapter-2': True},
+                  available_adapters=['adapter-1', 'adapter-2']),
+...]
+
+>>> get_model_status(pipe.unet)
+TunerModelStatus(
+    base_model_type='other',
+    adapter_model_type='None',
+    peft_types={},
+    trainable_params=797184,
+    total_params=861115332,
+    num_adapter_layers=128,
+    enabled=True,
+    active_adapters=['adapter-2'],
+    merged_adapters=[],
+    requires_grad={'adapter-1': False, 'adapter-2': True},
+    available_adapters=['adapter-1', 'adapter-2'],
+)
+```
