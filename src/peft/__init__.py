@@ -77,6 +77,8 @@ from .tuners import (
     OFTModel,
     PolyConfig,
     PolyModel,
+    LNTuningConfig,
+    LNTuningModel,
     VeraConfig,
     VeraModel,
 )
