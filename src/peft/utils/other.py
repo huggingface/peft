@@ -390,7 +390,12 @@ def fsdp_auto_wrap_policy(model):
     import functools
     import os
 
-    from accelerate.utils.dataclasses import get_module_class_from_name
+    from accelerate import FullyShardedDataParallelPlugin
+
+    if hasattr(FullyShardedDataParallelPlugin, "get_module_class_from_name"):
+        get_module_class_from_name = FullyShardedDataParallelPlugin.get_module_class_from_name
+    else:
+        from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
