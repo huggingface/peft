@@ -306,7 +306,7 @@ def set_peft_model_state_dict(
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
             PeftType.BOFT: "boft_",
-            PeftType.LN_TUNING: "ln_tuning",
+            PeftType.LN_TUNING: "ln_tuning_",
             PeftType.VERA: "vera_lambda_",
         }[config.peft_type]
         for k, v in state_dict.items():
