@@ -21,7 +21,12 @@ from typing import Optional, Tuple
 import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
-from accelerate.utils import is_npu_available, is_xpu_available, is_mlu_available
+from accelerate.utils import is_npu_available, is_xpu_available
+from packaging import version
+if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
+    from accelerate.utils import is_mlu_available
+else:
+    is_mlu_available = None
 from huggingface_hub import file_exists
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
 from safetensors.torch import storage_ptr, storage_size
@@ -67,7 +72,7 @@ def infer_device() -> str:
         return "cuda"
     elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
-    elif is_mlu_available():
+    elif is_mlu_available and is_mlu_available():
         return "mlu"
     elif is_xpu_available():
         return "xpu"
