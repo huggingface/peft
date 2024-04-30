@@ -390,7 +390,7 @@ def fsdp_auto_wrap_policy(model):
     import functools
     import os
 
-    from accelerate import FullyShardedDataParallelPlugin
+    from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
@@ -403,7 +403,7 @@ def fsdp_auto_wrap_policy(model):
     ).split(",")
     transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
-        transformer_cls = FullyShardedDataParallelPlugin.get_module_class_from_name(model, layer_class)
+        transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
             raise Exception("Could not find the transformer layer class to wrap in the model.")
         else:
