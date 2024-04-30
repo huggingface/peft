@@ -29,6 +29,7 @@ from peft import (
     AdaLoraConfig,
     BOFTConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
@@ -688,8 +689,10 @@ class PeftCommonTester:
         model = get_peft_model(model, config).eval()
         logits_peft = model(**inputs)[0]
 
-        # sanity check that the logits are different
-        assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
+        # Initializing with LN tuning cannot be configured to change the outputs (unlike init_lora_weights=False)
+        if not issubclass(config_cls, LNTuningConfig):
+            # sanity check that the logits are different
+            assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
 
         model_unloaded = model.merge_and_unload(safe_merge=True)
         logits_unloaded = model_unloaded(**inputs)[0]
