@@ -217,6 +217,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
 
+        def save_pissa_as_lora(peft_config, convert_pissa_to_lora, output_state_dict, kwargs):
+            if not str(peft_config.init_lora_weights).startswith("pissa"):
+                warnings.warn("`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter")
+            initial_adapter = os.path.basename(convert_pissa_to_lora)
+            self.load_adapter(
+                os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter
+            )
+            if str(self.peft_config[initial_adapter].init_lora_weights).startswith("pissa"):
+                raise ValueError(
+                    "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`. "
+                    "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
+                )
+            output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
+            return output_state_dict
+
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
             self.create_or_update_model_card(save_directory)
@@ -256,21 +271,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if convert_pissa_to_lora is not None:
-                    if not str(peft_config.init_lora_weights).startswith("pissa"):
-                        warnings.warn(
-                            "`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter"
-                        )
-                    initial_adapter = os.path.basename(convert_pissa_to_lora)
-                    self.load_adapter(
-                        os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter
+                    output_state_dict = save_pissa_as_lora(
+                        peft_config, convert_pissa_to_lora, output_state_dict, kwargs
                     )
-                    if str(self.peft_config[initial_adapter].init_lora_weights).startswith("pissa"):
-                        raise ValueError(
-                            "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`. "
-                            "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
-                        )
-                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
-
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
@@ -278,20 +281,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             elif is_main_process:
                 if convert_pissa_to_lora is not None:
-                    if not str(peft_config.init_lora_weights).startswith("pissa"):
-                        warnings.warn(
-                            "`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter"
-                        )
-                    initial_adapter = os.path.basename(convert_pissa_to_lora)
-                    self.load_adapter(
-                        os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter
+                    output_state_dict = save_pissa_as_lora(
+                        peft_config, convert_pissa_to_lora, output_state_dict, kwargs
                     )
-                    if str(self.peft_config[initial_adapter].init_lora_weights).startswith("pissa"):
-                        raise ValueError(
-                            "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`. "
-                            "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
-                        )
-                    output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
