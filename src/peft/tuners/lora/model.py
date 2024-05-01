@@ -801,6 +801,17 @@ class LoraModel(BaseTuner):
         This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter
         in `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
         """
+        for name, param in self.model.named_parameters():
+            if (
+                param.data.dtype != torch.float32
+                and param.data.dtype != torch.float16
+                and param.data.dtype != torch.bfloat16
+            ):
+                warnings.warn(
+                    "Note that Quant(W_res) + AB != Quant(W) + \Delta(AB); "
+                    "the converted LoRA, when combined with W or Quant(W), may introduce a certain gap in the fine-tuned model. "
+                    "Therefore, we recommend directly using the Quant(W_res) in conjunction with the PiSSA adapter. "
+                )
         pissa_init_state_dict = get_peft_model_state_dict(
             self,
             state_dict=kwargs.get("state_dict", None),
