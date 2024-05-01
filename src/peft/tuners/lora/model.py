@@ -575,9 +575,6 @@ class LoraModel(BaseTuner):
 
         if adapter_name in list(self.peft_config.keys()):
             return
-        for adapter in adapters:
-            if adapter not in list(self.peft_config.keys()):
-                raise ValueError(f"Adapter {adapter} does not exist")
 
         combination_type, new_rank, new_target_modules = self._check_add_weighted_adapter(
             adapters=adapters,

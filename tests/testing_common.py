@@ -1150,193 +1150,228 @@ class PeftCommonTester:
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        if not isinstance(config, LoraConfig):
+        if not isinstance(config, (LoraConfig, IA3Config)):
             return pytest.skip(f"Test not applicable for {config}")
 
         model = self.transformers_class.from_pretrained(model_id)
         model = get_peft_model(model, config, adapter_list[0])
-        model.add_adapter(adapter_list[1], config)
-        model.add_adapter(adapter_list[2], replace(config, r=20))
-        model = model.to(self.torch_device)
 
-        # test re-weighting single adapter
-        model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
+        if isinstance(config, IA3Config):
+            model.add_adapter(adapter_list[1], config)
+            model.add_adapter(adapter_list[2], config)
+            model = model.to(self.torch_device)
 
-        # test svd re-weighting with multiple adapters
-        model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
+            # test re-weighting single adapter
+            model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
 
-        # test ties_svd re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[1:],
-            weight_list[1:],
-            "multi_adapter_ties_svd_reweighting",
-            combination_type="ties_svd",
-            density=0.5,
-        )
+            # test re-weighting with multiple adapters
+            model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_reweighting")
 
-        # test dare_linear_svd re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[1:],
-            weight_list[1:],
-            "multi_adapter_dare_linear_svd_reweighting",
-            combination_type="dare_linear_svd",
-            density=0.5,
-        )
+            new_adapters = [
+                "single_adapter_reweighting",
+                "multi_adapter_reweighting",
+            ]
+            for new_adapter in new_adapters:
+                assert new_adapter in model.peft_config
 
-        # test dare_ties_svd re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[1:],
-            weight_list[1:],
-            "multi_adapter_dare_ties_svd_reweighting",
-            combination_type="dare_ties_svd",
-            density=0.5,
-        )
+            dummy_input = self.prepare_inputs_for_testing()
+            model.eval()
+            for adapter_name in new_adapters:
+                # ensuring new adapters pass the forward loop
+                model.set_adapter(adapter_name)
+                assert model.active_adapter == adapter_name
+                assert model.active_adapters == [adapter_name]
+                model(**dummy_input)[0]
 
-        # test magnitude_prune_svd re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[1:],
-            weight_list[1:],
-            "multi_adapter_magnitude_prune_svd_reweighting",
-            combination_type="magnitude_prune_svd",
-            density=0.5,
-        )
+        if isinstance(config, LoraConfig):
+            model.add_adapter(adapter_list[1], config)
+            model.add_adapter(adapter_list[2], replace(config, r=20))
+            model = model.to(self.torch_device)
 
-        # test cat re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
-        )
+            # test re-weighting single adapter
+            model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
 
-        # test linear re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
-        )
+            # test svd re-weighting with multiple adapters
+            model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_svd_reweighting")
 
-        # test ties re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[:2], weight_list[:2], "multi_adapter_ties_reweighting", combination_type="ties", density=0.5
-        )
-
-        # test dare_linear re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[:2],
-            weight_list[:2],
-            "multi_adapter_dare_linear_reweighting",
-            combination_type="dare_linear",
-            density=0.5,
-        )
-
-        # test dare_ties re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[:2],
-            weight_list[:2],
-            "multi_adapter_dare_ties_reweighting",
-            combination_type="dare_ties",
-            density=0.5,
-        )
-
-        # test magnitude_prune re-weighting with multiple adapters
-        model.add_weighted_adapter(
-            adapter_list[:2],
-            weight_list[:2],
-            "multi_adapter_magnitude_prune_reweighting",
-            combination_type="magnitude_prune",
-            density=0.5,
-        )
-
-        # test linear re-weighting with multiple adapters with only first adapter having non zero weight
-        model.add_weighted_adapter(
-            adapter_list[:2],
-            [weight_list[0], 0],
-            "multi_adapter_linear_reweighting_single_enabled",
-            combination_type="linear",
-        )
-
-        with pytest.raises(ValueError):
+            # test ties_svd re-weighting with multiple adapters
             model.add_weighted_adapter(
                 adapter_list[1:],
                 weight_list[1:],
-                "multi_adapter_linear_reweighting_uneven_r",
-                combination_type="linear",
+                "multi_adapter_ties_svd_reweighting",
+                combination_type="ties_svd",
+                density=0.5,
             )
 
-        with pytest.raises(ValueError):
+            # test dare_linear_svd re-weighting with multiple adapters
             model.add_weighted_adapter(
                 adapter_list[1:],
                 weight_list[1:],
-                "multi_adapter_ties_reweighting_uneven_r",
+                "multi_adapter_dare_linear_svd_reweighting",
+                combination_type="dare_linear_svd",
+                density=0.5,
+            )
+
+            # test dare_ties_svd re-weighting with multiple adapters
+            model.add_weighted_adapter(
+                adapter_list[1:],
+                weight_list[1:],
+                "multi_adapter_dare_ties_svd_reweighting",
+                combination_type="dare_ties_svd",
+                density=0.5,
+            )
+
+            # test magnitude_prune_svd re-weighting with multiple adapters
+            model.add_weighted_adapter(
+                adapter_list[1:],
+                weight_list[1:],
+                "multi_adapter_magnitude_prune_svd_reweighting",
+                combination_type="magnitude_prune_svd",
+                density=0.5,
+            )
+
+            # test cat re-weighting with multiple adapters
+            model.add_weighted_adapter(
+                adapter_list[1:], weight_list[1:], "multi_adapter_cat_reweighting", combination_type="cat"
+            )
+
+            # test linear re-weighting with multiple adapters
+            model.add_weighted_adapter(
+                adapter_list[:2], weight_list[:2], "multi_adapter_linear_reweighting", combination_type="linear"
+            )
+
+            # test ties re-weighting with multiple adapters
+            model.add_weighted_adapter(
+                adapter_list[:2],
+                weight_list[:2],
+                "multi_adapter_ties_reweighting",
                 combination_type="ties",
                 density=0.5,
             )
 
-        with pytest.raises(ValueError):
+            # test dare_linear re-weighting with multiple adapters
             model.add_weighted_adapter(
-                adapter_list[1:],
-                weight_list[1:],
-                "multi_adapter_dare_linear_reweighting_uneven_r",
+                adapter_list[:2],
+                weight_list[:2],
+                "multi_adapter_dare_linear_reweighting",
                 combination_type="dare_linear",
                 density=0.5,
             )
 
-        with pytest.raises(ValueError):
+            # test dare_ties re-weighting with multiple adapters
             model.add_weighted_adapter(
-                adapter_list[1:],
-                weight_list[1:],
-                "multi_adapter_dare_ties_reweighting_uneven_r",
+                adapter_list[:2],
+                weight_list[:2],
+                "multi_adapter_dare_ties_reweighting",
                 combination_type="dare_ties",
                 density=0.5,
             )
 
-        with pytest.raises(ValueError):
+            # test magnitude_prune re-weighting with multiple adapters
             model.add_weighted_adapter(
-                adapter_list[1:],
-                weight_list[1:],
-                "multi_adapter_magnitude_prune_reweighting_uneven_r",
+                adapter_list[:2],
+                weight_list[:2],
+                "multi_adapter_magnitude_prune_reweighting",
                 combination_type="magnitude_prune",
                 density=0.5,
             )
 
-        new_adapters = [
-            "single_adapter_reweighting",
-            "multi_adapter_svd_reweighting",
-            "multi_adapter_ties_svd_reweighting",
-            "multi_adapter_dare_linear_svd_reweighting",
-            "multi_adapter_dare_ties_svd_reweighting",
-            "multi_adapter_magnitude_prune_svd_reweighting",
-            "multi_adapter_cat_reweighting",
-            "multi_adapter_linear_reweighting",
-            "multi_adapter_linear_reweighting_single_enabled",
-            "multi_adapter_ties_reweighting",
-            "multi_adapter_dare_linear_reweighting",
-            "multi_adapter_dare_ties_reweighting",
-            "multi_adapter_magnitude_prune_reweighting",
-        ]
-        for new_adapter in new_adapters:
-            assert new_adapter in model.peft_config
+            # test linear re-weighting with multiple adapters with only first adapter having non zero weight
+            model.add_weighted_adapter(
+                adapter_list[:2],
+                [weight_list[0], 0],
+                "multi_adapter_linear_reweighting_single_enabled",
+                combination_type="linear",
+            )
 
-        key_list = [key for key, _ in model.named_modules()]
-        for key in key_list:
-            _, target, _ = _get_submodules(model, key)
-            if isinstance(target, LoraLayer):
-                for adapter_name in new_adapters:
-                    if "single" in adapter_name:
-                        new_delta_weight = target.get_delta_weight(adapter_name)
-                        weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
-                        assert torch.allclose(new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4)
-                    elif "svd" in adapter_name:
-                        assert target.r[adapter_name] == 20
-                    elif "linear" in adapter_name:
-                        assert target.r[adapter_name] == 8
-                    elif "cat" in adapter_name:
-                        assert target.r[adapter_name] == 28
+            with pytest.raises(ValueError):
+                model.add_weighted_adapter(
+                    adapter_list[1:],
+                    weight_list[1:],
+                    "multi_adapter_linear_reweighting_uneven_r",
+                    combination_type="linear",
+                )
 
-        dummy_input = self.prepare_inputs_for_testing()
-        model.eval()
-        for adapter_name in new_adapters:
-            # ensuring new adapters pass the forward loop
-            model.set_adapter(adapter_name)
-            assert model.active_adapter == adapter_name
-            assert model.active_adapters == [adapter_name]
-            model(**dummy_input)[0]
+            with pytest.raises(ValueError):
+                model.add_weighted_adapter(
+                    adapter_list[1:],
+                    weight_list[1:],
+                    "multi_adapter_ties_reweighting_uneven_r",
+                    combination_type="ties",
+                    density=0.5,
+                )
+
+            with pytest.raises(ValueError):
+                model.add_weighted_adapter(
+                    adapter_list[1:],
+                    weight_list[1:],
+                    "multi_adapter_dare_linear_reweighting_uneven_r",
+                    combination_type="dare_linear",
+                    density=0.5,
+                )
+
+            with pytest.raises(ValueError):
+                model.add_weighted_adapter(
+                    adapter_list[1:],
+                    weight_list[1:],
+                    "multi_adapter_dare_ties_reweighting_uneven_r",
+                    combination_type="dare_ties",
+                    density=0.5,
+                )
+
+            with pytest.raises(ValueError):
+                model.add_weighted_adapter(
+                    adapter_list[1:],
+                    weight_list[1:],
+                    "multi_adapter_magnitude_prune_reweighting_uneven_r",
+                    combination_type="magnitude_prune",
+                    density=0.5,
+                )
+
+            new_adapters = [
+                "single_adapter_reweighting",
+                "multi_adapter_svd_reweighting",
+                "multi_adapter_ties_svd_reweighting",
+                "multi_adapter_dare_linear_svd_reweighting",
+                "multi_adapter_dare_ties_svd_reweighting",
+                "multi_adapter_magnitude_prune_svd_reweighting",
+                "multi_adapter_cat_reweighting",
+                "multi_adapter_linear_reweighting",
+                "multi_adapter_linear_reweighting_single_enabled",
+                "multi_adapter_ties_reweighting",
+                "multi_adapter_dare_linear_reweighting",
+                "multi_adapter_dare_ties_reweighting",
+                "multi_adapter_magnitude_prune_reweighting",
+            ]
+            for new_adapter in new_adapters:
+                assert new_adapter in model.peft_config
+
+            key_list = [key for key, _ in model.named_modules()]
+            for key in key_list:
+                _, target, _ = _get_submodules(model, key)
+                if isinstance(target, LoraLayer):
+                    for adapter_name in new_adapters:
+                        if "single" in adapter_name:
+                            new_delta_weight = target.get_delta_weight(adapter_name)
+                            weighted_original_delta_weights = target.get_delta_weight(adapter_list[0]) * weight_list[0]
+                            assert torch.allclose(
+                                new_delta_weight, weighted_original_delta_weights, atol=1e-4, rtol=1e-4
+                            )
+                        elif "svd" in adapter_name:
+                            assert target.r[adapter_name] == 20
+                        elif "linear" in adapter_name:
+                            assert target.r[adapter_name] == 8
+                        elif "cat" in adapter_name:
+                            assert target.r[adapter_name] == 28
+
+            dummy_input = self.prepare_inputs_for_testing()
+            model.eval()
+            for adapter_name in new_adapters:
+                # ensuring new adapters pass the forward loop
+                model.set_adapter(adapter_name)
+                assert model.active_adapter == adapter_name
+                assert model.active_adapters == [adapter_name]
+                model(**dummy_input)[0]
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")
