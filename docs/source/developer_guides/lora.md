@@ -54,9 +54,6 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 ```
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/main/examples/pissa_finetuning).
 
-
-
-
 ### LoftQ
 
 #### Standard approach
