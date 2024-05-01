@@ -794,7 +794,9 @@ class LoraModel(BaseTuner):
         """
         return self._unload_and_optionally_merge(merge=False)
 
-    def subtract_pissa_init(self, output_state_dict: dict[str, torch.Tensor], adapter_name: str = "pissa_init", kwargs=None):
+    def subtract_pissa_init(
+        self, output_state_dict: dict[str, torch.Tensor], adapter_name: str = "pissa_init", kwargs=None
+    ):
         """
         This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter
         in `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
@@ -818,5 +820,4 @@ class LoraModel(BaseTuner):
                     [output_state_dict[name], -pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=1
                 )
 
-        self.delete_adapter(adapter_name)
         return tensors_lora

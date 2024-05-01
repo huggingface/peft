@@ -194,7 +194,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
             convert_pissa_to_lora (`str`):
-                The initial path for the PISSA adapter.
+                The path to the initialized PiSSA adapter, which is obtained after initializing the model with PiSSA
+                and before performing any training.
                 When `convert_pissa_to_lora` is not None, the difference in PISSA before and after fine-tuning is calculated.
                 This difference can be represented as the parameters of a of a standard LoRA adapter.
                 Using this converted adapter does not require changes to the base model, thus conveniently allowing
@@ -230,6 +231,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
                 )
             output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
+            self.delete_adapter(adapter_name)
             return output_state_dict
 
         if is_main_process:

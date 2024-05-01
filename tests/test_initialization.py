@@ -16,6 +16,7 @@ import pytest
 import torch
 from scipy import stats
 from torch import nn
+from copy import deepcopy
 
 from peft import LoraConfig, PromptTuningConfig, get_peft_model
 from peft.utils import infer_device
@@ -252,7 +253,6 @@ class TestInitialization:
         assert model.conv2d.scaling["default"] == expected_scaling
 
     def test_lora_pissa_linear_init_default(self, data):
-        from copy import deepcopy
 
         model = self.get_model()
         output = model(data)[0]
