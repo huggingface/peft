@@ -147,10 +147,6 @@ class LoraLayer(BaseTunerLayer):
             # add `wlora_weights`` to the list of learnable parameters
             self.adapter_layer_names = self.adapter_layer_names[:] + ("wlora_weights",)
             self.use_wlora[adapter_name] = True
-            # remove `lora_A` and `lora_B` from the list of trainable parameters
-            self.adapter_layer_names = tuple(
-                layer for layer in self.adapter_layer_names if layer != "lora_A" and layer != "lora_B"
-            )
         else:
             self.use_wlora[adapter_name] = False
 
