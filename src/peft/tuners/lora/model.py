@@ -813,7 +813,7 @@ class LoraModel(BaseTuner):
                 tensors_lora[name] = torch.cat(
                     [output_state_dict[name], pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=0
                 )
-            else:
+            elif "lora_B" in name:
                 tensors_lora[name] = torch.cat(
                     [output_state_dict[name], -pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=1
                 )
