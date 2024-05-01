@@ -266,7 +266,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     )
                     if str(self.peft_config[initial_adapter].init_lora_weights).startswith("pissa"):
                         raise ValueError(
-                            "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`."
+                            "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`. "
                             "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
                         )
                     output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
