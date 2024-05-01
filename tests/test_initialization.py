@@ -251,7 +251,7 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
 
-    def test_pissa_linear_init_default(self, data):
+    def test_lora_pissa_linear_init_default(self, data):
         from copy import deepcopy
 
         model = self.get_model()
