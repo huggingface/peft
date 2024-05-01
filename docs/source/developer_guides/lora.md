@@ -126,6 +126,48 @@ Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a 
 [Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
 [adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
 
+### Learning the scaling weights of pre-trained LoRAs
+
+This technique allows learning the scaling weights of multiple pre-trained LoRAs. This method adds a learnable weight to each of the pre-trained LoRA modules to learn the weighted sum of those modules. This allows us to learn the best combination of pre-trained LoRA for few-shot adaptation. For more information, see https://arxiv.org/abs/2402.15414.
+
+To use this feature you would create a config for each LoRA with the `wlora=True`: 
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftConfig
+
+# Load base model
+base_model = "facebook/opt-350m"
+tokenizer = AutoTokenizer.from_pretrained(base_model)
+model = AutoModelForCausalLM.from_pretrained(base_model)
+
+# Add the first LoRA with learnable weight to the base model
+lora_1 = "varun-v-rao/opt-350m-lora-1.57M-squad-model3"
+lora_1_config = PeftConfig.from_pretrained(lora_1)
+lora_1_config.use_wlora = True
+model.add_adapter(adapter_config=lora_1_config, adapter_name="lora_1")
+
+# Add the second LoRA
+lora_2 = "varun-v-rao/opt-350m-lora-1.57M-squad-model3"
+lora_2_config = PeftConfig.from_pretrained(lora_2)
+lora_2_config.use_wlora = True
+model.add_adapter(adapter_config=lora_2_config, adapter_name="lora_2")
+
+# Activate LoRA modules as trainable
+model.set_adapter(["lora_1", "lora_2"])
+
+# Freeze lora_A and lora_B
+for name, param in model.named_parameters():
+    if "lora_A" in name or "lora_B" in name:
+        param.requires_grad = False
+```
+
+#### Caveats
+
+- WLoRA only supports linear layers at the moment.
+- WLoRA works better than training a LoRA from scratch in few-shot adaptation settings. However, when the training data increases, training a LoRA from scratch outperforms WLoRA since it has more trainable parameters.
+
+
+
 ## Merge adapters
 
 While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA adapter. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model. This allows you to use the newly merged model as a standalone model. The [`~LoraModel.merge_and_unload`] function doesn't keep the adapter weights in memory.
