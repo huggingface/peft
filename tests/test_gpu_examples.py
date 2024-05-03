@@ -1503,6 +1503,107 @@ class TestPiSSA:
         mse_pissa = torch.pow(logits_base - logits_pissa, 2).mean()
         return mae_quantized, mse_quantized, mae_pissa, mse_pissa
 
+    @pytest.mark.xfail(
+        reason="The quantization error of the base model is not equal to that of the residual model.", strict=True
+    )
+    def get_convert_errors(
+        self,
+        tmp_path,
+        bits=4,
+        device="cuda",
+        model_id="hf-internal-testing/tiny-random-BloomForCausalLM",
+    ):
+        # Helper function that compares the PiSSA module with the quantized base model,
+        # vs the PiSSA converted LoRA with the quantized residual model.
+        # Since W_res - Quant(W_res) != W - Quant(W), then Quant(W_res) + AB != Quant(W) + \Delta(AB),
+        # converting PiSSA to LoRA introduces a certain degree of error.
+        torch.manual_seed(0)
+        model = self.get_base_model(model_id, device)
+        task_type = TaskType.SEQ_2_SEQ_LM if model.config.is_encoder_decoder else TaskType.CAUSAL_LM
+        inputs = self.get_input(model_id, device)
+
+        # Pre-process and save PiSSA model
+        target_modules = "all-linear" if task_type != TaskType.SEQ_2_SEQ_LM else ["o", "k", "wi", "q", "v"]
+        lora_config = LoraConfig(
+            task_type=task_type,
+            init_lora_weights="pissa",
+            target_modules=target_modules,
+        )
+        model = self.get_base_model(model_id, device)
+        if device == "cuda":
+            model = model.to("cuda")
+        pissa_model = get_peft_model(model, lora_config)
+        if device == "cuda":
+            pissa_model = pissa_model.to("cuda")
+
+        pissa_model.peft_config["default"].init_lora_weights = True
+        pissa_model.save_pretrained(os.path.join(tmp_path, "init_model"))
+        pissa_model = pissa_model.unload()
+        pissa_model.save_pretrained(os.path.join(tmp_path, "residual_model"))
+
+        del pissa_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # logits from quantized LoRA model using PiSSA
+        kwargs = {}
+        if bits == 4:
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
+        elif bits == 8:
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("bits must be 4 or 8")
+        # now load quantized model and apply PiSSA-initialized weights on top
+        base_model = self.get_base_model(
+            os.path.join(tmp_path, "residual_model"),
+            device=None,
+            **kwargs,
+            torch_dtype=torch.float32,
+        )
+        pissa_model = PeftModel.from_pretrained(base_model, os.path.join(tmp_path, "init_model"), is_trainable=True)
+        # sanity check: ranks should still be 8 as initially
+        assert pissa_model.peft_config["default"].r == 8
+        for name, param in pissa_model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == 8
+        logits_pissa = self.get_logits(pissa_model, inputs)
+
+        pissa_model.save_pretrained(
+            os.path.join(tmp_path, "lora_model"), convert_pissa_to_lora=os.path.join(tmp_path, "init_model")
+        )
+
+        del pissa_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        base_model = self.get_base_model(
+            model_id,
+            device=None,
+            **kwargs,
+            torch_dtype=torch.float32,
+        )
+        pissa_model = PeftModel.from_pretrained(base_model, os.path.join(tmp_path, "lora_model"), is_trainable=True)
+
+        # rank should be double of what it was initially
+        assert pissa_model.peft_config["default"].r == 16
+        for name, param in pissa_model.named_parameters():
+            if "lora_A" in name:
+                assert param.shape[0] == 16
+        logits_lora = self.get_logits(pissa_model, inputs)
+
+        # sanity check
+        tol = 1e-01
+        assert torch.allclose(logits_pissa, logits_lora, atol=tol, rtol=tol)
+        tol = 1e-02
+        assert torch.allclose(logits_pissa, logits_lora, atol=tol, rtol=tol)
+        tol = 1e-03
+        assert torch.allclose(logits_pissa, logits_lora, atol=tol, rtol=tol)
+        tol = 1e-04
+        assert torch.allclose(logits_pissa, logits_lora, atol=tol, rtol=tol)
+        del pissa_model
+        gc.collect()
+        torch.cuda.empty_cache()
+
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_bloomz_pissa_4bit(self, device, tmp_path):
         # In this test, we compare the logits of the base model, the quantized LoRA model, and the quantized model
