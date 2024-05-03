@@ -168,6 +168,42 @@ class LoraModel(BaseTuner):
         if peft_config.layer_replication:
             replicate_layers(model, peft_config.layer_replication)
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True):
+        """
+        A helper method to cast the adapter weights to the correct dtype.
+
+        Currently, this only upcasts float16 to float32.
+
+        Args:
+            adapter_name (`str`):
+                The adapter name.
+            autocast_adapter_dtype (`bool`, *optional*):
+                Whether to autocast the adapter dtype. Defaults to `True`.
+
+        """
+        if not autocast_adapter_dtype:
+            return
+
+        for module in self.model.modules():
+            if not isinstance(module, BaseTunerLayer):
+                continue
+
+            for submodule in module.modules():
+                if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict)):
+                    continue
+
+                if adapter_name not in submodule:
+                    continue
+
+                if isinstance(submodule[adapter_name], nn.Parameter):
+                    if submodule[adapter_name].dtype == torch.float16:
+                        submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                    continue
+
+                for param in submodule[adapter_name].parameters():
+                    if param.dtype == torch.float16:
+                        param.data = param.data.to(torch.float32)
+
     def _create_and_replace(
         self,
         lora_config,

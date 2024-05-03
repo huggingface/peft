@@ -51,10 +51,17 @@ class MixedModel(BaseTuner):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (:obj:`str`):
             The name of the first adapter.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
+            tuners.
+
     """
 
-    def __init__(self, model: nn.Module, config: Configs, adapter_name: str) -> None:
-        super().__init__(model, config, adapter_name)
+    def __init__(
+        self, model: nn.Module, config: Configs, adapter_name: str, autocast_adapter_dtype: bool = True
+    ) -> None:
+        super().__init__(model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
     def _check_new_adapter_config(self, config: Configs) -> None:
         """

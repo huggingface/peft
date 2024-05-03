@@ -304,6 +304,19 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True):
+        """
+        A helper method to cast the adapter to the correct dtype.
+
+        Args:
+            adapter_name (`str`):
+                The adapter name.
+            autocast_adapter_dtype (`bool`, *optional*):
+                Whether to autocast the adapter dtype. Defaults to `True`.
+
+        """
+        pass
+
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
 
@@ -311,7 +324,7 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-    def inject_adapter(self, model: nn.Module, adapter_name: str):
+    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
         hood by `peft.mapping.get_peft_model` if a non-prompt tuning adapter class is passed.
@@ -323,6 +336,9 @@ class BaseTuner(nn.Module, ABC):
                 The model to be tuned.
             adapter_name (`str`):
                 The adapter name.
+            autocast_adapter_dtype (`bool`, *optional*):
+                Whether to autocast the adapter dtype. Defaults to `True`. Needs to be implemented on a per model basis
+                (e.g. for LoraModel).
         """
         peft_config = self.peft_config[adapter_name]
         # Note: If possible, all checks should be performed *at the start of this method*.

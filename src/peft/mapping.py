@@ -117,7 +117,11 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
 
 
 def get_peft_model(
-    model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default", mixed: bool = False
+    model: PreTrainedModel,
+    peft_config: PeftConfig,
+    adapter_name: str = "default",
+    mixed: bool = False,
+    autocast_adapter_dtype: bool = True,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
@@ -131,6 +135,11 @@ def get_peft_model(
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
         mixed (`bool`, `optional`, defaults to `False`):
             Whether to allow mixing different (compatible) adapter types.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
+            tuners.
+
     """
     model_config = getattr(model, "config", {"model_type": "custom"})
     if hasattr(model_config, "to_dict"):
@@ -139,14 +148,18 @@ def get_peft_model(
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
 
     if mixed:
-        return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
+        return PeftMixedModel(
+            model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+        )
 
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
-        return PeftModel(model, peft_config, adapter_name=adapter_name)
+        return PeftModel(model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
     if peft_config.is_prompt_learning:
         peft_config = _prepare_prompt_learning_config(peft_config, model_config)
-    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](model, peft_config, adapter_name=adapter_name)
+    return MODEL_TYPE_TO_PEFT_MODEL_MAPPING[peft_config.task_type](
+        model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+    )
 
 
 def inject_adapter_in_model(
