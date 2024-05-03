@@ -59,16 +59,23 @@ python preprocess.py \
     --base_model_name_or_path meta-llama/Llama-2-7b-hf \
     --init_lora_weights pissa \
     --output_dir pissa-llama-2-7b-r32-alpha-32 \
-    --save_for_reuse True \
     --lora_r 32 \
     --lora_alpha 32 \
     --lora_dropout 0 \
-    --do_train False \
     --bits bf16
 ```
 
 ### Convert PiSSA to LoRA
-When using `peft_model.save_pretrained`, if `convert_pissa_to_lora=None`, the fine-tuned matrices $A$ and $B$ are saved and should be combined with the residual model. However, when specifying `convert_pissa_to_lora="pissa_init_dir"`, the saving function converts PiSSA to LoRA by $\Delta W = A \times B - A_0 \times B_0 =  [A | A_0] \times [B | -B_0]^T=A^{'}B^{'}$. This conversion enables the loading of LoRA on top of a standard base model:
+The main advantage of PiSSA is concentrated during the training phase. For a trained PiSSA adapter, we recommend converting it equivalently to the LoRA adapter for using and sharing.
+```python
+# The fine-tuned matrices $A$ and $B$ in PiSSA adapter is saved and should be combined with the residual model.
+peft_model.save_pretrained(output_dir) 
+# Given the matrices $A_0$ and $B_0$, initialized by PiSSA and untrained, and the trained matrices $A$ and $B$, 
+# we can convert these to LoRA by setting $\Delta W = A \times B - A_0 \times B_0 = [A \mid A_0] \times [B \mid -B_0]^T = A'B'$.
+peft_model.save_pretrained(output_dir, convert_pissa_to_lora="pissa_init")
+
+```
+This conversion enables the loading of LoRA on top of a standard base model:
 
 ```python
 import torch

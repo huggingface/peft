@@ -24,9 +24,10 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--base_model_name_or_path", type=str, default="bf16")
 parser.add_argument("--bits", type=str, default="bf16", choices=["bf16", "fp16", "fp32"])
 parser.add_argument(
-    "--init_lora_weights", type=str, default="pissa", help="(`['gaussian', 'pissa', 'pissa_niter_[number of iters]']`)"
+    "--init_lora_weights", type=str, default="pissa", help="(`['pissa', 'pissa_niter_[number of iters]']`)"
 )
 parser.add_argument("--lora_r", type=int, default=128)
+parser.add_argument("--lora_alpha", type=int, default=128)
 parser.add_argument("--lora_dropout", type=int, default=0)
 script_args = parser.parse_args()
 print(script_args)

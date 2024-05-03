@@ -35,7 +35,7 @@ class TrainingArguments(TrainingArguments):
             "help": "The name or path of the fp32/16 residual model. (`['fxmeng/pissa-llama-2-7b-r16-alpha-16']`)"
         },
     )
-    bits: str = field(default="bf16", metadata={"help": "(`['fp4', 'nf4', 'int8', 'bf16', 'fp16', fp32]`)"})
+    bits: str = field(default="fp32", metadata={"help": "(`['fp4', 'nf4', 'int8', 'bf16', 'fp16', fp32]`)"})
     init_lora_weights: str = field(default="pissa", metadata={"help": "(`['gaussian', 'pissa', 'pissa_niter_4']`)"})
     lora_r: int = field(default=16)
     lora_alpha: int = field(default=16)
