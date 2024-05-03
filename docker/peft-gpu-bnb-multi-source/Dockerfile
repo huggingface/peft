@@ -31,32 +31,21 @@ RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
 
 # Stage 2
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS build-image
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 AS build-image
 COPY --from=compile-image /opt/conda /opt/conda
 ENV PATH /opt/conda/bin:$PATH
 
 RUN chsh -s /bin/bash
 SHELL ["/bin/bash", "-c"]
-RUN source activate peft && \ 
-    python3 -m pip install --no-cache-dir bitsandbytes optimum auto-gptq
-
-# Add autoawq for quantization testing
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ/releases/download/v0.2.4/autoawq-0.2.4-cp38-cp38-linux_x86_64.whl
-RUN source activate peft && \
-    python3 -m pip install --no-cache-dir https://github.com/casper-hansen/AutoAWQ_kernels/releases/download/v0.0.6/autoawq_kernels-0.0.6-cp38-cp38-linux_x86_64.whl
 
 # Install apt libs
 RUN apt-get update && \
-    apt-get install -y curl git wget && \
+    apt-get install -y curl git wget cmake && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists*
 
-# Add eetq for quantization testing
-RUN source activate peft && \
-    python3 -m pip install git+https://github.com/NetEase-FuXi/EETQ.git
-
 # Activate the conda env and install transformers + accelerate from source
+# Also clone BNB and build it from source.
 RUN source activate peft && \
     python3 -m pip install -U --no-cache-dir \
     librosa \
@@ -64,18 +53,14 @@ RUN source activate peft && \
     scipy \
     git+https://github.com/huggingface/transformers \
     git+https://github.com/huggingface/accelerate \
-    peft[test]@git+https://github.com/huggingface/peft
-
-# Add aqlm for quantization testing
-RUN source activate peft && \
-    pip install aqlm[gpu]>=1.0.2
-
-# Add HQQ for quantization testing
-RUN source activate peft && \
-pip install hqq
-
-RUN source activate peft && \ 
-    pip freeze | grep transformers
+    peft[test]@git+https://github.com/huggingface/peft \
+    optimum \
+    auto-gptq && \
+    git clone https://github.com/TimDettmers/bitsandbytes && cd bitsandbytes && git checkout multi-backend-refactor && \
+    cmake -B . -DCOMPUTE_BACKEND=cuda -S . && \
+    cmake --build . && \
+    pip install -e . && \ 
+    pip freeze | grep bitsandbytes
 
 RUN echo "source activate peft" >> ~/.profile
 

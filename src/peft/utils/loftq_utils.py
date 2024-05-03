@@ -31,10 +31,6 @@ from transformers.utils.hub import get_checkpoint_shard_files
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 
 
-if is_bnb_available():
-    import bitsandbytes as bnb
-
-
 class NFQuantizer:
     def __init__(self, num_bits=2, device="cuda", method="normal", block_size=64, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -192,6 +188,11 @@ def _low_rank_decomposition(weight, reduced_rank=32):
 
 @torch.no_grad()
 def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, reduced_rank: int, num_iter=1):
+    if is_bnb_available():
+        import bitsandbytes as bnb
+    else:
+        raise ValueError("bitsandbytes is not available, please install it to use LoftQ.")
+
     if num_bits not in [2, 4, 8]:
         raise ValueError("Only support 2, 4, 8 bits quantization")
     if num_iter <= 0:
@@ -239,6 +240,8 @@ def loftq_init(weight: Union[torch.Tensor, torch.nn.Parameter], num_bits: int, r
 
 @torch.no_grad()
 def _loftq_init_new(qweight, weight, num_bits: int, reduced_rank: int):
+    import bitsandbytes as bnb
+
     if num_bits != 4:
         raise ValueError("Only 4 bit quantization supported at the moment.")
     if not is_bnb_4bit_available():
