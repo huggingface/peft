@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
+          docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest", "huggingface/peft-gpu-bnb-multi-source:latest"]
     runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0"
@@ -68,13 +68,13 @@ jobs:
         if: always()
         run: |
           pip install slack_sdk tabulate
-          python scripts/log_reports.py --slack_channel_name bnb-daily-ci >> $GITHUB_STEP_SUMMARY
+          python scripts/log_reports.py --slack_channel_name bnb-daily-ci-collab >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
     strategy:
       fail-fast: false
       matrix:
-        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest"]
+        docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest", "huggingface/peft-gpu-bnb-multi-source:latest"]
     runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
@@ -130,4 +130,4 @@ jobs:
         if: always()
         run: |
           pip install slack_sdk tabulate
-          python scripts/log_reports.py --slack_channel_name bnb-daily-ci >> $GITHUB_STEP_SUMMARY
+          python scripts/log_reports.py --slack_channel_name bnb-daily-ci-collab >> $GITHUB_STEP_SUMMARY

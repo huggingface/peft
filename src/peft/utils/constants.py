@@ -44,6 +44,28 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
 
+TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
+    "llama": ["input_layernorm", "post_attention_layernorm", "norm"],
+    "bloom": ["input_layernorm", "post_attention_layernorm", "ln_f"],
+    "llava": [
+        "multi_modal_projector",
+        "input_layernorm",
+        "post_attention_layernorm",
+        "norm",
+        "embed_tokens",
+        "lm_head",
+    ],
+    "t5": ["layer_norm", "final_layer_norm"],
+    "mt5": ["layer_norm", "final_layer_norm"],
+    "bart": ["self_attn_layer_norm", "encoder_attn_layer_norm", "final_layer_norm"],
+    "gpt2": ["ln_1", "ln_2", "ln_f"],
+    "blip-2": ["layernorm", "LayerNorm", "final_layer_norm", "self_attn_layer_norm"],
+    "gptj": ["ln_1", "ln_f"],
+    "falcon": ["input_layernorm", "post_attention_layernorm", "ln_f"],
+    "mistral": ["input_layernorm", "post_attention_layernorm", "norm"],
+    "phi": ["input_layernorm", "final_layernorm"],
+    "gemma": ["input_layernorm", "post_attention_layernorm", "norm"],
+}
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
@@ -148,6 +170,41 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
+}
+
+TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "v"],
+    "mt5": ["q", "v"],
+    "bart": ["q_proj", "v_proj"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
+    "blip-2": ["q", "v", "q_proj", "v_proj"],
+    "opt": ["q_proj", "v_proj"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
+    "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
+    "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "value_proj"],
+    "deberta": ["in_proj"],
+    "layoutlm": ["query", "value"],
+    "llama": ["q_proj", "v_proj"],
+    "chatglm": ["query_key_value"],
+    "gpt_bigcode": ["c_attn"],
+    "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+    # "btlm": ["c_proj", "c_attn"],  # tested, does not work because of different shapes
+    "codegen": ["qkv_proj"],
+    # "mistral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    # "mixtral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "stablelm": ["q_proj", "v_proj"],
+    # "phi": ["q_proj", "v_proj", "fc1", "fc2"],  # tested, does not work because of different shapes
+    "phi": ["q_proj", "v_proj"],
+    # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
 }
 
 WEIGHTS_NAME = "adapter_model.bin"

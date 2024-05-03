@@ -16,19 +16,35 @@
 # limitations under the License.
 import copy
 import os
+import re
+import shutil
 import tempfile
 import time
 import unittest
 from contextlib import contextmanager
+from functools import partial
 
 import pytest
 import torch
 from parameterized import parameterized
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
 
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    BOFTConfig,
+    IA3Config,
+    LNTuningConfig,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    OFTConfig,
+    PeftModel,
+    TaskType,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.tuners.tuners_utils import BaseTunerLayer
 from peft.utils import ModulesToSaveWrapper, infer_device
 
@@ -228,6 +244,111 @@ TEST_CASES = [
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
     ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
     ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    #############
+    # LN Tuning #
+    #############
+    ("LayerNorm 1 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "layernorm0"}),
+    ("LayerNorm 2 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["layernorm0"]}),
+    (
+        "LayerNorm 3 LNTuning",
+        "MLP_LayerNorm",
+        LNTuningConfig,
+        {"target_modules": ["layernorm0"], "modules_to_save": ["layernorm1"]},
+    ),
+    ("Linear 4 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": "lin0"}),
+    ("Linear 5 LNTuning", "MLP_LayerNorm", LNTuningConfig, {"target_modules": ["lin0"]}),
+    ########
+    # BOFT #
+    ########
+    ("Vanilla MLP 1 BOFT", "MLP", BOFTConfig, {"target_modules": ["lin1"], "boft_block_size": 2}),
+    (
+        "Vanilla MLP 2 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "modules_to_save": ["lin0"], "boft_block_size": 2},
+    ),
+    (
+        "Vanilla MLP 3 BOFT",
+        "MLP",
+        BOFTConfig,
+        {
+            "target_modules": ["lin1"],
+            "boft_block_size": 2,
+            "boft_dropout": 0.1,
+        },
+    ),
+    (
+        "Vanilla MLP 4 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Vanilla MLP 5 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 2, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Vanilla MLP 6 BOFT",
+        "MLP",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 10, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
+    ),
+    (
+        "Conv2d 1 BOFT",
+        "Conv2d",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 45, "boft_block_num": 0, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "Conv2d 2 BOFT",
+        "Conv2d",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 0, "boft_block_num": 1, "boft_n_butterfly_factor": 1},
+    ),
+    (
+        "MLP2 1 BOFT",
+        "MLP2",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
+    ),
+    (
+        "MLP2 2 BOFT",
+        "MLP2",
+        BOFTConfig,
+        {"target_modules": ["lin1"], "boft_block_size": 0, "boft_block_num": 8, "boft_n_butterfly_factor": 3},
+    ),
+    (
+        "Conv2d2 1 BOFT",
+        "Conv2d2",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 2},
+    ),
+    (
+        "Conv2d2 1 BOFT",
+        "Conv2d2",
+        BOFTConfig,
+        {"target_modules": ["conv2d"], "boft_block_size": 2, "boft_block_num": 0, "boft_n_butterfly_factor": 3},
+    ),
+    ########
+    # VeRA #
+    ########
+    ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 VeRA", "MLP", VeraConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 VeRA", "MLP", VeraConfig, {"target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 5 VeRA",
+        "MLP",
+        VeraConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 VeRA",
+        "EmbConv1D",
+        VeraConfig,
+        {"target_modules": ["conv1d"]},
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -296,6 +417,9 @@ PREFIXES = {
     LoHaConfig: "hada_",
     LoKrConfig: "lokr_",
     OFTConfig: "oft_",
+    BOFTConfig: "boft_",
+    LNTuningConfig: "ln_tuning_",
+    VeraConfig: "vera_lambda_",
 }
 
 
@@ -306,6 +430,48 @@ class MLP(nn.Module):
         self.relu = nn.ReLU()
         self.drop = nn.Dropout(0.5)
         self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class MLP_LayerNorm(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.layernorm0 = nn.LayerNorm(10, 10)
+        self.lin0 = nn.Linear(10, 20, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.layernorm1 = nn.LayerNorm(20, 20)
+        self.lin1 = nn.Linear(20, 2, bias=bias)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.layernorm0(X)
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = self.drop(X)
+        X = self.layernorm1(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
+class MLP2(nn.Module):
+    def __init__(self, bias=True):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 32, bias=bias)
+        self.relu = nn.ReLU()
+        self.drop = nn.Dropout(0.5)
+        self.lin1 = nn.Linear(32, 2, bias=bias)
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
@@ -352,9 +518,9 @@ class DeepMLP(nn.Module):
 
 
 class ModelEmbConv1D(nn.Module):
-    def __init__(self):
+    def __init__(self, emb_size=100):
         super().__init__()
-        self.emb = nn.Embedding(100, 5)
+        self.emb = nn.Embedding(emb_size, 5)
         self.conv1d = Conv1D(1, 5)
         self.relu = nn.ReLU()
         self.flat = nn.Flatten()
@@ -417,6 +583,29 @@ class ModelConv2D(nn.Module):
         return X
 
 
+class ModelConv2D2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin0 = nn.Linear(10, 40)
+        self.conv2d = nn.Conv2d(8, 32, 3)
+        self.relu = nn.ReLU()
+        self.flat = nn.Flatten()
+        self.lin1 = nn.Linear(32, 2)
+        self.sm = nn.LogSoftmax(dim=-1)
+
+    def forward(self, X):
+        X = X.float()
+        X = self.lin0(X)
+        X = self.relu(X)
+        X = X.reshape(-1, 8, 3, 3)
+        X = self.conv2d(X)
+        X = self.relu(X)
+        X = self.flat(X)
+        X = self.lin1(X)
+        X = self.sm(X)
+        return X
+
+
 class MockTransformerWrapper:
     """Mock class to behave like a transformers model.
 
@@ -440,6 +629,15 @@ class MockTransformerWrapper:
 
         if model_id == "Conv2d":
             return ModelConv2D().to(torch_dtype)
+
+        if model_id == "MLP_LayerNorm":
+            return MLP_LayerNorm().to(torch_dtype)
+
+        if model_id == "MLP2":
+            return MLP2().to(torch_dtype)
+
+        if model_id == "Conv2d2":
+            return ModelConv2D2().to(torch_dtype)
 
         raise ValueError(f"model_id {model_id} not implemented")
 
@@ -488,6 +686,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
+        elif issubclass(config_cls, LNTuningConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
@@ -519,6 +719,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
+        elif issubclass(config_cls, LNTuningConfig):
+            # LNTuning do not take init_weights
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_safe_merge(model_id, config_cls, config_kwargs)
@@ -668,6 +871,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
+        if isinstance(config_cls, LNTuningConfig):
+            # LayerNorm tuning is slow to learn
+            lr = 1.0
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -689,7 +895,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that after leaving the disable_adapter context, everything is enabled again
         outputs_enabled_after_disable = model(**X)
 
-        assert not torch.allclose(outputs_before, outputs_after)
+        if self.torch_device == "cpu":
+            # LayerNorm is running float32 on cpu, so difference in outputs are smaller
+            rtol, atol = 1e-8, 1e-8
+        else:
+            rtol, atol = 1e-5, 1e-8
+        assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
         assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
@@ -707,9 +918,14 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         outputs_before = model(**X)
 
         model.train()
-        lr = 0.01
-        # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
-        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        if isinstance(config_cls, LNTuningConfig):
+            # LayerNorm tuning is slow to learn
+            lr = 1.0
+            optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        else:
+            # Adam optimizer since SGD isn't great for small models with IA3 + Conv1D
+            lr = 0.01
+            optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -756,12 +972,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # Note: We test only with custom models since they run really fast. There is really no point in testing the same
         # thing with decoder, encoder_decoder, etc.
-        if config_cls != LoraConfig:
+        if config_cls != LoraConfig or config_cls != BOFTConfig:
             # skip this test for other configs as bias is specific to Lora
-            self.skipTest("Testing bias warnings only for LoraConfig")
+            self.skipTest("Testing bias warnings only for LoraConfig or BOFTConfig")
 
-        if not issubclass(config_cls, LoraConfig):
-            self.skipTest("Bias argument is only supported for LoRA models")
+        if not issubclass(config_cls, (LoraConfig, BOFTConfig)):
+            self.skipTest("Bias argument is only supported for LoRA or BOFT models")
 
         def run_with_disable(config_kwargs, bias):
             config_kwargs = config_kwargs.copy()
@@ -775,12 +991,21 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             with peft_model.disable_adapter():
                 pass  # there is nothing to be done
 
-        # check that bias=all and bias=lora_only give a warning with the correct message
-        msg_start = "Careful, disabling adapter layers with bias configured to be"
-        with pytest.warns(UserWarning, match=msg_start):
-            run_with_disable(config_kwargs, bias="lora_only")
-        with pytest.warns(UserWarning, match=msg_start):
-            run_with_disable(config_kwargs, bias="all")
+        if config_cls == LoraConfig:
+            # check that bias=all and bias=lora_only give a warning with the correct message
+            msg_start = "Careful, disabling adapter layers with bias configured to be"
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="lora_only")
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="all")
+
+        if config_cls == BOFTConfig:
+            # check that bias=all and bias=boft_only give a warning with the correct message
+            msg_start = "Careful, disabling adapter layers with bias configured to be"
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="boft_only")
+            with pytest.warns(UserWarning, match=msg_start):
+                run_with_disable(config_kwargs, bias="all")
 
         # For bias=none, there is no warning. Unfortunately, AFAIK unittest has no option to assert that no warning is
         # given, therefore, we check that the unittest gives us an AssertionError if we check for a warning
@@ -800,6 +1025,96 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             self.fail("There should be no warning when bias is set to 'none'")
 
     @parameterized.expand(TEST_CASES)
+    def test_active_adapter(self, test_name, model_id, config_cls, config_kwargs):
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        assert model.active_adapters == ["default"]
+        assert model.active_adapter == "default"
+
+        # at this stage, "default" is still the activate adapter, "other" is disabled
+        model.add_adapter("other", config)
+        assert model.active_adapters == ["default"]
+        assert model.active_adapter == "default"
+
+        # set "other" as the active adapter
+        model.set_adapter("other")
+        assert model.active_adapters == ["other"]
+        assert model.active_adapter == "other"
+
+        # set both adapters as active
+        # Note: On the PeftModel, there cannot be multiple active adapters, so we have to go through model.base_model
+        # instead.
+        model.base_model.set_adapter(["default", "other"])
+        # model.active_adapters works, as it delegates to the base_model
+        assert model.active_adapters == ["default", "other"]
+        # model.active_adapter would not work, thus we have to check the base_model directly
+        assert model.base_model.active_adapter == ["default", "other"]
+
+    @parameterized.expand(TEST_CASES)
+    def test_disable_adapters_exiting_context_restores_previous_state(
+        self, test_name, model_id, config_cls, config_kwargs
+    ):
+        # Test that when we exit the disable_adapter context, we correctly restore the enabled state of the modules as
+        # they were before the context.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        tuner_modules = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+
+        # all layers should be enabled
+        assert all(not module.disable_adapters for module in tuner_modules)
+        with model.disable_adapter():
+            pass
+        # this should not change after exiting the context
+        assert all(not module.disable_adapters for module in tuner_modules)
+
+        # now disable all layers
+        model.disable_adapter_layers()
+        assert all(module.disable_adapters for module in tuner_modules)
+        with model.disable_adapter():
+            pass
+        assert all(module.disable_adapters for module in tuner_modules)
+
+    @parameterized.expand(TEST_CASES)
+    def test_disable_adapters_exiting_context_irregular_state(self, test_name, model_id, config_cls, config_kwargs):
+        # When we have a model where some adapters are enabled and others are disabled, we should get a warning when
+        # entering the disable_adapter context because we cannot correctly restore the state of the adapters from
+        # before the context. After exiting the context, all adapters will be enabled, which is the status quo of how
+        # we deal with this.
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+        tuner_modules = [module for module in model.modules() if isinstance(module, BaseTunerLayer)]
+
+        # now we mix the states, some enabled some not
+        if len(tuner_modules) < 2:
+            # next check only works with more than 1 tuner module
+            return
+
+        # disable a single layer
+        tuner_modules[0].enable_adapters(False)
+        # sanity check that we have both enabled and disabled layers
+        assert {module.disable_adapters for module in tuner_modules} == {True, False}
+        # check that we get a warning with irregular states
+        msg = "The model contains some adapter layers that are enabled and others that are disabled"
+        with self.assertWarnsRegex(UserWarning, expected_regex=msg):
+            with model.disable_adapter():
+                pass
+
+        # when encountering irregular adapters, we enable all adapters at the end of the context
+        assert all(not module.disable_adapters for module in tuner_modules)
+
+    @parameterized.expand(TEST_CASES)
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
@@ -817,6 +1132,131 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         assert hasattr(model.base_model.model.lin0, "weight")
         assert hasattr(model.base_model.model.lin0, "bias")
+
+    def test_multiple_adapters_automatic_modules_to_save(self):
+        # See issue 1574
+        # When we use certain task types, PeftModel.modules_to_save is automatically updated to include some extra
+        # layers not specified in the PeftConfig. This attribute should be honored for all adapters, not just for
+        # the default adapter.
+        config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        model = get_peft_model(model, config0)
+        # sanity check
+        assert model.modules_to_save
+
+        model.add_adapter("other", config1)
+        assert "default" in model.base_model.classifier.modules_to_save
+        assert "other" in model.base_model.classifier.modules_to_save
+
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
+        # See issue 1574
+        # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
+        # possible to switch between those adapters and to use them.
+        if hasattr(config_cls, "feedforward_modules"):  # IA³
+            config_cls = partial(config_cls, feedforward_modules=["lin0"])
+
+        config0 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = config_cls(target_modules=["lin0"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        assert "default" in model.base_model.lin1.modules_to_save
+        assert "other" not in model.base_model.lin1.modules_to_save
+
+        # check that switching adapters and predicting does not raise
+        inputs = self.prepare_inputs_for_testing()
+        # "default" adapter is active
+        model(**inputs)
+        # switch to "other" adapter
+        model.set_adapter("other")
+        model(**inputs)
+
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
+        # See issue 1574
+        # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
+        if hasattr(config_cls, "feedforward_modules"):  # IA³
+            config_cls = partial(config_cls, feedforward_modules=["lin0"])
+
+        config0 = config_cls(target_modules=["lin0"])
+        config1 = config_cls(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        assert "default" not in model.base_model.lin1.modules_to_save
+        assert "other" in model.base_model.lin1.modules_to_save
+
+        # check that switching adapters and predicting does not raise
+        inputs = self.prepare_inputs_for_testing()
+        # "default" adapter is active
+        model(**inputs)
+        # switch to "other" adapter
+        model.set_adapter("other")
+        model(**inputs)
+
+    def test_multiple_adapters_mixed_modules_to_save_merging_adapters(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save, but it also checks that merging adapter
+        # weights works when one adapter has a modules_to_save and the other hasn't
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        # check that this does not raise
+        model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+        # since one of the adapters that was merged has a modules_to_save, that one should be used for the merged
+        # adapter
+        assert "default" in model.base_model.model.lin1.modules_to_save
+        assert "other" not in model.base_model.model.lin1.modules_to_save
+        assert "merged" in model.base_model.model.lin1.modules_to_save
+
+        # check that using the merged adapter does not raise
+        model.set_adapter("merged")
+        inputs = self.prepare_inputs_for_testing()
+        model(**inputs)
+
+    def test_multiple_adapters_same_modules_to_save_merging_adapters_raises(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save_merging_adapters but here the two
+        # adapters target the same module with modules_to_save. In this case, trying to merge the adapter weights
+        # should raise an error.
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"])
+        model = MLP()
+        model = get_peft_model(model, config0).to(self.torch_device)
+        model.add_adapter("other", config1)
+
+        msg = re.escape(
+            "Cannot add weighted adapters if they target the same module with modules_to_save, but found 1 such "
+            "instance(s)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
+
+    def test_multiple_adapters_seq_cls_mixed_modules_to_save_merging_adapters(self):
+        # See issue 1574
+        # This test is similar to test_multiple_adapters_mixed_modules_to_save_merging_adapters but uses a SEQ_CLS
+        # model like in test_multiple_adapters_automatic_modules_to_save. This should raise an error because the same
+        # module is implicitly targeted by modules_to_save twice.
+        config0 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        config1 = LoraConfig(task_type=TaskType.SEQ_CLS)
+        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")
+        model = get_peft_model(model, config0)
+        model.add_adapter("other", config1)
+
+        msg = re.escape(
+            "Cannot add weighted adapters if they target the same module with modules_to_save, but found 1 such "
+            "instance(s)."
+        )
+        with pytest.raises(ValueError, match=msg):
+            model.add_weighted_adapter(["default", "other"], weights=[1.0, 1.0], adapter_name="merged")
 
     def test_existing_model_card(self):
         # ensure that if there is already a model card, it is not overwritten
@@ -901,6 +1341,35 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             assert "base_model.model.emb.base_layer.weight" not in state_dict
             del state_dict
 
+    def test_load_resized_embedding_ignore_mismatched_sizes(self):
+        # issue #1605
+        # Make it possible to load a LoRA layer that targets an embedding layer even if the sizes mismatch by passing
+        # ignore_mismatched_sizes=True
+        model = ModelEmbConv1D(emb_size=100)
+        config = LoraConfig(target_modules=["emb", "lin0"], init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.mkdtemp()
+        try:
+            model.save_pretrained(tmp_dirname)
+            model = ModelEmbConv1D(emb_size=105)
+
+            # first check that this raises
+            with pytest.raises(RuntimeError) as exc:
+                PeftModel.from_pretrained(model, tmp_dirname)
+            msg = exc.value.args[0]
+            assert "size mismatch" in msg and "100" in msg and "105" in msg
+
+            # does not raise
+            PeftModel.from_pretrained(model, tmp_dirname, ignore_mismatched_sizes=True)
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                # windows error
+                pass
+
     @parameterized.expand(
         [
             LoraConfig(target_modules=["lin0"], init_lora_weights=False),
@@ -909,6 +1378,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
+            BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -985,6 +1455,22 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             unloaded = model.unload()
 
         assert isinstance(unloaded.classifier, nn.Linear)
+
+    def test_gpt2_dora_merge_and_unload(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload()
+
+    def test_gpt2_dora_merge_and_unload_safe_merge(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload(safe_merge=True)
 
 
 class TestMultiRankAdapter(unittest.TestCase):
@@ -1777,7 +2263,7 @@ class RequiresGradTester(unittest.TestCase):
         config1 = LoHaConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
-        # active pter is still "default"
+        # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.hada_w1_a.default",
@@ -1878,7 +2364,7 @@ class RequiresGradTester(unittest.TestCase):
         config1 = LoKrConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
-        # active pter is still "default"
+        # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.lokr_w1.default",
@@ -1963,7 +2449,7 @@ class RequiresGradTester(unittest.TestCase):
         config1 = OFTConfig(target_modules=["lin1"], inference_mode=True)
         peft_model.add_adapter("adapter1", config1)
 
-        # active pter is still "default"
+        # active adapter is still "default"
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.default",
@@ -2030,6 +2516,324 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
+        )
+
+    def test_requires_grad_boft_different_targets(self):
+        # test two different OFT adapters that target different modules
+        config0 = BOFTConfig(target_modules=["lin0"], boft_block_size=2)
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active pter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.boft_R.default",
+            "base_model.model.lin0.boft_s.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.boft_R.default",
+            "base_model.model.lin0.boft_s.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+    def test_requires_grad_boft_same_targets(self):
+        # same as previous test, except that BOFT adapters target the same layer
+        config0 = BOFTConfig(target_modules=["lin1"], boft_block_size=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = BOFTConfig(target_modules=["lin1"], boft_block_size=2, inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.default",
+            "base_model.model.lin1.boft_s.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.default",
+            "base_model.model.lin1.boft_s.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.boft_R.adapter1",
+            "base_model.model.lin1.boft_s.adapter1",
+        )
+
+    def test_requires_grad_lntuning_different_targets(self):
+        config0 = LNTuningConfig(
+            target_modules=["layernorm0"],
+        )
+        peft_model = get_peft_model(MLP_LayerNorm(), config0)
+
+        config1 = LNTuningConfig(
+            target_modules=["layernorm1"],
+            inference_mode=True,
+        )
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm1.ln_tuning_layers.adapter1.bias",
+        )
+
+    def test_requires_grad_lntuning_same_targets(self):
+        config0 = LNTuningConfig(
+            target_modules=["layernorm0"],
+        )
+        peft_model = get_peft_model(MLP_LayerNorm(), config0)
+
+        config1 = LNTuningConfig(target_modules=["layernorm0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.default.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.default.bias",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.weight",
+            "base_model.model.layernorm0.ln_tuning_layers.adapter1.bias",
+        )
+
+    def test_requires_grad_vera_different_targets(self):
+        # Test two different VeRA adapters that target different modules. Most notably, ensure that vera_A and vera_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = VeraConfig(target_modules=["lin1"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = VeraConfig(target_modules=["lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_vera_same_targets(self):
+        # Test two different VeRA adapters that target the same module. Most notably, ensure that vera_A and vera_B
+        # don't require grads.
+
+        # requires a model with at least 2 layers with the same shapes
+        class MLP2(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.relu = nn.ReLU()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 20, bias=bias)  # lin1 and lin2 have same shape
+                self.lin2 = nn.Linear(20, 20, bias=bias)
+                self.lin3 = nn.Linear(20, 2, bias=bias)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X = self.lin0(X)
+                X = self.relu(X)
+                X = self.lin1(X)
+                X = self.relu(X)
+                X = self.lin2(X)
+                X = self.relu(X)
+                X = self.lin3(X)
+                X = self.sm(X)
+                return X
+
+        config0 = VeraConfig(target_modules=["lin1", "lin2"])
+        peft_model = get_peft_model(MLP2(), config0)
+
+        config1 = VeraConfig(target_modules=["lin1", "lin2"])
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+            "base_model.model.lin2.vera_lambda_b.default",
+            "base_model.model.lin2.vera_lambda_d.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.default",
+            "base_model.model.lin1.vera_lambda_d.default",
+            "base_model.model.lin2.vera_lambda_b.default",
+            "base_model.model.lin2.vera_lambda_d.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.adapter1",
+            "base_model.model.lin1.vera_lambda_d.adapter1",
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vera_lambda_b.adapter1",
+            "base_model.model.lin1.vera_lambda_d.adapter1",
+            "base_model.model.lin2.vera_lambda_b.adapter1",
+            "base_model.model.lin2.vera_lambda_d.adapter1",
         )
 
 

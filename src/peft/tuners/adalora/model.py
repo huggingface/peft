@@ -27,6 +27,7 @@ from peft.utils import (
     get_auto_gptq_quant_linear,
     get_quantization_config,
 )
+from peft.utils.integrations import gather_params_ctx
 
 from .gptq import SVDQuantLinear
 from .layer import AdaLoraLayer, RankAllocator, SVDLinear
@@ -133,7 +134,7 @@ class AdaLoraModel(LoraModel):
         # If it is not an AdaLoraLayer, create a new module, else update it with new adapters
         if not isinstance(target, AdaLoraLayer):
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
-            if adapter_name != self.active_adapter:
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
@@ -244,7 +245,11 @@ class AdaLoraModel(LoraModel):
             num_param = 0
             for n, p in self.model.named_parameters():
                 if ("lora_A" in n or "lora_B" in n) and self.trainable_adapter_name in n:
-                    para_cov = p @ p.T if "lora_A" in n else p.T @ p
+                    if p.shape == torch.Size([0]):
+                        with gather_params_ctx(p, fwd_module=self):
+                            para_cov = p @ p.T if "lora_A" in n else p.T @ p
+                    else:
+                        para_cov = p @ p.T if "lora_A" in n else p.T @ p
                     I = torch.eye(*para_cov.size(), out=torch.empty_like(para_cov))  # noqa: E741
                     I.requires_grad = False
                     num_param += 1
@@ -344,3 +349,7 @@ class AdaLoraModel(LoraModel):
         # Pass the function and do forward propagation
         else:
             return None
+
+    def add_weighted_adapter(self, *args, **kwargs):
+        """This method is not supported for AdaLoRA, use LoRA instead."""
+        raise TypeError(f"{self.__class__.__name__} does not support add_weighted_adapter method.")

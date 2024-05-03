@@ -35,8 +35,10 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
@@ -52,6 +54,8 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "bloom_model_postprocess_past_key_value",
@@ -93,6 +97,8 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     loaded_in_kbit = getattr(model, "is_loaded_in_8bit", False) or getattr(model, "is_loaded_in_4bit", False)
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
+    is_eetq_quantized = getattr(model, "quantization_method", None) == "eetq"
+
     if gradient_checkpointing_kwargs is None:
         gradient_checkpointing_kwargs = {}
 
@@ -100,7 +106,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # freeze base model's layers
         param.requires_grad = False
 
-    if not is_gptq_quantized and not is_aqlm_quantized:
+    if not is_gptq_quantized and not is_aqlm_quantized and not is_eetq_quantized:
         # cast all non INT8 parameters to fp32
         for param in model.parameters():
             if (
@@ -108,7 +114,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
             ) and param.__class__.__name__ != "Params4bit":
                 param.data = param.data.to(torch.float32)
 
-    if (loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized) and use_gradient_checkpointing:
+    if (loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized or is_eetq_quantized) and use_gradient_checkpointing:
         # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
         if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
             # For backward compatibility
@@ -331,7 +337,13 @@ def _set_adapter(model, adapter_name):
         if isinstance(module, ModulesToSaveWrapper):
             # only check the adapter_name if we actually encounter a ModulesToSaveWrapper, otherwise we don't care
             adapter_name = check_adapter_name(adapter_name)
-            module.set_adapter(adapter_name)
+
+            # if the adapter is found in this module, set it as the active adapter, else disable the adapters of this
+            # module
+            if adapter_name in module.modules_to_save:
+                module.set_adapter(adapter_name)
+            else:
+                module.enable_adapters(False)
 
 
 def _prepare_prompt_learning_config(peft_config, model_config):
@@ -381,6 +393,11 @@ def fsdp_auto_wrap_policy(model):
     import os
 
     from accelerate import FullyShardedDataParallelPlugin
+
+    if hasattr(FullyShardedDataParallelPlugin, "get_module_class_from_name"):
+        get_module_class_from_name = FullyShardedDataParallelPlugin.get_module_class_from_name
+    else:
+        from accelerate.utils.dataclasses import get_module_class_from_name
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 
     from ..tuners import PrefixEncoder, PromptEmbedding, PromptEncoder
@@ -393,7 +410,7 @@ def fsdp_auto_wrap_policy(model):
     ).split(",")
     transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
-        transformer_cls = FullyShardedDataParallelPlugin.get_module_class_from_name(model, layer_class)
+        transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
             raise Exception("Could not find the transformer layer class to wrap in the model.")
         else:

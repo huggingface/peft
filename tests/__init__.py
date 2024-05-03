@@ -10,6 +10,11 @@ if os.environ.get("PEFT_DEBUG_WITH_TORCH_COMPILE") == "1":
     import peft
     from peft.mapping import get_peft_model as get_peft_model_original
 
+    # TODO: Experimental dynamo feature that should allow correct compilation of more PEFT modules. This should be
+    # removed once PyTorch has found a better solution, as this incurs a performance penalty.
+    # https://github.com/pytorch/pytorch/issues/124717#issuecomment-2083235776
+    torch._dynamo.config.guard_nn_modules = True
+
     def get_peft_model_new(*args, **kwargs):
         """Make get_peft_model() return a compiled model."""
         peft_model = get_peft_model_original(*args, **kwargs)

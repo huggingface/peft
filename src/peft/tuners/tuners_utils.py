@@ -161,7 +161,8 @@ class BaseTuner(nn.Module, ABC):
                 # user is adding a dict of PeftConfigs
                 self.peft_config.update(peft_config)
 
-        self.active_adapter = adapter_name
+        self.active_adapter: str | list[str] = adapter_name
+        self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
         self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
@@ -176,6 +177,21 @@ class BaseTuner(nn.Module, ABC):
 
     def forward(self, *args: Any, **kwargs: Any):
         return self.model.forward(*args, **kwargs)
+
+    def _pre_injection_hook(self, model: nn.Module, config: PeftConfig, adapter_name: str) -> None:
+        r"""
+        A hook to be called before the adapter is injected into the model. This method can be overridden by child
+        classes to perform any pre-injection operations.
+
+        Args:
+            model (`nn.Module`):
+                The model to be adapted.
+            config (`PeftConfig`):
+                The adapter config.
+            adapter_name (`str`):
+                The adapter name.
+        """
+        pass
 
     @abstractmethod
     def _prepare_adapter_config(self, peft_config: PeftConfig, model_config: dict) -> PeftConfig:
@@ -265,6 +281,20 @@ class BaseTuner(nn.Module, ABC):
         """
         ...
 
+    @abstractmethod
+    def disable_adapter_layers(self) -> None:
+        """
+        Disable all adapters in-place.
+        """
+        ...
+
+    @abstractmethod
+    def enable_adapter_layers(self) -> None:
+        """
+        Enable all adapters in-place
+        """
+        ...
+
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -347,6 +377,10 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
+        # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
+        # added, and it targets different layer(s) than the first adapter (which is active), then those different
+        # layers will be activated, which we don't want.
+        self.set_adapter(self.active_adapters)
         self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
@@ -415,9 +449,9 @@ class BaseTunerLayer(ABC):
     active_adapter = None
 
     # All names of layers that may contain adapter (trainable) weights
-    adapter_layer_names: tuple[str] = ()
+    adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters
-    other_param_names: tuple[str] = ()
+    other_param_names: tuple[str, ...] = ()
 
     # indicates whether all adapters should be disabled
     _disable_adapters: bool = False
@@ -477,9 +511,19 @@ class BaseTunerLayer(ABC):
         return self._disable_adapters
 
     @property
-    def active_adapter(self) -> str:
+    def active_adapter(self) -> str | list[str]:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
+
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        adapters = set()
+        for layer_name in self.adapter_layer_names:
+            module = getattr(self, layer_name)
+            if not isinstance(module, (nn.ModuleDict, nn.ParameterDict)):
+                continue
+            adapters.update(set(module.keys()))
+        return adapters
 
     @property
     def active_adapters(self):
@@ -697,6 +741,8 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
     """
     if adapter_names is None:
         adapter_names = module.active_adapters
+    if isinstance(adapter_names, str):
+        raise ValueError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
 
     if module.merged:
         merged_adapters = set(module.merged_adapters)
