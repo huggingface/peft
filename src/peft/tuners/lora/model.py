@@ -297,9 +297,15 @@ class LoraModel(BaseTuner):
             dispatchers.append(dispatch_bnb_4bit)
 
         dispatchers.extend(
-            
-            [dispatch_eetq, dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_hqq, dispatch_megatron, dispatch_default]
-        
+            [
+                dispatch_eetq,
+                dispatch_aqlm,
+                dispatch_awq,
+                dispatch_gptq,
+                dispatch_hqq,
+                dispatch_megatron,
+                dispatch_default,
+            ]
         )
 
         new_module = None

@@ -2108,6 +2108,7 @@ class PeftHqqGPUTests(unittest.TestCase):
         cc_matrix = torch.corrcoef(torch.stack((output_normal.flatten(), output_merged_unloaded.flatten())))
         assert cc_matrix.min() > 0.97
 
+
 # TODO: unskip the tests once https://github.com/casper-hansen/AutoAWQ/issues/466 is fixed
 @require_torch_gpu
 @require_auto_awq
