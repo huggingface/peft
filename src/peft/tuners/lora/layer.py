@@ -574,7 +574,7 @@ class Linear(nn.Module, LoraLayer):
                         chunk_id = int(active_adapter[-1])
                         lora_result = lora_B(lora_A(dropout(x))) * scaling
                         dim = lora_result.shape[-1]
-                        result[..., dim * chunk_id: dim * (chunk_id + 1)] += lora_result
+                        result[..., dim * chunk_id : dim * (chunk_id + 1)] += lora_result
                     else:
                         result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
