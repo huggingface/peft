@@ -1962,21 +1962,37 @@ class PeftHqqGPUTests(unittest.TestCase):
         correctly.
         """
 
-        from hqq.core.quantize import BaseQuantizeConfig
-        from hqq.engine.hf import HQQModelForCausalLM
+        use_transformers = False
+        try:
+            from transformers import HQQConfig
+
+            use_transformers = True
+        except ImportError:
+            from hqq.core.quantize import BaseQuantizeConfig
+            from hqq.engine.hf import HQQModelForCausalLM
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             device = "cuda"
             compute_dtype = torch.float16
 
-            model = HQQModelForCausalLM.from_pretrained(
-                self.causal_lm_model_id,
-                device_map=device,
-                torch_dtype=compute_dtype,
-            )
+            if use_transformers:
+                quant_config = HQQConfig(nbits=4, group_size=64)
 
-            quant_config = BaseQuantizeConfig(nbits=4, group_size=64)
-            model.quantize_model(quant_config=quant_config, compute_dtype=compute_dtype, device=device)
+                model = AutoModelForCausalLM.from_pretrained(
+                    self.causal_lm_model_id,
+                    device_map=device,
+                    torch_dtype=compute_dtype,
+                    quantization_config=quant_config,
+                )
+            else:
+                model = HQQModelForCausalLM.from_pretrained(
+                    self.causal_lm_model_id,
+                    device_map=device,
+                    torch_dtype=compute_dtype,
+                )
+
+                quant_config = BaseQuantizeConfig(nbits=4, group_size=64)
+                model.quantize_model(quant_config=quant_config, compute_dtype=compute_dtype, device=device)
 
             model = prepare_model_for_kbit_training(model)
             config = LoraConfig(
