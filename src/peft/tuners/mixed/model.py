@@ -51,7 +51,6 @@ class MixedModel(BaseTuner):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (:obj:`str`):
             The name of the first adapter.
-
     """
 
     def __init__(self, model: nn.Module, config: Configs, adapter_name: str) -> None:
