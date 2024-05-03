@@ -112,6 +112,10 @@ class LoraConfig(PeftConfig):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate LoRA adapters attached to them.
+        chunk_pattern(`Optional[dict]`):
+            Apply LoRA to each chunk of the dense matrix. This is used when q_proj, v_proj, v_proj are fused into one
+            big qkv_proj. key: the module name need to be chunked, value: number of chunks, e.g., {'qkv_proj': 3,
+            'gate_up_proj': 2}."
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -265,6 +269,17 @@ class LoraConfig(PeftConfig):
                 "   Final model will have this arrangement of original layers: `[0, 1, 2, 3, 2, 3, 4]`\n"
                 "This format is based on what is used for pass-through merges in mergekit. It makes it simple to select sequential "
                 "ranges of a model and stack them while reusing layers at either end of each sequence."
+            )
+        },
+    )
+    chunk_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "Apply LoRA to each chunk of the dense matrix. "
+                "This is used when q_proj, v_proj, v_proj are fused into one big qkv_proj. "
+                "key: the module name need to be chunked, value: number of chunks, "
+                "e.g., {'qkv_proj': 3, 'gate_up_proj': 2}."
             )
         },
     )

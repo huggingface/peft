@@ -185,6 +185,8 @@ class LoraModel(BaseTuner):
         target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
         r = lora_config.rank_pattern.get(target_name_key, lora_config.r)
         alpha = lora_config.alpha_pattern.get(target_name_key, lora_config.lora_alpha)
+        # make each chunk of the dense matrix has the same rank
+        n_chunk = lora_config.chunk_pattern.get(target_name_key, None)
 
         kwargs = {
             "r": r,
@@ -196,6 +198,7 @@ class LoraModel(BaseTuner):
             "use_dora": lora_config.use_dora,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "n_chunk": n_chunk,
         }
 
         quant_methods = ["gptq", "aqlm", "awq"]

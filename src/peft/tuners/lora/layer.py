@@ -85,6 +85,9 @@ class LoraLayer(BaseTunerLayer):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.n_chunk = self.kwargs.get("n_chunk", None)
+        if self.n_chunk is not None:
+            self.chunk_adapter_name = []
 
     def update_layer(
         self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False
@@ -102,8 +105,19 @@ class LoraLayer(BaseTunerLayer):
 
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
-        self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
-        self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+        if self.n_chunk is not None:
+            if self.out_features % self.n_chunk != 0:
+                raise ValueError(f"out_features {self.out_features} divided by n_chunk {self.n_chunk} is not integer.")
+
+            out_features = self.out_features // self.n_chunk
+            for i in range(self.n_chunk):
+                chunk_name = adapter_name + f"-chunk-{i}"
+                self.chunk_adapter_name = [chunk_name]
+                self.lora_A[chunk_name] = nn.Linear(self.in_features, r, bias=False)
+                self.lora_B[chunk_name] = nn.Linear(r, out_features, bias=False)
+        else:
+            self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+            self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
@@ -162,16 +176,30 @@ class LoraLayer(BaseTunerLayer):
             "num_iter": self.kwargs.get("loftq_iter", 1),
         }
 
-        qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
-        if adapter_name in self.lora_A.keys():
-            # initialize A the same way as the default for nn.Linear and B to zero
-            self.lora_A[adapter_name].weight.data = lora_A
-            self.lora_B[adapter_name].weight.data = lora_B
-        if adapter_name in self.lora_embedding_A.keys():
-            # initialize a the same way as the default for nn.linear and b to zero
-            self.lora_embedding_A[adapter_name].weight.data = lora_A
-            self.lora_embedding_B[adapter_name].weight.data = lora_B
-        self.get_base_layer().weight.data = qweight
+        if self.n_chunk is not None:
+            if self.out_features % self.n_chunk != 0:
+                raise ValueError(f"out_features {self.out_features} divided by n_chunk {self.n_chunk} is not integer.")
+
+            out_features = self.out_features // self.n_chunk
+            for i in range(self.n_chunk):
+                qweight, lora_A, lora_B = loftq_init(weight[out_features * i : out_features * (i + 1), :], **kwargs)
+                chunk_name = adapter_name + f"-chunk-{i}"
+                if adapter_name in self.lora_A.keys():
+                    self.lora_A[chunk_name].weight.data = lora_A
+                    self.lora_B[chunk_name].weight.data = lora_B
+                if adapter_name in self.lora_embedding_A.keys():
+                    self.lora_embedding_A[chunk_name].weight.data = lora_A
+                    self.lora_embedding_B[chunk_name].weight.data = lora_B
+                self.get_base_layer().weight.data[out_features * i : out_features * (i + 1), :] = qweight
+        else:
+            qweight, lora_A, lora_B = loftq_init(weight, **kwargs)
+            if adapter_name in self.lora_A.keys():
+                self.lora_A[adapter_name].weight.data = lora_A
+                self.lora_B[adapter_name].weight.data = lora_B
+            if adapter_name in self.lora_embedding_A.keys():
+                self.lora_embedding_A[adapter_name].weight.data = lora_A
+                self.lora_embedding_B[adapter_name].weight.data = lora_B
+            self.get_base_layer().weight.data = qweight
 
     def _get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
@@ -405,7 +433,12 @@ class Linear(nn.Module, LoraLayer):
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        orig_weights = orig_weights + delta_weight
+                        if self.n_chunk is not None and active_adapter in self.chunk_adapter_name:
+                            chunk_id = int(active_adapter[-1])
+                            dim = delta_weight.shape[-1]
+                            orig_weights[dim * chunk_id : dim * (chunk_id + 1)] += delta_weight
+                        else:
+                            orig_weights = orig_weights + delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -429,7 +462,12 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        base_layer.weight.data = base_layer.weight.data + delta_weight
+                        if self.n_chunk is not None and active_adapter in self.chunk_adapter_name:
+                            chunk_id = int(active_adapter[-1])
+                            dim = delta_weight.shape[-1]
+                            base_layer.weight.data[dim * chunk_id : dim * (chunk_id + 1)] += delta_weight
+                        else:
+                            base_layer.weight.data = base_layer.weight.data + delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -460,7 +498,13 @@ class Linear(nn.Module, LoraLayer):
                 weight = self.get_base_layer().weight
                 delta_weight = self.get_delta_weight(active_adapter)
                 if not self.use_dora[active_adapter]:
-                    weight.data -= delta_weight
+                    if self.n_chunk is not None and active_adapter in self.chunk_adapter_name:
+                        chunk_id = int(active_adapter[-1])
+                        delta_weight = self.get_delta_weight(active_adapter)
+                        dim = delta_weight.shape[-1]
+                        weight.data[dim * chunk_id : dim * (chunk_id + 1)] -= delta_weight
+                    else:
+                        weight.data -= delta_weight
                 else:
                     weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
                     dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
@@ -526,7 +570,13 @@ class Linear(nn.Module, LoraLayer):
                 x = x.to(lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                    if self.n_chunk is not None and active_adapter in self.chunk_adapter_name:
+                        chunk_id = int(active_adapter[-1])
+                        lora_result = lora_B(lora_A(dropout(x))) * scaling
+                        dim = lora_result.shape[-1]
+                        result[..., dim * chunk_id: dim * (chunk_id + 1)] += lora_result
+                    else:
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     x = dropout(x)
                     result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
