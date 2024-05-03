@@ -231,7 +231,7 @@ class LoraLayer(BaseTunerLayer):
         lora_weight = lora_B.weight @ lora_A.weight
         magnitude = self.lora_magnitude_vector[active_adapter]
         base_layer = self.get_base_layer()
-        if hasattr(base_layer, "W_q"):
+        if hasattr(base_layer, "W_q"):  # For handling HQQ quantized weight
             weight = base_layer.dequantize()
         else:
             weight = base_layer.weight
