@@ -1860,7 +1860,6 @@ class MixedPrecisionTests(unittest.TestCase):
         )
 
         model = get_peft_model(model, self.config, autocast_adapter_dtype=True)
-
         dtype_counts_after = Counter(p.dtype for p in model.parameters())
         assert dtype_counts_before == dtype_counts_after
 

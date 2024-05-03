@@ -148,9 +148,8 @@ def get_peft_model(
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
 
     if mixed:
-        return PeftMixedModel(
-            model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
-        )
+        # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
+        return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
 
     if peft_config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys() and not peft_config.is_prompt_learning:
         return PeftModel(model, peft_config, adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)

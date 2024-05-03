@@ -113,20 +113,9 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
             The config of the model to be tuned. The adapter type must be compatible.
         adapter_name (`str`, `optional`, defaults to `"default"`):
             The name of the first adapter.
-        autocast_adapter_dtype (`bool`, *optional*):
-            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
-
     """
 
-    def __init__(
-        self,
-        model: nn.Module,
-        peft_config: PeftConfig,
-        adapter_name: str = "default",
-        autocast_adapter_dtype: bool = True,
-    ) -> None:
+    def __init__(self, model: nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
         super().__init__()
         _check_config_compatible(peft_config)
         _prepare_model_for_gradient_checkpointing(model)
