@@ -17,7 +17,6 @@ import os
 from peft import LoraConfig, get_peft_model, PeftModel, prepare_model_for_kbit_training
 from dataclasses import dataclass, field
 from typing import Optional, List
-from copy import deepcopy
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, TrainingArguments, HfArgumentParser
 from trl import SFTTrainer
 from datasets import load_dataset
