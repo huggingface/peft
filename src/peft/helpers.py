@@ -1,3 +1,17 @@
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import inspect
 from copy import deepcopy
 from functools import update_wrapper
@@ -8,9 +22,9 @@ from .peft_model import PeftModel
 
 def update_forward_signature(model: PeftModel) -> None:
     """
-    Args:
     Updates the forward signature of the PeftModel to include parents class signature
         model (`PeftModel`): Peft model to update the forward signature
+
     Example:
 
     ```python
@@ -41,9 +55,9 @@ def update_forward_signature(model: PeftModel) -> None:
 
 def update_generate_signature(model: PeftModel) -> None:
     """
-    Args:
     Updates the generate signature of a PeftModel with overriding generate to include parents class signature
         model (`PeftModel`): Peft model to update the generate signature
+
     Example:
 
     ```python
@@ -81,12 +95,12 @@ def update_generate_signature(model: PeftModel) -> None:
 
 def update_signature(model: PeftModel, method: str = "all") -> None:
     """
-    Args:
     Updates the signature of a PeftModel include parents class signature for forward or generate method
         model (`PeftModel`): Peft model to update generate or forward signature method (`str`): method to update
         signature choose one of "forward", "generate", "all"
+
     Example:
-     ```python
+    ```python
     >>> from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
     >>> from peft import get_peft_model, LoraConfig, TaskType, update_signature
 
