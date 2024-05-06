@@ -231,7 +231,7 @@ class PeftConfig(PeftConfigMixin):
     base_model_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "The name of the base model to use."}
     )
-    revision: Optional[str] = field(default=None, metadata={"help": "The specific base model version to use."})
+    revision: Optional[str] = field(default="main", metadata={"help": "The specific base model version to use."})
     peft_type: Optional[Union[str, PeftType]] = field(default=None, metadata={"help": "Peft type"})
     task_type: Optional[Union[str, TaskType]] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
@@ -52,7 +52,6 @@ from .tuners import (
     PromptTuningConfig,
 )
 from .utils import _prepare_prompt_learning_config
-
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel
@@ -109,7 +108,7 @@ def get_peft_model(
     peft_config: PeftConfig,
     adapter_name: str = "default",
     mixed: bool = False,
-    revision: str = None,
+    revision: Optional[str] = "main",
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
@@ -123,7 +122,7 @@ def get_peft_model(
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
         mixed (`bool`, `optional`, defaults to `False`):
             Whether to allow mixing different (compatible) adapter types.
-        revision (`str`, `optional`, defaults to `None`):
+        revision (`str`, `optional`, defaults to `main`):
             The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
             the base model
     """
