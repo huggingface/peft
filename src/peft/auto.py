@@ -62,6 +62,7 @@ class _BaseAutoPeftModel:
         adapter_name: str = "default",
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
+        revision: Optional[str] = "main",
         **kwargs,
     ):
         r"""
@@ -69,7 +70,7 @@ class _BaseAutoPeftModel:
         are passed along to `PeftConfig` that automatically takes care of filtering the kwargs of the Hub methods and
         the config object init.
         """
-        peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, revision=revision, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
         base_model_revision = peft_config.revision
 
@@ -115,7 +116,7 @@ class _BaseAutoPeftModel:
             tokenizer_exists = check_file_exists_on_hf_hub(
                 repo_id=pretrained_model_name_or_path,
                 filename=TOKENIZER_CONFIG_NAME,
-                revision=kwargs.get("revision", None),
+                revision=revision,
                 repo_type=kwargs.get("repo_type", None),
                 token=token,
             )
