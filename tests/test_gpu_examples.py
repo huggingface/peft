@@ -1508,10 +1508,10 @@ class TestPiSSA:
 
         # save LoRA weights, they should be initialized such that they minimize the quantization error
         pissa_model.base_model.peft_config["default"].init_lora_weights = True
-        pissa_model.save_pretrained(f"{tmp_path}/pissa_model")
+        pissa_model.save_pretrained(tmp_path / "pissa_model")
 
         pissa_model = pissa_model.unload()
-        pissa_model.save_pretrained(f"{tmp_path}/residual_model")
+        pissa_model.save_pretrained(tmp_path / "residual_model")
 
         del pissa_model
         gc.collect()
@@ -1519,9 +1519,9 @@ class TestPiSSA:
 
         # now load quantized model and apply PiSSA-initialized weights on top
         qpissa_model = self.quantize_model(
-            cls.from_pretrained(f"{tmp_path}/residual_model").eval().to(device), bits, device
+            cls.from_pretrained(tmp_path / "residual_model").eval().to(device), bits, device
         )
-        qpissa_model = PeftModel.from_pretrained(qpissa_model, f"{tmp_path}/pissa_model")
+        qpissa_model = PeftModel.from_pretrained(qpissa_model, tmp_path / "pissa_model")
         qpissa_model = qpissa_model.merge_and_unload()
         qpissa_error = self.nuclear_norm(base_model, qpissa_model)
         print(qpissa_error)
@@ -1573,14 +1573,14 @@ def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self,
     peft_model = get_peft_model(deepcopy(model), config)
     # save the initial model
     peft_model.peft_config["default"].init_lora_weights = True
-    peft_model.save_pretrained(f"{tmp_path}/init-model")
+    peft_model.save_pretrained(tmp_path / "init-model")
     peft_model = peft_model.unload()
-    torch.save(peft_model.state_dict(), f"{tmp_path}/residual-model")
+    torch.save(peft_model.state_dict(), tmp_path / "residual-model")
     del peft_model
 
     # create 4bit base model
     base_model = deepcopy(model)
-    base_model.load_state_dict(torch.load(f"{tmp_path}/residual-model"))
+    base_model.load_state_dict(torch.load(tmp_path / "residual-model"))
     # sanity check: the base model weights were indeed changed
     tol = 1e-06
     assert not torch.allclose(model.linear.weight, base_model.linear.weight, atol=tol, rtol=tol)
@@ -1589,7 +1589,7 @@ def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self,
     linear4bit.load_state_dict(base_model.linear.state_dict())
     linear4bit.to(0)
     base_model.linear = linear4bit
-    peft_model = PeftModel.from_pretrained(deepcopy(base_model), f"{tmp_path}/init-model")
+    peft_model = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "init-model")
     output_quantized_pissa = peft_model(data)[0]
     # sanity check
     tol = 1e-06
@@ -1603,8 +1603,8 @@ def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self,
     assert not torch.allclose(output_quantized_pissa, output_finetuned_pissa, atol=tol, rtol=tol)
 
     # save the model normally
-    peft_model.save_pretrained(f"{tmp_path}/pissa-model")
-    model_loaded = PeftModel.from_pretrained(deepcopy(base_model), f"{tmp_path}/pissa-model")
+    peft_model.save_pretrained(tmp_path / "pissa-model")
+    model_loaded = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "pissa-model")
     output_loaded = model_loaded(data)[0]
 
     assert torch.allclose(output_finetuned_pissa, output_loaded, atol=tol, rtol=tol)
@@ -1613,8 +1613,8 @@ def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self,
     assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
 
     # save the model with conversion
-    peft_model.save_pretrained(f"{tmp_path}/pissa-model-converted", convert_pissa_to_lora=f"{tmp_path}/init-model")
-    model_converted = PeftModel.from_pretrained(deepcopy(model), f"{tmp_path}/pissa-model-converted")
+    peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model")
+    model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
     output_converted = model_converted(data)[0]
 
     # rank should be double of what it was initially
