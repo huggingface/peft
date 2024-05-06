@@ -111,3 +111,24 @@ def update_signature(model: PeftModel, method: str = "all") -> None:
         update_generate_signature(model)
     else:
         raise ValueError(f"method {method} is not supported please choose one of ['forward', 'generate', 'all']")
+
+
+def check_is_peft_model(model_name_or_path: str) -> bool:
+    """
+    Check if the model is a PEFT model.
+
+    Args:
+        model_name_or_path (`str`):
+            Model id to check, can be local or on the Hugging Face Hub.
+
+    Returns:
+        `bool`: True if the model is a PEFT model, False otherwise.
+    """
+    is_peft_model = True
+    try:
+        PeftConfig.from_pretrained(model_name_or_path)
+    except Exception:
+        # allow broad exceptions so that this works even if new exceptions are added on HF Hub side
+        is_peft_model = False
+
+    return is_peft_model
