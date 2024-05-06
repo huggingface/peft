@@ -3,7 +3,7 @@ from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
 
-from .peft_model import PeftModel
+from .peft_model import PeftConfig, PeftModel
 
 
 def update_forward_signature(model: PeftModel) -> None:
