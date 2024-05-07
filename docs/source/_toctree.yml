@@ -106,6 +106,8 @@
       title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/helpers
+      title: Helpers
     title: Adapters
   - sections:
     - local: package_reference/merge_utils
