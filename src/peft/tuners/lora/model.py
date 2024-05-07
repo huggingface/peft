@@ -16,7 +16,6 @@ from __future__ import annotations
 import math
 import operator
 import re
-import os
 import warnings
 from contextlib import contextmanager
 from dataclasses import asdict, replace
@@ -42,8 +41,8 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
-    get_quantization_config,
     get_peft_model_state_dict,
+    get_quantization_config,
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 
@@ -846,7 +845,7 @@ class LoraModel(BaseTuner):
                 and param.data.dtype != torch.bfloat16
             ):
                 warnings.warn(
-                    "Note that Quant(W_res) + AB != Quant(W) + \Delta(AB); "
+                    r"Note that Quant(W_res) + AB != Quant(W) + \Delta(AB); "
                     "the converted LoRA, when combined with W or Quant(W), may introduce a certain gap in the fine-tuned model. "
                     "Therefore, we recommend directly using the Quant(W_res) in conjunction with the PiSSA adapter. "
                 )

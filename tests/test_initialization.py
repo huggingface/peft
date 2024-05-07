@@ -13,13 +13,14 @@
 # limitations under the License.
 
 import re
+from copy import deepcopy
 
 import pytest
 import torch
 from scipy import stats
 from torch import nn
-from copy import deepcopy
-from peft import AdaLoraConfig, LoraConfig, PromptTuningConfig, VeraConfig, get_peft_model, PeftModel
+
+from peft import AdaLoraConfig, LoraConfig, PeftModel, PromptTuningConfig, VeraConfig, get_peft_model
 from peft.utils import infer_device
 
 
@@ -254,7 +255,6 @@ class TestLoraInitialization:
         assert model.conv2d.scaling["default"] == expected_scaling
 
     def test_lora_pissa_linear_init_default(self, data):
-
         model = self.get_model()
         output = model(data)[0]
 

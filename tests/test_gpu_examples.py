@@ -16,9 +16,11 @@ import importlib
 import os
 import tempfile
 import unittest
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
+import bitsandbytes as bnb
 import pytest
 import torch
 from accelerate import infer_auto_device_map
@@ -55,8 +57,6 @@ from peft import (
 )
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 from peft.utils.loftq_utils import NFQuantizer
-import bitsandbytes as bnb
-from copy import deepcopy
 
 from .testing_utils import (
     require_aqlm,
@@ -1474,7 +1474,7 @@ class TestPiSSA:
         device="cuda",
         model_id="hf-internal-testing/tiny-random-BloomForCausalLM",
     ):
-        # Comparing the quantized LoRA model to the base model, vs the PiSSA quantized model to the base model. 
+        # Comparing the quantized LoRA model to the base model, vs the PiSSA quantized model to the base model.
         # We expect the PiSSA quantized model to have less error than the normal LoRA quantized model.
 
         cls = AutoModelForSeq2SeqLM if "t5" in str(model_id) else AutoModelForCausalLM
@@ -1557,6 +1557,7 @@ class TestPiSSA:
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_t5_pissa_8bit(self, device, tmp_path):
         self.get_errors(bits=8, device=device, model_id="t5-small", tmp_path=tmp_path)
+
 
 @pytest.mark.xfail(
     reason="The quantization error of the base model is not equal to that of the residual model.", strict=True

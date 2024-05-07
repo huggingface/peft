@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
-import os
-from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
 import argparse
+import os
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from peft import LoraConfig, get_peft_model
+
 
 parser = argparse.ArgumentParser(
     description="Merge Adapter to Base Model", help="The name or path of the fp32/16 base model."
