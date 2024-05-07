@@ -37,7 +37,6 @@ class PeftHubFeaturesTester(unittest.TestCase):
             assert isinstance(model, PeftModel)
 
 
-
 class TestLocalModel:
     def test_local_model_saving_no_warning(self, recwarn, tmp_path):
         # When the model is saved, the library checks for vocab changes by
