@@ -137,8 +137,8 @@ def get_peft_model(
             Whether to allow mixing different (compatible) adapter types.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 or bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     """
     model_config = getattr(model, "config", {"model_type": "custom"})

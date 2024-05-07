@@ -104,8 +104,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **base_model** ([`torch.nn.Module`]) -- The base transformer model used for Peft.
@@ -407,7 +407,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.inference_mode = not is_trainable
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
-            model = cls(model, config, adapter_name)
+            model = cls(model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
                 model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
@@ -946,8 +946,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 The device to load the adapter on. If `None`, the device will be inferred.
             autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
                 Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
-                weights using float16 to float32, as this is typically required for stable training, and only affect
-                select PEFT tuners.
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
@@ -1134,8 +1134,8 @@ class PeftModelForSequenceClassification(PeftModel):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -1369,8 +1369,8 @@ class PeftModelForCausalLM(PeftModel):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     Example:
 
@@ -1580,8 +1580,8 @@ class PeftModelForSeq2SeqLM(PeftModel):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     Example:
 
@@ -1840,8 +1840,8 @@ class PeftModelForTokenClassification(PeftModel):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -2059,8 +2059,8 @@ class PeftModelForQuestionAnswering(PeftModel):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -2299,8 +2299,8 @@ class PeftModelForFeatureExtraction(PeftModel):
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
         autocast_adapter_dtype (`bool`, *optional*):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
-            using float16 to float32, as this is typically required for stable training, and only affect select PEFT
-            tuners.
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
