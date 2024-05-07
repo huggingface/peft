@@ -1198,11 +1198,7 @@ class PeftCommonTester:
 
         # test ties re-weighting with multiple adapters
         model.add_weighted_adapter(
-            adapter_list[:2],
-            weight_list[:2],
-            "multi_adapter_ties_reweighting",
-            combination_type="ties",
-            density=0.5,
+            adapter_list[:2], weight_list[:2], "multi_adapter_ties_reweighting", combination_type="ties", density=0.5
         )
 
         # test dare_linear re-weighting with multiple adapters
@@ -1367,20 +1363,17 @@ class PeftCommonTester:
             **config_kwargs,
         )
 
-        # Define a dictionary to map config types to their respective test functions
-        test_functions = {
-            LoraConfig: self._test_weighted_combination_of_adapters_lora,
-            IA3Config: self._test_weighted_combination_of_adapters_ia3,
-        }
+        if not isinstance(config, (LoraConfig, IA3Config)):
+            # This test is only applicable for Lora and IA3 configs
+            return pytest.skip(f"Test not applicable for {config}")
 
-        # Get the test function based on the config type
-        test_function = test_functions.get(type(config))
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config, adapter_list[0])
 
-        if test_function:
-            # Only instantiate the model if a valid config is provided
-            model = self.transformers_class.from_pretrained(model_id)
-            model = get_peft_model(model, config, adapter_list[0])
-            test_function(model, config, adapter_list, weight_list)
+        if isinstance(config, LoraConfig):
+            self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
+        elif isinstance(config, IA3Config):
+            self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
         else:
             pytest.skip(f"Test not applicable for {config}")
 
