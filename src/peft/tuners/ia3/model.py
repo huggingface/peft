@@ -481,7 +481,7 @@ class IA3Model(BaseTuner):
                 else:
                     continue
 
-                target_ia3_l.data = target_ia3_l.data * 0.0
+                target_ia3_l.data = target_ia3_l.data.zero_()
                 for adapter, weight in zip(adapters, weights):
                     if adapter in target.ia3_l:
                         current_adapter_ia3_l = target.ia3_l[adapter]
