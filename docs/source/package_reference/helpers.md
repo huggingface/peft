@@ -8,5 +8,5 @@ A collection of helper functions for PEFT.
 
 ## Checking if a model is a PEFT model
 
-[[autodoc]] helpers.check_is_peft_model
+[[autodoc]] helpers.check_if_peft_model
     - all

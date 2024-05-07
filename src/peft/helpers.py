@@ -113,7 +113,7 @@ def update_signature(model: PeftModel, method: str = "all") -> None:
         raise ValueError(f"method {method} is not supported please choose one of ['forward', 'generate', 'all']")
 
 
-def check_is_peft_model(model_name_or_path: str) -> bool:
+def check_if_peft_model(model_name_or_path: str) -> bool:
     """
     Check if the model is a PEFT model.
 
