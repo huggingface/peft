@@ -22,15 +22,10 @@ import accelerate
 import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
-from packaging import version
 from huggingface_hub import file_exists
 from huggingface_hub.utils import EntryNotFoundError, HFValidationError
+from packaging import version
 from safetensors.torch import storage_ptr, storage_size
-
-mlu_available = False
-if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
-    from accelerate.utils import is_mlu_available
-    mlu_available = is_mlu_available()
 
 from ..import_utils import is_auto_gptq_available, is_torch_tpu_available
 from .constants import (
@@ -48,6 +43,13 @@ from .constants import (
     bloom_model_postprocess_past_key_value,
     starcoder_model_postprocess_past_key_value,
 )
+
+
+mlu_available = False
+if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
+    from accelerate.utils import is_mlu_available
+
+    mlu_available = is_mlu_available()
 
 
 __all__ = [
