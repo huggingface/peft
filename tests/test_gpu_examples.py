@@ -1556,8 +1556,7 @@ class TestPiSSA:
 
     @pytest.mark.parametrize("device", ["cuda", "cpu"])
     def test_t5_pissa_8bit(self, device, tmp_path):
-        self.get_errors(bits=8, device=device, model_id="t5-small" tmp_path=tmp_path)
-
+        self.get_errors(bits=8, device=device, model_id="t5-small", tmp_path=tmp_path)
 
 @pytest.mark.xfail(
     reason="The quantization error of the base model is not equal to that of the residual model.", strict=True
