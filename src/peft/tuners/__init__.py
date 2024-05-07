@@ -31,4 +31,5 @@ from .multitask_prompt_tuning import MultitaskPromptEmbedding, MultitaskPromptTu
 from .oft import OFTConfig, OFTModel
 from .mixed import MixedModel
 from .poly import PolyConfig, PolyModel
+from .ln_tuning import LNTuningConfig, LNTuningModel
 from .vera import VeraConfig, VeraModel
