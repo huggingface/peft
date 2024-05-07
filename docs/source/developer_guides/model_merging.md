@@ -140,7 +140,7 @@ print(tokenizer.decode(outputs[0]))
 </hfoptions>
 
 
-## Merging $(IA)^3$ Models
+## Merging (IA)³ Models
 $(IA)^3$ models support linear model merging. To merge $(IA)^3$ models, you can use the `~IA3Model.add_weighted_adapter` method. This method is similar to the `~LoraModel.add_weighted_adapter` method, but it doesn't accept the `combination_type` parameter. Assuming we have a PEFT model and three $(IA)^3$ adapters, we can merge them as follows:
 
 ```py
