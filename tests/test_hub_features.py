@@ -42,7 +42,8 @@ class PeftHubFeaturesTester(unittest.TestCase):
 class TestBaseModelRevision:
     def test_save_and_load_base_model_revision(self, tmp_path):
         r"""
-        Test if subfolder argument works as expected
+        Test saving a PeftModel with a base model revision and loading with AutoPeftModel to recover the same base
+        model
         """
         lora_config = LoraConfig(r=8, lora_alpha=16, lora_dropout=0.0)
         test_inputs = torch.arange(10).reshape(-1, 1)
@@ -70,3 +71,17 @@ class TestBaseModelRevision:
 
         output_revision_loaded = peft_model_revision_loaded(test_inputs).logits
         assert torch.allclose(output_revision, output_revision_loaded)
+
+    def test_load_different_peft_and_base_model_revision(self, tmp_path):
+        r"""
+        Test loading an AutoPeftModel from the hub where the base model revision and peft revision differ
+        """
+        base_model_id = "hf-internal-testing/tiny-random-BertModel"
+        base_model_revision = None
+        peft_model_id = "peft-internal-testing/tiny-random-BertModel-lora"
+        peft_model_revision = "v1.2.3"
+
+        peft_model = AutoPeftModelForCausalLM.from_pretrained(peft_model_id, revision=peft_model_revision).eval()
+
+        assert peft_model.peft_config["default"].base_model_name_or_path == base_model_id
+        assert peft_model.peft_config["default"].revision == base_model_revision
