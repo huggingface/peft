@@ -1577,7 +1577,7 @@ class TestPiSSA:
                 x_4d = x.flatten().reshape(1, 100, 10, 10)
                 return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
 
-        model = MyModule()
+        model = MyModule().to("cuda")
         output_base = model(data)[0]
 
         config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
