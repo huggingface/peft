@@ -20,7 +20,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
-import bitsandbytes as bnb
 import pytest
 import torch
 from accelerate import infer_auto_device_map
@@ -1492,7 +1491,6 @@ class TestPiSSA:
         )
         qlora_model = qlora_model.merge_and_unload()
         qlora_error = self.nuclear_norm(base_model, qlora_model)
-        print(qlora_error)
         del qlora_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -1524,7 +1522,6 @@ class TestPiSSA:
         qpissa_model = PeftModel.from_pretrained(qpissa_model, tmp_path / "pissa_model")
         qpissa_model = qpissa_model.merge_and_unload()
         qpissa_error = self.nuclear_norm(base_model, qpissa_model)
-        print(qpissa_error)
         del qpissa_model
         gc.collect()
         torch.cuda.empty_cache()
@@ -1558,73 +1555,88 @@ class TestPiSSA:
     def test_t5_pissa_8bit(self, device, tmp_path):
         self.get_errors(bits=8, device=device, model_id="t5-small", tmp_path=tmp_path)
 
+    @require_bitsandbytes
+    def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self, tmp_path):
+        # A copy of the test `test_lora_pissa_conversion_same_output_after_loading` in peft/tests/test_initialization.py,
+        # that would fail if bitsandbytes quantization is used because Quant(W_res) + AB !=Quant(W) + \Delta(AB).
+        import bitsandbytes as bnb
 
-@pytest.mark.xfail(
-    reason="The quantization error of the base model is not equal to that of the residual model.", strict=True
-)
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
-def test_lora_pissa_conversion_same_output_after_loading_with_quantization(self, data, tmp_path):
-    # A copy of the test `test_lora_pissa_conversion_same_output_after_loading` in peft/tests/test_initialization.py,
-    # that would fail if bitsandbytes quantization is used because Quant(W_res) + AB !=Quant(W) + \Delta(AB).
-    model = self.get_model()
-    output_base = model(data)[0]
+        torch.manual_seed(0)
+        data = torch.rand(10, 1000).to("cuda")
 
-    config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
-    peft_model = get_peft_model(deepcopy(model), config)
-    # save the initial model
-    peft_model.peft_config["default"].init_lora_weights = True
-    peft_model.save_pretrained(tmp_path / "init-model")
-    peft_model = peft_model.unload()
-    torch.save(peft_model.state_dict(), tmp_path / "residual-model")
-    del peft_model
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = torch.nn.Linear(1000, 1000)
+                self.embed = torch.nn.Embedding(1000, 1000)
+                self.conv2d = torch.nn.Conv2d(100, 100, 3)
 
-    # create 4bit base model
-    base_model = deepcopy(model)
-    base_model.load_state_dict(torch.load(tmp_path / "residual-model"))
-    # sanity check: the base model weights were indeed changed
-    tol = 1e-06
-    assert not torch.allclose(model.linear.weight, base_model.linear.weight, atol=tol, rtol=tol)
-    # quantize the linear layer
-    linear4bit = bnb.nn.Linear4bit(base_model.linear.in_features, base_model.linear.out_features)
-    linear4bit.load_state_dict(base_model.linear.state_dict())
-    linear4bit.to(0)
-    base_model.linear = linear4bit
-    peft_model = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "init-model")
-    output_quantized_pissa = peft_model(data)[0]
-    # sanity check
-    tol = 1e-06
-    assert not torch.allclose(output_base, output_quantized_pissa, atol=tol, rtol=tol)
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
 
-    # modify the weights, or else the adapter performs an identity transformation
-    peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
-    output_finetuned_pissa = peft_model(data)[0]
-    # sanity check
-    tol = 1e-06
-    assert not torch.allclose(output_quantized_pissa, output_finetuned_pissa, atol=tol, rtol=tol)
+        model = MyModule()
+        output_base = model(data)[0]
 
-    # save the model normally
-    peft_model.save_pretrained(tmp_path / "pissa-model")
-    model_loaded = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "pissa-model")
-    output_loaded = model_loaded(data)[0]
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model = peft_model.unload()
+        torch.save(peft_model.state_dict(), tmp_path / "residual-model")
+        del peft_model
 
-    assert torch.allclose(output_finetuned_pissa, output_loaded, atol=tol, rtol=tol)
-    # sanity check: ranks should still be 8 as initially
-    assert model_loaded.peft_config["default"].r == 8
-    assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        # create 4bit base model
+        base_model = deepcopy(model)
+        base_model.load_state_dict(torch.load(tmp_path / "residual-model"))
+        # sanity check: the base model weights were indeed changed
+        tol = 1e-06
+        assert not torch.allclose(model.linear.weight, base_model.linear.weight, atol=tol, rtol=tol)
+        # quantize the linear layer
+        linear4bit = bnb.nn.Linear4bit(base_model.linear.in_features, base_model.linear.out_features)
+        linear4bit.load_state_dict(base_model.linear.state_dict())
+        linear4bit.to(0)
+        base_model.linear = linear4bit
+        peft_model = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "init-model")
+        output_quantized_pissa = peft_model(data)[0]
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_quantized_pissa, atol=tol, rtol=tol)
 
-    # save the model with conversion
-    peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model")
-    model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
-    output_converted = model_converted(data)[0]
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_finetuned_pissa = peft_model(data)[0]
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_quantized_pissa, output_finetuned_pissa, atol=tol, rtol=tol)
 
-    # rank should be double of what it was initially
-    assert model_converted.peft_config["default"].r == 16
-    assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
-    # base model weights should be the same as the initial model
-    assert torch.allclose(
-        model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
-    )
-    assert torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "pissa-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(base_model), tmp_path / "pissa-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_finetuned_pissa, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+
+        # save the model with conversion
+        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model")
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
+        output_converted = model_converted(data)[0]
+
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+        # This check is expected to fail when using bnb
+        assert not torch.allclose(output_finetuned_pissa, output_converted, atol=tol, rtol=tol)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
