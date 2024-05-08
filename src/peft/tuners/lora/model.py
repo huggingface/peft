@@ -835,8 +835,8 @@ class LoraModel(BaseTuner):
         self, output_state_dict: dict[str, torch.Tensor], adapter_name: str = "pissa_init", kwargs=None
     ):
         """
-        This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter
-        in `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
+        This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter in
+        `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
         """
         for name, param in self.model.named_parameters():
             if (

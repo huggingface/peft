@@ -202,11 +202,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
             convert_pissa_to_lora (`str`):
                 The path to the initialized PiSSA adapter, which is obtained after initializing the model with PiSSA
-                and before performing any training.
-                When `convert_pissa_to_lora` is not None, the difference in PISSA before and after fine-tuning is calculated.
-                This difference can be represented as the parameters of a of a standard LoRA adapter.
-                Using this converted adapter does not require changes to the base model, thus conveniently allowing
-                the use of multiple PISSA and LoRA adapters, and the activation or deactivation of any adapters.
+                and before performing any training. When `convert_pissa_to_lora` is not None, the difference in PISSA
+                before and after fine-tuning is calculated. This difference can be represented as the parameters of a
+                of a standard LoRA adapter. Using this converted adapter does not require changes to the base model,
+                thus conveniently allowing the use of multiple PISSA and LoRA adapters, and the activation or
+                deactivation of any adapters.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
