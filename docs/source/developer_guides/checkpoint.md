@@ -113,7 +113,7 @@ Here we can see part of the `__init__` code used by all `LoraLayer` classes in P
 Let's check the `state_dict` of a PEFT LoRA model applied to BERT. When printing the first five keys using the default LoRA settings (the remaining keys are the same, just with different layer numbers), we get:
 
 ```
-'base_model.model.encoder.layer.0.attention.self.query.lora_A.weight', 'base_model.model.encoder.layer.0.attention.self.query.lora_B.weight', 'base_model.model.encoder.layer.0.attention.self.value.lora_A.weight', 'base_model.model.encoder.layer.0.attention.self.value.lora_B.weight', 'base_model.model.encoder.layer.1.attention.self.query.lora_A.weight',
+'base_model.model.encoder.layer.0.attention.self.query.lora_A.weight' 'base_model.model.encoder.layer.0.attention.self.query.lora_B.weight' 'base_model.model.encoder.layer.0.attention.self.value.lora_A.weight' 'base_model.model.encoder.layer.0.attention.self.value.lora_B.weight' 'base_model.model.encoder.layer.1.attention.self.query.lora_A.weight'
 ... 
 ```
 
@@ -137,7 +137,7 @@ When we call `save_pretrained`, we strip this adapter name from the keys. The re
 
 <Tip>
 
-If we call `save_pretrained("some/path")` and the adapter name is not `"default"`, we store the adapter in a subdirectory with the same name as the adapter. So if the name is "other", it would be stored inside of `some/path/other`.
+If we call `save_pretrained("some/path")` and the adapter name is not `"default"`, we store the adapter in a sub-directory with the same name as the adapter. So if the name is "other", it would be stored inside of `some/path/other`.
 
 </Tip>
 
