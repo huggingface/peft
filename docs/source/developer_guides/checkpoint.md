@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Checkpoint format
 
-This document describes the format of the save files used by 🤗 PEFT. Read this if you're interested in how the checkpoint files are structured and how to possibly convert between the PEFT format and other formats.
+This document describes the format of the saved files used by 🤗 PEFT. Read this if you're interested in how the checkpoint files are structured and how to possibly convert between the PEFT format and other formats.
 
 ## PEFT files
 
@@ -32,7 +32,7 @@ By default, the model will be saved in the `safetensors` format, which has sever
 
 As mentioned above, the `state_dict` will only contain the parameters of the adapter module, not the base model. To illustrate the difference in size, a normal BERT model requires ~420MB of disk space, whereas an IA³ adapter on top of this BERT model only requires ~260KB.
 
-The `adapter_config.json` file contains the configuration of the adapter module, which is necessary to load the model. Below is an example of a an `adapter_config.json` for an IA³ adapter with standard settings applied to a BERT model:
+The `adapter_config.json` file contains the configuration of the adapter module, which is necessary to load the model. Below is an example of an `adapter_config.json` for an IA³ adapter with standard settings applied to a BERT model:
 
 ```json
 {
@@ -108,7 +108,7 @@ class LoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 ```
 
-Here we can see part of the `__init__` code used by all `LoraLayer` classes in PEFT. There are a bunch of parameters used the initialize the model, but only a few are relevant for the checkpoint file, namely: `lora_A`, `lora_B`, `lora_embedding_A`, and `lora_embedding_B`. These parameters are listed in the class attribute `adapter_layer_names` and they contain the learnable parameters, hence the parameters we need to include in the checkpoint file. All the other parameters, e.g. the rank `r`, are derived from the `adapter_config.json` and have to be included there (unless the default value is used). When converting a LoRA checkpoint from another format to PEFT, it is thus necessary to include those parameters.
+Here we can see part of the `__init__` code used by all `LoraLayer` classes in PEFT. There is a bunch of parameters used the initialize the model, but only a few are relevant for the checkpoint file, namely: `lora_A`, `lora_B`, `lora_embedding_A`, and `lora_embedding_B`. These parameters are listed in the class attribute `adapter_layer_names` and they contain the learnable parameters, hence the parameters we need to include in the checkpoint file. All the other parameters, e.g. the rank `r`, are derived from the `adapter_config.json` and have to be included there (unless the default value is used). When converting a LoRA checkpoint from another format to PEFT, it is thus necessary to include those parameters.
 
 Let's check the `state_dict` of a PEFT LoRA model applied to BERT. When printing the first five keys using the default LoRA settings (the remaining keys are the same, just with different layer numbers), we get:
 
