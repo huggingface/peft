@@ -129,7 +129,7 @@ If the model's embedding layer doesn't follow the Transformer's naming scheme, y
 ```python
 model = get_peft_model(...)
 # train the model
-model.save_adapter("my_adapter", save_embedding_layers=True)
+model.save_pretrained("my_adapter", save_embedding_layers=True)
 ```
 
 For inference, load the base model first and resize it the same way you did before you trained the model. After you've resized the base model, you can load the PEFT checkpoint.
