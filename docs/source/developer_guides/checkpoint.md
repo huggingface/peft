@@ -28,7 +28,7 @@ When you call `save_pretrained` on a PEFT model, the PEFT model will save the fo
 2. `adapter_config.json`
 3. `README.md`
 
-By default, the model will be saved in the `safetensors` format, which has several advantages over the `bin` format (which uses `pickle` under the hood). Content-wise, the two store the same `state_dict` though and are thus interchangeable.
+By default, the model will be saved in the `safetensors` format, which has several advantages over the `bin` format (which uses `pickle` under the hood). Content-wise, the two store the same `state_dict` though and are thus interchangeable. You can read more about `pickle` file vulnerabilities [in this documentation page.](https://huggingface.co/docs/hub/security-pickle)
 
 As mentioned above, the `state_dict` will only contain the parameters of the adapter module, not the base model. To illustrate the difference in size, a normal BERT model requires ~420MB of disk space, whereas an IA³ adapter on top of this BERT model only requires ~260KB.
 
