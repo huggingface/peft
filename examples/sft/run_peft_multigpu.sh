@@ -28,7 +28,7 @@ torchrun --nproc_per_node 8 --nnodes 1 train.py \
 --per_device_eval_batch_size 8 \
 --gradient_accumulation_steps 8 \
 --gradient_checkpointing True \
---use_reentrant False \ 
+--use_reentrant False \
 --dataset_text_field "content" \
 --use_peft_lora True \
 --lora_r 8 \
