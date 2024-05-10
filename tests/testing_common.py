@@ -719,8 +719,6 @@ class PeftCommonTester:
         dummy_input = self.prepare_inputs_for_testing()
         # ensure that we have at least 3 samples for this test
         dummy_input = {k: torch.cat([v for _ in range(3)]) for k, v in dummy_input.items()}
-        dummy_input["input_ids"][1] += 1
-        dummy_input["input_ids"][2] += 2
 
         with torch.inference_mode():
             with model.disable_adapter():
@@ -762,7 +760,6 @@ class PeftCommonTester:
         assert torch.allclose(logits_base[::3], logits_mixed[::3], atol=atol, rtol=rtol)
         assert torch.allclose(logits_adapter0[1::3], logits_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(logits_adapter1[2::3], logits_mixed[2::3], atol=atol, rtol=rtol)
-        breakpoint()
 
     def _test_generate(self, model_id, config_cls, config_kwargs):
         model = self.transformers_class.from_pretrained(model_id)
