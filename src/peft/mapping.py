@@ -134,7 +134,7 @@ def get_peft_model(
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
 
     if revision is not None:
-        if peft_config.revision is not None:
+        if peft_config.revision is not None and peft_config.revision != revision:
             warnings.warn(
                 f"peft config has already set base model revision to {peft_config.revision}, overwriting with revision {revision}"
             )

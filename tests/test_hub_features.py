@@ -59,6 +59,7 @@ class TestBaseModelRevision:
         base_model_no_revision = AutoModelForCausalLM.from_pretrained(base_model_id, revision="main").eval()
         # we need a copy of the config because otherwise, we are changing in-place the `revision` of the previous config and model
         lora_config_no_revision = copy.deepcopy(lora_config)
+        lora_config_no_revision.revision = "main"
         peft_model_no_revision = get_peft_model(base_model_no_revision, lora_config_no_revision, revision="main")
         output_no_revision = peft_model_no_revision(test_inputs).logits
         assert not torch.allclose(output_no_revision, output_revision)
