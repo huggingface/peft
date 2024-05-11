@@ -62,7 +62,7 @@ class _BaseAutoPeftModel:
         adapter_name: str = "default",
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
-        revision: Optional[str] = "main",
+        revision: Optional[str] = None,
         **kwargs,
     ):
         r"""

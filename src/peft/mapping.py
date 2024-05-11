@@ -109,7 +109,7 @@ def get_peft_model(
     peft_config: PeftConfig,
     adapter_name: str = "default",
     mixed: bool = False,
-    revision: Optional[str] = "main",
+    revision: Optional[str] = None,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
