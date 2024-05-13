@@ -87,7 +87,7 @@ jobs:
  
       - name: Post to Slack
         if: always()
-        uses: huggingface/transformers/.github/actions/post-slack@main
+        uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
           slack_channel: "C06LKJB31RU"
           title: 🤗 Results of the PEFT-GPU docker build 
