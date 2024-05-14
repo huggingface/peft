@@ -148,7 +148,7 @@ class TestTorchCompileCausalLM:
         tmp_dir = tmp_path / "model"
         config, compile_kwargs = settings
         if isinstance(config, AdaLoraConfig):
-            pytest.skip(msg="AdaLora does not work correctly with Trainer")
+            pytest.skip(reason="AdaLora does not work correctly with Trainer")
 
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
