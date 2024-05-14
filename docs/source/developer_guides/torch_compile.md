@@ -77,7 +77,8 @@ These more advanced PEFT features don't work in conjunction with `torch.compile`
 
 ## Test cases
 
-All the use cases listed above are tested inside of `peft/tests/test_torch_compile.py`. If you want to check in more detail how we tested a certain feature, please go to that file and check the test that corresponds to your use case.
+All the use cases listed above are tested inside of [`peft/tests/test_torch_compile.py`](https://github.com/huggingface/peft/blob/main/tests/test_torch_compile.py). If you want to check in more detail how we tested a certain feature, please go to that file and check the test that corresponds to your use case.
+
 <Tip>
 
 If you have another use case where you know that `torch.compile` does or does not work with PEFT, please contribute by letting us know or by opening a PR to add this use case to the covered test cases.
