@@ -55,4 +55,4 @@ tests_regression:
 	python -m pytest -s --regression tests/regression/ $(if $(IS_GITHUB_CI),--report-log "regression_tests.log",)
 
 tests_torch_compile:
-	python -m pytest tests/test_torch_compile.py $(if $(IS_GITHUB_CI),--report-log "core_multi_gpu.log",)
+	python -m pytest tests/test_torch_compile.py $(if $(IS_GITHUB_CI),--report-log "compile_tests.log",)

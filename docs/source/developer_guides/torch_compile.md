@@ -14,13 +14,14 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# Using PEFT with `torch.compile`
+# torch.compile
 
-In PEFT, `torch.compile` works for some but not all features. The reason why it won't always work is because PEFT is highly dynamic in certain places (loading and switching between multiple adapters, for instance), which can cause trouble for `torch.compile`. In other places, `torch.compile` may work, but won't be as fast as expected because of graph breaks.
+In PEFT, [torch.compile](https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html) works for some but not all features. The reason why it won't always work is because PEFT is highly dynamic in certain places (loading and switching between multiple adapters, for instance), which can cause trouble for `torch.compile`. In other places, `torch.compile` may work, but won't be as fast as expected because of graph breaks.
 
-Note that just because there is no error, it doesn't mean that `torch.compile` works correctly. It might give you an output but the output is incorrect. Therefore, if you're unsure if you can use `torch.compile` in your PEFT use case, please consult this document and make sure that your case is covered.
+If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. Check the table below to see which features work and which ones don't with torch.compile.
 
-Note: Unless indicated otherwise, the default `torch.compile` settings were used.
+> [!TIP]
+> Unless indicated otherwise, the default `torch.compile` settings were used.
 
 ## Features that work with `torch.compile`
 
@@ -79,6 +80,6 @@ These more advanced PEFT features don't work in conjunction with `torch.compile`
 All the use cases listed above are tested inside of `peft/tests/test_torch_compile.py`. If you want to check in more detail how we tested a certain feature, please go to that file and check the test that corresponds to your use case.
 <Tip>
 
-If you have another use case where you know that `torch.compile` does or does not work with PEFT, please contribute to PEFT by letting us know about this or by opening a PR to add this use case to the covered test cases.
+If you have another use case where you know that `torch.compile` does or does not work with PEFT, please contribute by letting us know or by opening a PR to add this use case to the covered test cases.
 
 </Tip>

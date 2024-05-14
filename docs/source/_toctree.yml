@@ -38,7 +38,7 @@
   - local: developer_guides/mixed_models
     title: Mixed adapter types
   - local: developer_guides/torch_compile
-    title: Compatibility with torch.compile
+    title: torch.compile
   - local: developer_guides/contributing
     title: Contribute to PEFT
   - local: developer_guides/troubleshooting
