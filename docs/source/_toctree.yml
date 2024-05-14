@@ -42,7 +42,7 @@
   - local: developer_guides/troubleshooting
     title: Troubleshooting
   - local: developer_guides/checkpoint
-    title: The PEFT checkpoint format
+    title: PEFT checkpoint format
 
 - title: 🤗 Accelerate integrations
   sections:

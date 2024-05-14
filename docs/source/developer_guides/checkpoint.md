@@ -14,15 +14,15 @@ rendered properly in your Markdown viewer.
 
 -->
 
-# Checkpoint format
+# PEFT checkpoint format
 
-This document describes the format of the saved files used by 🤗 PEFT. Read this if you're interested in how the checkpoint files are structured and how to possibly convert between the PEFT format and other formats.
+This document describes how PEFT's checkpoint files are structured and how to convert between the PEFT format and other formats.
 
 ## PEFT files
 
-PEFT is all about parameter efficient fine-tuning. This means that generally, PEFT methods will not update each of the model's parameters but only a small subset. This has the nice advantage that the checkpoint files can generally be much smaller than the original model files and are thus easier to store and share. However, this also means that to load a PEFT model, you need to have the original model available as well.
+PEFT (parameter-efficient fine-tuning) methods only update a small subset of a model's parameters rather than all of them. This is nice because checkpoint files can generally be much smaller than the original model files and are easier to store and share. However, this also means that to load a PEFT model, you need to have the original model available as well.
 
-When you call `save_pretrained` on a PEFT model, the PEFT model will save the following files:
+When you call [`~PeftModel.save_pretrained`] on a PEFT model, the PEFT model saves the following files:
 
 1. `adapter_model.safetensors` or `adapter_model.bin`
 2. `adapter_config.json`
@@ -30,7 +30,7 @@ When you call `save_pretrained` on a PEFT model, the PEFT model will save the fo
 
 By default, the model will be saved in the `safetensors` format, which has several advantages over the `bin` format (which uses `pickle` under the hood). Content-wise, the two store the same `state_dict` though and are thus interchangeable. You can read more about `pickle` file vulnerabilities [in this documentation page.](https://huggingface.co/docs/hub/security-pickle)
 
-As mentioned above, the `state_dict` will only contain the parameters of the adapter module, not the base model. To illustrate the difference in size, a normal BERT model requires ~420MB of disk space, whereas an IA³ adapter on top of this BERT model only requires ~260KB.
+The `state_dict` only contains the parameters of the adapter module, not the base model. To illustrate the difference in size, a normal BERT model requires ~420MB of disk space, whereas an IA³ adapter on top of this BERT model only requires ~260KB.
 
 The `adapter_config.json` file contains the configuration of the adapter module, which is necessary to load the model. Below is an example of an `adapter_config.json` for an IA³ adapter with standard settings applied to a BERT model:
 
@@ -59,25 +59,25 @@ The `adapter_config.json` file contains the configuration of the adapter module,
 }
 ```
 
-As you can see, the configuration file contains:
+The configuration file contains:
 
-- the adapter module type is stored: `"peft_type": "IA3"`
-- information about the base model: `"base_model_name_or_path": "bert-base-uncased"`, `"auto_mapping"`
-- the revision of the model, if any: `"revision": null`.
+- the adapter module type stored, `"peft_type": "IA3"`
+- information about the base model like `"base_model_name_or_path": "bert-base-uncased"`
+- the revision of the model (if any), `"revision": null`
 
-If the base model was not a pretrained 🤗 transformers model, the latter two entries will be `null`. Other than that, the settings you can see are all related to the specific IA³ adapter that was used to fine-tune the model.
+If the base model is not a pretrained Transformers model, the latter two entries will be `null`. Other than that, the settings are all related to the specific IA³ adapter that was used to fine-tune the model.
 
-The generated `README.md` is the model card of this PEFT model and contains a few pre-filled entries. The intent of this is to make it easier to share the model with others and to provide some basic information about the model. This file is not needed to load the model and can be ignored for further discussion.
+The generated `README.md` is the model card of a PEFT model and contains a few pre-filled entries. The intent of this is to make it easier to share the model with others and to provide some basic information about the model. This file is not needed to load the model.
 
-## Conversion from and to other formats
+## Convert to PEFT format
 
 When converting from another format to the PEFT format, we require both the `adapter_model.safetensors` (or `adapter_model.bin`) file and the `adapter_config.json` file.
 
-### Converting the checkpoint file
+### adapter_model
 
-For the model weights themselves, it is important to use the correct mapping from parameter name to value for PEFT to be able to load the file. Getting this mapping right is unfortunately an exercise in checking the implementation details, as there is no generally agreed upon format for PEFT adapters.
+For the model weights, it is important to use the correct mapping from parameter name to value for PEFT to load the file. Getting this mapping right is an exercise in checking the implementation details, as there is no generally agreed upon format for PEFT adapters.
 
-Fortunately, figuring out this mapping is not overly complicated for the common base cases. Let's look at a concrete example, the `LoraLayer` ([LoRA layer code](https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py)):
+Fortunately, figuring out this mapping is not overly complicated for common base cases. Let's look at a concrete example, the [`LoraLayer`](https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py):
 
 ```python
 # showing only part of the code
@@ -108,7 +108,7 @@ class LoraLayer(BaseTunerLayer):
         self.kwargs = kwargs
 ```
 
-Here we can see part of the `__init__` code used by all `LoraLayer` classes in PEFT. There is a bunch of parameters used the initialize the model, but only a few are relevant for the checkpoint file, namely: `lora_A`, `lora_B`, `lora_embedding_A`, and `lora_embedding_B`. These parameters are listed in the class attribute `adapter_layer_names` and they contain the learnable parameters, hence the parameters we need to include in the checkpoint file. All the other parameters, e.g. the rank `r`, are derived from the `adapter_config.json` and have to be included there (unless the default value is used). When converting a LoRA checkpoint from another format to PEFT, it is thus necessary to include those parameters.
+In the `__init__` code used by all `LoraLayer` classes in PEFT, there are a bunch of parameters used to initialize the model, but only a few are relevant for the checkpoint file: `lora_A`, `lora_B`, `lora_embedding_A`, and `lora_embedding_B`. These parameters are listed in the class attribute `adapter_layer_names` and contain the learnable parameters, so they must be included in the checkpoint file. All the other parameters, like the rank `r`, are derived from the `adapter_config.json` and must be included there (unless the default value is used).
 
 Let's check the `state_dict` of a PEFT LoRA model applied to BERT. When printing the first five keys using the default LoRA settings (the remaining keys are the same, just with different layer numbers), we get:
 
@@ -121,11 +121,11 @@ Let's check the `state_dict` of a PEFT LoRA model applied to BERT. When printing
 
 Let's break this down:
 
-- By default, for BERT models, we apply LoRA to the `query` and `value` layers of the attention module. This is why we see `attention.self.query` and `attention.self.value` in the key names for each layer.
-- LoRA decomposes the weights into two low rank matrices, `lora_A` and `lora_B`. This is why we see `lora_A` and `lora_B` in the key names.
-- These LoRA matrices are implemented as `nn.Linear` layers, thus the parameters are stored in the `.weight` attribute (`lora_A.weight`, `lora_B.weight`).
-- By default, we don't apply LoRA to the embedding layer of the BERT model, therefore there are _no entries_ for `lora_A_embedding` and `lora_B_embedding`.
-- The keys of the `state_dict` always start with `"base_model.model."`. The reason for that is that in PEFT, we wrap the base model inside a tuner-specific model (`LoraModel` in this case), which itself is wrapped in a general PEFT model (`PeftModel`). For this reason, these two prefixes are added to the keys. When converting to the PEFT format, it is thus required to add these prefixes.
+- By default, for BERT models, LoRA is applied to the `query` and `value` layers of the attention module. This is why you see `attention.self.query` and `attention.self.value` in the key names for each layer.
+- LoRA decomposes the weights into two low-rank matrices, `lora_A` and `lora_B`. This is where `lora_A` and `lora_B` come from in the key names.
+- These LoRA matrices are implemented as `nn.Linear` layers, so the parameters are stored in the `.weight` attribute (`lora_A.weight`, `lora_B.weight`).
+- By default, LoRA isn't applied to BERT's embedding layer, so there are _no entries_ for `lora_A_embedding` and `lora_B_embedding`.
+- The keys of the `state_dict` always start with `"base_model.model."`. The reason is that, in PEFT, we wrap the base model inside a tuner-specific model (`LoraModel` in this case), which itself is wrapped in a general PEFT model (`PeftModel`). For this reason, these two prefixes are added to the keys. When converting to the PEFT format, it is required to add these prefixes.
 
 <Tip>
 
@@ -133,27 +133,27 @@ This last point is not true for prefix tuning techniques like prompt tuning. The
 
 </Tip>
 
-When inspecting the names of the parameters in the loaded model, we might be surprised to find that they look a bit different, e.g. `base_model.model.encoder.layer.0.attention.self.query.lora_A.default.weight`. The difference here is the `.default` part in the second to last segment. This part exists because PEFT generally allows to add multiple adapters at once (using an `nn.ModuleDict` or `nn.ParameterDict` to store them). For example, if we add another adapter called "other", the key for that adapter would be `base_model.model.encoder.layer.0.attention.self.query.lora_A.other.weight`.
+When inspecting the parameter names in the loaded model, you might be surprised to find that they look a bit different, e.g. `base_model.model.encoder.layer.0.attention.self.query.lora_A.default.weight`. The difference is the *`.default`* part in the second to last segment. This part exists because PEFT generally allows the addition of multiple adapters at once (using an `nn.ModuleDict` or `nn.ParameterDict` to store them). For example, if you add another adapter called "other", the key for that adapter would be `base_model.model.encoder.layer.0.attention.self.query.lora_A.other.weight`.
 
-When we call `save_pretrained`, we strip this adapter name from the keys. The reason for this is that the adapter name is not a fundamental part of the model architecture but just an arbitrary name. When loading the adapter, we could choose a totally different name, and the model would still work the same way. Therefore, the adapter name is not stored in the checkpoint file.
+When you call [`~PeftModel.save_pretrained`], the adapter name is stripped from the keys. The reason is that the adapter name is not an important part of the model architecture; it is just an arbitrary name. When loading the adapter, you could choose a totally different name, and the model would still work the same way. This is why the adapter name is not stored in the checkpoint file.
 
 <Tip>
 
-If we call `save_pretrained("some/path")` and the adapter name is not `"default"`, we store the adapter in a sub-directory with the same name as the adapter. So if the name is "other", it would be stored inside of `some/path/other`.
+If you call `save_pretrained("some/path")` and the adapter name is not `"default"`, the adapter is stored in a sub-directory with the same name as the adapter. So if the name is "other", it would be stored inside of `some/path/other`.
 
 </Tip>
 
-In some circumstances, deciding which values to add to the checkpoint file can become a bit more complicated. For example, in PEFT, DoRA is implemented as a special case of LoRA. Therefore, if you want to convert a DoRA model to PEFT, you should create a LoRA checkpoint with extra entries for DoRA. Referring back to the code above, we can see the following line:
+In some circumstances, deciding which values to add to the checkpoint file can become a bit more complicated. For example, in PEFT, DoRA is implemented as a special case of LoRA. If you want to convert a DoRA model to PEFT, you should create a LoRA checkpoint with extra entries for DoRA. You can see this in the `__init__` of the previous `LoraLayer` code:
 
 ```python
-        self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
+self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
 ```
 
-This indicates that we can have an optional extra parameter per layer for DoRA.
+This indicates that there is an optional extra parameter per layer for DoRA.
 
-### Creating the `adapter_config.json`
+### adapter_config
 
-All the other information we need to load  PEFT model is contained in the `adapter_config.json` file. Let's check this file for a LoRA model applied to BERT:
+All the other information needed to load a PEFT model is contained in the `adapter_config.json` file. Let's check this file for a LoRA model applied to BERT:
 
 ```json
 {
@@ -190,9 +190,9 @@ All the other information we need to load  PEFT model is contained in the `adapt
 }
 ```
 
-This contains a lot of entries and at first glance, it could feel difficult to figure out all the right values to put in there. However, most of the entries are not necessary to load the model. This is because they use the default values and thus don't need to be added, or because they only affect the initialization of the LoRA weights, which is irrelevant when it comes to loading the model. If you find that you don't know what a specific parameter does, e.g. `"use_rslora"`, just don't add it and you should be fine. Also note that as we add more options, this file will get more entries in the future, but it should be backwards compatible.
+This contains a lot of entries, and at first glance, it could feel overwhelming to figure out all the right values to put in there. However, most of the entries are not necessary to load the model. This is either because they use the default values and don't need to be added or because they only affect the initialization of the LoRA weights, which is irrelevant when it comes to loading the model. If you find that you don't know what a specific parameter does, e.g., `"use_rslora",` don't add it, and you should be fine. Also note that as more options are added, this file will get more entries in the future, but it should be backward compatible.
 
-When it comes to the bare minimum of what needs to be included, it is sufficient to have this minimal json:
+At the minimum, you should include the following entries:
 
 ```json
 {
@@ -201,15 +201,15 @@ When it comes to the bare minimum of what needs to be included, it is sufficient
 }
 ```
 
-However, it is recommended to add as many entries as you can, like the rank `r` or the `base_model_name_or_path` if it's a transformers model. This information can help to understand the model better and to share it more easily with others. To check which keys and values are expected, check out the corresponding `config.py` file in the PEFT source code. For example, for LoRA, this can be found in [`peft/tuners/lora/config.py`](https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/config.py).
+However, adding as many entries as possible, like the rank `r` or the `base_model_name_or_path` (if it's a Transformers model) is recommended. This information can help others understand the model better and share it more easily. To check which keys and values are expected, check out the [config.py](https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/config.py) file (as an example, this is the config file for LoRA) in the PEFT source code.
 
-## Storing the whole PEFT model including the base weights
+## Model storage
 
-In some circumstances, you might want to store the whole PEFT model including the base weights. This can be necessary if, for instance, the base model is not available to the users trying to load the PEFT model.
+In some circumstances, you might want to store the whole PEFT model, including the base weights. This can be necessary if, for instance, the base model is not available to the users trying to load the PEFT model. You can merge the weights first or convert it into a Transformer model.
 
-### Storing the whole model by merging the weights first
+### Merge the weights
 
-The most straightforward way to achieve this is to merge the adapter weights into the base weights and then store the whole model:
+The most straightforward way to store the whole PEFT model is to merge the adapter weights into the base weights:
 
 ```python
 merged_model = model.merge_and_unload()
@@ -218,17 +218,17 @@ merged_model.save_pretrained(...)
 
 There are some disadvantages to this approach, though:
 
-- Once `merge_and_unload` is called, we get back a basic model without any PEFT-specific functionality. This means that we can't use any PEFT-specific methods anymore.
-- We cannot unmerge the weights, load multiple adapters at once, disable the adapter, etc.
-- Not all PEFT methods support merging the weights.
+- Once [`~LoraModel.merge_and_unload`] is called, you get a basic model without any PEFT-specific functionality. This means you can't use any of the PEFT-specific methods anymore.
+- You cannot unmerge the weights, load multiple adapters at once, disable the adapter, etc.
+- Not all PEFT methods support merging weights.
 - Some PEFT methods may generally allow merging, but not with specific settings (e.g. when using certain quantization techniques).
-- Obviously, the model will be much larger than the PEFT model, as it will contain all the base weights as well.
+- The whole model will be much larger than the PEFT model, as it will contain all the base weights as well.
 
-One advantage of this approach is that inference should be a bit faster.
+But inference with a merged model should be a bit faster.
 
-### Storing the whole model by converting it into a pure 🤗 transformers model
+### Convert to a Transformers model
 
-Another way to save the whole model, assuming that the base model is a 🤗 transformers model, is to use this admittedly hacky approach:
+Another way to save the whole model, assuming the base model is a Transformers model, is to use this hacky approach to directly insert the PEFT weights into the base model and save it, which only works if you "trick" Transformers into believing the PEFT model is not a PEFT model. This only works with LoRA because other adapters are not implemented in Transformers.
 
 ```python
 model = ...  # the PEFT model
@@ -246,4 +246,3 @@ model_loaded.save_pretrained(<final_location>)
 model_loaded.push_to_hub(<final_location>)
 ```
 
-This only works with LoRA, as other adapters are not implemented in transformers yet.
