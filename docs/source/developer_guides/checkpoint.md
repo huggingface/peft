@@ -22,15 +22,15 @@ This document describes how PEFT's checkpoint files are structured and how to co
 
 PEFT (parameter-efficient fine-tuning) methods only update a small subset of a model's parameters rather than all of them. This is nice because checkpoint files can generally be much smaller than the original model files and are easier to store and share. However, this also means that to load a PEFT model, you need to have the original model available as well.
 
-When you call [`~PeftModel.save_pretrained`] on a PEFT model, the PEFT model saves the following files:
+When you call [`~PeftModel.save_pretrained`] on a PEFT model, the PEFT model saves three files, described below:
 
 1. `adapter_model.safetensors` or `adapter_model.bin`
-2. `adapter_config.json`
-3. `README.md`
 
-By default, the model will be saved in the `safetensors` format, which has several advantages over the `bin` format (which uses `pickle` under the hood). Content-wise, the two store the same `state_dict` though and are thus interchangeable. You can read more about `pickle` file vulnerabilities [in this documentation page.](https://huggingface.co/docs/hub/security-pickle)
+By default, the model is saved in the `safetensors` format, a secure alternative to the `bin` format, which is known to be susceptible to [security vulnerabilities](https://huggingface.co/docs/hub/security-pickle) because it uses the pickle utility under the hood. Both formats store the same `state_dict` though, and are interchangeable.
 
 The `state_dict` only contains the parameters of the adapter module, not the base model. To illustrate the difference in size, a normal BERT model requires ~420MB of disk space, whereas an IA³ adapter on top of this BERT model only requires ~260KB.
+
+2. `adapter_config.json`
 
 The `adapter_config.json` file contains the configuration of the adapter module, which is necessary to load the model. Below is an example of an `adapter_config.json` for an IA³ adapter with standard settings applied to a BERT model:
 
@@ -66,6 +66,8 @@ The configuration file contains:
 - the revision of the model (if any), `"revision": null`
 
 If the base model is not a pretrained Transformers model, the latter two entries will be `null`. Other than that, the settings are all related to the specific IA³ adapter that was used to fine-tune the model.
+
+3. `README.md`
 
 The generated `README.md` is the model card of a PEFT model and contains a few pre-filled entries. The intent of this is to make it easier to share the model with others and to provide some basic information about the model. This file is not needed to load the model.
 
