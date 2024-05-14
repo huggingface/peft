@@ -1093,6 +1093,33 @@ class PeftBnbGPUExampleTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @parameterized.expand(["4bit", "8bit"])
+    def test_initialize_dora_with_bnb_on_cpu(self, kbit):
+        # 1674
+        # The issue is that to initialize DoRA, we need to dequantize the weights. That only works on GPU for bnb.
+        # Therefore, intializing DoRA with bnb on CPU used to fail.
+        model_id = "facebook/opt-125m"
+        if kbit == "4bit":
+            bnb_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
+        elif kbit == "8bit":
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("Only 4bit and 8bit bnb allowed")
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
+        model = model.cpu()  # ensure that we're on CPU
+        # sanity check that all weights are on CPU
+        weights_not_cpu = [name for name, p in model.named_parameters() if p.device != torch.device("cpu")]
+        assert not weights_not_cpu
+
+        lora_config = LoraConfig(use_dora=True)
+
+        # should not raise
+        peft_model = get_peft_model(model, lora_config)
+        # check that the weights are still on CPU
+        weights_not_cpu = [name for name, p in peft_model.named_parameters() if p.device != torch.device("cpu")]
+        assert not weights_not_cpu
+
 
 @require_torch_gpu
 @require_auto_gptq
