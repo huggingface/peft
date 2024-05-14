@@ -41,6 +41,8 @@
     title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
+  - local: developer_guides/checkpoint
+    title: PEFT checkpoint format
 
 - title: 🤗 Accelerate integrations
   sections:
