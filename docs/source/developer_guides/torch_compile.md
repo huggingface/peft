@@ -23,18 +23,18 @@ If you don't see an error, it doesn't necessarily mean that `torch.compile` work
 > [!TIP]
 > Unless indicated otherwise, the default `torch.compile` settings were used.
 
-## Features that work with `torch.compile`
+## Training and inference
+
+### Features that work with `torch.compile`
 
 These features work with `torch.compile`. Everything listed below was tested with a causal LM:
 
-### Training and inference
-
-- Training with `Trainer` from 🤗 transformers.
-- Training with a custom PyTorch loop.
+- Training with `Trainer` from 🤗 transformers
+- Training with a custom PyTorch loop
 - Inference
 - Generation
 
-The following adapters were tested:
+The following adapters were tested successfully:
 
 - AdaLoRA
 - BOFT
@@ -46,7 +46,16 @@ The following adapters were tested:
 - OFT
 - VeRA
 
-### Advanced PEFT features
+### Features that don't work with `torch.compile`
+
+The following adapters don't work correctly for training or inference when using `torch.compile`:
+
+- LoKr
+- LoRA targeting embedding layers
+
+## Advanced PEFT features
+
+### Features that work with `torch.compile`
 
 Below are some of the more advanced PEFT features that work. They were all tested with LoRA.
 
@@ -56,16 +65,7 @@ Below are some of the more advanced PEFT features that work. They were all teste
 
 Generally, we can expect that if a feature works correctly with LoRA and is also supported by other adapter types, it should also work for that adapter type.
 
-## Features that don't work with `torch.compile`
-
-### Training and inference
-
-The following adapters don't work correctly for training or inference when using `torch.compile`:
-
-- LoKr
-- LoRA targeting embedding layers
-
-### Advanced PEFT features
+### Features that don't work with `torch.compile`
 
 These more advanced PEFT features don't work in conjunction with `torch.compile`. Tests were run with LoRA:
 
@@ -79,8 +79,5 @@ These more advanced PEFT features don't work in conjunction with `torch.compile`
 
 All the use cases listed above are tested inside of [`peft/tests/test_torch_compile.py`](https://github.com/huggingface/peft/blob/main/tests/test_torch_compile.py). If you want to check in more detail how we tested a certain feature, please go to that file and check the test that corresponds to your use case.
 
-<Tip>
-
-If you have another use case where you know that `torch.compile` does or does not work with PEFT, please contribute by letting us know or by opening a PR to add this use case to the covered test cases.
-
-</Tip>
+> [!TIP]
+> If you have another use case where you know that `torch.compile` does or does not work with PEFT, please contribute by letting us know or by opening a PR to add this use case to the covered test cases.
