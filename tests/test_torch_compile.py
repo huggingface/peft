@@ -141,10 +141,9 @@ class TestTorchCompileCausalLM:
             return model
         return torch.compile(model, **compile_kwargs)
 
-    @pytest.mark.single_gpu_tests
     @pytest.mark.parametrize("settings", SETTINGS.values(), ids=SETTINGS.keys())
     def test_causal_lm_training_trainer_compile(self, settings, tokenizer, data, tmp_path):
-        r"""Train a LoRA model with torch.compile using Trainer"""
+        r"""Train a PEFT model with torch.compile using Trainer"""
         tmp_dir = tmp_path / "model"
         config, compile_kwargs = settings
         if isinstance(config, AdaLoraConfig):
@@ -209,10 +208,9 @@ class TestTorchCompileCausalLM:
         assert torch.allclose(output_after.logits, output_loaded.logits, atol=atol, rtol=rtol)
         assert (tokens_after == tokens_loaded).all()
 
-    @pytest.mark.single_gpu_tests
     @pytest.mark.parametrize("settings", SETTINGS.values(), ids=SETTINGS.keys())
     def test_causal_lm_training_pytorch_compile(self, settings, tokenizer, data, tmp_path):
-        r"""Train a LoRA model with torch.compile using PyTorch training loop"""
+        r"""Train a PEFT model with torch.compile using PyTorch training loop"""
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             self.model_id,
