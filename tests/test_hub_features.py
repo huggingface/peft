@@ -15,8 +15,7 @@ import unittest
 
 from transformers import AutoModelForCausalLM
 
-from peft import PeftConfig, PeftModel, LoraConfig
-from peft import get_peft_model
+from peft import LoraConfig, PeftConfig, PeftModel, get_peft_model
 
 
 PEFT_MODELS_TO_TEST = [("peft-internal-testing/test-lora-subfolder", "test")]
@@ -44,7 +43,7 @@ class TestLocalModel:
         # examining `config.json` in the model path.
         # However, previously, those checks only covered huggingface hub models.
         # This test makes sure that the local `config.json` is checked as well.
-        # If `save_pretrained` could not find the file, it will issue a warning. 
+        # If `save_pretrained` could not find the file, it will issue a warning.
         model_id = "facebook/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         local_dir = tmp_path / model_id
