@@ -177,6 +177,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
+        convert_pissa_to_lora: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         r"""
@@ -199,6 +200,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
+            convert_pissa_to_lora (`str`):
+                The path to the initialized PiSSA adapter, which is obtained after initializing the model with PiSSA
+                and before performing any training. When `convert_pissa_to_lora` is not None, the difference in PISSA
+                before and after fine-tuning is calculated. This difference can be represented as the parameters of a
+                of a standard LoRA adapter. Using this converted adapter does not require changes to the base model,
+                thus conveniently allowing the use of multiple PISSA and LoRA adapters, and the activation or
+                deactivation of any adapters.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
@@ -216,6 +224,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
+
+        def save_pissa_as_lora(peft_config, convert_pissa_to_lora, output_state_dict, kwargs):
+            if not str(peft_config.init_lora_weights).startswith("pissa"):
+                warnings.warn("`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter")
+            initial_adapter = os.path.basename(convert_pissa_to_lora)
+            self.load_adapter(
+                os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter
+            )
+            if str(self.peft_config[initial_adapter].init_lora_weights).startswith("pissa"):
+                raise ValueError(
+                    "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`. "
+                    "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
+                )
+            output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
+            self.delete_adapter(adapter_name)
+            return output_state_dict
 
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
@@ -255,13 +279,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
-
+                if convert_pissa_to_lora is not None:
+                    output_state_dict = save_pissa_as_lora(
+                        peft_config, convert_pissa_to_lora, output_state_dict, kwargs
+                    )
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
                     metadata={"format": "pt"},
                 )
             elif is_main_process:
+                if convert_pissa_to_lora is not None:
+                    output_state_dict = save_pissa_as_lora(
+                        peft_config, convert_pissa_to_lora, output_state_dict, kwargs
+                    )
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
@@ -289,6 +320,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 auto_mapping_dict = None
 
             if is_main_process:
+                if convert_pissa_to_lora is not None:
+                    peft_config.init_lora_weights = True
+                    peft_config.r *= 2
+                    peft_config.lora_alpha *= 2
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 
