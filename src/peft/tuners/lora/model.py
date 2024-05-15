@@ -41,6 +41,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    get_peft_model_state_dict,
     get_quantization_config,
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
@@ -844,3 +845,42 @@ class LoraModel(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def subtract_pissa_init(
+        self, output_state_dict: dict[str, torch.Tensor], adapter_name: str = "pissa_init", kwargs=None
+    ):
+        """
+        This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter in
+        `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
+        """
+        for name, param in self.model.named_parameters():
+            if (
+                param.data.dtype != torch.float32
+                and param.data.dtype != torch.float16
+                and param.data.dtype != torch.bfloat16
+            ):
+                warnings.warn(
+                    r"Note that Quant(W_res) + AB != Quant(W) + \Delta(AB); "
+                    "the converted LoRA, when combined with W or Quant(W), may introduce a certain gap in the fine-tuned model. "
+                    "Therefore, we recommend directly using the Quant(W_res) in conjunction with the PiSSA adapter. "
+                )
+        pissa_init_state_dict = get_peft_model_state_dict(
+            self,
+            state_dict=kwargs.get("state_dict", None),
+            adapter_name=adapter_name,
+        )
+        tensors_lora = {}
+        for name in output_state_dict.keys():
+            ## W = W^{res} + A_0 \times B_0,
+            ## W + \Delta W = W^{res} + A \times B,
+            ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | -B_0]^T = A'B'.
+            if "lora_A" in name:
+                tensors_lora[name] = torch.cat(
+                    [output_state_dict[name], pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=0
+                )
+            elif "lora_B" in name:
+                tensors_lora[name] = torch.cat(
+                    [output_state_dict[name], -pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=1
+                )
+
+        return tensors_lora

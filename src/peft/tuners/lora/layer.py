@@ -20,6 +20,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
@@ -112,7 +113,9 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
-        if init_lora_weights == "loftq":
+        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
+            self.pissa_init(adapter_name, init_lora_weights)
+        elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -154,6 +157,42 @@ class LoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+
+    def pissa_init(self, adapter_name, init_lora_weights):
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize PiSSA under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+
+        if init_lora_weights == "pissa":
+            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
+            V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
+            Vr = V[:, : self.r[adapter_name]]
+            Sr = S[: self.r[adapter_name]]
+            Sr /= self.scaling[adapter_name]
+            Uhr = Uh[: self.r[adapter_name]]
+        elif len(init_lora_weights.split("_niter_")) == 2:
+            Vr, Sr, Ur = svd_lowrank(
+                weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
+            )
+            Sr /= self.scaling[adapter_name]
+            Uhr = Ur.t()
+        else:
+            raise ValueError(
+                f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead."
+            )
+
+        lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
+        lora_B = Vr @ torch.diag(torch.sqrt(Sr))
+        self.lora_A[adapter_name].weight.data = lora_A
+        self.lora_B[adapter_name].weight.data = lora_B
+        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+        weight = weight.to(dtype)
+        self.get_base_layer().weight.data = weight
 
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
