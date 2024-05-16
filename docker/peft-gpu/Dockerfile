@@ -70,6 +70,10 @@ RUN source activate peft && \
 RUN source activate peft && \
     pip install aqlm[gpu]>=1.0.2
 
+# Add HQQ for quantization testing
+RUN source activate peft && \
+pip install hqq
+
 RUN source activate peft && \ 
     pip freeze | grep transformers
 

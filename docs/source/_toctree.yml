@@ -41,6 +41,8 @@
     title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
+  - local: developer_guides/checkpoint
+    title: PEFT checkpoint format
 
 - title: 🤗 Accelerate integrations
   sections:
@@ -106,6 +108,8 @@
       title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/helpers
+      title: Helpers
     title: Adapters
   - sections:
     - local: package_reference/merge_utils
