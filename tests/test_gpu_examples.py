@@ -16,6 +16,7 @@ import importlib
 import os
 import tempfile
 import unittest
+from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
@@ -2002,7 +2003,7 @@ class MultiprocessTester(unittest.TestCase):
 @require_torch_gpu
 class MixedPrecisionTests(unittest.TestCase):
     def setUp(self):
-        self.causal_lm_model_id = "facebook/opt-350m"
+        self.causal_lm_model_id = "facebook/opt-125m"
         self.tokenizer = AutoTokenizer.from_pretrained(self.causal_lm_model_id)
         self.config = LoraConfig(
             r=16,
@@ -2024,15 +2025,14 @@ class MixedPrecisionTests(unittest.TestCase):
         gc.collect()
 
     @pytest.mark.single_gpu_tests
-    def test_model_loaded_in_float16_raises(self):
-        # This test shows the issue with loading the model in fp16 and then trying to use it with mixed precision
-        # training, which should not use fp16. If this is ever automated in PEFT, this test should fail. In that case,
-        # remove this test, adjust the next one, and remove the entry about FP16 usage from troubleshooting.md.
+    def test_model_using_float16_with_amp_raises(self):
+        # This test shows the issue with using a model in fp16 and then trying to use it with mixed precision training,
+        # which should not use fp16.
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             torch_dtype=torch.float16,
         )
-        model = get_peft_model(model, self.config)
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
@@ -2040,8 +2040,8 @@ class MixedPrecisionTests(unittest.TestCase):
                 train_dataset=self.data["train"],
                 args=TrainingArguments(
                     fp16=True,  # <= this is required for the error to be raised
-                    logging_steps=1,
                     output_dir=tmp_dir,
+                    max_steps=3,
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
@@ -2049,32 +2049,216 @@ class MixedPrecisionTests(unittest.TestCase):
                 trainer.train()
 
     @pytest.mark.single_gpu_tests
-    def test_model_loaded_in_float16_working(self):
-        # Same test as before but containing the fix to make it work
+    def test_model_using_float16_autocast_dtype(self):
+        # Here we use autocast_adapter_dtype=True (the default) to automatically promote the adapter weights to float32.
+        # No exception should be raised.
         model = AutoModelForCausalLM.from_pretrained(
             self.causal_lm_model_id,
             torch_dtype=torch.float16,
         )
-        model = get_peft_model(model, self.config)
-
-        # for now, this is unfortunately necessary to avoid the error:
-        # ValueError: Attempting to unscale FP16 gradients.
-        for param in model.parameters():
-            if param.requires_grad:
-                param.data = param.data.float()
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=True)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             trainer = Trainer(
                 model=model,
                 train_dataset=self.data["train"],
                 args=TrainingArguments(
-                    fp16=True,
+                    fp16=True,  # <= this is required for the error to be raised
+                    output_dir=tmp_dir,
+                    max_steps=3,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.train()  # does not raise
+
+    @pytest.mark.single_gpu_tests
+    def test_model_using_float16_explicit_cast(self):
+        # Same test as above but containing the fix to make it work
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
+
+        # here we manually promote the adapter weights to float32
+        for param in model.parameters():
+            if param.requires_grad:
+                param.data = param.data.float()
+
+        dtype_counts_before = Counter(p.dtype for p in model.parameters())
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=True)
+        dtype_counts_after = Counter(p.dtype for p in model.parameters())
+        assert dtype_counts_before == dtype_counts_after
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
                     max_steps=3,
                     output_dir=tmp_dir,
                 ),
                 data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
             )
-            trainer.train()
+            trainer.train()  # does not raise
+
+    @pytest.mark.single_gpu_tests
+    def test_load_model_using_float16_with_amp_raises(self):
+        # Same as previous tests, but loading the adapter with PeftModel.from_pretrained instead
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, torch_dtype=torch.float16)
+            model = PeftModel.from_pretrained(model, tmp_dir, autocast_adapter_dtype=False, is_trainable=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    output_dir=tmp_dir,
+                    max_steps=3,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            with pytest.raises(ValueError, match="Attempting to unscale FP16 gradients."):
+                trainer.train()
+
+    @pytest.mark.single_gpu_tests
+    def test_load_model_using_float16_autocast_dtype(self):
+        # Same as previous tests, but loading the adapter with PeftModel.from_pretrained instead
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        # Below, we purposefully set autocast_adapter_dtype=False so that the saved adapter uses float16. We still want
+        # the loaded adapter to use float32 when we load it with autocast_adapter_dtype=True.
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
+        # sanity check: this should have float16 adapter weights:
+        assert (
+            model.base_model.model.model.decoder.layers[0].self_attn.v_proj.lora_A["default"].weight.dtype
+            == torch.float16
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, torch_dtype=torch.float16)
+            model = PeftModel.from_pretrained(model, tmp_dir, autocast_adapter_dtype=True, is_trainable=True)
+            # sanity check: this should NOT have float16 adapter weights:
+            assert (
+                model.base_model.model.model.decoder.layers[0].self_attn.v_proj.lora_A["default"].weight.dtype
+                == torch.float32
+            )
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    output_dir=tmp_dir,
+                    max_steps=3,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.train()  # does not raise
+
+    @pytest.mark.single_gpu_tests
+    def test_load_adapter_using_float16_autocast_dtype(self):
+        # Here we test the load_adapter method with autocast_adapter_dtype. We show that autocasting is prevented when
+        # calling load_model(..., autocast_adapter_dtype=False) and that it is enabled when calling
+        # load_model(..., autocast_adapter_dtype=True) (the default).
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            torch_dtype=torch.float16,
+        )
+        # Below, we purposefully set autocast_adapter_dtype=False so that the saved adapter uses float16. We still want
+        # the loaded adapter to use float32 when we load it with autocast_adapter_dtype=True.
+        model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
+        # sanity check: this should have float16 adapter weights:
+        assert (
+            model.base_model.model.model.decoder.layers[0].self_attn.v_proj.lora_A["default"].weight.dtype
+            == torch.float16
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(tmp_dir)
+            model = AutoModelForCausalLM.from_pretrained(self.causal_lm_model_id, torch_dtype=torch.float16)
+            # the default adapter is now in float16
+            model = get_peft_model(model, self.config, autocast_adapter_dtype=False)
+            # sanity check: this should NOT have float16 adapter weights:
+            assert (
+                model.base_model.model.model.decoder.layers[0].self_attn.v_proj.lora_A["default"].weight.dtype
+                == torch.float16
+            )
+
+            # now load the first adapter in float16 using the adapter name "loaded16"
+            model.load_adapter(tmp_dir, "loaded16", autocast_adapter_dtype=False)
+            assert (
+                model.base_model.model.model.decoder.layers[0].self_attn.v_proj.lora_A["loaded16"].weight.dtype
+                == torch.float16
+            )
+
+            # now load the first adapter in float32 using the adapter name "loaded32"
+            model.load_adapter(tmp_dir, "loaded32", autocast_adapter_dtype=True)
+            assert (
+                model.base_model.model.model.decoder.layers[0].self_attn.v_proj.lora_A["loaded32"].weight.dtype
+                == torch.float32
+            )
+
+            # training with the default adapter, which is in float16, should raise
+            model.set_adapter("default")
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    output_dir=tmp_dir,
+                    max_steps=3,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            with pytest.raises(ValueError, match="Attempting to unscale FP16 gradients."):
+                trainer.train()
+
+            # training the model with the adapter "loaded16", which is in float16, should also raise
+            model.set_adapter("loaded16")
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    output_dir=tmp_dir,
+                    max_steps=3,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            with pytest.raises(ValueError, match="Attempting to unscale FP16 gradients."):
+                trainer.train()
+
+            # training the model with the adapter "loaded32", which is in float32, should not raise
+            model.set_adapter("loaded32")
+            trainer = Trainer(
+                model=model,
+                train_dataset=self.data["train"],
+                args=TrainingArguments(
+                    fp16=True,  # <= this is required for the error to be raised
+                    output_dir=tmp_dir,
+                    max_steps=3,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.train()  # does not raise
 
 
 @require_torch_gpu
