@@ -173,7 +173,7 @@ def get_module(name, opt_model):
     return module
 
 
-def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict) -> Optimizer:
+def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict, loraplus_lr_embedding: float=1e-6) -> Optimizer:
     """
     Creates a LoraPlus optimizer.
     Implementing LoRA+ https://arxiv.org/abs/2402.12354
@@ -190,9 +190,8 @@ def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], 
     loraplus_lr_ratio = optimizer_kwargs.pop("loraplus_lr_ratio")
     loraplus_lr_embedding = optimizer_kwargs.pop("loraplus_lr_embedding")
 
-    # TODO: make available as parameter
-    # if loraplus_lr_embedding is None:
-    loraplus_lr_embedding = 1e-6
+    if loraplus_lr_embedding is None:
+        loraplus_lr_embedding = 1e-6
 
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -251,11 +250,7 @@ def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], 
     optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
     if optimizer_cls.__name__ == "Adam8bit":
         manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
-        skipped = 0
         for module in model.modules():
             if isinstance(module, nn.Embedding):
-                skipped += sum(
-                    {p.data_ptr(): p.numel() for p in module.parameters()}.values()
-                )
                 manager.register_module_override(module, "weight", {"optim_bits": 32})
     return optimizer
