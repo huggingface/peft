@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import warnings
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
@@ -117,7 +118,11 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
 
 
 def get_peft_model(
-    model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default", mixed: bool = False
+    model: PreTrainedModel,
+    peft_config: PeftConfig,
+    adapter_name: str = "default",
+    mixed: bool = False,
+    revision: Optional[str] = None,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
@@ -131,12 +136,22 @@ def get_peft_model(
             The name of the adapter to be injected, if not provided, the default adapter name is used ("default").
         mixed (`bool`, `optional`, defaults to `False`):
             Whether to allow mixing different (compatible) adapter types.
+        revision (`str`, `optional`, defaults to `main`):
+            The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
+            the base model
     """
     model_config = getattr(model, "config", {"model_type": "custom"})
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
 
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+
+    if revision is not None:
+        if peft_config.revision is not None and peft_config.revision != revision:
+            warnings.warn(
+                f"peft config has already set base model revision to {peft_config.revision}, overwriting with revision {revision}"
+            )
+        peft_config.revision = revision
 
     if mixed:
         return PeftMixedModel(model, peft_config, adapter_name=adapter_name)
