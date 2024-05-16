@@ -97,7 +97,7 @@ class PeftConfigMixin(PushToHubMixin):
         # TODO: this hack is needed to fix the following issue (on commit 702f937):
         # if someone saves a default config and loads it back with `PeftConfig` class it yields to
         # not loading the correct config class.
-
+        #
         # from peft import AdaLoraConfig, PeftConfig
         # peft_config = AdaLoraConfig()
         # print(peft_config)
@@ -232,7 +232,7 @@ class PeftConfig(PeftConfigMixin):
     base_model_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "The name of the base model to use."}
     )
-    revision: Optional[str] = field(default=None, metadata={"help": "The specific model version to use."})
+    revision: Optional[str] = field(default=None, metadata={"help": "The specific base model version to use."})
     peft_type: Optional[Union[str, PeftType]] = field(default=None, metadata={"help": "Peft type"})
     task_type: Optional[Union[str, TaskType]] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})

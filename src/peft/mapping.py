@@ -14,7 +14,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import warnings
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
@@ -122,6 +123,7 @@ def get_peft_model(
     adapter_name: str = "default",
     mixed: bool = False,
     autocast_adapter_dtype: bool = True,
+    revision: Optional[str] = None,
 ) -> PeftModel | PeftMixedModel:
     """
     Returns a Peft model object from a model and a config.
@@ -139,13 +141,22 @@ def get_peft_model(
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 or bfloat16 to float32, as this is typically required for stable training, and only affect
             select PEFT tuners.
-
+        revision (`str`, `optional`, defaults to `main`):
+            The revision of the base model. If this isn't set, the saved peft model will load the `main` revision for
+            the base model
     """
     model_config = getattr(model, "config", {"model_type": "custom"})
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
 
     peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+
+    if revision is not None:
+        if peft_config.revision is not None and peft_config.revision != revision:
+            warnings.warn(
+                f"peft config has already set base model revision to {peft_config.revision}, overwriting with revision {revision}"
+            )
+        peft_config.revision = revision
 
     if mixed:
         # note: PeftMixedModel does not support autocast_adapter_dtype, so don't pass it
