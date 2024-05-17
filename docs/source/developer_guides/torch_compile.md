@@ -18,16 +18,14 @@ rendered properly in your Markdown viewer.
 
 In PEFT, [torch.compile](https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html) works for some but not all features. The reason why it won't always work is because PEFT is highly dynamic in certain places (loading and switching between multiple adapters, for instance), which can cause trouble for `torch.compile`. In other places, `torch.compile` may work, but won't be as fast as expected because of graph breaks.
 
-If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. This guide describes what works with torch.compile and what doesn't.
+If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. This guide describes what works with `torch.compile` and what doesn't.
 
 > [!TIP]
 > Unless indicated otherwise, the default `torch.compile` settings were used.
 
-## Training and inference
+## Training and inference with `torch.compile`
 
-### Features that work with `torch.compile`
-
-These features work with `torch.compile`. Everything listed below was tested with a causal LM:
+These features **work** with `torch.compile`. Everything listed below was tested with a causal LM:
 
 - Training with `Trainer` from 🤗 transformers
 - Training with a custom PyTorch loop
@@ -46,18 +44,14 @@ The following adapters were tested successfully:
 - OFT
 - VeRA
 
-### Features that don't work with `torch.compile`
-
-The following adapters don't work correctly for training or inference when using `torch.compile`:
+The following adapters **don't work** correctly for training or inference when using `torch.compile`:
 
 - LoKr
 - LoRA targeting embedding layers
 
-## Advanced PEFT features
+## Advanced PEFT features with `torch.compile`
 
-### Features that work with `torch.compile`
-
-Below are some of the more advanced PEFT features that work. They were all tested with LoRA.
+Below are some of the more advanced PEFT features that **work**. They were all tested with LoRA.
 
 - `modules_to_save` (i.e. `config = LoraConfig(..., modules_to_save=...)`)
 - Merging adapters (one or multiple)
@@ -65,9 +59,7 @@ Below are some of the more advanced PEFT features that work. They were all teste
 
 Generally, we can expect that if a feature works correctly with LoRA and is also supported by other adapter types, it should also work for that adapter type.
 
-### Features that don't work with `torch.compile`
-
-These more advanced PEFT features don't work in conjunction with `torch.compile`. Tests were run with LoRA:
+The more advanced PEFT features below **don't work** in conjunction with `torch.compile`. Tests were run with LoRA:
 
 - Using PEFT adapters with quantization (bitsandbytes)
 - Inference with multiple adapters
