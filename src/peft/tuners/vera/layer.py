@@ -265,3 +265,7 @@ class Linear(nn.Linear, VeraLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "vera." + rep
