@@ -1088,6 +1088,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
 
 
+@require_torch_gpu
 class TestSameAdapterDifferentDevices:
     # 1639
     # The original issue comes down to the following problem: If the user has a base layer on CUDA, moves the adapter to
