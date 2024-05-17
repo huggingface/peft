@@ -349,3 +349,7 @@ class AdaLoraModel(LoraModel):
         # Pass the function and do forward propagation
         else:
             return None
+
+    def add_weighted_adapter(self, *args, **kwargs):
+        """This method is not supported for AdaLoRA, use LoRA instead."""
+        raise TypeError(f"{self.__class__.__name__} does not support add_weighted_adapter method.")

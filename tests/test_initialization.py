@@ -13,17 +13,18 @@
 # limitations under the License.
 
 import re
+from copy import deepcopy
 
 import pytest
 import torch
 from scipy import stats
 from torch import nn
 
-from peft import LoraConfig, PromptTuningConfig, VeraConfig, get_peft_model
+from peft import AdaLoraConfig, LoraConfig, PeftModel, PromptTuningConfig, VeraConfig, get_peft_model
 from peft.utils import infer_device
 
 
-class TestInitialization:
+class TestLoraInitialization:
     """Test class to check the initialization of adapters."""
 
     torch_device = infer_device()
@@ -253,7 +254,66 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling
         assert model.conv2d.scaling["default"] == expected_scaling
 
-    def test_rslora_scaling(self):
+    def test_lora_pissa_linear_init_default(self, data):
+        model = self.get_model()
+        output = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"])
+        peft_model = get_peft_model(deepcopy(model), config)
+        assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+        config = LoraConfig(init_lora_weights="pissa_niter_16", target_modules=["linear"])
+        peft_model = get_peft_model(deepcopy(model), config)
+        assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
+
+    def test_lora_pissa_conversion_same_output_after_loading(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "pissa"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_pissa = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "pissa-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_pissa, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model")
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_pissa, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_rslora_scaling(self):
         # default is True
         torch.manual_seed(0)
 
@@ -296,7 +356,7 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
-    def test_rslora_scaling_pattern(self):
+    def test_lora_rslora_scaling_pattern(self):
         # default is True
         torch.manual_seed(0)
 
@@ -323,7 +383,7 @@ class TestInitialization:
         assert model.embed.scaling["default"] == expected_scaling["embed"]
         assert model.conv2d.scaling["default"] == expected_scaling["conv2d"]
 
-    def test_use_dora_linear(self, data):
+    def test_lora_use_dora_linear(self, data):
         # check that dora is a no-op when initialized
         torch.manual_seed(0)
         model = self.get_model()
@@ -340,7 +400,7 @@ class TestInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert torch.allclose(output_base, output_dora)
 
-    def test_use_dora_linear_init_false(self, data):
+    def test_lora_use_dora_linear_init_false(self, data):
         # with init_lora_weights=False, dora should not be a no-op
         torch.manual_seed(0)
         model = self.get_model()
@@ -357,10 +417,44 @@ class TestInitialization:
         assert torch.allclose(output_base, output_disabled)
         assert not torch.allclose(output_base, output_dora)
 
-    def test_use_dora_with_megatron_core_raises(self):
+    def test_lora_use_dora_with_megatron_core_raises(self):
         megatron_config = {"does-not": "matter-here"}
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
+
+
+class TestAdaLoraInitialization:
+    def test_adalora_target_modules_set(self):
+        config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
+        assert config.target_modules == {"linear", "embed", "conv2d"}
+
+    def test_adalora_use_dora_raises(self):
+        with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
+            AdaLoraConfig(use_dora=True)
+
+    def test_adalora_loftq_config_raises(self):
+        with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
+            AdaLoraConfig(loftq_config={"loftq": "config"})
+
+
+class TestPromptTuningInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+                self.embed = nn.Embedding(1000, 1000)
+                self.conv2d = nn.Conv2d(100, 100, 3)
+
+            def forward(self, x):
+                x_int = (100 * x).int()
+                x_4d = x.flatten().reshape(1, 100, 10, 10)
+                return self.linear(x), self.embed(x_int), self.conv2d(x_4d)
+
+        return MyModule().eval().to(self.torch_device)
 
     def test_use_prompt_tuning_init_text_raises(self):
         with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', tokenizer_name_or_path can't be None"):

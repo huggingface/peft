@@ -128,6 +128,70 @@ quantized_model = get_peft_model(quantized_model, peft_config)
 
 You can refer to the [Google Colab](https://colab.research.google.com/drive/12GTp1FCj5_0SnnNQH18h_2XFh9vS_guX?usp=sharing) example for an overview of AQLM+LoRA finetuning.
 
+## EETQ quantization
+
+You can also perform LoRA fine-tuning on EETQ quantized models. [EETQ](https://github.com/NetEase-FuXi/EETQ) package offers simple and efficient way to perform 8-bit quantization, which is claimed to be faster than the `LLM.int8()` algorithm. First, make sure that you have a transformers version that is compatible with EETQ (e.g. by installing it from latest pypi or from source).
+
+```py
+import torch
+from transformers import EetqConfig
+
+config = EetqConfig("int8")
+```
+
+Pass the `config` to the [`~transformers.AutoModelForCausalLM.from_pretrained`] method.
+
+```py
+from transformers import AutoModelForCausalLM
+
+model = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", quantization_config=config)
+```
+
+and create a `LoraConfig` and pass it to `get_peft_model`:
+
+```py
+from peft import LoraConfig, get_peft_model
+
+config = LoraConfig(
+    r=16,
+    lora_alpha=8,
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type="CAUSAL_LM"
+)
+
+model = get_peft_model(model, config)
+```
+
+## HQQ quantization
+
+The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
+
+```py
+from hqq.engine.hf import HQQModelForCausalLM
+
+quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
+
+peft_config = LoraConfig(...)
+
+quantized_model = get_peft_model(quantized_model, peft_config)
+```
+
+Or using transformers version that is compatible with HQQ (e.g. by installing it from latest pypi or from source).
+
+```python
+from transformers import HqqConfig, AutoModelForCausalLM
+
+quant_config = HqqConfig(nbits=4, group_size=64)
+
+quantized_model = AutoModelForCausalLM.from_pretrained(save_dir_or_hfhub, device='cuda', quantization_config=quant_config)
+
+peft_config = LoraConfig(...)
+
+quantized_model = get_peft_model(quantized_model, peft_config)
+```
+
 ## Next steps
 
 If you're interested in learning more about quantization, the following may be helpful:

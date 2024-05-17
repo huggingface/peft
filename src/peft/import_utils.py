@@ -77,3 +77,13 @@ def is_aqlm_available():
 @lru_cache
 def is_auto_awq_available():
     return importlib.util.find_spec("awq") is not None
+
+
+@lru_cache
+def is_eetq_available():
+    return importlib.util.find_spec("eetq") is not None
+
+
+@lru_cache
+def is_hqq_available():
+    return importlib.util.find_spec("hqq") is not None

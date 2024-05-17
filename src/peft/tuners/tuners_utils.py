@@ -281,6 +281,20 @@ class BaseTuner(nn.Module, ABC):
         """
         ...
 
+    @abstractmethod
+    def disable_adapter_layers(self) -> None:
+        """
+        Disable all adapters in-place.
+        """
+        ...
+
+    @abstractmethod
+    def enable_adapter_layers(self) -> None:
+        """
+        Enable all adapters in-place
+        """
+        ...
+
     def _check_new_adapter_config(self, config: PeftConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
@@ -290,6 +304,44 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
+    def _cast_adapter_dtype(self, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+        """
+        A helper method to cast the adapter weights to the correct dtype.
+
+        Currently, this only upcasts float16 and bfloat16 to float32.
+
+        Args:
+            adapter_name (`str`):
+                The adapter name.
+            autocast_adapter_dtype (`bool`, *optional*):
+                Whether to autocast the adapter dtype. Defaults to `True`.
+
+        """
+        if not autocast_adapter_dtype:
+            return
+
+        dtypes_to_convert_to_fp32 = {torch.float16, torch.bfloat16}
+
+        for module in self.model.modules():
+            if not isinstance(module, BaseTunerLayer):
+                continue
+
+            for submodule in module.modules():
+                if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict)):
+                    continue
+
+                if adapter_name not in submodule:
+                    continue
+
+                if isinstance(submodule[adapter_name], nn.Parameter):
+                    if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
+                        submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                    continue
+
+                for param in submodule[adapter_name].parameters():
+                    if param.dtype in dtypes_to_convert_to_fp32:
+                        param.data = param.data.to(torch.float32)
+
     def _check_merge_allowed(self):
         """Helper method to check whether the adapter can be merged.
 
@@ -297,7 +349,7 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-    def inject_adapter(self, model: nn.Module, adapter_name: str):
+    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
         hood by `peft.mapping.get_peft_model` if a non-prompt tuning adapter class is passed.
@@ -309,6 +361,8 @@ class BaseTuner(nn.Module, ABC):
                 The model to be tuned.
             adapter_name (`str`):
                 The adapter name.
+            autocast_adapter_dtype (`bool`, *optional*):
+                Whether to autocast the adapter dtype. Defaults to `True`.
         """
         peft_config = self.peft_config[adapter_name]
         # Note: If possible, all checks should be performed *at the start of this method*.
@@ -363,6 +417,10 @@ class BaseTuner(nn.Module, ABC):
                 f"Please check the target modules and try again."
             )
 
+        # It's important to set the adapter here (again), because otherwise it can happen that if a 2nd adapter is
+        # added, and it targets different layer(s) than the first adapter (which is active), then those different
+        # layers will be activated, which we don't want.
+        self.set_adapter(self.active_adapters)
         self._mark_only_adapters_as_trainable(model)
 
         if self.peft_config[adapter_name].inference_mode:
@@ -496,6 +554,16 @@ class BaseTunerLayer(ABC):
     def active_adapter(self) -> str | list[str]:
         # use a property to ensure that active_adapter is not set directly, instead use the set_adapter method
         return self._active_adapter
+
+    def _get_available_adapters(self) -> set[str]:
+        """Return all adapter names that can be found on this module."""
+        adapters = set()
+        for layer_name in self.adapter_layer_names:
+            module = getattr(self, layer_name)
+            if not isinstance(module, (nn.ModuleDict, nn.ParameterDict)):
+                continue
+            adapters.update(set(module.keys()))
+        return adapters
 
     @property
     def active_adapters(self):
@@ -713,6 +781,8 @@ def check_adapters_to_merge(module: BaseTunerLayer, adapter_names: Optional[list
     """
     if adapter_names is None:
         adapter_names = module.active_adapters
+    if isinstance(adapter_names, str):
+        raise ValueError(f"adapter_names should be a list of strings, got {adapter_names!r}.")
 
     if module.merged:
         merged_adapters = set(module.merged_adapters)
