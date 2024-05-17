@@ -138,3 +138,20 @@ print(tokenizer.decode(outputs[0]))
 
 </hfoption>
 </hfoptions>
+
+
+## Merging (IA)³ Models
+The (IA)³ models facilitate linear merging of adapters. To merge adapters in an (IA)³ model, utilize the `add_weighted_adapter` method from the `IA3Model` class. This method is analogous to the `add_weighted_adapter` method used in `LoraModel`, with the key difference being the absence of the `combination_type` parameter. For example, to merge three (IA)³ adapters into a PEFT model, you would proceed as follows:
+
+```py
+adapters = ["adapter1", "adapter2", "adapter3"]
+weights = [0.4, 0.3, 0.3]
+adapter_name = "merge"
+model.add_weighted_adapter(adapters, weights, adapter_name)
+```
+
+It is recommended that the weights sum to 1.0 to preserve the scale of the model. The merged model can then be set as the active model using the `set_adapter` method:
+
+```py
+model.set_adapter("merge")
+```
