@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 import warnings
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from enum import Enum
 from typing import Optional
 
@@ -29,6 +29,7 @@ from peft.utils import (
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
+    _freeze_adapter,
     _get_submodules,
 )
 
@@ -279,17 +280,20 @@ class IA3Model(BaseTuner):
                 module.set_adapter(adapter_name)
         self.active_adapter = adapter_name
 
-    def _prepare_adapter_config(self, peft_config, model_config):
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
-            peft_config.target_modules = TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            peft_config.target_modules = set(
+                TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            )
         if peft_config.feedforward_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING:
                 raise ValueError("Please specify `feedforward_modules` in `peft_config`")
-            peft_config.feedforward_modules = TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[
-                model_config["model_type"]
-            ]
+            peft_config.feedforward_modules = set(
+                TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING[model_config["model_type"]]
+            )
         return peft_config
 
     def _unload_and_optionally_merge(
@@ -393,3 +397,94 @@ class IA3Model(BaseTuner):
                     new_adapter = target.active_adapters[:]
 
         self.active_adapter = new_adapter or []
+
+    def _check_add_weighted_adapter(self, adapters: list[str]) -> tuple[str, str]:
+        """
+        Helper function to check if the arguments to add_weighted_adapter are valid and compatible with the underlying
+        model.
+        """
+        # Validate existence of adapters
+        for adapter in adapters:
+            if adapter not in self.peft_config:
+                raise ValueError(f"Adapter {adapter} does not exist")
+
+        # Check for conflicting modules_to_save
+        modules_to_save_wrappers = [module for module in self.modules() if isinstance(module, ModulesToSaveWrapper)]
+        if any(
+            sum(adapter in wrapper.modules_to_save for adapter in adapters) > 1 for wrapper in modules_to_save_wrappers
+        ):
+            raise ValueError("Cannot add weighted adapters targeting the same module with modules_to_save.")
+
+        # Ensure all adapters have compatible target and feedforward module types
+        target_module_types = {type(self.peft_config[adapter].target_modules) for adapter in adapters}
+        feedforward_module_types = {type(self.peft_config[adapter].feedforward_modules) for adapter in adapters}
+        if len(target_module_types) > 1 or len(feedforward_module_types) > 1:
+            raise ValueError("All adapter configs should have the same type for target and feedforward modules.")
+
+        # Combine target and feedforward modules
+        if str in target_module_types:
+            new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
+        else:
+            new_target_modules = set.union(*(self.peft_config[adapter].target_modules for adapter in adapters))
+
+        if str in feedforward_module_types:
+            new_feedforward_modules = "|".join(
+                f"({self.peft_config[adapter].feedforward_modules})" for adapter in adapters
+            )
+        else:
+            new_feedforward_modules = set.union(
+                *(self.peft_config[adapter].feedforward_modules for adapter in adapters)
+            )
+
+        return new_target_modules, new_feedforward_modules
+
+    def add_weighted_adapter(
+        self,
+        adapters: list[str],
+        weights: list[float],
+        adapter_name: str,
+    ) -> None:
+        """
+        This method adds a new adapter by merging the given adapters with the given weights.
+
+        Args:
+            adapters (`list`):
+                List of adapter names to be merged.
+            weights (`list`):
+                List of weights for each adapter.
+            adapter_name (`str`):
+                Name of the new adapter.
+        """
+        if adapter_name in list(self.peft_config.keys()):
+            return
+
+        new_target_modules, new_feedforward_modules = self._check_add_weighted_adapter(
+            adapters=adapters,
+        )
+
+        self.peft_config[adapter_name] = replace(
+            self.peft_config[adapters[0]],
+            target_modules=new_target_modules,
+            feedforward_modules=new_feedforward_modules,
+        )
+        self.inject_adapter(self.model, adapter_name)
+
+        # Do we really need that?
+        _freeze_adapter(self.model, adapter_name)
+
+        key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, IA3Layer):
+                if adapter_name in target.ia3_l:
+                    target_ia3_l = target.ia3_l[adapter_name]
+                else:
+                    continue
+
+                target_ia3_l.data = target_ia3_l.data.zero_()
+                for adapter, weight in zip(adapters, weights):
+                    if adapter in target.ia3_l:
+                        current_adapter_ia3_l = target.ia3_l[adapter]
+                    else:
+                        continue
+                    target_ia3_l.data += current_adapter_ia3_l.data * weight
