@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 In PEFT, [torch.compile](https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html) works for some but not all features. The reason why it won't always work is because PEFT is highly dynamic in certain places (loading and switching between multiple adapters, for instance), which can cause trouble for `torch.compile`. In other places, `torch.compile` may work, but won't be as fast as expected because of graph breaks.
 
-If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. Check the table below to see which features work and which ones don't with torch.compile.
+If you don't see an error, it doesn't necessarily mean that `torch.compile` worked correctly. It might give you an output, but the output is incorrect. This guide describes what works with torch.compile and what doesn't.
 
 > [!TIP]
 > Unless indicated otherwise, the default `torch.compile` settings were used.
