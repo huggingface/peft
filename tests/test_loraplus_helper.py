@@ -1,10 +1,11 @@
+import bitsandbytes as bnb
 import torch
 from torch import nn
-import bitsandbytes as bnb
-
-from peft.helpers import create_loraplus_optimizer
 from transformers import TrainingArguments
 from transformers.trainer_pt_utils import get_parameter_names
+
+from peft.optimizers import create_loraplus_optimizer
+
 
 class SimpleNet(nn.Module):
     def __init__(self, bias=True):
