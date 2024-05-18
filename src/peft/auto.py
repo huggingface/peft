@@ -62,6 +62,7 @@ class _BaseAutoPeftModel:
         adapter_name: str = "default",
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
+        revision: Optional[str] = None,
         **kwargs,
     ):
         r"""
@@ -69,8 +70,9 @@ class _BaseAutoPeftModel:
         are passed along to `PeftConfig` that automatically takes care of filtering the kwargs of the Hub methods and
         the config object init.
         """
-        peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, **kwargs)
+        peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path, revision=revision, **kwargs)
         base_model_path = peft_config.base_model_name_or_path
+        base_model_revision = peft_config.revision
 
         task_type = getattr(peft_config, "task_type", None)
 
@@ -101,7 +103,7 @@ class _BaseAutoPeftModel:
                 "Cannot infer the auto class from the config, please make sure that you are loading the correct model for your task type."
             )
 
-        base_model = target_class.from_pretrained(base_model_path, **kwargs)
+        base_model = target_class.from_pretrained(base_model_path, revision=base_model_revision, **kwargs)
 
         tokenizer_exists = False
         if os.path.exists(os.path.join(pretrained_model_name_or_path, TOKENIZER_CONFIG_NAME)):
@@ -114,7 +116,7 @@ class _BaseAutoPeftModel:
             tokenizer_exists = check_file_exists_on_hf_hub(
                 repo_id=pretrained_model_name_or_path,
                 filename=TOKENIZER_CONFIG_NAME,
-                revision=kwargs.get("revision", None),
+                revision=revision,
                 repo_type=kwargs.get("repo_type", None),
                 token=token,
             )

@@ -102,6 +102,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         model ([`~transformers.PreTrainedModel`]): The base transformer model used for Peft.
         peft_config ([`PeftConfig`]): The configuration of the Peft model.
         adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **base_model** ([`torch.nn.Module`]) -- The base transformer model used for Peft.
@@ -118,7 +122,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             in the base model if using [`PromptLearningConfig`].
     """
 
-    def __init__(self, model: PreTrainedModel, peft_config: PeftConfig, adapter_name: str = "default") -> None:
+    def __init__(
+        self,
+        model: PreTrainedModel,
+        peft_config: PeftConfig,
+        adapter_name: str = "default",
+        autocast_adapter_dtype: bool = True,
+    ) -> None:
         super().__init__()
         self.modules_to_save = None
         self.active_adapter = adapter_name
@@ -137,6 +147,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
             self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
+
+        if hasattr(self.base_model, "_cast_adapter_dtype"):
+            self.base_model._cast_adapter_dtype(
+                adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+            )
 
         if getattr(model, "is_gradient_checkpointing", True):
             model = self._prepare_model_for_gradient_checkpointing(model)
@@ -177,6 +192,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         selected_adapters: Optional[list[str]] = None,
         save_embedding_layers: Union[str, bool] = "auto",
         is_main_process: bool = True,
+        convert_pissa_to_lora: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
         r"""
@@ -199,6 +215,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             is_main_process (`bool`, *optional*):
                 Whether the process calling this is the main process or not. Will default to `True`. Will not save the
                 checkpoint if not on the main process, which is important for multi device setups (e.g. DDP).
+            convert_pissa_to_lora (`str`):
+                The path to the initialized PiSSA adapter, which is obtained after initializing the model with PiSSA
+                and before performing any training. When `convert_pissa_to_lora` is not None, the difference in PISSA
+                before and after fine-tuning is calculated. This difference can be represented as the parameters of a
+                of a standard LoRA adapter. Using this converted adapter does not require changes to the base model,
+                thus conveniently allowing the use of multiple PISSA and LoRA adapters, and the activation or
+                deactivation of any adapters.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """
@@ -216,6 +239,22 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     f"You passed an invalid `selected_adapters` arguments, current supported adapter names are"
                     f" {list(self.peft_config.keys())} - got {selected_adapters}."
                 )
+
+        def save_pissa_as_lora(peft_config, convert_pissa_to_lora, output_state_dict, kwargs):
+            if not str(peft_config.init_lora_weights).startswith("pissa"):
+                warnings.warn("`convert_pissa_to_lora` only works for converting a PiSSA adapter to a LoRA adapter")
+            initial_adapter = os.path.basename(convert_pissa_to_lora)
+            self.load_adapter(
+                os.path.dirname(convert_pissa_to_lora), subfolder=initial_adapter, adapter_name=initial_adapter
+            )
+            if str(self.peft_config[initial_adapter].init_lora_weights).startswith("pissa"):
+                raise ValueError(
+                    "The `init_lora_weights` parameter of the initial PiSSA adapter should be set to `True`. "
+                    "Otherwise, `self.load_adapter` will subtract the principal singular value and vector again based on the residual model."
+                )
+            output_state_dict = self.base_model.subtract_pissa_init(output_state_dict, initial_adapter, kwargs)
+            self.delete_adapter(adapter_name)
+            return output_state_dict
 
         if is_main_process:
             os.makedirs(save_directory, exist_ok=True)
@@ -255,13 +294,20 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     # not supported in safetensors.
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
-
+                if convert_pissa_to_lora is not None:
+                    output_state_dict = save_pissa_as_lora(
+                        peft_config, convert_pissa_to_lora, output_state_dict, kwargs
+                    )
                 safe_save_file(
                     output_state_dict,
                     os.path.join(output_dir, SAFETENSORS_WEIGHTS_NAME),
                     metadata={"format": "pt"},
                 )
             elif is_main_process:
+                if convert_pissa_to_lora is not None:
+                    output_state_dict = save_pissa_as_lora(
+                        peft_config, convert_pissa_to_lora, output_state_dict, kwargs
+                    )
                 torch.save(output_state_dict, os.path.join(output_dir, WEIGHTS_NAME))
 
             # save the config and change the inference mode to `True`
@@ -289,6 +335,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 auto_mapping_dict = None
 
             if is_main_process:
+                if convert_pissa_to_lora is not None:
+                    peft_config.init_lora_weights = True
+                    peft_config.r *= 2
+                    peft_config.lora_alpha *= 2
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 
@@ -300,6 +350,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapter_name: str = "default",
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
+        autocast_adapter_dtype: bool = True,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -326,6 +377,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 The configuration object to use instead of an automatically loaded configuration. This configuration
                 object is mutually exclusive with `model_id` and `kwargs`. This is useful when configuration is already
                 loaded before calling `from_pretrained`.
+            autocast_adapter_dtype (`bool`, *optional*):
+                Whether to autocast the adapter dtype. Defaults to `True`. Only relevant for specific adapter types.
             kwargs: (`optional`):
                 Additional keyword arguments passed along to the specific PEFT configuration class.
         """
@@ -389,10 +442,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.inference_mode = not is_trainable
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
-            model = cls(model, config, adapter_name)
+            model = cls(model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
         else:
-            model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](model, config, adapter_name)
-        model.load_adapter(model_id, adapter_name, is_trainable=is_trainable, **kwargs)
+            model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
+                model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+            )
+        model.load_adapter(
+            model_id, adapter_name, is_trainable=is_trainable, autocast_adapter_dtype=autocast_adapter_dtype, **kwargs
+        )
+
         return model
 
     def _setup_prompt_encoder(self, adapter_name: str):
@@ -900,6 +958,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         adapter_name: str,
         is_trainable: bool = False,
         torch_device: Optional[str] = None,
+        autocast_adapter_dtype: bool = True,
         **kwargs: Any,
     ):
         """
@@ -920,6 +979,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 used for inference.
             torch_device (`str`, *optional*, defaults to None):
                 The device to load the adapter on. If `None`, the device will be inferred.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
+                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
+                only affect select PEFT tuners.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
@@ -998,6 +1061,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             if self.peft_config[adapter_name].is_prompt_learning:
                 remove_hook_from_submodules(self.prompt_encoder)
             add_hook_to_module(self.get_base_model(), hook)
+
+        if hasattr(self.base_model, "_cast_adapter_dtype"):
+            self.base_model._cast_adapter_dtype(
+                adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+            )
 
         # Set model in evaluation mode to deactivate Dropout modules by default
         if not is_trainable:
@@ -1098,6 +1166,11 @@ class PeftModelForSequenceClassification(PeftModel):
     Args:
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
+        adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -1131,8 +1204,10 @@ class PeftModelForSequenceClassification(PeftModel):
         ```
     """
 
-    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
-        super().__init__(model, peft_config, adapter_name)
+    def __init__(
+        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
+    ) -> None:
+        super().__init__(model, peft_config, adapter_name, **kwargs)
 
         classifier_module_names = ["classifier", "score"]
         if self.modules_to_save is None:
@@ -1326,7 +1401,11 @@ class PeftModelForCausalLM(PeftModel):
     Args:
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
-
+        adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     Example:
 
@@ -1356,8 +1435,10 @@ class PeftModelForCausalLM(PeftModel):
         ```
     """
 
-    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
-        super().__init__(model, peft_config, adapter_name)
+    def __init__(
+        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
+    ) -> None:
+        super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
 
     def forward(
@@ -1531,7 +1612,11 @@ class PeftModelForSeq2SeqLM(PeftModel):
     Args:
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
-
+        adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     Example:
 
@@ -1560,8 +1645,10 @@ class PeftModelForSeq2SeqLM(PeftModel):
         ```
     """
 
-    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
-        super().__init__(model, peft_config, adapter_name)
+    def __init__(
+        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
+    ) -> None:
+        super().__init__(model, peft_config, adapter_name, **kwargs)
         self.base_model_prepare_inputs_for_generation = self.base_model.prepare_inputs_for_generation
         self.base_model_prepare_encoder_decoder_kwargs_for_generation = (
             self.base_model._prepare_encoder_decoder_kwargs_for_generation
@@ -1785,6 +1872,11 @@ class PeftModelForTokenClassification(PeftModel):
     Args:
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
+        adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -1818,8 +1910,10 @@ class PeftModelForTokenClassification(PeftModel):
         ```
     """
 
-    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig = None, adapter_name: str = "default") -> None:
-        super().__init__(model, peft_config, adapter_name)
+    def __init__(
+        self, model: torch.nn.Module, peft_config: PeftConfig = None, adapter_name: str = "default", **kwargs
+    ) -> None:
+        super().__init__(model, peft_config, adapter_name, **kwargs)
 
         classifier_module_names = ["classifier", "score"]
         if self.modules_to_save is None:
@@ -1997,6 +2091,11 @@ class PeftModelForQuestionAnswering(PeftModel):
     Args:
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
+        adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -2028,8 +2127,10 @@ class PeftModelForQuestionAnswering(PeftModel):
         ```
     """
 
-    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default") -> None:
-        super().__init__(model, peft_config, adapter_name)
+    def __init__(
+        self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs
+    ) -> None:
+        super().__init__(model, peft_config, adapter_name, **kwargs)
 
         qa_module_names = ["qa_outputs"]
         if self.modules_to_save is None:
@@ -2230,6 +2331,11 @@ class PeftModelForFeatureExtraction(PeftModel):
     Args:
         model ([`~transformers.PreTrainedModel`]): Base transformer model.
         peft_config ([`PeftConfig`]): Peft config.
+        adapter_name (`str`,  *optional*): The name of the adapter, defaults to `"default"`.
+        autocast_adapter_dtype (`bool`, *optional*):
+            Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
+            using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
+            select PEFT tuners.
 
     **Attributes**:
         - **config** ([`~transformers.PretrainedConfig`]) -- The configuration object of the base model.
@@ -2258,8 +2364,8 @@ class PeftModelForFeatureExtraction(PeftModel):
         ```
     """
 
-    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default"):
-        super().__init__(model, peft_config, adapter_name)
+    def __init__(self, model: torch.nn.Module, peft_config: PeftConfig, adapter_name: str = "default", **kwargs):
+        super().__init__(model, peft_config, adapter_name, **kwargs)
 
     def forward(
         self,

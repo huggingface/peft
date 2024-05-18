@@ -69,6 +69,12 @@ trainer = Trainer(model=peft_model, fp16=True, ...)
 trainer.train()
 ```
 
+<Tip>
+
+Starting from PEFT verion v0.11.0, PEFT automatically promotes the dtype of adapter weights from `torch.float16` and `torch.bfloat16` to `torch.float32` where appropriate. To _prevent_ this behavior, you can pass `autocast_adapter_dtype=False` to [`~get_peft_model`], to [`~PeftModel.from_pretrained`], and to [`~PeftModel.load_adapter`].
+
+</Tip>
+
 ## Bad results from a loaded PEFT model
 
 There can be several reasons for getting a poor result from a loaded PEFT model which are listed below. If you're still unable to troubleshoot the problem, see if anyone else had a similar [issue](https://github.com/huggingface/peft/issues) on GitHub, and if you can't find any, open a new issue.
@@ -129,7 +135,7 @@ If the model's embedding layer doesn't follow the Transformer's naming scheme, y
 ```python
 model = get_peft_model(...)
 # train the model
-model.save_adapter("my_adapter", save_embedding_layers=True)
+model.save_pretrained("my_adapter", save_embedding_layers=True)
 ```
 
 For inference, load the base model first and resize it the same way you did before you trained the model. After you've resized the base model, you can load the PEFT checkpoint.
