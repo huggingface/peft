@@ -19,7 +19,7 @@ from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 
-from .layer import Conv2d, Linear, ReftLayer
+from .layer import Conv2d, Linear, LoReftLayer
 
 
 class LoReftModel(LycorisTuner):
@@ -82,7 +82,7 @@ class LoReftModel(LycorisTuner):
         self,
         config: LycorisConfig,
         adapter_name: str,
-        target: Union[ReftLayer, nn.Module],
+        target: Union[LoReftLayer, nn.Module],
         target_name: str,
         parent: nn.Module,
         current_key: str,
@@ -98,7 +98,7 @@ class LoReftModel(LycorisTuner):
         kwargs = config.to_dict()
         kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
 
-        if isinstance(target, ReftLayer):
+        if isinstance(target, LoReftLayer):
             target.update_layer(adapter_name, **kwargs)
         else:
             new_module = self._create_new_module(config, adapter_name, target, **kwargs)

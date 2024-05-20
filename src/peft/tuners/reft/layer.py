@@ -13,13 +13,14 @@
 # limitations under the License.
 
 import math
-from typing import Any, List, Optional, Set
+from typing import Any, Optional, Set
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
+
 
 def parse_positions(positions: str):
     # Code borrow from https://github.com/stanfordnlp/pyreft/pyreft/dataset.py
@@ -34,10 +35,10 @@ def parse_positions(positions: str):
             last_n = int(positions.strip("l"))
     return first_n, last_n
 
-class ReftLayer(nn.Module, LycorisLayer):
+class LoReftLayer(nn.Module, LycorisLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("reft_A", "reft_R")
-    # other_param_names is defined on parent class   
+    # other_param_names is defined on parent class
 
     def __init__(self, base_layer: nn.Module):
         super().__init__()
@@ -46,7 +47,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         # ReFT info
         self.reft_A = nn.ModuleDict({})
         self.reft_R = nn.ModuleDict({})
-        self.loc = dict()
+        self.loc = {}
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
@@ -163,7 +164,7 @@ class ReftLayer(nn.Module, LycorisLayer):
                     loc = torch.cat([torch.arange(first_n), torch.arange(result.shape[1]-last_n, result.shape[1])])
                     selected_results = torch.gather(result, 1, loc)
                     rotated_base = rotate_layer(selected_results)
-                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight) 
+                    offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight)
                     output.scatter_(1, loc, offset)
                     output = module_dropout(output)
 
@@ -171,7 +172,7 @@ class ReftLayer(nn.Module, LycorisLayer):
         return output
 
 
-class Linear(ReftLayer):
+class Linear(LoReftLayer):
     """Reft implemented in Linear layer"""
 
     def __init__(
@@ -206,7 +207,7 @@ class Linear(ReftLayer):
         return "reft." + rep
 
 
-class Conv2d(ReftLayer):
+class Conv2d(LoReftLayer):
     """Reft implemented in Conv2d layer"""
 
     def __init__(
