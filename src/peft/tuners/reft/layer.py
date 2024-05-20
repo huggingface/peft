@@ -79,6 +79,11 @@ class LoReftLayer(nn.Module, LycorisLayer):
         if adapter_name in self.reft_A.keys():
             nn.init.kaiming_uniform_(self.reft_A[adapter_name].weight, a=math.sqrt(5))
 
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        pass
+
+    def unmerge(self) -> None:
+        pass 
 
     def update_layer(
         self,
