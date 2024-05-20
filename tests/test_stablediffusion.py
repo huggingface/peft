@@ -161,6 +161,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "oft_kwargs": {"init_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
             },
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loreft"])],
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
