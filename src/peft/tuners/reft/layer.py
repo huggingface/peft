@@ -66,9 +66,9 @@ class LoReftLayer(nn.Module, LycorisLayer):
         return {*self.reft_A, *self.reft_R}
 
     def create_adapter_parameters(self, adapter_name: str, r: int):
-        rotate_layer = torch.nn.Linear(self.out_features, r, bias=False).to(self.get_base_layer().weight.device)
+        rotate_layer = torch.nn.Linear(self.out_features, r, bias=False).to(torch.float32)
         self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer, orthogonal_map='cayley')
-        self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r).to(self.get_base_layer().weight.device)
+        self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r).to(torch.float32)
 
     def reset_adapter_parameters(self, adapter_name: str):
         # Original implementation performs initialization with normal distribution
@@ -156,7 +156,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
                 learned_source = self.reft_A[active_adapter]
                 dropout = self.dropout[active_adapter]
 
-                result = result.to(learned_source.weight.dtype)
+                result = result.to(torch.float32)
                 if self.first_n[active_adapter] == 0 and self.last_n[active_adapter] == 0:
                     rotated_base = rotate_layer(result)
                     offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight)
