@@ -908,7 +908,7 @@ class PeftCommonTester:
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
 
             logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
-            assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4)
+            assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4), (logits, logits_from_pretrained)
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
