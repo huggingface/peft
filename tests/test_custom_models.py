@@ -2871,6 +2871,7 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin0.reft_A.default.weight",
             "base_model.model.lin0.reft_R.default.weight",
+            "base_model.model.lin0.reft_A.default.bias",
         )
 
         # set config0 as active, should not change anything
@@ -2878,7 +2879,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.reft_A.default.weight",
-            "base_model.model.lin0.reft_B.default.weight",
+            "base_model.model.lin0.reft_R.default.weight",
+            "base_model.model.lin0.reft_A.default.bias",
         )
 
         # change activate adapter to adapter1
@@ -2886,7 +2888,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin1.reft_A.adapter1.weight",
-            "base_model.model.lin1.reft_B.adapter1.weight",
+            "base_model.model.lin1.reft_R.adapter1.weight",
+            "base_model.model.lin0.reft_A.adapter1.bias",
         )
 
         # disable all adapters
@@ -2897,7 +2900,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin1.reft_A.adapter1.weight",
-            "base_model.model.lin1.reft_B.adapter1.weight",
+            "base_model.model.lin1.reft_R.adapter1.weight",
+            "base_model.model.lin1.reft_A.adapter1.bias",
         )
 
     def test_requires_grad_loreft_same_targets(self):
