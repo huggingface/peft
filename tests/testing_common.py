@@ -809,7 +809,7 @@ class PeftCommonTester:
             _ = model.generate(inputs["input_ids"])
 
     def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig, LoReftConfig):
+        if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if self.torch_device == "mps":  # BFloat16 is not supported on MPS
