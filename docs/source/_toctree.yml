@@ -37,10 +37,14 @@
     title: Adapter injection
   - local: developer_guides/mixed_models
     title: Mixed adapter types
+  - local: developer_guides/torch_compile
+    title: torch.compile
   - local: developer_guides/contributing
     title: Contribute to PEFT
   - local: developer_guides/troubleshooting
     title: Troubleshooting
+  - local: developer_guides/checkpoint
+    title: PEFT checkpoint format
 
 - title: 🤗 Accelerate integrations
   sections:
@@ -102,8 +106,12 @@
       title: Prefix tuning
     - local: package_reference/prompt_tuning
       title: Prompt tuning
+    - local: package_reference/layernorm_tuning
+      title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/helpers
+      title: Helpers
     title: Adapters
   - sections:
     - local: package_reference/merge_utils

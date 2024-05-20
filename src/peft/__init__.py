@@ -17,7 +17,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.10.1.dev0"
+__version__ = "0.11.2.dev0"
 
 from .auto import (
     AutoPeftModel,
@@ -44,6 +44,8 @@ from .peft_model import (
     PeftModelForTokenClassification,
     PeftModelForQuestionAnswering,
     PeftModelForFeatureExtraction,
+    get_layer_status,
+    get_model_status,
 )
 from .tuners import (
     AdaptionPromptConfig,
@@ -75,6 +77,8 @@ from .tuners import (
     OFTModel,
     PolyConfig,
     PolyModel,
+    LNTuningConfig,
+    LNTuningModel,
     VeraConfig,
     VeraModel,
 )
