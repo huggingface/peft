@@ -44,7 +44,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.LORA: LoraModel,
     PeftType.LOHA: LoHaModel,
     PeftType.LOKR: LoKrModel,
-    PeftType.REFT: LoReftModel,
+    PeftType.LOREFT: LoReftModel,
     PeftType.ADALORA: AdaLoraModel,
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
