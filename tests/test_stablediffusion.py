@@ -160,7 +160,6 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "loha_kwargs": {"init_weights": [False]},
                 "oft_kwargs": {"init_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
-                "loreft_kwargs": {"init_weights": [False]},
             },
         )
     )
