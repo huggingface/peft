@@ -19,7 +19,7 @@ from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 
-from .layer import Conv2d, Linear, LoReftLayer
+from .layer import Linear, LoReftLayer
 
 
 class LoReftModel(LycorisTuner):
