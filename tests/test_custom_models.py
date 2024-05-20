@@ -350,7 +350,7 @@ TEST_CASES = [
             "dropout": 0.1,
         },
     ),
-    ("Vanilla MLP 7 LOREFT", "MLP", LoReftConfig, {"target_modules": "lin0", "dropout": 0.5}),
+    ("Vanilla MLP 7 LOREFT", "MLP", LoReftConfig, {"target_modules": "lin0", "dropout": 0.1}),
     # VeRA #
     ########
     ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),
