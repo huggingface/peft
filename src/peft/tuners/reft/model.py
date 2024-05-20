@@ -20,7 +20,9 @@ from torch import nn
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
 
 from .layer import Linear, LoReftLayer
-
+from peft.utils import (
+    TRANSFORMERS_MODELS_TO_LOREFT_TARGET_MODULES_MAPPING,
+)
 
 class LoReftModel(LycorisTuner):
     """
@@ -103,3 +105,12 @@ class LoReftModel(LycorisTuner):
             new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
 
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        if peft_config.target_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LOREFT_TARGET_MODULES_MAPPING:
+                raise ValueError("Please specify `target_modules` in `peft_config`")
+            peft_config.target_modules = set(
+                TRANSFORMERS_MODELS_TO_LOREFT_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            )
+        return peft_config
