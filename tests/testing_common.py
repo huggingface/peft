@@ -1137,7 +1137,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "LOREFT"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
