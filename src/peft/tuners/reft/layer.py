@@ -140,7 +140,9 @@ class LoReftLayer(nn.Module, LycorisLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
+            print('x', x.shape)
             result = self.base_layer(x, *args, **kwargs)
+            print('result', result.shape)
 
             # Execute all the adapters
             for active_adapter in self.active_adapters:
