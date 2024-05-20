@@ -102,7 +102,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
         self.r[adapter_name] = r
-        first_n, last_n = parse_positions(loc)
+        first_n, last_n = parse_positions(loc) if loc else (0, 0)
         self.first_n[adapter_name] = first_n
         self.last_n[adapter_name] = last_n
         self.alpha[adapter_name] = alpha
