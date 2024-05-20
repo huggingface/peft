@@ -742,8 +742,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         elif issubclass(config_cls, LNTuningConfig):
             # LNTuning do not take init_weights
             pass
-        elif issubclass(config_cls, LoReftConfig):
-            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_safe_merge(model_id, config_cls, config_kwargs)
@@ -2918,7 +2916,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.reft_A.default.weight",
-            "base_model.model.lin0.reft_B.default.weight",
+            "base_model.model.lin0.reft_R.default.parametrizations.weight.original",
+            "base_model.model.lin1.reft_A.adapter1.bias",
         )
 
         # set config0 as active, should not change anything
@@ -2926,7 +2925,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.reft_A.default.weight",
-            "base_model.model.lin0.reft_B.default.weight",
+            "base_model.model.lin0.reft_R.default.parametrizations.weight.original",
+            "base_model.model.lin1.reft_A.adapter1.bias",
         )
 
         # change activate adapter to adapter1
@@ -2934,7 +2934,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.reft_A.adapter1.weight",
-            "base_model.model.lin0.reft_B.adapter1.weight",
+            "base_model.model.lin0.reft_R.default.parametrizations.weight.original",
+            "base_model.model.lin1.reft_A.adapter1.bias",
         )
 
         # disable all adapters
@@ -2945,7 +2946,8 @@ class RequiresGradTester(unittest.TestCase):
         self.check_requires_grad(
             peft_model,
             "base_model.model.lin0.reft_A.adapter1.weight",
-            "base_model.model.lin0.reft_B.adapter1.weight",
+            "base_model.model.lin0.reft_R.default.parametrizations.weight.original",
+            "base_model.model.lin1.reft_A.adapter1.bias",
         )
 
 
