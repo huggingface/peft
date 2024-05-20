@@ -64,7 +64,6 @@ class LoReftLayer(nn.Module, LycorisLayer):
 
     def create_adapter_parameters(self, adapter_name: str, r: int):
         rotate_layer = torch.nn.Linear(self.out_features, r, bias=False)
-        torch.nn.init.orthogonal_(rotate_layer.weight)
         self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer, orthogonal_map='cayley')
         self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r)
 
