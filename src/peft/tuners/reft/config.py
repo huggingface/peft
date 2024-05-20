@@ -27,7 +27,7 @@ class LoReftConfig(LycorisConfig):
     Args:
         r (`int`): LoReFT rank.
         alpha (`int`): LoReFT alpha.
-        loc (`List[int]`):
+        loc (`Optional[str]`):
             Token locations are applied LoReFT.
         module_dropout (`int`):
             The dropout probability for disabling LoReFT modules during training.
