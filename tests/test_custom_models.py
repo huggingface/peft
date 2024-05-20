@@ -353,8 +353,6 @@ TEST_CASES = [
     ("Vanilla MLP 7 LOREFT", "MLP", LoReftConfig, {"target_modules": "lin0", "rank_dropout": 0.5}),
     ("Conv2d 1 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d", "lin0"]}),
-    ("Conv2d 3 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d"], "use_effective_conv2d": True}),
-    ("Conv2d 4 LOREFT", "Conv2d", LoReftConfig, {"target_modules": ["conv2d", "lin0"], "use_effective_conv2d": True}),
     # VeRA #
     ########
     ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),

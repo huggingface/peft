@@ -86,7 +86,6 @@ class LoReftLayer(nn.Module, LycorisLayer):
         rank_dropout: float,
         module_dropout: float,
         init_weights: bool,
-        use_effective_conv2d: bool = False,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
@@ -98,8 +97,6 @@ class LoReftLayer(nn.Module, LycorisLayer):
             rank_dropout (`float`): The dropout probability for rank dimension during training.
             module_dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
-            use_effective_conv2d (`bool`, *optional*, defaults to `False`):
-                Use parameter effective decomposition for Conv2d with ksize > 1.
         """
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -216,7 +213,6 @@ class Conv2d(LoReftLayer):
         loc: str = None,
         rank_dropout: float = 0.0,
         module_dropout: float = 0.0,
-        use_effective_conv2d: bool = False,
         init_weights: bool = True,
         **kwargs,
     ):
@@ -225,7 +221,7 @@ class Conv2d(LoReftLayer):
         # Create adapter and set it active
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, r, alpha, loc, rank_dropout, module_dropout, init_weights, use_effective_conv2d, **kwargs
+            adapter_name, r, alpha, loc, rank_dropout, module_dropout, init_weights, **kwargs
         )
 
     def _get_delta_activations(
