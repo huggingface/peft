@@ -155,7 +155,8 @@ class LoReftLayer(nn.Module, LycorisLayer):
                 rotate_layer = self.reft_R[active_adapter]
                 learned_source = self.reft_A[active_adapter]
                 dropout = self.dropout[active_adapter]
-                result = result.to(rotate_layer.parametrizations.weight.original.dtype)
+
+                result = result.to(learned_source.dtype)
                 if self.first_n[active_adapter] == 0 and self.last_n[active_adapter] == 0:
                     rotated_base = rotate_layer(result)
                     offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight)
