@@ -926,6 +926,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters_with_merging(self, test_name, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, LoReftConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
