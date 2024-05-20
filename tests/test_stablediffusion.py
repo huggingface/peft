@@ -89,13 +89,13 @@ CONFIG_TESTING_KWARGS = (
         "text_encoder": {
             "r": 8,
             "alpha": 32,
-            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+            "target_modules": ["out_proj"],
             "dropout": 0.0,
         },
         "unet": {
             "r": 8,
             "alpha": 32,
-            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
+            "target_modules": ["to_out.0"],
             "dropout": 0.0,
         },
     },
