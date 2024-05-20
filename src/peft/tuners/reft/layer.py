@@ -195,39 +195,6 @@ class Linear(LoReftLayer):
         raise NotImplementedError
 
 
-
-    def __repr__(self) -> str:
-        rep = super().__repr__()
-        return "reft." + rep
-
-
-class Conv2d(LoReftLayer):
-    """Reft implemented in Conv2d layer"""
-
-    def __init__(
-        self,
-        base_layer: nn.Module,
-        adapter_name: str = "default",
-        r: int = 0,
-        alpha: float = 0.0,
-        loc: str = None,
-        dropout: float = 0.0,
-        init_weights: bool = True,
-        **kwargs,
-    ):
-        super().__init__(base_layer)
-
-        # Create adapter and set it active
-        self._active_adapter = adapter_name
-        self.update_layer(
-            adapter_name, r, alpha, loc, dropout, init_weights, **kwargs
-        )
-
-    def _get_delta_activations(
-        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
-    ) -> torch.Tensor:
-        raise NotImplementedError
-
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "reft." + rep

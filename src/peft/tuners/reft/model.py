@@ -74,7 +74,6 @@ class LoReftModel(LycorisTuner):
 
     prefix: str = "reft_"
     layers_mapping: dict[type[torch.nn.Module], type[LoReftLayer]] = {
-        torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,
     }
 
