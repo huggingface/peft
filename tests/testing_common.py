@@ -685,7 +685,7 @@ class PeftCommonTester:
         assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
-        if config_cls in (LoReftConfig):
+        if issubclass(config_cls, LoReftConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         torch.manual_seed(0)
