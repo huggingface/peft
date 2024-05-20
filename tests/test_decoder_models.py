@@ -32,7 +32,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-gpt_neo",
     "hf-internal-testing/tiny-random-GPTJForCausalLM",
     "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
-    "HuggingFaceM4/tiny-random-LlamaForCausalLM",
+    "trl-internal-testing/tiny-random-LlamaForCausalLM",
 ]
 
 FULL_GRID = {
@@ -171,6 +171,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
         )
@@ -185,6 +186,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_boft_and_gpt2,
@@ -280,6 +282,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_adalora_or_boft_and_gpt2,
@@ -293,6 +296,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
             {
                 "model_ids": PEFT_DECODER_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
@@ -313,6 +317,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
             filter_params_func=skip_boft_and_gpt2,
@@ -336,7 +341,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
 
     def test_lora_layer_replication(self):
-        model_id = "HuggingFaceM4/tiny-random-LlamaForCausalLM"
+        model_id = "trl-internal-testing/tiny-random-LlamaForCausalLM"
         config_kwargs = {
             "target_modules": ["down_proj", "up_proj"],
             "task_type": "CAUSAL_LM",

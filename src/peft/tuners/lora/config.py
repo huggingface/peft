@@ -73,11 +73,19 @@ class LoraConfig(PeftConfig):
             Otherwise, it will use the original default value of `lora_alpha/r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        init_lora_weights (`bool` | `Literal["gaussian", "loftq"]`):
+        init_lora_weights (`bool` | `Literal["gaussian", "pissa", "pissa_niter_[number of iters]", "loftq"]`):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization.
+            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Passing
+            'pissa' results in the initialization of PiSSA, which converge more rapidly than LoRA and ultimately
+            achieve superior performance. Moreover, PiSSA reduces the quantization error compared to QLoRA, leading to
+            further enhancements. Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA
+            initialization, where [number of iters] indicates the number of subspace iterations to perform FSVD, and
+            must be a nonnegative integer. When the [number of iters] is set to 16, it can complete the initialization
+            of a 7b model within seconds, and the training effect is approximately equivalent to using SVD. For more
+            information, see <a href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors
+            Adaptation</a>.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -108,7 +116,7 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
-        layer_replication(`List[Tuple[int, int]]`):
+        layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate LoRA adapters attached to them.
@@ -155,7 +163,7 @@ class LoraConfig(PeftConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    init_lora_weights: bool | Literal["gaussian", "loftq"] = field(
+    init_lora_weights: bool | Literal["gaussian", "pissa", "pissa_niter_[number of iters]", "loftq"] = field(
         default=True,
         metadata={
             "help": (
@@ -163,6 +171,9 @@ class LoraConfig(PeftConfig):
                 "initialization from the reference implementation from Microsoft. Passing 'gaussian' results "
                 "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
                 "to False leads to completely random initialization and is discouraged."
+                "Passing 'pissa' results in PiSSA initialization."
+                "Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, "
+                "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
         },

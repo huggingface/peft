@@ -20,10 +20,11 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import dequantize_bnb_weight, gather_params_ctx
+from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -77,6 +78,12 @@ class LoraLayer(BaseTunerLayer):
         elif hasattr(base_layer, "w_bit") and base_layer.__class__.__name__ == "WQLinear_GEMM":
             # Awq layers
             in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif base_layer.__class__.__name__ == "EetqLinear":
+            # Eetq layers
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif hasattr(base_layer, "W_q") and base_layer.__class__.__name__ == "HQQLinear":
+            # HQQ layers
+            in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
@@ -106,7 +113,9 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
-        if init_lora_weights == "loftq":
+        if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
+            self.pissa_init(adapter_name, init_lora_weights)
+        elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
@@ -149,6 +158,42 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
+    def pissa_init(self, adapter_name, init_lora_weights):
+        weight = self.get_base_layer().weight
+        dtype = weight.dtype
+        if dtype not in [torch.float32, torch.float16, torch.bfloat16]:
+            raise TypeError(
+                "Please initialize PiSSA under float32, float16, or bfloat16. "
+                "Subsequently, re-quantize the residual model to help minimize quantization errors."
+            )
+        weight = weight.to(torch.float32)
+
+        if init_lora_weights == "pissa":
+            # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
+            V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
+            Vr = V[:, : self.r[adapter_name]]
+            Sr = S[: self.r[adapter_name]]
+            Sr /= self.scaling[adapter_name]
+            Uhr = Uh[: self.r[adapter_name]]
+        elif len(init_lora_weights.split("_niter_")) == 2:
+            Vr, Sr, Ur = svd_lowrank(
+                weight.data, self.r[adapter_name], niter=int(init_lora_weights.split("_niter_")[-1])
+            )
+            Sr /= self.scaling[adapter_name]
+            Uhr = Ur.t()
+        else:
+            raise ValueError(
+                f"init_lora_weights should be 'pissa' or 'pissa_niter_[number of iters]', got {init_lora_weights} instead."
+            )
+
+        lora_A = torch.diag(torch.sqrt(Sr)) @ Uhr
+        lora_B = Vr @ torch.diag(torch.sqrt(Sr))
+        self.lora_A[adapter_name].weight.data = lora_A
+        self.lora_B[adapter_name].weight.data = lora_B
+        weight = weight.data - self.scaling[adapter_name] * lora_B @ lora_A
+        weight = weight.to(dtype)
+        self.get_base_layer().weight.data = weight
+
     def loftq_init(self, adapter_name):
         from peft.utils.loftq_utils import loftq_init
 
@@ -178,19 +223,28 @@ class LoraLayer(BaseTunerLayer):
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
-        lora_A = self.lora_A[adapter_name]
-        lora_B = self.lora_B[adapter_name]
+        lora_A = self.lora_A[adapter_name].weight
+        lora_B = self.lora_B[adapter_name].weight
+        # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
+        dtype_is_fp16 = lora_A.dtype == torch.float16
+        if dtype_is_fp16:
+            lora_A = lora_A.float()
+            lora_B = lora_B.float()
+
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer().parameters()):
-            weight = self.get_base_layer().weight
-            quant_state = getattr(self.get_base_layer(), "state", None)
-            weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+            base_layer = self.get_base_layer()
+            weight = dequantize_module_weight(base_layer)
             if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
-                lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
+                lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
-                lora_weight = lora_B.weight @ lora_A.weight
+                lora_weight = lora_B @ lora_A
+
+            if dtype_is_fp16:
+                lora_weight = lora_weight.half()
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
+
         self.lora_magnitude_vector = nn.ParameterDict()
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
         # add lora_magnitude_vector to the list of learnable parameters
@@ -210,9 +264,8 @@ class LoraLayer(BaseTunerLayer):
         """
         lora_weight = lora_B.weight @ lora_A.weight
         magnitude = self.lora_magnitude_vector[active_adapter]
-        weight = self.get_base_layer().weight
-        quant_state = getattr(self.get_base_layer(), "state", None)
-        weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+        base_layer = self.get_base_layer()
+        weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
         weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
