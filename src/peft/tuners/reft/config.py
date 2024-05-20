@@ -29,7 +29,7 @@ class LoReftConfig(LycorisConfig):
         alpha (`int`): LoReFT alpha.
         loc (`Optional[str]`):
             Token locations are applied LoReFT.
-        module_dropout (`int`):
+        dropout (`int`):
             The dropout probability for disabling LoReFT modules during training.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
@@ -58,7 +58,7 @@ class LoReftConfig(LycorisConfig):
     r: int = field(default=8, metadata={"help": "LoReFT rank"})
     alpha: int = field(default=8, metadata={"help": "LoReFT alpha"})
     loc: Optional[str] = field(default=None, metadata={"help": "token locations are applied LoReFT. e.g., f2+l2"})
-    module_dropout: float = field(
+    dropout: float = field(
         default=0.0, metadata={"help": "The dropout probability for disabling LoReFT modules during training"}
     )
     target_modules: Optional[Union[List[str], str]] = field(

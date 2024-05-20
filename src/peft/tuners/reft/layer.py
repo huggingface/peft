@@ -85,8 +85,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
         r: int,
         alpha: float,
         loc: Optional[str],
-        rank_dropout: float,
-        module_dropout: float,
+        dropout: float,
         init_weights: bool,
         **kwargs,
     ) -> None:
@@ -96,8 +95,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
             alpha (`float`): Alpha for the added adapter.
-            rank_dropout (`float`): The dropout probability for rank dimension during training.
-            module_dropout (`float`): The dropout probability for disabling adapter during training.
+            dropout (`float`): The dropout probability for disabling adapter during training.
             init_weights (`bool`): Whether to initialize weights.
         """
         if r <= 0:
@@ -109,8 +107,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
         self.last_n[adapter_name] = last_n
         self.alpha[adapter_name] = alpha
         self.scaling[adapter_name] = alpha / r
-        self.rank_dropout[adapter_name] = rank_dropout
-        self.module_dropout[adapter_name] = module_dropout
+        self.dropout[adapter_name] = torch.nn.Dropout(dropout)
 
         # Create weights with provided shape
         self.create_adapter_parameters(adapter_name, r)
@@ -151,7 +148,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
 
                 rotate_layer = self.reft_R[active_adapter]
                 learned_source = self.reft_A[active_adapter]
-                module_dropout = self.module_dropout[active_adapter]
+                dropout = self.dropout[active_adapter]
                 if self.first_n[active_adapter] == 0 and self.last_n[active_adapter] == 0:
                     rotated_base = rotate_layer(result)
                     offset = torch.matmul((learned_source(result) - rotated_base), rotate_layer.weight)
@@ -164,8 +161,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
                     rotated_base = rotate_layer(selected_results)
                     offset = torch.matmul((learned_source(selected_results) - rotated_base), rotate_layer.weight)
                     output.scatter_(1, loc, offset)
-                    output = module_dropout(output)
-
+                output = dropout(output)
         output = output.to(previous_dtype)
         return output
 
@@ -180,8 +176,7 @@ class Linear(LoReftLayer):
         r: int = 0,
         alpha: float = 0.0,
         loc: str = None,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
+        dropout: float = 0.0,
         init_weights: bool = True,
         **kwargs,
     ):
@@ -189,7 +184,7 @@ class Linear(LoReftLayer):
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, loc, rank_dropout, module_dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, loc, dropout, init_weights, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -213,8 +208,7 @@ class Conv2d(LoReftLayer):
         r: int = 0,
         alpha: float = 0.0,
         loc: str = None,
-        rank_dropout: float = 0.0,
-        module_dropout: float = 0.0,
+        dropout: float = 0.0,
         init_weights: bool = True,
         **kwargs,
     ):
@@ -223,7 +217,7 @@ class Conv2d(LoReftLayer):
         # Create adapter and set it active
         self._active_adapter = adapter_name
         self.update_layer(
-            adapter_name, r, alpha, loc, rank_dropout, module_dropout, init_weights, **kwargs
+            adapter_name, r, alpha, loc, dropout, init_weights, **kwargs
         )
 
     def _get_delta_activations(
