@@ -40,6 +40,7 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     VeraConfig,
+    LoReftConfig,
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_kbit_training,
@@ -95,6 +96,11 @@ CONFIG_TESTING_KWARGS = (
         "save_projection": True,
         "bias": "none",
     },
+    # LoReFT
+    {
+        "r": 8,
+        "target_modules": None,
+    },
 )
 
 CLASSES_MAPPING = {
@@ -106,6 +112,7 @@ CLASSES_MAPPING = {
     "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
     "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[6]),
     "vera": (VeraConfig, CONFIG_TESTING_KWARGS[6]),
+    "loreft": (LoReftConfig, CONFIG_TESTING_KWARGS[7]),
 }
 
 
