@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from .config import LoReftConfig
-from .layer import Conv2d, Linear, LoReftLayer
+from .layer import Linear, LoReftLayer
 from .model import LoReftModel
 
 
-__all__ = ["LoReftConfig", "LoReftModel", "Conv2d", "Linear", "LoReftLayer"]
+__all__ = ["LoReftConfig", "LoReftModel", "Linear", "LoReftLayer"]
