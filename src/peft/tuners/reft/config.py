@@ -105,7 +105,7 @@ class LoReftConfig(LycorisConfig):
     )
 
     def __post_init__(self):
-        self.peft_type = PeftType.REFT
+        self.peft_type = PeftType.LOREFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
