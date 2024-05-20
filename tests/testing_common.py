@@ -544,6 +544,9 @@ class PeftCommonTester:
         if issubclass(config_cls, BOFTConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
+        if issubclass(config_cls, LoReftConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -801,7 +804,7 @@ class PeftCommonTester:
             _ = model.generate(inputs["input_ids"])
 
     def _test_generate_half_prec(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig):
+        if config_cls not in (IA3Config, LoraConfig, PrefixTuningConfig, LoReftConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         if self.torch_device == "mps":  # BFloat16 is not supported on MPS

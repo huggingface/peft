@@ -2889,7 +2889,7 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin1.reft_A.adapter1.weight",
             "base_model.model.lin1.reft_R.adapter1.parametrizations.weight.original",
-            "base_model.model.lin0.reft_A.adapter1.bias",
+            "base_model.model.lin1.reft_A.adapter1.bias",
         )
 
         # disable all adapters
