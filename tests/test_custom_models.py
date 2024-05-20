@@ -742,6 +742,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         elif issubclass(config_cls, LNTuningConfig):
             # LNTuning do not take init_weights
             pass
+        elif issubclass(config_cls, LoReftConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_safe_merge(model_id, config_cls, config_kwargs)
