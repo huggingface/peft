@@ -145,7 +145,7 @@ def get_peft_model_state_dict(
 
     elif config.peft_type == PeftType.POLY:
         to_return = {k: state_dict[k] for k in state_dict if "poly_" in k}
-    elif config.peft_type == PeftType.REFT:
+    elif config.peft_type == PeftType.LOREFT:
         to_return = {k: state_dict[k].contiguous() for k in state_dict if "reft_" in k}
 
     elif config.peft_type == PeftType.LN_TUNING:
@@ -296,7 +296,7 @@ def set_peft_model_state_dict(
         PeftType.POLY,
         PeftType.LN_TUNING,
         PeftType.BOFT,
-        PeftType.REFT,
+        PeftType.LOREFT,
         PeftType.VERA,
     ):
         peft_model_state_dict = {}
@@ -309,7 +309,7 @@ def set_peft_model_state_dict(
             PeftType.OFT: "oft_",
             PeftType.POLY: "poly_",
             PeftType.BOFT: "boft_",
-            PeftType.REFT: "reft_",
+            PeftType.LOREFT: "reft_",
             PeftType.LN_TUNING: "ln_tuning_",
             PeftType.VERA: "vera_lambda_",
         }[config.peft_type]
