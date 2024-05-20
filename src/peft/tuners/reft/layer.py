@@ -48,6 +48,8 @@ class LoReftLayer(nn.Module, LycorisLayer):
         self.reft_A = nn.ModuleDict({})
         self.reft_R = nn.ModuleDict({})
         self.loc = {}
+        self.first_n = {}
+        self.last_n = {}
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
