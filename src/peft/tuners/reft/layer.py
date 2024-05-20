@@ -141,9 +141,9 @@ class LoReftLayer(nn.Module, LycorisLayer):
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
+            output = self.base_layer(x, *args, **kwargs)
         elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
+            output = self.base_layer(x, *args, **kwargs)
         else:
             result = self.base_layer(x, *args, **kwargs)
 
