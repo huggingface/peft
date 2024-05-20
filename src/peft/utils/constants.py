@@ -207,6 +207,41 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
 }
 
+TRANSFORMERS_MODELS_TO_LOREFT_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "v"],
+    "mt5": ["q", "v"],
+    "bart": ["q_proj", "v_proj"],
+    "gpt2": ["c_attn"],
+    "bloom": ["query_key_value"],
+    "blip-2": ["q", "v", "q_proj", "v_proj"],
+    "opt": ["q_proj", "v_proj"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
+    "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
+    "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "value_proj"],
+    "deberta": ["in_proj"],
+    "layoutlm": ["query", "value"],
+    "llama": ["q_proj", "v_proj"],
+    "chatglm": ["query_key_value"],
+    "gpt_bigcode": ["c_attn"],
+    "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+    "btlm": ["c_proj", "c_attn"],
+    "codegen": ["qkv_proj"],
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
+    "stablelm": ["q_proj", "v_proj"],
+    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
+    "phi": ["q_proj", "v_proj"],
+    "gemma": ["q_proj", "v_proj"], 
+}
+
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
