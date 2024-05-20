@@ -463,13 +463,13 @@ class PeftCommonTester:
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
-        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
+        model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
         model = get_peft_model(model, config)
-        model = model.to(device="cpu", dtype=torch.float16)
+        model = model.to(device=self.torch_device, dtype=torch.float16)
 
         model.eval()
 
@@ -560,6 +560,8 @@ class PeftCommonTester:
         logits_merged_unloaded = model(**dummy_input)[0]
 
         atol, rtol = 1e-4, 1e-4
+        if self.torch_device in ['mlu']:
+            atol, rtol = 1e-3, 1e-3  # MLU 
         if (config.peft_type == "IA3") and (model_id == "Conv2d"):
             # for some reason, the IA³ Conv2d introduces a larger error
             atol, rtol = 0.3, 0.01
@@ -688,14 +690,17 @@ class PeftCommonTester:
         model = get_peft_model(model, config).eval()
         logits_peft = model(**inputs)[0]
 
+        atol, rtol = 1e-6, 1e-6 # default
         # sanity check that the logits are different
-        assert not torch.allclose(logits_base, logits_peft, atol=1e-6, rtol=1e-6)
+        assert not torch.allclose(logits_base, logits_peft, atol=atol, rtol=rtol)
 
         model_unloaded = model.merge_and_unload(safe_merge=True)
         logits_unloaded = model_unloaded(**inputs)[0]
 
+        if self.torch_device in ['mlu']:
+            atol, rtol = 1e-3, 1e-3  # MLU 
         # check that the logits are the same after unloading
-        assert torch.allclose(logits_peft, logits_unloaded, atol=1e-6, rtol=1e-6)
+        assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument

@@ -897,6 +897,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
 
+        if self.torch_device in ['mlu'] and model_id in ['Conv2d']:
+            atol, rtol = 1e-3, 1e-2  # MLU 
+
         # unmerged or merged should make no difference
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
