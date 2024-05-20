@@ -225,7 +225,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft"])],
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "loreft"])],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):
