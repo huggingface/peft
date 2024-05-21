@@ -50,6 +50,10 @@ class XLoraClassifier(nn.Module):
         n_layers: int,
         device: torch.device,
     ):
+        """
+        Construct an X-LoRA classifier from a model, config and some metadata. Note that n_layers is the number of LoRA
+        adapter layers, not the number of model layers.
+        """
         super().__init__()
 
         self.n_classes = n_classes
@@ -112,7 +116,9 @@ class XLoraClassifier(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         """
-        Make some dummy scalings
+        Make some dummy scalings for the scalings pass (the one to get the logits for the X-LoRA classifier). These are
+        of shape (batch_size, seq_len, n_layers, n_classes) and filled with the override scalings pass value. Note that
+        n_layers is the number of LoRA adapter layers, not the number of model layers.
         """
         if input_ids is not None:
             batch_size = input_ids.shape[0]
