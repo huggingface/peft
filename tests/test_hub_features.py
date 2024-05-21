@@ -39,6 +39,28 @@ class PeftHubFeaturesTester(unittest.TestCase):
             assert isinstance(model, PeftModel)
 
 
+class TestLocalModel:
+    def test_local_model_saving_no_warning(self, recwarn, tmp_path):
+        # When the model is saved, the library checks for vocab changes by
+        # examining `config.json` in the model path.
+        # However, previously, those checks only covered huggingface hub models.
+        # This test makes sure that the local `config.json` is checked as well.
+        # If `save_pretrained` could not find the file, it will issue a warning.
+        model_id = "facebook/opt-125m"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        local_dir = tmp_path / model_id
+        model.save_pretrained(local_dir)
+        del model
+
+        base_model = AutoModelForCausalLM.from_pretrained(local_dir)
+        peft_config = LoraConfig()
+        peft_model = get_peft_model(base_model, peft_config)
+        peft_model.save_pretrained(local_dir)
+
+        for warning in recwarn.list:
+            assert "Could not find a config file" not in warning.message.args[0]
+
+
 class TestBaseModelRevision:
     def test_save_and_load_base_model_revision(self, tmp_path):
         r"""
