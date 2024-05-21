@@ -214,6 +214,7 @@ It is possible to get this information for non-PEFT models if they are using PEF
 >>> pipe = StableDiffusionPipeline.from_pretrained(path, torch_dtype=torch.float16)
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-1")
 >>> pipe.load_lora_weights(lora_id, adapter_name="adapter-2")
+>>> pipe.set_lora_device(["adapter-2"], "cuda")
 >>> get_layer_status(pipe.text_encoder)
 [TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.k_proj',
                   module_type='lora.Linear',
@@ -221,14 +222,15 @@ It is possible to get this information for non-PEFT models if they are using PEF
                   active_adapters=['adapter-2'],
                   merged_adapters=[],
                   requires_grad={'adapter-1': False, 'adapter-2': True},
-                  available_adapters=['adapter-1', 'adapter-2']),
+                  available_adapters=['adapter-1', 'adapter-2'],
+                  devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']}),
  TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.v_proj',
                   module_type='lora.Linear',
                   enabled=True,
                   active_adapters=['adapter-2'],
                   merged_adapters=[],
                   requires_grad={'adapter-1': False, 'adapter-2': True},
-                  available_adapters=['adapter-1', 'adapter-2']),
+                  devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']}),
 ...]
 
 >>> get_model_status(pipe.unet)
@@ -244,5 +246,6 @@ TunerModelStatus(
     merged_adapters=[],
     requires_grad={'adapter-1': False, 'adapter-2': True},
     available_adapters=['adapter-1', 'adapter-2'],
+    devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']},
 )
 ```
