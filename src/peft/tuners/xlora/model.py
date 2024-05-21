@@ -81,8 +81,8 @@ def convert_layers_to_xlora(
 
 class XLoraModel(BaseTuner):
     """
-    Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently,
-    this X-LoRA implementation only works with models with a transformer architecture.
+    Creates an X-LoRA (Mixture of LoRA experts), model from a pretrained transformers model. Currently, this X-LoRA
+    implementation only works with models with a transformer architecture.
 
     The method is described in detail in https://arxiv.org/abs/2402.07148.
 
@@ -297,8 +297,8 @@ class XLoraModel(BaseTuner):
 
     def set_scaling_pass_value(self, value: float | None):
         """
-        Set the scaling pass value, the value to set the scalings to during the scaling pass. If the value is None,
-        the scaling pass value will be 1/n where n is the number of adapters.
+        Set the scaling pass value, the value to set the scalings to during the scaling pass. If the value is None, the
+        scaling pass value will be 1/n where n is the number of adapters.
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         classifier._set_override_scaling_pass_value(value)

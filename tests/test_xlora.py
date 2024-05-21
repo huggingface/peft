@@ -74,9 +74,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        # No check on text because of sampling, untrained adapters etc.
-        print(text[0])
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
@@ -86,8 +84,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
         _ = model.get_latest_scalings()
         # 32 is the numeber of max scalings. 3 is the number of prompt tokens.
@@ -100,8 +97,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
         assert 32 >= len(model.get_scalings_log()) > 0
 
@@ -131,8 +127,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
         model.set_use_trainable_adapters(True)
         assert model.xlora_config.use_trainable_adapters
@@ -149,8 +144,8 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        before_logits = outputs[: inputs.shape[1] :]
+        assert torch.isfinite(before_logits).all()
 
         model.save_pretrained(save_directory=tmp_dir)
 
@@ -165,8 +160,9 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        after_logits = outputs
+        assert torch.isfinite(after_logits).all()
+        assert torch.equal(after_logits, before_logits)
 
     def test_save_load_functional_pt(self, tokenizer, model, tmp_dir):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
@@ -174,8 +170,8 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        before_logits = outputs[: inputs.shape[1] :]
+        assert torch.isfinite(before_logits).all()
 
         model.save_pretrained(save_directory=tmp_dir, safe_serialization=False)
 
@@ -190,8 +186,9 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        after_logits = outputs
+        assert torch.isfinite(after_logits).all()
+        assert torch.equal(after_logits, before_logits)
 
     def test_topk_lora(self, tokenizer, model):
         model.set_topk_lora(2)
@@ -202,8 +199,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
     def test_softmax_topk(self, tokenizer, model):
         # Just reach in to set the config
@@ -216,8 +212,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        text = tokenizer.batch_decode(outputs[: inputs.shape[1] :].detach().cpu().numpy(), skip_special_tokens=True)
-        print(text[0])
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
     def test_set_override_scaling_pass_value(self, model):
         # Defaults to 0
