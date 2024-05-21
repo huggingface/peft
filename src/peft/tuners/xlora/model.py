@@ -239,21 +239,6 @@ class XLoraModel(BaseTuner):
         except AttributeError:
             return getattr(self.lora_model, name)
 
-    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
-        # Handle case during init
-        if not hasattr(self, "lora_model"):
-            return
-        active_adapters = []
-        copy = self.lora_model.active_adapters.copy()
-        for name in self.lora_model.active_adapters:
-            if not isinstance(self.lora_model.peft_config[name], XLoraConfig):
-                active_adapters.append(name)
-        self.lora_model.active_adapter = active_adapters
-        if self.xlora_config.use_trainable_adapters:
-            super()._mark_only_adapters_as_trainable(model)
-
-        self.lora_model.active_adapter = copy
-
     @staticmethod
     def _prepare_adapter_config(peft_config, _model_config):
         # Handle X-LoRA case
