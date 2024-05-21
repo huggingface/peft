@@ -355,21 +355,3 @@ class XLoraModel(BaseTuner):
         """
         classifier: XLoraClassifier = self.internal_xlora_classifier  # type: ignore
         return classifier._get_bucketed_scalings()
-
-    def set_use_trainable_adapters(self, use_trainable_adapters: bool):
-        """
-        Set the adapters to trainable or not trainable.
-
-        This is reflected in the config.
-        """
-        for name, param in self.named_parameters():
-            if "lora_" in name:
-                param.requires_grad = use_trainable_adapters
-
-        self.xlora_config.use_trainable_adapters = use_trainable_adapters
-
-    def get_use_trainable_adapters(self) -> bool:
-        """
-        Get the trainable or not trainable state of the adapters.
-        """
-        return self.xlora_config.use_trainable_adapters

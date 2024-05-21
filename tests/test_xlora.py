@@ -129,13 +129,6 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
-        model.set_use_trainable_adapters(True)
-        assert model.xlora_config.use_trainable_adapters
-
-        model.set_use_trainable_adapters(False)
-        model.get_use_trainable_adapters()
-        assert not model.xlora_config.use_trainable_adapters
-
         assert str(model) is not None
 
     def test_save_load_functional(self, tokenizer, model, tmp_dir):
