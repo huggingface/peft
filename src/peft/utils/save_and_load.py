@@ -45,35 +45,6 @@ def get_embedding_layer_name(model, layer, is_embedding_in_target_modules):
     return None
 
 
-def get_buffers_to_save(model: torch.nn.Module, config) -> dict[str, torch.Tensor]:
-    """
-    Get the buffers to save for the given model and config.
-
-    Although the base model weights are not updated when using PEFT, some buffers may still be updated and therefore
-    need to be saved as part of the PEFT checkpoint. An example of this are the running stats of batch norm layers.
-
-    Args:
-        model (torch.nn.Module):
-            The PEFT model.
-        config (PeftConfig):
-            The PEFT config.
-
-    Returns:
-        dict[str, torch.Tensor]:
-            The buffers to save.
-    """
-    # note: config is currently not used but that may change in the future
-    buffers_to_save = {}
-    for module_name, module in model.named_modules():
-        # currently, we only deal with running stats from BatchNorm* modules
-        if not hasattr(module, "track_running_stats"):
-            continue
-        for buffer_name, buffer in module.named_buffers():
-            if buffer is not None:
-                buffers_to_save[module_name + "." + buffer_name] = buffer
-    return buffers_to_save
-
-
 def get_peft_model_state_dict(
     model, state_dict=None, adapter_name="default", unwrap_compiled=False, save_embedding_layers="auto"
 ):
@@ -255,10 +226,6 @@ def get_peft_model_state_dict(
                     to_return.update({k: v for k, v in state_dict.items() if embedding_module_name in k})
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
-
-    # DEAL WITH BUFFERS
-    buffers_to_save = get_buffers_to_save(model, config)
-    to_return.update(buffers_to_save)
 
     # REMOVE ADAPTER NAME
     to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}

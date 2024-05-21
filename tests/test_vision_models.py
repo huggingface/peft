@@ -26,14 +26,14 @@ from peft import LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_p
 
 
 CONFIGS = {
-    "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier"]),
-    "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier"]),
-    "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier"]),
-    "oft": OFTConfig(target_modules=["convolution"], modules_to_save=["classifier"]),
+    "lora": LoraConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "oft": OFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     # TODO: cannot use BOFT because some convolutional kernel dimensions are even (64) and others odd (147). There is no
     # common denominator for the boft_block_size except 1, but using 1 results in an error in the fbd_cuda kernel:
     # > Error in forward_fast_block_diag_cuda_kernel: an illegal memory access was encountered
-    # "boft": BOFTConfig(target_modules=["convolution"], modules_to_save=["classifier"], boft_block_size=2),
+    # "boft": BOFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], boft_block_size=2),
 }
 
 
@@ -112,4 +112,6 @@ class TestResnet:
         model_running_mean = len([k for k in model.state_dict().keys() if "running_mean" in k])
         state_dict = load_file(tmp_path / "adapter_model.safetensors")
         checkpoint_running_mean = len([k for k in state_dict.keys() if "running_mean" in k])
-        assert model_running_mean == checkpoint_running_mean
+        # note that the model has twice as many "running_mean", as there is one copy per ModulesToSaveWrapper, we need
+        # to multiply by 2 to get the same number
+        assert model_running_mean == checkpoint_running_mean * 2
