@@ -831,8 +831,8 @@ class TestModelAndLayerStatus:
         config = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False)
         model = get_peft_model(base_model, config)
 
-        model_status = get_model_status(model)
-        layer_status = get_layer_status(model)
+        model_status = model.get_model_status()
+        layer_status = model.get_layer_status()
 
         assert model_status.base_model_type == "SmallModel"
         assert model_status.adapter_model_type == "LoHaModel"
@@ -874,8 +874,8 @@ class TestModelAndLayerStatus:
         # move the buffer dict to CUDA
         model.lin0.vera_A["default"] = model.lin0.vera_A["default"].to("cuda")
 
-        model_status = get_model_status(model)
-        layer_status = get_layer_status(model)
+        model_status = model.get_model_status()
+        layer_status = model.get_layer_status()
 
         assert model_status.base_model_type == "SmallModel"
         assert model_status.adapter_model_type == "VeraModel"
