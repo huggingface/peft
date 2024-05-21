@@ -74,17 +74,6 @@ class XLoraClassifier(nn.Module):
                 last = nn.Linear(config.hidden_size, n_classes * n_layers, bias=True).to(device).to(dtype)
             else:
                 last = nn.Linear(config.hidden_size, n_classes, bias=True).to(device).to(dtype)
-        elif self.config.xlora_depth == 2:
-            layers.append(nn.Linear(config.hidden_size, config.xlora_size, bias=True).to(device).to(dtype))
-
-            layers.append(nn.ReLU())
-            if add_dropout:
-                layers.append(nn.Dropout(p=config.xlora_dropout_p))
-
-            if config.layerwise_scalings:
-                last = nn.Linear(config.xlora_size, n_classes * n_layers, bias=True).to(device).to(dtype)
-            else:
-                last = nn.Linear(config.xlora_size, n_classes, bias=True).to(device).to(dtype)
         else:
             if self.config.xlora_depth <= 0:
                 raise ValueError("X-LoRA depth must be strictly positive.")
