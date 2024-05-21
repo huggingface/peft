@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import builtins
-from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -36,13 +35,6 @@ class TemperatureScaledSoftmax(nn.Module):
         scaled_logits = logits / self.temperature
         # Apply softmax to the scaled logits
         return self.softmax(scaled_logits)
-
-
-@dataclass
-class InhibitorFlagPayload:
-    batch_size: int
-    seq_len: int
-    override_scaling_pass_value: Number
 
 
 class XLoraClassifier(nn.Module):
@@ -136,14 +128,9 @@ class XLoraClassifier(nn.Module):
             seq_len = inputs_embeds.shape[1]
             device = input_ids.device
 
-        payload = InhibitorFlagPayload(
-            batch_size=batch_size,
-            seq_len=seq_len,
-            override_scaling_pass_value=self.override_scaling_pass_value,
-        )
         return torch.full(  # type: ignore
-            (payload.batch_size, payload.seq_len, self.n_layers, self.n_classes),
-            payload.override_scaling_pass_value,
+            (batch_size, seq_len, self.n_layers, self.n_classes),
+            self.override_scaling_pass_value,
         ).to(device)
 
     def forward(
