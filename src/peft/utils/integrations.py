@@ -20,7 +20,7 @@ import transformers
 
 
 @contextmanager
-def gather_params_ctx(module: torch.nn.Module, modifier_rank: int = 0):
+def gather_params_ctx(param, modifier_rank: int = 0, fwd_module: torch.nn.Module = None):
     """Call DeepSpeed GatheredParameters context manager if DeepSpeed is enabled, otherwise do nothing."""
     if packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.33.0"):
         from transformers.integrations import is_deepspeed_zero3_enabled
@@ -33,18 +33,24 @@ def gather_params_ctx(module: torch.nn.Module, modifier_rank: int = 0):
 
     import deepspeed
 
-    params_to_gather = module.parameters()
-    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=modifier_rank):
+    with deepspeed.zero.GatheredParameters(param, modifier_rank=modifier_rank, fwd_module=fwd_module):
         yield
     return
 
 
-def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
+def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
     """
-    Helper function to dequantize 4bit or 8bit bnb weights.
+    Helper function to dequantize a quantized weight.
 
-    If the weight is not a bnb quantized weight, it will be returned as is.
+    This function should be extended if more quantization schemes are added to the library.
+
+    If the weight is not quantized, it will be returned as is.
     """
+    if hasattr(module, "W_q"):  # For handling HQQ quantized weight
+        weight = module.dequantize()
+        return weight
+
+    weight = module.weight
     if not isinstance(weight, torch.nn.Parameter):
         raise TypeError(f"Input weight should be of type nn.Parameter, got {type(weight)} instead")
 
@@ -52,10 +58,35 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     if cls_name not in ("Params4bit", "Int8Params"):
         return weight
 
+    quant_state = getattr(module, "state", None)
+    device = weight.device
+    is_cpu = device.type == torch.device("cpu").type
+    weight = dequantize_bnb_weight(weight, state=quant_state)  # no-op if not bnb
+    if is_cpu:
+        # dequantize_bnb_weight for 8bit moves the device in-place, thus we need to move it back to CPU if necessary
+        module.weight = module.weight.to(device)
+    return weight
+
+
+def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
+    """Helper function to dequantize 4bit or 8bit bnb weights.
+
+    Since dequantization is not supported on CPU, the weight will be temporarily moved to CUDA if necessary.
+    """
     import bitsandbytes as bnb
 
+    # BNB requires CUDA weights
+    device = weight.device
+    is_cpu = device.type == torch.device("cpu").type
+    if is_cpu:
+        weight = weight.to(torch.device("cuda"))
+
+    cls_name = weight.__class__.__name__
     if cls_name == "Params4bit":
-        return bnb.functional.dequantize_4bit(weight.data, weight.quant_state)
+        dequantized = bnb.functional.dequantize_4bit(weight.data, weight.quant_state)
+        if is_cpu:
+            dequantized = dequantized.to(device)
+        return dequantized
 
     if state.SCB is None:
         state.SCB = weight.SCB
@@ -66,4 +97,7 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     if state.CxB is None:
         state.CxB, state.SB = bnb.functional.transform(weight.data, to_order=state.formatB)
     out32, Sout32 = bnb.functional.igemmlt(im, state.CxB, Sim, state.SB)
-    return bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+    dequantized = bnb.functional.mm_dequant(out32, Sout32, SCim, state.SCB, bias=None).t()
+    if is_cpu:
+        dequantized = dequantized.to(device)
+    return dequantized

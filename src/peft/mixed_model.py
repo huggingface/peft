@@ -311,6 +311,12 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         """
         return self.base_model.unload(*args, **kwargs)
 
+    def get_layer_status(self):
+        raise TypeError(f"get_layer_status is not supported for {self.__class__.__name__}.")
+
+    def get_model_status(self):
+        raise TypeError(f"get_model_status is not supported for {self.__class__.__name__}.")
+
     @classmethod
     def _split_kwargs(cls, kwargs: dict[str, Any]):
         return PeftModel._split_kwargs(kwargs)

@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.10.1.dev0"
+VERSION = "0.11.2.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -52,7 +52,7 @@ setup(
     url="https://github.com/huggingface/peft",
     package_dir={"": "src"},
     packages=find_packages("src"),
-    package_data={"peft": ["py.typed"]},
+    package_data={"peft": ["py.typed", "tuners/boft/fbd/fbd_cuda.cpp", "tuners/boft/fbd/fbd_cuda_kernel.cu"]},
     entry_points={},
     python_requires=">=3.8.0",
     install_requires=[

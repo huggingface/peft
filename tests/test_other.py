@@ -15,6 +15,7 @@
 import pytest
 import torch
 from torch import nn
+from transformers import AutoModelForCausalLM
 
 from peft import LoraConfig, get_peft_model
 
@@ -73,3 +74,15 @@ def test_modules_to_save_targets_module_dict_raises(cls):
     msg = "modules_to_save cannot be applied to modules of type"
     with pytest.raises(TypeError, match=msg):
         get_peft_model(model=model, peft_config=peft_config)
+
+
+def test_get_peft_model_revision_warning(tmp_path):
+    base_model_id = "peft-internal-testing/tiny-random-BertModel"
+    base_revision = "v2.0.0"
+    base_model = AutoModelForCausalLM.from_pretrained(base_model_id, revision=base_revision).eval()
+    lora_config = LoraConfig(revision=base_revision)
+
+    overwrite_revision = "main"
+    overwrite_warning = f"peft config has already set base model revision to {base_revision}, overwriting with revision {overwrite_revision}"
+    with pytest.warns(UserWarning, match=overwrite_warning):
+        _ = get_peft_model(base_model, lora_config, revision=overwrite_revision)

@@ -41,6 +41,7 @@ from peft.utils import (
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
+    get_peft_model_state_dict,
     get_quantization_config,
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
@@ -48,7 +49,9 @@ from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
 from .config import LoraConfig
+from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
+from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .tp_layer import dispatch_megatron
 
@@ -218,7 +221,7 @@ class LoraModel(BaseTuner):
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
-            if adapter_name != self.active_adapter:
+            if adapter_name not in self.active_adapters:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
@@ -244,6 +247,8 @@ class LoraModel(BaseTuner):
             if (self.prefix in name) or ("ranknum" in name):
                 if hasattr(child, "qweight"):
                     weight = child.qweight
+                elif hasattr(child, "W_q"):
+                    weight = child.W_q
                 elif hasattr(child, "weight"):
                     weight = child.weight
                 elif getattr(child, "in_proj_weight", None) is not None:  # MHA
@@ -292,7 +297,17 @@ class LoraModel(BaseTuner):
 
             dispatchers.append(dispatch_bnb_4bit)
 
-        dispatchers.extend([dispatch_aqlm, dispatch_awq, dispatch_gptq, dispatch_megatron, dispatch_default])
+        dispatchers.extend(
+            [
+                dispatch_eetq,
+                dispatch_aqlm,
+                dispatch_awq,
+                dispatch_gptq,
+                dispatch_hqq,
+                dispatch_megatron,
+                dispatch_default,
+            ]
+        )
 
         new_module = None
         for dispatcher in dispatchers:
@@ -454,17 +469,85 @@ class LoraModel(BaseTuner):
 
         return self.model
 
+    def _check_add_weighted_adapter(
+        self, adapters: list[str], combination_type: str, svd_rank: int | None
+    ) -> tuple[str, int, str]:
+        """
+        Helper function to check if the arguments to add_weighted_adapter are valid and compatible with the underlying
+        model.
+        """
+        for adapter in adapters:
+            if adapter not in list(self.peft_config.keys()):
+                raise ValueError(f"Adapter {adapter} does not exist")
+
+        # If more than one of the adapters targets the same module with modules_to_save, raise an error, as these
+        # modules cannot be merged. First, find the ModulesToSaveWrapper instances in the model, then check if they
+        # have modules for the adapters to be merged.
+        modules_to_save_wrappers = [module for module in self.modules() if isinstance(module, ModulesToSaveWrapper)]
+        problematic_wrappers = [
+            wrapper
+            for wrapper in modules_to_save_wrappers
+            if sum(adapter in wrapper.modules_to_save for adapter in adapters) > 1
+        ]
+        if problematic_wrappers:
+            raise ValueError(
+                "Cannot add weighted adapters if they target the same module with modules_to_save, but found "
+                f"{len(problematic_wrappers)} such instance(s)."
+            )
+
+        # if there is only one adapter, we can only use linear merging
+        combination_type = "linear" if len(adapters) == 1 else combination_type
+
+        adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
+        if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
+            # all adapters ranks should be same, new rank is just this value
+            if len(set(adapters_ranks)) != 1:
+                raise ValueError(
+                    "All adapters must have the same r value when using combination_type linear, ties, dare_ties or "
+                    "dare_linear."
+                )
+            new_rank = adapters_ranks[0]
+        elif combination_type == "cat":
+            # adapters ranks may be different, new rank is sum of all ranks
+            # be careful, because output adapter rank may be really big if mixing a lot of adapters
+            new_rank = sum(adapters_ranks)
+        elif combination_type.endswith("svd"):
+            # new rank is the max of all ranks of the adapters if not provided
+            new_rank = svd_rank or max(adapters_ranks)
+        else:
+            raise ValueError(f"Invalid combination_type: {combination_type}")
+
+        target_module_types = [type(self.peft_config[adapter].target_modules) for adapter in adapters]
+        if not target_module_types:
+            raise ValueError(f"Found no adapter matching the names in {adapters}")
+        if len(set(target_module_types)) > 1:
+            raise ValueError(
+                "all adapter configs should follow the same target modules type. "
+                "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
+            )
+
+        if target_module_types[0] == str:
+            new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
+        elif target_module_types[0] == set:
+            new_target_modules = reduce(
+                operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
+            )
+        else:
+            raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
+
+        return combination_type, new_rank, new_target_modules
+
     def add_weighted_adapter(
         self,
-        adapters,
-        weights,
-        adapter_name,
-        combination_type="svd",
-        svd_rank=None,
-        svd_clamp=None,
-        svd_full_matrices=True,
-        svd_driver=None,
-        density=None,
+        adapters: list[str],
+        weights: list[float],
+        adapter_name: str,
+        combination_type: str = "svd",
+        svd_rank: int | None = None,
+        svd_clamp: int | None = None,
+        svd_full_matrices: bool = True,
+        svd_driver: str | None = None,
+        density: float | None = None,
         majority_sign_method: Literal["total", "frequency"] = "total",
     ) -> None:
         """
@@ -509,48 +592,12 @@ class LoraModel(BaseTuner):
 
         if adapter_name in list(self.peft_config.keys()):
             return
-        for adapter in adapters:
-            if adapter not in list(self.peft_config.keys()):
-                raise ValueError(f"Adapter {adapter} does not exist")
 
-        # if there is only one adapter, we can only use linear merging
-        combination_type = "linear" if len(adapters) == 1 else combination_type
-
-        adapters_ranks = [self.peft_config[adapter].r for adapter in adapters]
-        if combination_type in ("linear", "ties", "dare_ties", "dare_linear", "magnitude_prune"):
-            # all adapters ranks should be same, new rank is just this value
-            if len(set(adapters_ranks)) != 1:
-                raise ValueError(
-                    "All adapters must have the same r value when using combination_type linear, ties, dare_ties or dare_linear."
-                )
-            new_rank = adapters_ranks[0]
-        elif combination_type == "cat":
-            # adapters ranks may be different, new rank is sum of all ranks
-            # be careful, because output adapter rank may be really big if mixing a lot of adapters
-            new_rank = sum(adapters_ranks)
-        elif combination_type.endswith("svd"):
-            # new rank is the max of all ranks of the adapters if not provided
-            new_rank = svd_rank or max(adapters_ranks)
-        else:
-            raise ValueError(f"Invalid combination_type: {combination_type}")
-
-        target_module_types = [type(self.peft_config[adapter].target_modules) for adapter in adapters]
-        if not target_module_types:
-            raise ValueError(f"Found no adapter matching the names in {adapters}")
-        if len(set(target_module_types)) > 1:
-            raise ValueError(
-                "all adapter configs should follow the same target modules type. "
-                "Combining adapters with `target_modules` type being a mix of list/set and string is not supported."
-            )
-
-        if target_module_types[0] == str:
-            new_target_modules = "|".join(f"({self.peft_config[adapter].target_modules})" for adapter in adapters)
-        elif target_module_types[0] == set:
-            new_target_modules = reduce(
-                operator.or_, (self.peft_config[adapter].target_modules for adapter in adapters)
-            )
-        else:
-            raise TypeError(f"Invalid type {target_module_types[0]} found in target_modules")
+        combination_type, new_rank, new_target_modules = self._check_add_weighted_adapter(
+            adapters=adapters,
+            combination_type=combination_type,
+            svd_rank=svd_rank,
+        )
 
         self.peft_config[adapter_name] = replace(
             self.peft_config[adapters[0]],
@@ -796,3 +843,42 @@ class LoraModel(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def subtract_pissa_init(
+        self, output_state_dict: dict[str, torch.Tensor], adapter_name: str = "pissa_init", kwargs=None
+    ):
+        """
+        This function can calculate the updates of the PiSSA by comparing the parameters of the PiSSA adapter in
+        `output_state_dict` with the initial values of PiSSA in `adapter_name`, thus converting PiSSA to LoRA.
+        """
+        for name, param in self.model.named_parameters():
+            if (
+                param.data.dtype != torch.float32
+                and param.data.dtype != torch.float16
+                and param.data.dtype != torch.bfloat16
+            ):
+                warnings.warn(
+                    r"Note that Quant(W_res) + AB != Quant(W) + \Delta(AB); "
+                    "the converted LoRA, when combined with W or Quant(W), may introduce a certain gap in the fine-tuned model. "
+                    "Therefore, we recommend directly using the Quant(W_res) in conjunction with the PiSSA adapter. "
+                )
+        pissa_init_state_dict = get_peft_model_state_dict(
+            self,
+            state_dict=kwargs.get("state_dict", None),
+            adapter_name=adapter_name,
+        )
+        tensors_lora = {}
+        for name in output_state_dict.keys():
+            ## W = W^{res} + A_0 \times B_0,
+            ## W + \Delta W = W^{res} + A \times B,
+            ## \Delta W = A \times B - A_0 \times B_0 = [A | A_0] \times [B | -B_0]^T = A'B'.
+            if "lora_A" in name:
+                tensors_lora[name] = torch.cat(
+                    [output_state_dict[name], pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=0
+                )
+            elif "lora_B" in name:
+                tensors_lora[name] = torch.cat(
+                    [output_state_dict[name], -pissa_init_state_dict[".".join(name.split(".")[1:])]], dim=1
+                )
+
+        return tensors_lora
