@@ -1139,22 +1139,7 @@ class PeftCommonTester:
             assert not torch.allclose(logits_with_adapter, logits_unload, atol=1e-10, rtol=1e-10)
             assert torch.allclose(logits_transformers, logits_unload, atol=1e-4, rtol=1e-4)
 
-    def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
-        if issubclass(config_cls, AdaLoraConfig):
-            # AdaLora does not support adding more than 1 adapter
-            return pytest.skip(f"Test not applicable for {config_cls}")
-
-        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
-        weight_list = [0.5, 1.5, 1.5]
-        config = config_cls(
-            base_model_name_or_path=model_id,
-            **config_kwargs,
-        )
-        if not isinstance(config, LoraConfig):
-            return pytest.skip(f"Test not applicable for {config}")
-
-        model = self.transformers_class.from_pretrained(model_id)
-        model = get_peft_model(model, config, adapter_list[0])
+    def _test_weighted_combination_of_adapters_lora(self, model, config, adapter_list, weight_list):
         model.add_adapter(adapter_list[1], config)
         model.add_adapter(adapter_list[2], replace(config, r=20))
         model = model.to(self.torch_device)
@@ -1337,6 +1322,60 @@ class PeftCommonTester:
             assert model.active_adapter == adapter_name
             assert model.active_adapters == [adapter_name]
             model(**dummy_input)[0]
+
+    def _test_weighted_combination_of_adapters_ia3(self, model, config, adapter_list, weight_list):
+        model.add_adapter(adapter_list[1], config)
+        model.add_adapter(adapter_list[2], config)
+        model = model.to(self.torch_device)
+
+        # test re-weighting single adapter
+        model.add_weighted_adapter([adapter_list[0]], [weight_list[0]], "single_adapter_reweighting")
+
+        # test re-weighting with multiple adapters
+        model.add_weighted_adapter(adapter_list[1:], weight_list[1:], "multi_adapter_reweighting")
+
+        new_adapters = [
+            "single_adapter_reweighting",
+            "multi_adapter_reweighting",
+        ]
+        for new_adapter in new_adapters:
+            assert new_adapter in model.peft_config
+
+        dummy_input = self.prepare_inputs_for_testing()
+        model.eval()
+        for adapter_name in new_adapters:
+            # ensuring new adapters pass the forward loop
+            model.set_adapter(adapter_name)
+            assert model.active_adapter == adapter_name
+            assert model.active_adapters == [adapter_name]
+            model(**dummy_input)[0]
+
+    def _test_weighted_combination_of_adapters(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, AdaLoraConfig):
+            # AdaLora does not support adding more than 1 adapter
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
+        adapter_list = ["adapter1", "adapter_2", "adapter_3"]
+        weight_list = [0.5, 1.5, 1.5]
+        # Initialize the config
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+
+        if not isinstance(config, (LoraConfig, IA3Config)):
+            # This test is only applicable for Lora and IA3 configs
+            return pytest.skip(f"Test not applicable for {config}")
+
+        model = self.transformers_class.from_pretrained(model_id)
+        model = get_peft_model(model, config, adapter_list[0])
+
+        if isinstance(config, LoraConfig):
+            self._test_weighted_combination_of_adapters_lora(model, config, adapter_list, weight_list)
+        elif isinstance(config, IA3Config):
+            self._test_weighted_combination_of_adapters_ia3(model, config, adapter_list, weight_list)
+        else:
+            pytest.skip(f"Test not applicable for {config}")
 
     def _test_disable_adapter(self, model_id, config_cls, config_kwargs):
         task_type = config_kwargs.get("task_type")
