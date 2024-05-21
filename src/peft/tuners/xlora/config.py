@@ -42,7 +42,8 @@ class XLoraConfig(PeftConfig):
         softmax_temperature (`float`, *optional*, defaults to 1.0):
             Softmax temperature, lower yields sharper predictions
         layerwise_scalings (`bool`, *optional*, defaults to `False`):
-            Generate scalings for each layer.
+            If True, generate scalings for each LoRA adapter (each layer). If this is False, then scalings will be
+            broadcasted, the same, to each layer.
         top_k_lora (`int`, *optional*, defaults to None):
             Sparsely select the top_k LoRA experts instead of the default dense method.
         xlora_depth (`int`, *optional*, defaults to 1):
