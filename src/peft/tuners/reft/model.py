@@ -44,8 +44,7 @@ class LoReftModel(LycorisTuner):
         >>> config_te = LoReftConfig(
         ...     r=8,
         ...     target_modules=["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
-        ...     module_dropout=0.0,
-        ...     init_weights=True,
+        ...     dropout=0.0,
         ... )
         >>> config_unet = LoReftConfig(
         ...     r=8,
@@ -59,8 +58,7 @@ class LoReftModel(LycorisTuner):
         ...         "ff.net.0.proj",
         ...         "ff.net.2",
         ...     ],
-        ...     module_dropout=0.0,
-        ...     init_weights=True,
+        ...     dropout=0.0,
         ... )
 
         >>> model = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5")

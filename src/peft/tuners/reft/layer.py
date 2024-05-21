@@ -70,15 +70,6 @@ class LoReftLayer(nn.Module, LycorisLayer):
         self.reft_R[adapter_name] = torch.nn.utils.parametrizations.orthogonal(rotate_layer, orthogonal_map='cayley')
         self.reft_A[adapter_name] =  torch.nn.Linear(self.out_features, r)
 
-    def reset_adapter_parameters(self, adapter_name: str):
-        # Original implementation performs initialization with normal distribution
-        # https://github.com/KohakuBlueleaf/LyCORIS/blob/3549fdef8f564761d68b695a08ef88b1122fdedc/lycoris/modules/loha.py#L158
-
-        # FedPara paper proposes to perform He initialization, let's stick with it
-        # It is enough to initialize only single matrix with zeros to make adapter do nothing after initialization
-        if adapter_name in self.reft_A.keys():
-            nn.init.kaiming_uniform_(self.reft_A[adapter_name].weight, a=math.sqrt(5))
-
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         pass
 
@@ -92,7 +83,6 @@ class LoReftLayer(nn.Module, LycorisLayer):
         alpha: float,
         loc: Optional[str],
         dropout: float,
-        init_weights: bool,
         **kwargs,
     ) -> None:
         """Internal function to create loha adapter
@@ -102,7 +92,6 @@ class LoReftLayer(nn.Module, LycorisLayer):
             r (`int`): Rank for the added adapter.
             alpha (`float`): Alpha for the added adapter.
             dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights.
         """
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -119,8 +108,8 @@ class LoReftLayer(nn.Module, LycorisLayer):
         self.create_adapter_parameters(adapter_name, r)
 
         # Initialize weights
-        if init_weights:
-            self.reset_adapter_parameters(adapter_name)
+        if adapter_name in self.reft_A.keys():
+            nn.init.kaiming_uniform_(self.reft_A[adapter_name].weight, a=math.sqrt(5))
 
         # Move new weights to device
         weight = getattr(self.get_base_layer(), "weight", None)
@@ -185,14 +174,13 @@ class Linear(LoReftLayer):
         alpha: float = 0.0,
         loc: str = None,
         dropout: float = 0.0,
-        init_weights: bool = True,
         **kwargs,
     ):
         super().__init__(base_layer)
 
         # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, alpha, loc, dropout, init_weights, **kwargs)
+        self.update_layer(adapter_name, r, alpha, loc, dropout, **kwargs)
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any

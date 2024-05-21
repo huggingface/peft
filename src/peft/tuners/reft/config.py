@@ -39,8 +39,6 @@ class LoReftConfig(LycorisConfig):
             the output layer. If this is not specified, modules will be chosen according to the model architecture. If
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
-        init_weights (`bool`):
-            Whether to perform initialization of LoReFT weights.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -67,15 +65,6 @@ class LoReftConfig(LycorisConfig):
             "help": "List of module names or regex expression of the module names to replace with LoReFT."
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
-        },
-    )
-    init_weights: bool = field(
-        default=True,
-        metadata={
-            "help": (
-                "Whether to initialize the weights of the LoReFT layers with their default initialization. Don't change "
-                "this setting, except if you know exactly what you're doing."
-            ),
         },
     )
     layers_to_transform: Optional[Union[List[int], int]] = field(

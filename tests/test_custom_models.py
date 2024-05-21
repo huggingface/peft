@@ -706,7 +706,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
-        elif issubclass(config_cls, LNTuningConfig):
+        elif issubclass(config_cls, (LNTuningConfig, LoReftConfig)):
             pass
         else:
             config_kwargs["init_weights"] = False
@@ -739,7 +739,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_lora_weights"] = False
         elif issubclass(config_cls, IA3Config):
             config_kwargs["init_ia3_weights"] = False
-        elif issubclass(config_cls, LNTuningConfig):
+        elif issubclass(config_cls, (LNTuningConfig, LoReftConfig)):
             # LNTuning do not take init_weights
             pass
         else:
@@ -1403,7 +1403,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
-            LoReftConfig(target_modules=["lin0"], init_weights=False),
+            LoReftConfig(target_modules=["lin0"]),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
