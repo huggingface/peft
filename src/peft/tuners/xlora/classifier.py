@@ -123,16 +123,11 @@ class XLoraClassifier(nn.Module):
         if input_ids is not None:
             batch_size = input_ids.shape[0]
             device = input_ids.device
+            seq_len = input_ids.shape[1]
         else:
             batch_size = inputs_embeds.shape[0]
-            device = input_ids.device
-
-        if input_ids is not None:
-            seq_len = input_ids.shape[1]
-            device = input_ids.device
-        else:
+            device = inputs_embeds.device
             seq_len = inputs_embeds.shape[1]
-            device = input_ids.device
 
         return torch.full(  # type: ignore
             (batch_size, seq_len, self.n_layers, self.n_classes),
@@ -148,16 +143,13 @@ class XLoraClassifier(nn.Module):
         **kwargs,
     ) -> torch.Tensor:
         """
-        Using the hidden states of the model, predict `n_classes` LoRA alpha values. Sets the scalings.
+        Using the hidden states of the model, predict `n_classes` LoRA alpha values. Returns the scalings.
         """
         if input_ids is not None:
             batch_size = input_ids.shape[0]
-        else:
-            batch_size = inputs_embeds.shape[0]
-
-        if input_ids is not None:
             seq_len = input_ids.shape[1]
         else:
+            batch_size = inputs_embeds.shape[0]
             seq_len = inputs_embeds.shape[1]
 
         hidden_states = result.hidden_states  # type: ignore
