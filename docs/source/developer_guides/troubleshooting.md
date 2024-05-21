@@ -223,14 +223,14 @@ It is possible to get this information for non-PEFT models if they are using PEF
                   merged_adapters=[],
                   requires_grad={'adapter-1': False, 'adapter-2': True},
                   available_adapters=['adapter-1', 'adapter-2'],
-                  devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda]}),
+                  devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']}),
  TunerLayerStatus(name='text_model.encoder.layers.0.self_attn.v_proj',
                   module_type='lora.Linear',
                   enabled=True,
                   active_adapters=['adapter-2'],
                   merged_adapters=[],
                   requires_grad={'adapter-1': False, 'adapter-2': True},
-                  devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda]}),
+                  devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']}),
 ...]
 
 >>> get_model_status(pipe.unet)
@@ -246,6 +246,6 @@ TunerModelStatus(
     merged_adapters=[],
     requires_grad={'adapter-1': False, 'adapter-2': True},
     available_adapters=['adapter-1', 'adapter-2'],
-    devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda],
+    devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']},
 )
 ```
