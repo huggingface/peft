@@ -561,8 +561,8 @@ class PeftCommonTester:
         logits_merged_unloaded = model(**dummy_input)[0]
 
         atol, rtol = 1e-4, 1e-4
-        if self.torch_device in ['mlu']:
-            atol, rtol = 1e-3, 1e-3  # MLU 
+        if self.torch_device in ["mlu"]:
+            atol, rtol = 1e-3, 1e-3  # MLU
         if (config.peft_type == "IA3") and (model_id == "Conv2d"):
             # for some reason, the IA³ Conv2d introduces a larger error
             atol, rtol = 0.3, 0.01
@@ -691,7 +691,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config).eval()
         logits_peft = model(**inputs)[0]
 
-        atol, rtol = 1e-6, 1e-6 # default
+        atol, rtol = 1e-6, 1e-6  # default
         # Initializing with LN tuning cannot be configured to change the outputs (unlike init_lora_weights=False)
         if not issubclass(config_cls, LNTuningConfig):
             # sanity check that the logits are different
@@ -700,8 +700,8 @@ class PeftCommonTester:
         model_unloaded = model.merge_and_unload(safe_merge=True)
         logits_unloaded = model_unloaded(**inputs)[0]
 
-        if self.torch_device in ['mlu']:
-            atol, rtol = 1e-3, 1e-3  # MLU 
+        if self.torch_device in ["mlu"]:
+            atol, rtol = 1e-3, 1e-3  # MLU
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 

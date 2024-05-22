@@ -26,6 +26,7 @@ from peft import LoraConfig, PeftModel, get_peft_model, get_peft_model_state_dic
 
 from .testing_utils import require_torch_gpu
 
+
 def is_megatron_available() -> bool:
     return importlib.util.find_spec("megatron") is not None
 
