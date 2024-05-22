@@ -181,7 +181,7 @@ class TestXlora:
         )
         after_logits = outputs[: inputs.shape[1] :]
         assert torch.isfinite(after_logits).all()
-        assert torch.equal(after_logits, before_logits)
+        assert torch.equal(after_logits, before_logits), (after_logits, before_logits)
 
     def test_topk_lora(self, tokenizer, model):
         model.set_topk_lora(2)
