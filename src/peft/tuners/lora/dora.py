@@ -52,7 +52,7 @@ class DoraLinearLayer(nn.Module):
         magnitude = self.weight
         weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
-        weight_norm = self.get_weight_norm(weight, lora_weight, scaling)
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
@@ -95,7 +95,7 @@ class DoraConv2dLayer(DoraLinearLayer):
         lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.weight
-        weight_norm = self.get_weight_norm(weight, lora_weight, scaling)
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
