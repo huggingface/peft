@@ -244,6 +244,27 @@ class XLoraModel(BaseTuner):
         # Handle X-LoRA case
         return peft_config
 
+    """
+    Does nothing. X-LoRA needs adapters to be frozen.
+    """
+
+    def _mark_only_adapters_as_trainable(self) -> None:
+        ...
+
+    """
+    Does nothing. X-LoRA needs adapters to be frozen.
+    """
+
+    def enable_adapter_layers(self) -> None:
+        ...
+
+    """
+    Does nothing. X-LoRA needs adapters to be frozen.
+    """
+
+    def disable_adapter_layers(self) -> None:
+        ...
+
     def _create_and_replace(
         self,
         lora_config,

@@ -153,7 +153,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        after_logits = outputs
+        after_logits = outputs[: inputs.shape[1] :]
         assert torch.isfinite(after_logits).all()
         assert torch.equal(after_logits, before_logits)
 
@@ -179,7 +179,7 @@ class TestXlora:
             input_ids=inputs.to("cuda"),
             max_new_tokens=32,
         )
-        after_logits = outputs
+        after_logits = outputs[: inputs.shape[1] :]
         assert torch.isfinite(after_logits).all()
         assert torch.equal(after_logits, before_logits)
 
