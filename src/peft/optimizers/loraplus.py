@@ -8,7 +8,9 @@ from transformers.trainer_pt_utils import get_parameter_names
 from ..peft_model import PeftModel
 
 
-def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict, loraplus_lr_embedding: float=1e-6) -> Optimizer:
+def create_loraplus_optimizer(
+    model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict, loraplus_lr_embedding: float = 1e-6
+) -> Optimizer:
     """
     Creates a LoraPlus optimizer.
     Implementing LoRA+ https://arxiv.org/abs/2402.12354
@@ -22,6 +24,7 @@ def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], 
             - loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer. Defaults to loraplus_lr_embedding
     """
     from ..tuners.lora.layer import Embedding
+
     loraplus_lr_ratio = optimizer_kwargs.pop("loraplus_lr_ratio")
 
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
@@ -81,6 +84,7 @@ def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], 
     optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
     if optimizer_cls.__name__ == "Adam8bit":
         import bitsandbytes
+
         manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
         for module in model.modules():
             if isinstance(module, nn.Embedding):
