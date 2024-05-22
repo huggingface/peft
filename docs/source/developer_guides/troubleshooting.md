@@ -249,3 +249,25 @@ TunerModelStatus(
     devices={'adapter-1': ['cpu'], 'adapter-2': ['cuda']},
 )
 ```
+
+## Reproducibility
+
+### Models using batch norm
+
+When loading a trained PEFT model where the base model uses batch norm (e.g. `torch.nn.BatchNorm1d` or `torch.nn.BatchNorm2d`), you may find that you cannot reproduce the exact same outputs. This is because the batch norm layers keep track of running stats during training, but these stats are not part of the PEFT checkpoint. Therefore, when you load the PEFT model, the running stats of the base model will be used (i.e. from before training with PEFT).
+
+Depending on your use case, this may not be a big deal. If, however, you need your outputs to be 100% reproducible, you can achieve this by adding the batch norm layers to `modules_to_save`. Below is an example of this using resnet and LoRA. Notice that we set `modules_to_save=["classifier", "normalization"]`. We need the `"classifier"` argument because our task is image classification, and we add the `"normalization"` argument to ensure that the batch norm layers are saved in the PEFT checkpoint.
+
+```python
+from transformers import AutoModelForImageClassification
+from peft import LoraConfig, get_peft_model
+
+model_id = "microsoft/resnet-18"
+base_model = AutoModelForImageClassification.from_pretrained(self.model_id)
+config = LoraConfig(
+    target_modules=["convolution"],
+    modules_to_save=["classifier", "normalization"],
+),
+```
+
+Depending on the type of model you use, the batch norm layers could have different names than `"normalization"`, so please ensure that the name matches your model architecture.
