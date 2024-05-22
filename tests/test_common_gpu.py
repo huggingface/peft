@@ -1002,8 +1002,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         # measure any differences, we need to change the magnitude vector.
         for name, module in model.named_modules():
             if isinstance(module, LoraLinear4bit):
-                module.lora_magnitude_vector["default"] = torch.nn.Parameter(
-                    10 * torch.rand_like(module.lora_magnitude_vector["default"])
+                module.lora_magnitude_vector["default"].weight = torch.nn.Parameter(
+                    10 * torch.rand_like(module.lora_magnitude_vector["default"].weight)
                 )
 
         with torch.inference_mode():
@@ -1054,8 +1054,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         # measure any differences, we need to change the magnitude vector.
         for name, module in model.named_modules():
             if isinstance(module, LoraLinear8bitLt):
-                module.lora_magnitude_vector["default"] = torch.nn.Parameter(
-                    10 * torch.rand_like(module.lora_magnitude_vector["default"])
+                module.lora_magnitude_vector["default"].weight = torch.nn.Parameter(
+                    10 * torch.rand_like(module.lora_magnitude_vector["default"].weight)
                 )
 
         with torch.inference_mode():
