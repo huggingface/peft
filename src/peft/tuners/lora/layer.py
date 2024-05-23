@@ -245,10 +245,12 @@ class LoraLayer(BaseTunerLayer):
                 lora_weight = lora_weight.half()
             weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
 
-        self.lora_magnitude_vector = nn.ParameterDict()
+        if self.lora_magnitude_vector is None:
+            # first dora layer being added
+            self.lora_magnitude_vector = nn.ParameterDict()
+            # add lora_magnitude_vector to the list of learnable parameters
+            self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
         self.lora_magnitude_vector[adapter_name] = nn.Parameter(weight_norm, requires_grad=True)
-        # add lora_magnitude_vector to the list of learnable parameters
-        self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
     def _cache_store(self, key: str, value: Any) -> None:
         self._caches[key] = value
@@ -262,23 +264,29 @@ class LoraLayer(BaseTunerLayer):
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        lora_weight = lora_B.weight @ lora_A.weight
+        lora_result = lora_B(lora_A(x))
+
+        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+        # calculate the same but using forward.
+        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device)
+        lora_weight = lora_B(lora_A(x_eye)).T
+
         magnitude = self.lora_magnitude_vector[active_adapter]
         base_layer = self.get_base_layer()
         weight = dequantize_module_weight(base_layer)
         weight = weight.to(x.dtype)
-        weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
+        weight_norm = self._get_weight_norm(weight, lora_weight.detach(), scaling)
         weight_norm = weight_norm.detach()
         mag_norm_scale = (magnitude / weight_norm).view(1, -1)
         result_dora = (mag_norm_scale - 1) * (
             F.linear(x, transpose(weight, self.fan_in_fan_out))
-        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
+        ) + mag_norm_scale * lora_result * scaling
 
         # Note: Computation could potentially be accelerated by using the code below instead of calculating X@W again.
         # This is only correct if dropout=0, otherwise results will differ:
@@ -1019,16 +1027,17 @@ class Conv2d(nn.Module, LoraLayer):
         """
         base_layer = self.get_base_layer()
         weight = base_layer.weight
+        # TODO: will probably not work with FSDP as forward is bypassed
         lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
         lora_weight = lora_weight.reshape(weight.shape)
         magnitude = self.lora_magnitude_vector[active_adapter]
-        weight_norm = self._get_weight_norm(weight, lora_weight, scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
         # Eq. (5) as a constant, thereby detaching it from the gradient
         # graph. This means that while ||V + ∆V ||_c dynamically
         # reflects the updates of ∆V , it won’t receive any gradient
         # during backpropagation"
+        weight_norm = self._get_weight_norm(weight, lora_weight.detach(), scaling)
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
         result_dora = (mag_norm_scale - 1) * (
