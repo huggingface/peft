@@ -178,7 +178,7 @@ class XLoraModel(BaseTuner):
             kwargs["scalings"] = scalings
             return args, kwargs
 
-        def new_model_forward(*args, **kwargs) -> None:
+        def new_model_forward(*args, **kwargs):
             # =========================== Forward pass with "dummy" scalings ==================
 
             dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args, **kwargs)
@@ -189,6 +189,15 @@ class XLoraModel(BaseTuner):
                     pre_forward = partial(scalings_injection_hook, scalings=dummy_scalings)
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
+
+            if self.disabled:
+                try:
+                    output = old_model_forward(*args, **kwargs)
+                finally:
+                    # Clean everything up
+                    for handle in hook_handles:
+                        handle.remove()
+                return output
 
             with torch.no_grad():
                 self.lora_model.disable_adapters()
@@ -233,6 +242,8 @@ class XLoraModel(BaseTuner):
         # Setup the model internal state
         self.internal_xlora_classifier = xlora_classifier
         self.internal_xlora_scalings = None  # type: ignore
+        # Controlled by enable_adapter_layers or disable_adapter_layers
+        self.disabled = False
 
     def _maybe_freeze_all_adapters(self):
         self.eval()
@@ -267,18 +278,18 @@ class XLoraModel(BaseTuner):
         ...
 
     """
-    Does nothing. X-LoRA needs adapters to be frozen.
+    This enables the X-LoRA adapter.
     """
 
     def enable_adapter_layers(self) -> None:
-        ...
+        self.disabled = False
 
     """
-    Does nothing. X-LoRA needs adapters to be frozen.
+    This diasables the X-LoRA adapter.
     """
 
     def disable_adapter_layers(self) -> None:
-        ...
+        self.disabled = True
 
     def _create_and_replace(
         self,

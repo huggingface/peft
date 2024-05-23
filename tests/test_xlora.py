@@ -67,6 +67,23 @@ class TestXlora:
         model = get_peft_model(model, peft_config).to(self.device)
         return model
 
+    @pytest.fixture(scope="function")
+    def model_layerwise(self, saved_lora_adapters):
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        model.config.use_cache = False
+        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_adapters)}
+
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=model.config.hidden_size,
+            xlora_depth=8,
+            adapters=adapters,
+            layerwise_scalings=True,
+        )
+        model = get_peft_model(model, peft_config).to(self.device)
+        return model
+
     def test_functional(self, tokenizer, model):
         model.enable_scalings_logging()
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
@@ -220,3 +237,28 @@ class TestXlora:
         model.set_scaling_pass_value(None)
         assert model.internal_xlora_classifier.override_scaling_pass_value == 1 / self.num_loras
         assert model.internal_xlora_classifier.config.scaling_pass_value == 1 / self.num_loras
+
+    def test_functional_layerwise(self, tokenizer, model_layerwise):
+        model_layerwise.enable_scalings_logging()
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model_layerwise.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+
+    def test_disable_adapter(self, tokenizer, model):
+        model.enable_scalings_logging()
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        with model.disable_adapter():
+            outputs_disabled = model.generate(
+                input_ids=inputs.to("cuda"),
+                max_new_tokens=32,
+            )
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        assert torch.isfinite(outputs_disabled[: inputs.shape[1] :]).all()
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+        assert not torch.equal(outputs, outputs_disabled)
