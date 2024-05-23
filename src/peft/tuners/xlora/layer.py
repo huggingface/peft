@@ -29,6 +29,10 @@ class XLoraLayer:
         self.layer_number = layer_number
         self.config = config
 
+    """
+    Apply the scalings for the adapter.
+    """
+
     @staticmethod
     def apply_scalings_to_x(x: torch.Tensor, scalings_layer: torch.Tensor, adapter: int) -> torch.Tensor:
         # scalings_layer = [batch_size, seq_len, n_classes]
@@ -36,9 +40,14 @@ class XLoraLayer:
         # scalings_layer = [batch_size, seq_len, 1]
         return x * scalings
 
-    def get_maybe_topk_scalings(self) -> torch.Tensor:
+    """
+    Get the scalings for this layer, potentially applying topk and topk+softmax. This is called before
+    `apply_scalings_to_x`
+    """
+
+    def get_maybe_topk_scalings(self, scalings) -> torch.Tensor:
         # xlora_scalings = [batch_size, seq_len, n_classes]
-        xlora_scalings: Tensor = self.scalings[:, :, self.layer_number, :]  # type: ignore
+        xlora_scalings: Tensor = scalings[:, :, self.layer_number, :]  # type: ignore
 
         if self.config.top_k_lora is not None:
             _, topk_indices = torch.topk(xlora_scalings, k=self.config.top_k_lora, dim=-1)
@@ -68,14 +77,14 @@ class XLoraLinearLayer(XLoraLayer):
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
-    def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, scalings: Tensor, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
         previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings()
+        xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
         result = self.target.base_layer(x, *args, **kwargs)
 
@@ -110,13 +119,13 @@ class XLoraEmbeddingLayer(XLoraLayer):
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
-    def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, scalings: Tensor, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
-        xlora_scalings = self.get_maybe_topk_scalings()
+        xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
         result = self.target.base_layer(x, *args, **kwargs)
 
@@ -149,14 +158,14 @@ class XLoraConv2dLayer(XLoraLayer):
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
-    def forward(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, scalings: Tensor, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
         previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings()
+        xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
         result = self.target.base_layer(x, *args, **kwargs)
 

@@ -12,11 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import partial
 from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
 
+from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
 
@@ -171,13 +173,22 @@ class XLoraModel(BaseTuner):
         # Now replace the old forward function with a new one that implements the X-LoRA architecture
         old_model_forward = self.lora_model.model.forward
 
+        def scalings_injection_hook(target, args, kwargs, scalings):
+            # pre-forward hook to inject the adapter_names argument when using mixed adapter batches inference
+            kwargs["scalings"] = scalings
+            return args, kwargs
+
         def new_model_forward(*args, **kwargs) -> None:
             # =========================== Forward pass with "dummy" scalings ==================
 
             dummy_scalings = self.internal_xlora_classifier.make_dummy_scalings(*args, **kwargs)
 
-            for layer in all_layers:
-                layer.scalings = dummy_scalings
+            hook_handles = []
+            for module in self.modules():
+                if isinstance(module, LoraLayer):
+                    pre_forward = partial(scalings_injection_hook, scalings=dummy_scalings)
+                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    hook_handles.append(handle)
 
             with torch.no_grad():
                 self.lora_model.disable_adapters()
@@ -190,8 +201,8 @@ class XLoraModel(BaseTuner):
                         base_output = old_model_forward(*args, **scaling_pass_kwargs)
                     finally:
                         # Clean everything up
-                        for layer in all_layers:
-                            layer.scalings = None
+                        for handle in hook_handles:
+                            handle.remove()
                 finally:
                     self.lora_model.enable_adapters()
 
@@ -199,15 +210,19 @@ class XLoraModel(BaseTuner):
 
             # =========================== Real forward pass with calculated scalings ==================
 
-            for layer in all_layers:
-                layer.scalings = xlora_scalings
+            hook_handles = []
+            for module in self.modules():
+                if isinstance(module, LoraLayer):
+                    pre_forward = partial(scalings_injection_hook, scalings=xlora_scalings)
+                    handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
+                    hook_handles.append(handle)
 
             try:
                 output = old_model_forward(*args, **kwargs)
             finally:
                 # Clean everything up
-                for layer in all_layers:
-                    layer.scalings = None
+                for handle in hook_handles:
+                    handle.remove()
             return output
 
         self.lora_model.model.forward = new_model_forward
