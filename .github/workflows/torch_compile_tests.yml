@@ -1,7 +1,5 @@
 name: torch compile tests
 
-# see peft/tests/__init__.py
-
 on:
   workflow_dispatch:
     inputs:
@@ -33,6 +31,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install .[test]
+          python -m pip install bitsandbytes
           if [ "${{ github.event.inputs.pytorch_nightly }}" = "true" ]; then
             python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
           fi
