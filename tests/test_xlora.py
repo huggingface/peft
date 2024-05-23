@@ -131,32 +131,6 @@ class TestXlora:
 
         assert str(model) is not None
 
-    def test_save_load_functional(self, tokenizer, model, tmp_dir):
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
-        outputs = model.generate(
-            input_ids=inputs.to("cuda"),
-            max_new_tokens=32,
-        )
-        before_logits = outputs[: inputs.shape[1] :]
-        assert torch.isfinite(before_logits).all()
-
-        model.save_pretrained(save_directory=tmp_dir)
-
-        del model
-
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir).to(self.device)
-
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
-        outputs = model.generate(
-            input_ids=inputs.to("cuda"),
-            max_new_tokens=32,
-        )
-        after_logits = outputs[: inputs.shape[1] :]
-        assert torch.isfinite(after_logits).all()
-        assert torch.equal(after_logits, before_logits)
-
     def test_save_load_functional_pt(self, tokenizer, model, tmp_dir):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
@@ -182,6 +156,32 @@ class TestXlora:
         after_logits = outputs[: inputs.shape[1] :]
         assert torch.isfinite(after_logits).all()
         assert torch.equal(after_logits, before_logits), (after_logits, before_logits)
+
+    def test_save_load_functional(self, tokenizer, model, tmp_dir):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        before_logits = outputs[: inputs.shape[1] :]
+        assert torch.isfinite(before_logits).all()
+
+        model.save_pretrained(save_directory=tmp_dir)
+
+        del model
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        model.config.use_cache = False
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir).to(self.device)
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to("cuda"),
+            max_new_tokens=32,
+        )
+        after_logits = outputs[: inputs.shape[1] :]
+        assert torch.isfinite(after_logits).all()
+        assert torch.equal(after_logits, before_logits)
 
     def test_topk_lora(self, tokenizer, model):
         model.set_topk_lora(2)
