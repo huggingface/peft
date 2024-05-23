@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
+from peft.tuners.xlora.model import XLoraModel
+
 from .config import PeftConfig
 from .mixed_model import PeftMixedModel
 from .peft_model import (
@@ -105,6 +107,7 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
     "POLY": PolyModel,
     "LN_TUNING": LNTuningModel,
     "VERA": VeraModel,
+    "XLORA": XLoraModel,
 }
 
 
