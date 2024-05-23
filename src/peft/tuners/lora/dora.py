@@ -52,7 +52,7 @@ class DoraLinearLayer(nn.Module):
 
         # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
         # calculate the same but using forward.
-        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device)
+        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
         lora_weight = lora_B(lora_A(x_eye)).T
 
         magnitude = self.weight
