@@ -222,7 +222,7 @@ class LoraLayer(BaseTunerLayer):
             # add lora_magnitude_vector to the list of learnable parameters
             self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
-        dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(self, fan_in_fan_out, False))
+        dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(self, "fan_in_fan_out", False))
         lora_A = self.lora_A[adapter_name].weight
         lora_B = self.lora_B[adapter_name].weight
         scaling = self.scaling[adapter_name]
@@ -833,14 +833,15 @@ class Conv2d(nn.Module, LoraLayer):
     def dora_init(self, adapter_name: str) -> None:
         if self.lora_magnitude_vector is None:
             self.lora_magnitude_vector = nn.ModuleDict()
+            # add lora_magnitude_vector to the list of learnable parameters
+            self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
         lora_A = self.lora_A[adapter_name].weight
         lora_B = self.lora_B[adapter_name].weight
         scaling = self.scaling[adapter_name]
         dora_layer.update_layer(base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
         self.lora_magnitude_vector[adapter_name] = dora_layer
-        # add lora_magnitude_vector to the list of learnable parameters
-        self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
