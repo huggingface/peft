@@ -220,7 +220,7 @@ class LoraLayer(BaseTunerLayer):
         lora_A = self.lora_A[adapter_name]
         lora_B = self.lora_B[adapter_name]
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
-        dtype_is_fp16 = lora_A.dtype.weight == torch.float16
+        dtype_is_fp16 = lora_A.weight.dtype == torch.float16
         if dtype_is_fp16:
             lora_A.weight = lora_A.weight.float()
             lora_B.weight = lora_B.weight.float()
