@@ -124,7 +124,6 @@ class LoraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
-            self.dora_init(adapter_name)
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
@@ -215,13 +214,16 @@ class LoraLayer(BaseTunerLayer):
         return weight_norm
 
     def dora_init(self, adapter_name: str) -> None:
-        lora_A = self.lora_A[adapter_name].weight
-        lora_B = self.lora_B[adapter_name].weight
+        # This method should not be called eagerly, but instead during the first forward pass. The reason is that with
+        # FSDP, when we dequantize the bnb weights during initialization, they cannot be flattened anymore because of
+        # diverging dtypes.
+        lora_A = self.lora_A[adapter_name]
+        lora_B = self.lora_B[adapter_name]
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
-        dtype_is_fp16 = lora_A.dtype == torch.float16
+        dtype_is_fp16 = lora_A.dtype.weight == torch.float16
         if dtype_is_fp16:
-            lora_A = lora_A.float()
-            lora_B = lora_B.float()
+            lora_A.weight = lora_A.weight.float()
+            lora_B.weight = lora_B.weight.float()
 
         scaling = self.scaling[adapter_name]
         with gather_params_ctx(self.get_base_layer().parameters()):
@@ -231,7 +233,10 @@ class LoraLayer(BaseTunerLayer):
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
                 lora_weight = lora_weight.reshape(weight.shape)
             else:
-                lora_weight = lora_B @ lora_A
+                # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+                # calculate the same but using forward.
+                x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device)
+                lora_weight = lora_B(lora_A(x_eye)).T
 
             if dtype_is_fp16:
                 lora_weight = lora_weight.half()
@@ -569,6 +574,9 @@ class Linear(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
+                    if not self.lora_magnitude_vector:
+                        # first iteration, initialize DoRA (no eager init because of FSDP)
+                        self.dora_init(active_adapter)
                     x = dropout(x)
                     result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
@@ -861,7 +869,6 @@ class Conv2d(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
-            self.dora_init(adapter_name)
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
@@ -1068,6 +1075,9 @@ class Conv2d(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
+                    if not self.lora_magnitude_vector:
+                        # first iteration, initialize DoRA (no eager init because of FSDP)
+                        self.dora_init(active_adapter)
                     x = dropout(x)
                     result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
