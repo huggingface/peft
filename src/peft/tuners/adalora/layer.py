@@ -72,11 +72,7 @@ class AdaLoraLayer(LoraLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        if hasattr(self.get_base_layer(), "qweight"):
-            # QuantLinear
-            self.to(self.get_base_layer().qweight.device)
-        else:
-            self.to(self.get_base_layer().weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):

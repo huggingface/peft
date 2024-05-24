@@ -61,7 +61,7 @@ class IA3Layer(BaseTunerLayer):
         self.ia3_l[adapter_name] = nn.Parameter(weight)
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
-        self.to(self.get_base_layer().weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_ia3_parameters(self, adapter_name):
@@ -210,7 +210,7 @@ class Conv2d(nn.Module, IA3Layer):
         self.ia3_l[adapter_name] = nn.Parameter(weight)
         if init_ia3_weights:
             self.reset_ia3_parameters(adapter_name)
-        self.to(self.get_base_layer().weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:

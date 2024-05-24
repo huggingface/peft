@@ -120,16 +120,8 @@ class LoraLayer(BaseTunerLayer):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
-        # check weight and qweight (for GPTQ)
-        for weight_name in ("weight", "qweight"):
-            weight = getattr(self.get_base_layer(), weight_name, None)
-            if weight is not None:
-                # the layer is already completely initialized, this is an update
-                if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                    self.to(weight.device, dtype=weight.dtype)
-                else:
-                    self.to(weight.device)
-                break
+        # call this before dora_init
+        self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
             self.dora_init(adapter_name)
@@ -594,12 +586,7 @@ class Embedding(nn.Module, LoraLayer):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
-        base_layer = self.get_base_layer()
-        weight = getattr(base_layer, "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            self.to(base_layer.weight.device, dtype=weight.dtype)
-
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -817,10 +804,8 @@ class Conv2d(nn.Module, LoraLayer):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
-        weight = getattr(base_layer, "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            self.to(base_layer.weight.device, dtype=weight.dtype)
+        # call this before dora_init
+        self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
             self.dora_init(adapter_name)
