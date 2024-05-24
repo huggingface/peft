@@ -226,13 +226,10 @@ class LoraLayer(BaseTunerLayer):
             # load a trained DoRA model
             if lora_A.weight.ndim == 4:
                 # conv2d
-                self.lora_magnitude_vector[adapter_name] = torch.zeros(
-                    (1, lora_B.weight.shape[0], 1, 1), device=lora_B.weight.device
-                )
+                param = torch.zeros((1, lora_B.weight.shape[0], 1, 1), device=lora_B.weight.device)
             else:
-                self.lora_magnitude_vector[adapter_name] = torch.zeros(
-                    lora_B.weight.shape[0], device=lora_B.weight.device
-                )
+                param = torch.zeros(lora_B.weight.shape[0], device=lora_B.weight.device)
+            self.lora_magnitude_vector[adapter_name] = nn.Parameter(param, requires_grad=False)
             return
 
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
