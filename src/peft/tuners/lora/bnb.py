@@ -233,7 +233,7 @@ if is_bnb_available():
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        if not self.lora_magnitude_vector:
+                        if not self.lora_magnitude_vector[active_adapter].sum():
                             # first iteration, initialize DoRA (no eager init because of FSDP)
                             self.dora_init(active_adapter)
                         output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
@@ -476,7 +476,7 @@ if is_bnb_4bit_available():
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        if not self.lora_magnitude_vector:
+                        if not self.lora_magnitude_vector[active_adapter].sum():
                             # first iteration, initialize DoRA (no eager init because of FSDP)
                             self.dora_init(active_adapter)
                         output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)

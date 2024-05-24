@@ -105,7 +105,7 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
-        self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
+        self.lora_magnitude_vector = torch.nn.ParameterDict  # for DoRA
         self._caches: dict[str, Any] = {}
         self.kwargs = kwargs
 ```
@@ -148,7 +148,7 @@ If you call `save_pretrained("some/path")` and the adapter name is not `"default
 In some circumstances, deciding which values to add to the checkpoint file can become a bit more complicated. For example, in PEFT, DoRA is implemented as a special case of LoRA. If you want to convert a DoRA model to PEFT, you should create a LoRA checkpoint with extra entries for DoRA. You can see this in the `__init__` of the previous `LoraLayer` code:
 
 ```python
-self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
+self.lora_magnitude_vector = torch.nn.ParameterDict  # for DoRA
 ```
 
 This indicates that there is an optional extra parameter per layer for DoRA.

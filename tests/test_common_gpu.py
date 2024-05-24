@@ -1010,6 +1010,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # measure any differences, we need to change the magnitude vector.
         for name, module in model.named_modules():
             if isinstance(module, LoraLinear4bit):
+                module.dora_init(model.active_adapter)  # dora is initialized lazily
                 module.lora_magnitude_vector["default"] = torch.nn.Parameter(
                     10 * torch.rand_like(module.lora_magnitude_vector["default"])
                 )
@@ -1062,6 +1063,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # measure any differences, we need to change the magnitude vector.
         for name, module in model.named_modules():
             if isinstance(module, LoraLinear8bitLt):
+                module.dora_init(model.active_adapter)  # dora is initialized lazily
                 module.lora_magnitude_vector["default"] = torch.nn.Parameter(
                     10 * torch.rand_like(module.lora_magnitude_vector["default"])
                 )
@@ -1223,6 +1225,7 @@ class TestSameAdapterDifferentDevices:
         # same as first test, but also using DoRA
         config = LoraConfig(target_modules=["lin0"], use_dora=True)
         model = get_peft_model(mlp, config)
+        model.lin0.dora_init("default")  # dora is initialized lazily
         model = model.cuda()
         model.lin0.lora_A.cpu()
         model.lin0.lora_B.cpu()
@@ -1235,6 +1238,7 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.base_layer.weight.device.type == "cuda"
 
         model.add_adapter("other", config)
+        model.lin0.dora_init("other")  # dora is initialized lazily
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
