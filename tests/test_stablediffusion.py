@@ -19,7 +19,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import BOFTConfig, LoHaConfig, LoraConfig, OFTConfig, LoReftConfig, get_peft_model
+from peft import BOFTConfig, LoHaConfig, LoraConfig, LoReftConfig, OFTConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed

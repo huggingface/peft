@@ -17,7 +17,6 @@ from typing import Any, Optional, Set
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from peft.tuners.lycoris_utils import LycorisLayer
 
@@ -74,7 +73,7 @@ class LoReftLayer(nn.Module, LycorisLayer):
         pass
 
     def unmerge(self) -> None:
-        pass 
+        pass
 
     def update_layer(
         self,

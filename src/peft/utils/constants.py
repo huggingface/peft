@@ -238,8 +238,7 @@ TRANSFORMERS_MODELS_TO_LOREFT_TARGET_MODULES_MAPPING = {
     "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
-    "phi": ["q_proj", "v_proj"],
-    "gemma": ["q_proj", "v_proj"], 
+    "gemma": ["q_proj", "v_proj"],
 }
 
 WEIGHTS_NAME = "adapter_model.bin"

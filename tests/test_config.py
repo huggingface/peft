@@ -28,6 +28,7 @@ from peft import (
     IA3Config,
     LoHaConfig,
     LoraConfig,
+    LoReftConfig,
     MultitaskPromptTuningConfig,
     OFTConfig,
     PeftConfig,
@@ -38,7 +39,6 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     VeraConfig,
-    LoReftConfig,
 )
 
 

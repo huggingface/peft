@@ -18,11 +18,12 @@ import torch
 from torch import nn
 
 from peft.tuners.lycoris_utils import LycorisConfig, LycorisTuner
-
-from .layer import Linear, LoReftLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LOREFT_TARGET_MODULES_MAPPING,
 )
+
+from .layer import Linear, LoReftLayer
+
 
 class LoReftModel(LycorisTuner):
     """
