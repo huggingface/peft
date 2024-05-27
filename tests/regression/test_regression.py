@@ -64,7 +64,18 @@ from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 from transformers.pytorch_utils import Conv1D
 
 import peft
-from peft import AdaLoraConfig, IA3Config, LoHaConfig, LoKrConfig, LoraConfig, PeftModel, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    BOFTConfig,
+    IA3Config,
+    LNTuningConfig,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    PeftModel,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.utils import infer_device
 
 
@@ -299,6 +310,17 @@ class TestMlp(RegressionTester):
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_mlp")
 
+    def test_lora_dora(self):
+        base_model = self.load_base_model()
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            target_modules=["lin0"],
+            use_dora=True,
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "lora_dora_mlp")
+
     def test_adalora(self):
         base_model = self.load_base_model()
         config = AdaLoraConfig(
@@ -362,6 +384,27 @@ class TestMlp(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_mlp_modules_to_save")
+
+    def test_boft(self):
+        base_model = self.load_base_model()
+        config = BOFTConfig(
+            boft_block_size=2,
+            target_modules=["lin0"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "boft_mlp")
+
+    def test_ln_tuning(self):
+        base_model = self.load_base_model()
+        config = LNTuningConfig(target_modules=["lin0"])
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "ln_tuning_mlp")
+
+    def test_vera_tuning(self):
+        base_model = self.load_base_model()
+        config = VeraConfig(target_modules=["lin0"])
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "vera_tuning_mlp")
 
 
 class TestLoraEmbConv1D(RegressionTester):
@@ -477,6 +520,15 @@ class TestLoraConv2D(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lokr_conv2d")
+
+    def test_boft(self):
+        base_model = self.load_base_model()
+        config = BOFTConfig(
+            boft_block_size=3,
+            target_modules=["conv2d"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "boft_conv2d")
 
 
 class TestOpt(RegressionTester):
