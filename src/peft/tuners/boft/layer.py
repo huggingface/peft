@@ -572,8 +572,9 @@ class Linear(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -613,8 +614,9 @@ class Linear(nn.Module, BOFTLayer):
                     block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
                     block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
                 butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -882,8 +884,9 @@ class Conv2d(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -925,8 +928,9 @@ class Conv2d(nn.Module, BOFTLayer):
                     block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
                     block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
                 butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):
