@@ -58,6 +58,12 @@ jobs:
           source activate peft
           make tests_core_single_gpu_bnb
 
+      - name: Run BNB regression tests on single GPU
+        if: always()
+        run: |
+          source activate peft
+          make tests_gpu_bnb_regression
+
       - name: Run transformers tests on single GPU
         if: always()
         run: |
