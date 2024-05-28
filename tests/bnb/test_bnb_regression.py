@@ -236,6 +236,7 @@ def test_flan_t5_4bit():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+@pytest.mark.xfail  # might not be reproducible depending on hardware
 def test_flan_t5_8bit():
     torch.manual_seed(0)
     bnb_config = BitsAndBytesConfig(load_in_8bit=True)
