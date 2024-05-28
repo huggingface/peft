@@ -124,7 +124,7 @@ class LoraLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
-            self.dora_init(adapter_name, lazy=True)
+            self.dora_init(adapter_name)
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
@@ -214,23 +214,9 @@ class LoraLayer(BaseTunerLayer):
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
 
-    def dora_init(self, adapter_name: str, lazy: bool = False) -> None:
-        # When the model is first initalized, this method should be called with lazy=True. This ensures that we create a
-        # placeholder value for lora_magnitude_vector, which is necessary to correctly load trained DoRA models.
-        # However, we don't want to create the real value here, as that would require dequantizing the bnb weights. This
-        # in turn causes issues with FSDP. Therefore, only call dora_init with lazy=False during the first forward pass.
+    def dora_init(self, adapter_name: str) -> None:
         lora_A = self.lora_A[adapter_name]
         lora_B = self.lora_B[adapter_name]
-        if lazy:
-            # Dummy value, to be replaced during the first forward pass. It must have the right size so that we can
-            # load a trained DoRA model
-            if lora_A.weight.ndim == 4:
-                # conv2d
-                param = torch.zeros((1, lora_B.weight.shape[0], 1, 1), device=lora_B.weight.device)
-            else:
-                param = torch.zeros(lora_B.weight.shape[0], device=lora_B.weight.device)
-            self.lora_magnitude_vector[adapter_name] = nn.Parameter(param, requires_grad=False)
-            return
 
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
         dtype_is_fp16 = lora_A.weight.dtype == torch.float16
@@ -465,9 +451,7 @@ class Linear(nn.Module, LoraLayer):
                     if not self.use_dora[active_adapter]:
                         orig_weights = orig_weights + delta_weight
                     else:
-                        if not self.lora_magnitude_vector[active_adapter].sum():
-                            # first iteration, initialize DoRA (no eager init because of FSDP)
-                            self.dora_init(active_adapter)
+                        # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
                         weight_norm = self._get_weight_norm(
                             orig_weights, transpose(delta_weight, self.fan_in_fan_out), scaling=1
@@ -492,9 +476,6 @@ class Linear(nn.Module, LoraLayer):
                         base_layer.weight.data = base_layer.weight.data + delta_weight
                     else:
                         # handle dora
-                        if not self.lora_magnitude_vector[active_adapter].sum():
-                            # first iteration, initialize DoRA (no eager init because of FSDP)
-                            self.dora_init(active_adapter)
                         # since delta_weight already includes scaling, set it to 1 here
                         weight_norm = self._get_weight_norm(
                             base_layer.weight, transpose(delta_weight, self.fan_in_fan_out), scaling=1
@@ -591,9 +572,6 @@ class Linear(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    if not self.lora_magnitude_vector[active_adapter].sum():
-                        # first iteration, initialize DoRA (no eager init because of FSDP)
-                        self.dora_init(active_adapter)
                     x = dropout(x)
                     result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
@@ -886,7 +864,7 @@ class Conv2d(nn.Module, LoraLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
         if use_dora:
-            self.dora_init(adapter_name, lazy=True)
+            self.dora_init(adapter_name)
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
@@ -924,9 +902,6 @@ class Conv2d(nn.Module, LoraLayer):
                         orig_weights = orig_weights + delta_weight
                     else:
                         # handle dora
-                        if not self.lora_magnitude_vector[active_adapter].sum():
-                            # first iteration, initialize DoRA (no eager init because of FSDP)
-                            self.dora_init(active_adapter)
                         # since delta_weight already includes scaling, set it to 1 here
                         weight_norm = self._get_weight_norm(orig_weights, delta_weight, scaling=1).detach()
                         # We need to cache weight_norm because it has to be based on the original weights. We
@@ -947,9 +922,6 @@ class Conv2d(nn.Module, LoraLayer):
                         base_layer.weight.data = base_layer.weight.data + delta_weight
                     else:
                         # handle dora
-                        if not self.lora_magnitude_vector[active_adapter].sum():
-                            # first iteration, initialize DoRA (no eager init because of FSDP)
-                            self.dora_init(active_adapter)
                         # since delta_weight already includes scaling, set it to 1 here
                         weight_norm = self._get_weight_norm(base_layer.weight, delta_weight, scaling=1).detach()
                         # We need to cache weight_norm because it has to be based on the original weights. We
@@ -1099,9 +1071,6 @@ class Conv2d(nn.Module, LoraLayer):
                 if not self.use_dora[active_adapter]:
                     result = result + lora_B(lora_A(dropout(x))) * scaling
                 else:
-                    if not self.lora_magnitude_vector[active_adapter].sum():
-                        # first iteration, initialize DoRA (no eager init because of FSDP)
-                        self.dora_init(active_adapter)
                     x = dropout(x)
                     result = result + self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
 
