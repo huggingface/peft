@@ -32,10 +32,8 @@ metric_name = "matthews_correlation"
 args = TrainingArguments(
     "glue_tune",
     save_strategy = "epoch",
-    learning_rate=1e-4,
     per_device_train_batch_size=8,
     num_train_epochs=3,
-    weight_decay=0.01,
     logging_steps=10,
     seed=0
 )
