@@ -348,6 +348,18 @@ def set_peft_model_state_dict(
                     " PRNG initialisation to restore these projections using `config.projection_prng_key`, which may"
                     " not be accurate on all system configurations."
                 )
+        elif config.peft_type == PeftType.LORA:
+            # Here we take care of a refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a
+            # ModuleDict with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer.
+            old_dora_suffix = f"lora_magnitude_vector.{adapter_name}"
+
+            def renamed_dora_weights(k):
+                if k.endswith(old_dora_suffix):
+                    k = k + ".weight"
+                return k
+
+            peft_model_state_dict = {renamed_dora_weights(k): v for k, v in peft_model_state_dict.items()}
+
     elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
     else:
