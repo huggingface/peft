@@ -365,9 +365,9 @@ if is_bnb_4bit_available():
                     )
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    weight.device
-                )
+                kwargs["requires_grad"] = False
+                kwargs.pop("data", None)
+                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self) -> None:
@@ -400,9 +400,9 @@ if is_bnb_4bit_available():
 
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    weight.device
-                )
+                kwargs["requires_grad"] = False
+                kwargs.pop("data", None)
+                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
         def get_delta_weight(self, adapter):
             return (

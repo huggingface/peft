@@ -43,10 +43,9 @@ class DoraLinearLayer(nn.Module):
             lora_A = lora_A.float()
             lora_B = lora_B.float()
 
-        # we have to create a copy of the base layer, otherwise, FSDP will throw an error
-        base_layer = deepcopy(base_layer)
-
         with gather_params_ctx(base_layer.parameters()):
+            # we have to create a copy of the base layer, otherwise, FSDP will throw an error
+            base_layer = deepcopy(base_layer)
             weight = dequantize_module_weight(base_layer)
             if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
