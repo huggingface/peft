@@ -59,7 +59,7 @@ def test_opt_350m_4bit():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -78,7 +78,7 @@ def test_opt_350m_8bit():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -101,7 +101,7 @@ def test_opt_350m_4bit_double_quant():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -124,7 +124,7 @@ def test_opt_350m_4bit_compute_dtype_float16():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -148,7 +148,7 @@ def test_opt_350m_4bit_quant_type_nf4():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -173,7 +173,7 @@ def test_opt_350m_4bit_quant_storage():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -195,7 +195,7 @@ def test_opt_350m_8bit_threshold():
         "facebook/opt-350m",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -223,7 +223,7 @@ def test_flan_t5_4bit():
         "google/flan-t5-base",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
@@ -243,7 +243,7 @@ def test_flan_t5_8bit():
         "google/flan-t5-base",
         quantization_config=bnb_config,
         torch_dtype=torch.float32,
-    ).eval()
+    )
 
     input = torch.LongTensor([[1, 0, 1, 0, 1, 2]]).to(device)
     with torch.no_grad():
