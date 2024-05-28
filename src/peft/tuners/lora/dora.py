@@ -14,7 +14,6 @@ class DoraLinearLayer(nn.Module):
     def __init__(self, fan_in_fan_out):
         super().__init__()
         self.fan_in_fan_out = fan_in_fan_out
-        self._kwargs = None
 
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
@@ -23,12 +22,7 @@ class DoraLinearLayer(nn.Module):
         weight_norm = torch.linalg.norm(weight, dim=1).to(weight.dtype)
         return weight_norm
 
-    def update_layer(self, **kwargs) -> None:
-        # We delay the initialization of this layer until the first forward pass. This is because otherwise, FSDP will
-        # fail. This is not particularly elegant, but it works.
-        self._kwargs = kwargs
-
-    def _update_layer(self, *, base_layer, lora_A, lora_B, scaling) -> None:
+    def update_layer(self, *, base_layer, lora_A, lora_B, scaling) -> None:
         # temporarily convert fp16 to fp32, as fp16 can cause trouble on CPU with PyTorch < 2.2
         dtype_is_fp16 = lora_A.dtype == torch.float16
         if dtype_is_fp16:
@@ -54,10 +48,6 @@ class DoraLinearLayer(nn.Module):
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        if self._kwargs:  # first forward pass => initialize the layer
-            self._update_layer(**self._kwargs)
-            self._kwargs = None
-
         lora_result = lora_B(lora_A(x))
 
         # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
@@ -111,10 +101,6 @@ class DoraConv2dLayer(DoraLinearLayer):
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        if self._kwargs:  # first forward pass => initialize the layer
-            self._update_layer(**self._kwargs)
-            self._kwargs = None
-
         weight = base_layer.weight
         lora_weight = torch.mm(lora_B.weight.flatten(start_dim=1), lora_A.weight.flatten(start_dim=1))
         lora_weight = lora_weight.reshape(weight.shape)
