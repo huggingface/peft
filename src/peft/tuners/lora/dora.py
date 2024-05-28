@@ -93,6 +93,10 @@ class DoraLinearLayer(nn.Module):
 
         return result_dora
 
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora.dora." + rep
+
 
 class DoraConv2dLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
@@ -137,3 +141,7 @@ class DoraConv2dLayer(DoraLinearLayer):
         ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
 
         return result_dora
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora.dora." + rep

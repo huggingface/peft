@@ -51,7 +51,7 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
-        self.lora_magnitude_vector: Optional[torch.nn.ModuleDict] = None  # for DoRA
+        self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
         self.kwargs = kwargs
 
@@ -208,10 +208,8 @@ class LoraLayer(BaseTunerLayer):
         self.get_base_layer().weight.data = qweight
 
     def dora_init(self, adapter_name: str) -> None:
-        if self.lora_magnitude_vector is None:
-            # first dora layer being added
-            self.lora_magnitude_vector = nn.ModuleDict()
-            # add lora_magnitude_vector to the list of learnable parameters
+        if not self.lora_magnitude_vector:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
         dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(self, "fan_in_fan_out", False))
@@ -817,8 +815,7 @@ class Conv2d(nn.Module, LoraLayer):
 
     def dora_init(self, adapter_name: str) -> None:
         if self.lora_magnitude_vector is None:
-            self.lora_magnitude_vector = nn.ModuleDict()
-            # add lora_magnitude_vector to the list of learnable parameters
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
             self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
 
         dora_layer = DoraConv2dLayer(fan_in_fan_out=False)
