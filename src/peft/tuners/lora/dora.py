@@ -44,8 +44,12 @@ class DoraLinearLayer(nn.Module):
             lora_B = lora_B.float()
 
         with gather_params_ctx(base_layer.parameters()):
-            # we have to create a copy of the base layer, otherwise, FSDP will throw an error
-            base_layer = deepcopy(base_layer)
+            # check if 4bit bnb
+            if base_layer.__class__.__name__ == "Params4bit":
+                # we have to create a copy of the base layer, otherwise, FSDP will throw an error
+                # 8bit does not work yet because Int8Params cannot be correctly deep-copied (attributes vanish)
+                base_layer = deepcopy(base_layer)
+
             weight = dequantize_module_weight(base_layer)
             if weight.data.ndim == 4:  # For handling LoRAs applied to Conv2Ds.
                 lora_weight = torch.mm(lora_B.flatten(start_dim=1), lora_A.flatten(start_dim=1))
