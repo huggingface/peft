@@ -150,7 +150,7 @@ Below is a diagram that explains the intuition of LoRA adapter merging:
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_diagram.png"/>
 </div>
 
-We show in the snippets below how to run that using peft.
+We show in the snippets below how to run that using PEFT.
 
 ```py
 from transformers import AutoModelForCausalLM
