@@ -1231,19 +1231,19 @@ class TestSameAdapterDifferentDevices:
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
-        assert model.lin0.lora_magnitude_vector.default.device.type == "cpu"
+        assert model.lin0.lora_magnitude_vector.default.weight.device.type == "cpu"
         assert model.lin0.base_layer.weight.device.type == "cuda"
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
-        assert model.lin0.lora_magnitude_vector.default.device.type == "cpu"
+        assert model.lin0.lora_magnitude_vector.default.weight.device.type == "cpu"
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == "cuda"
         assert model.lin0.lora_A.other.weight.device.type == "cuda"
         assert model.lin0.lora_B.other.weight.device.type == "cuda"
-        assert model.lin0.lora_magnitude_vector.other.device.type == "cuda"
+        assert model.lin0.lora_magnitude_vector.other.weight.device.type == "cuda"
 
     def test_adalora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using AdaLORA
