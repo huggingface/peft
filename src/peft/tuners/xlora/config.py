@@ -11,10 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 from peft.config import PeftConfig
 from peft.utils.peft_types import PeftType
@@ -61,7 +62,7 @@ class XLoraConfig(PeftConfig):
     """
 
     hidden_size: int = None  # type: ignore
-    adapters: Dict[str, str] = None  # type: ignore
+    adapters: dict[str, str] = None  # type: ignore
     enable_softmax: bool = True
     enable_softmax_topk: bool = False
     layerwise_scalings: bool = False

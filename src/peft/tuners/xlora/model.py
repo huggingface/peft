@@ -11,10 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 from contextlib import contextmanager
 from functools import partial
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -352,7 +353,7 @@ class XLoraModel(BaseTuner):
         """
         return self.internal_xlora_scalings
 
-    def get_scalings_log(self) -> List[torch.Tensor]:
+    def get_scalings_log(self) -> list[torch.Tensor]:
         """
         Returns a shallow (only copying the list itself not the tensors) copy of the list containing the scalings log.
         Editing the list does not change the underlying log. The tensors are of shape (batch_size, seq_len, n_layers,
