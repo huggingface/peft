@@ -2937,6 +2937,7 @@ class TestFSDPWrap:
     """
 
     @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
     def test_bnb_4bit_wrap_fsdp(self):
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
