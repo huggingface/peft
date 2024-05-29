@@ -240,7 +240,10 @@ class LoraModel(BaseTuner):
             child = child.base_layer
 
         if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
+            if hasattr(new_module, "W_q"):  # HQQ
+                new_module.W_q = child.W_q
+            else:
+                new_module.weight = child.weight
             if hasattr(child, "bias"):
                 new_module.bias = child.bias
 

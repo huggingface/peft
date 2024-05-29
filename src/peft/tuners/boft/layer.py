@@ -345,18 +345,11 @@ class BOFTLayer(BaseTunerLayer):
 
         self.reset_boft_parameters(adapter_name, init_weights)
 
-        weight = getattr(self, "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
-
         # set the boft block size and number
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
 
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_boft_parameters(self, adapter_name, init_weights):
@@ -579,8 +572,9 @@ class Linear(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -620,8 +614,9 @@ class Linear(nn.Module, BOFTLayer):
                     block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
                     block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
                 butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -777,18 +772,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
         self.reset_boft_parameters(adapter_name, init_weights)
 
-        weight = getattr(self, "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
-        self.set_adapter(self.active_adapters)
-
         # set the boft block size and number
         self.boft_block_size[adapter_name] = boft_block_size
         self.boft_block_num[adapter_name] = boft_block_num
+
+        self._move_adapter_to_device_of_base_layer(adapter_name)
+        self.set_adapter(self.active_adapters)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -895,8 +884,9 @@ class Conv2d(nn.Module, BOFTLayer):
             block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
             block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
         butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
         for i in range(1, butterfly_oft_mat_batch.shape[0]):
@@ -938,8 +928,9 @@ class Conv2d(nn.Module, BOFTLayer):
                     block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
                     block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
 
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, self.boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(self.boft_P, butterfly_oft_mat_batch)
+                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
                 butterfly_oft_mat = butterfly_oft_mat_batch[0]
 
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):

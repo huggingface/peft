@@ -249,7 +249,7 @@ accelerate launch --config_file "configs/fsdp_config_qlora.yaml"  train.py \
 --bnb_4bit_quant_storage_dtype "bfloat16"
 ```
 
-Notice the new argument being passed, `bnb_4bit_quant_storage_dtype`, which denotes the data type for packing the 4-bit parameters. For example, when it is set to `bfloat16`, **32/4 = 8** 4-bit params are packed together post quantization. When using mixed precision training with `bfloat16`, `bnb_4bit_quant_storage_dtype` can be either `bfloat16` for pure `bfloat16` finetuning, or `float32` for automatic mixed precision (this consumes more GPU memory). When using mixed precision training with `float16`, `bnb_4bit_quant_storage_dtype` should be set to `float32` for stable automatic mixed precision training.
+Notice the new argument being passed, `bnb_4bit_quant_storage_dtype`, which denotes the data type for packing the 4-bit parameters. For example, when it is set to `bfloat16`, **16/4 = 4** 4-bit params are packed together post quantization. When using mixed precision training with `bfloat16`, `bnb_4bit_quant_storage_dtype` can be either `bfloat16` for pure `bfloat16` finetuning, or `float32` for automatic mixed precision (this consumes more GPU memory). When using mixed precision training with `float16`, `bnb_4bit_quant_storage_dtype` should be set to `float32` for stable automatic mixed precision training.
 
 In terms of training code, the important code changes are: 
 

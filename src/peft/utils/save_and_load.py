@@ -71,6 +71,8 @@ def get_peft_model_state_dict(
     config = model.peft_config[adapter_name]
     if state_dict is None:
         state_dict = model.state_dict()
+
+    # TUNER SPECIFIC CODE
     if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
@@ -167,11 +169,13 @@ def get_peft_model_state_dict(
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
+    # MODULES TO SAVE
     if getattr(model, "modules_to_save", None) is not None:
         for key, value in state_dict.items():
             if any(f"{module_name}.modules_to_save.{adapter_name}" in key for module_name in model.modules_to_save):
                 to_return[key.replace("modules_to_save.", "")] = value
 
+    # DEAL WITH EMBEDDINGS
     # check the common embedding layers in `target_modules` to reset `save_embedding_layers` if necessary
     is_embedding_in_target_modules = False
     if (
@@ -187,25 +191,26 @@ def get_peft_model_state_dict(
 
         # For some models e.g. diffusers the text config file is stored in a subfolder
         # we need to make sure we can download that config.
-        has_remote_config = False
+        has_base_config = False
 
         # ensure that this check is not performed in HF offline mode, see #1452
         if model_id is not None:
-            exists = check_file_exists_on_hf_hub(model_id, "config.json")
+            local_config_exists = os.path.exists(os.path.join(model_id, "config.json"))
+            exists = local_config_exists or check_file_exists_on_hf_hub(model_id, "config.json")
             if exists is None:
                 # check failed, could not determine if it exists or not
                 warnings.warn(
                     f"Could not find a config file in {model_id} - will assume that the vocabulary was not modified."
                 )
-                has_remote_config = False
+                has_base_config = False
             else:
-                has_remote_config = exists
+                has_base_config = exists
 
         # check if the vocab size of the base model is different from the vocab size of the finetuned model
         if (
             vocab_size
             and model_id
-            and has_remote_config
+            and has_base_config
             and (vocab_size != model.config.__class__.from_pretrained(model_id).vocab_size)
         ):
             warnings.warn(
@@ -225,6 +230,7 @@ def get_peft_model_state_dict(
     elif save_embedding_layers:
         warnings.warn("Could not identify embedding layer(s) because the model is not a 🤗 transformers model.")
 
+    # REMOVE ADAPTER NAME
     to_return = {k.replace(f".{adapter_name}", ""): v for k, v in to_return.items()}
     return to_return
 
