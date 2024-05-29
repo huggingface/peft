@@ -220,15 +220,6 @@ class XLoraModel(BaseTuner):
                     handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                     hook_handles.append(handle)
 
-            if self.disabled:
-                try:
-                    output = self.lora_model.model.forward(*args_real, **kwargs_real)
-                finally:
-                    # Clean everything up
-                    for handle in hook_handles:
-                        handle.remove()
-                return output
-
             with torch.no_grad():
                 self.lora_model.disable_adapters()
 
@@ -258,15 +249,17 @@ class XLoraModel(BaseTuner):
 
             handles_to_remove = hook_handles
 
-        forward_handle = self.lora_model.model.register_forward_pre_hook(pre_forward, with_kwargs=True)
+        if not self.disabled:
+            forward_handle = self.lora_model.model.register_forward_pre_hook(pre_forward, with_kwargs=True)
 
         # Run the forward pass: first the scaling pass in the hook, and then with the base model
         yield
 
-        # TODO(EricLBuehler): If we get a forward exception, we may have multiple forward hooks.
-        for handle in handles_to_remove:
-            handle.remove()
-        forward_handle.remove()
+        if not self.disabled:
+            # TODO(EricLBuehler): If we get a forward exception, we may have multiple forward hooks.
+            for handle in handles_to_remove:
+                handle.remove()
+            forward_handle.remove()
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""

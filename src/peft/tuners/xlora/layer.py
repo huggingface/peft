@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import torch
 import torch.nn as nn
@@ -77,14 +77,15 @@ class XLoraLinearLayer(XLoraLayer):
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
-    def forward(self, x: Tensor, *args: Any, scalings: Tensor, **kwargs: Any) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, scalings: Optional[Tensor] = None, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
         previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings(scalings)
+        if scalings is not None:
+            xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
         result = self.target.base_layer(x, *args, **kwargs)
 
@@ -101,8 +102,13 @@ class XLoraLinearLayer(XLoraLayer):
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)  # type: ignore
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
-                result += lora_B(lora_A(dropout(x_mod))) * scaling * self.config.global_scaling_weight
+                if scalings is not None:
+                    x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                    scaling_weight = self.config.global_scaling_weight
+                else:
+                    x_mod = x
+                    scaling_weight = 1
+                result += lora_B(lora_A(dropout(x_mod))) * scaling * scaling_weight
 
         result = result.to(previous_dtype)
         return result
@@ -119,13 +125,14 @@ class XLoraEmbeddingLayer(XLoraLayer):
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
-    def forward(self, x: Tensor, *args: Any, scalings: Tensor, **kwargs: Any) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, scalings: Optional[Tensor] = None, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
-        xlora_scalings = self.get_maybe_topk_scalings(scalings)
+        if scalings is not None:
+            xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
         result = self.target.base_layer(x, *args, **kwargs)
 
@@ -140,9 +147,14 @@ class XLoraEmbeddingLayer(XLoraLayer):
                 embedding_A = self.target.lora_embedding_A[active_adapter].T
                 embedding_B = self.target.lora_embedding_B[active_adapter].T
                 scaling = self.target.scaling[active_adapter]
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                if scalings is not None:
+                    x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                    scaling_weight = self.config.global_scaling_weight
+                else:
+                    x_mod = x
+                    scaling_weight = 1
                 after_A = self.target._embed(x_mod, embedding_A)  # type: ignore
-                result += (after_A @ embedding_B) * scaling * self.config.global_scaling_weight
+                result += (after_A @ embedding_B) * scaling * scaling_weight
 
         return result
 
@@ -158,14 +170,16 @@ class XLoraConv2dLayer(XLoraLayer):
     ) -> None:
         super().__init__(model, target, target_forward, layer_number, config)
 
-    def forward(self, x: Tensor, *args: Any, scalings: Tensor, **kwargs: Any) -> Tensor:
+    def forward(self, x: Tensor, *args: Any, scalings: Optional[Tensor] = None, **kwargs: Any) -> Tensor:
         """
         This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
         method must be created (bound to an instance of the XLoraLayer class).
         """
 
         previous_dtype = x.dtype
-        xlora_scalings = self.get_maybe_topk_scalings(scalings)
+
+        if scalings is not None:
+            xlora_scalings = self.get_maybe_topk_scalings(scalings)
 
         result = self.target.base_layer(x, *args, **kwargs)
 
@@ -182,8 +196,13 @@ class XLoraConv2dLayer(XLoraLayer):
                 dropout = self.target.lora_dropout[active_adapter]
                 scaling = self.target.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)  # type: ignore
-                x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
-                result += lora_B(lora_A(dropout(x_mod))) * scaling * self.config.global_scaling_weight
+                if scalings is not None:
+                    x_mod = self.apply_scalings_to_x(x, xlora_scalings, adapter_n)
+                    scaling_weight = self.config.global_scaling_weight
+                else:
+                    x_mod = x
+                    scaling_weight = 1
+                result += lora_B(lora_A(dropout(x_mod))) * scaling * scaling_weight
 
         result = result.to(previous_dtype)
         return result
