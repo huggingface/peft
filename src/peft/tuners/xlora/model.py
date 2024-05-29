@@ -33,7 +33,7 @@ def convert_layers_to_xlora(
     base: nn.Module,  # PeftModel
     xloramodel: nn.Module,  # XLoraModel
     config: XLoraConfig,
-) -> tuple[int, torch.device | None, list[nn.Module]]:
+) -> tuple[int, torch.device | None]:
     """
     Returns the number of swapped layers.
     """
@@ -79,7 +79,7 @@ def convert_layers_to_xlora(
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
 
-    return (total_swapped, device, all_layers)
+    return (total_swapped, device)
 
 
 class XLoraModel(BaseTuner):
@@ -165,7 +165,7 @@ class XLoraModel(BaseTuner):
 
         self._maybe_freeze_all_adapters()
 
-        total_swapped, device, all_layers = convert_layers_to_xlora(
+        total_swapped, device = convert_layers_to_xlora(
             model,
             self,
             peft_config,
