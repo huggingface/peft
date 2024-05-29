@@ -11,32 +11,46 @@ on:
         required: false
         default: false
 
+env:
+  RUN_SLOW: "yes"
+  IS_GITHUB_CI: "1"
+  # To be able to run tests on CUDA 12.2
+  NVIDIA_DISABLE_REQUIRE: "1"
+
 jobs:
   run_tests_with_compile:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
+    strategy:
+      fail-fast: false
+      matrix:
+          docker-image-name: ["huggingface/peft-gpu-bnb-latest:latest"]
     env:
       PEFT_DEBUG_WITH_TORCH_COMPILE: 1
+      CUDA_VISIBLE_DEVICES: "0"
+      TEST_TYPE: "single_gpu_${{ matrix.docker-image-name }}"
+    container:
+      image: ${{ matrix.docker-image-name }}
+      options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.branch }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-          cache: "pip"
-          cache-dependency-path: "setup.py"
-      - name: Install dependencies
+      - name: Pip install
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install .[test]
-          python -m pip install bitsandbytes
+          source activate peft
+          pip install -e . --no-deps
+          pip install pytest-cov parameterized datasets scipy einops
+          pip install "pytest>=7.2.0,<8.0.0" # see: https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/setup.py#L148C6-L148C26
           if [ "${{ github.event.inputs.pytorch_nightly }}" = "true" ]; then
             python -m pip install --upgrade --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
           fi
       - name: Test compile with pytest
         run: |
+          source activate peft
           echo "PEFT_DEBUG_WITH_TORCH_COMPILE=$PEFT_DEBUG_WITH_TORCH_COMPILE"
           git status
           make tests_torch_compile
