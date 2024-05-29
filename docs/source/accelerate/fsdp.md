@@ -289,3 +289,4 @@ You can also refer the [llama-recipes](https://github.com/facebookresearch/llama
 2. Passing `modules_to_save` config parameter to is untested at present.
 3. GPU Memory saving when using CPU Offloading is untested at present.
 4. When using FSDP+QLoRA, `paged_adamw_8bit` currently results in an error when saving a checkpoint.
+5. DoRA training with FSDP should work (albeit at lower speed than LoRA). If combined with bitsandbytes (QDoRA), 4-bit quantization should also work, but 8-bit quantization has known issues and is not recommended.
