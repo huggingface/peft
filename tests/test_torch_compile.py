@@ -49,6 +49,8 @@ from peft import (
     get_peft_model,
 )
 
+from .testing_utils import require_bitsandbytes
+
 
 # only run (very slow) torch.compile tests when explicitly asked to
 if os.environ.get("PEFT_DEBUG_WITH_TORCH_COMPILE") != "1":
@@ -269,6 +271,7 @@ class TestTorchCompileCausalLM:
         assert torch.allclose(output_after.logits, output_loaded.logits, atol=atol, rtol=rtol)
         assert (tokens_after == tokens_loaded).all()
 
+    @require_bitsandbytes
     @pytest.mark.xfail(strict=True)
     def test_causal_lm_training_lora_bnb_compile(self, tokenizer, data, tmp_path):
         r"""Train a bnb quantized LoRA model with torch.compile using PyTorch training loop"""
@@ -329,6 +332,7 @@ class TestTorchCompileCausalLM:
         assert torch.allclose(output_after.logits, output_loaded.logits, atol=atol, rtol=rtol)
 
     @pytest.mark.xfail(strict=True)
+    @require_bitsandbytes
     def test_causal_lm_multiple_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
@@ -393,6 +397,7 @@ class TestTorchCompileCausalLM:
         assert torch.allclose(output_base.logits, output_disabled.logits, atol=atol, rtol=rtol)
         assert not torch.allclose(output_base.logits, output_lora.logits, atol=atol, rtol=rtol)
 
+    @require_bitsandbytes
     def test_causal_lm_merging_lora_adapter_compile(self, tokenizer, data):
         # merge the adapter
         torch.manual_seed(0)
@@ -420,6 +425,7 @@ class TestTorchCompileCausalLM:
         assert not torch.allclose(output_base.logits, output_lora.logits, atol=atol, rtol=rtol)
         assert torch.allclose(output_lora.logits, output_merged.logits, atol=atol, rtol=rtol)
 
+    @require_bitsandbytes
     def test_causal_lm_merging_multiple_lora_adapters_compile(self, tokenizer, data):
         # merge multiple adapters at once
         torch.manual_seed(0)
@@ -457,6 +463,7 @@ class TestTorchCompileCausalLM:
         assert not torch.allclose(output_default.logits, output_merged.logits, atol=atol, rtol=rtol)
         assert not torch.allclose(output_other.logits, output_merged.logits, atol=atol, rtol=rtol)
 
+    @require_bitsandbytes
     @pytest.mark.xfail(strict=True)
     def test_causal_lm_merge_and_unload_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
@@ -485,6 +492,7 @@ class TestTorchCompileCausalLM:
         assert not torch.allclose(output_base.logits, output_lora.logits, atol=atol, rtol=rtol)
         assert torch.allclose(output_lora.logits, output_unloaded.logits, atol=atol, rtol=rtol)
 
+    @require_bitsandbytes
     @pytest.mark.xfail(strict=True)
     def test_causal_lm_mixed_batch_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
@@ -530,6 +538,7 @@ class TestTorchCompileCausalLM:
         assert torch.allclose(output_default.logits[1], output_mixed.logits[1], atol=atol, rtol=rtol)
         assert torch.allclose(output_other.logits[2], output_mixed.logits[2], atol=atol, rtol=rtol)
 
+    @require_bitsandbytes
     def test_causal_lm_add_weighted_adapter_lora_adapter_compile(self, tokenizer, data):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
