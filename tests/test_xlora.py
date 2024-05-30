@@ -20,10 +20,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
+from peft.utils import infer_device
 
 
 class TestXlora:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    torch_device = infer_device()
 
     model_id = "facebook/opt-125m"
     num_loras = 4
@@ -119,7 +120,7 @@ class TestXlora:
         model.enable_scalings_logging()
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -129,7 +130,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -142,7 +143,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -172,7 +173,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -182,7 +183,7 @@ class TestXlora:
     def test_save_load_functional_pt(self, tokenizer, model, tmp_dir):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         before_logits = outputs[: inputs.shape[1] :]
@@ -198,7 +199,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         after_logits = outputs[: inputs.shape[1] :]
@@ -208,7 +209,7 @@ class TestXlora:
     def test_save_load_functional(self, tokenizer, model, tmp_dir):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         before_logits = outputs[: inputs.shape[1] :]
@@ -224,7 +225,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         after_logits = outputs[: inputs.shape[1] :]
@@ -237,7 +238,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -250,7 +251,7 @@ class TestXlora:
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -273,7 +274,7 @@ class TestXlora:
         model_layerwise.enable_scalings_logging()
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model_layerwise.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
@@ -283,11 +284,11 @@ class TestXlora:
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         with model.disable_adapter():
             outputs_disabled = model.generate(
-                input_ids=inputs.to("cuda"),
+                input_ids=inputs.to(self.torch_device),
                 max_new_tokens=32,
             )
         outputs = model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs_disabled[: inputs.shape[1] :]).all()
@@ -297,7 +298,7 @@ class TestXlora:
     def test_functional_embedding(self, tokenizer, embedding_model):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = embedding_model.generate(
-            input_ids=inputs.to("cuda"),
+            input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
