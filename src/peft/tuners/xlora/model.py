@@ -141,7 +141,6 @@ class XLoraModel(BaseTuner):
             conf = config
         lora_model = LoraModel(model, config.copy(), adapter_name)
         self.xlora_config = conf
-        del self.xlora_config.target_modules
         self.lora_model = lora_model
 
         peft_config = conf
