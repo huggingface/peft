@@ -443,7 +443,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
         else:
             config.inference_mode = not is_trainable
-        if isinstance(model.base_model, XLoraModel):
+        if isinstance(getattr(model, "base_model", None), XLoraModel):
             if not isinstance(config, XLoraConfig):
                 raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
             if "adapters" in kwargs:
