@@ -19,17 +19,13 @@ env:
 
 jobs:
   run_tests_with_compile:
-    runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
-    strategy:
-      fail-fast: false
-      matrix:
-          docker-image-name: ["huggingface/peft-gpu-bnb-latest:latest"]
+    runs-on: [self-hosted, single-gpu, nvidia-gpu, a10, ci]
     env:
       PEFT_DEBUG_WITH_TORCH_COMPILE: 1
       CUDA_VISIBLE_DEVICES: "0"
-      TEST_TYPE: "single_gpu_${{ matrix.docker-image-name }}"
+      TEST_TYPE: "single_gpu_huggingface/peft-gpu-bnb-latest:latest"
     container:
-      image: ${{ matrix.docker-image-name }}
+      image: "huggingface/peft-gpu-bnb-latest:latest"
       options: --gpus all --shm-size "16gb" --ipc host -v /mnt/cache/.cache/huggingface:/mnt/cache/
     defaults:
       run:
