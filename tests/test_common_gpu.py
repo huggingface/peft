@@ -826,7 +826,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that we can pass mixed adapter names to the model
         # note that with 8bit, we have quite a bit of imprecision, therefore we use softmax and higher tolerances
         torch.manual_seed(3000)
-        bnb_config = BitsAndBytesConfig(quantization_config=BitsAndBytesConfig(load_in_8bit=True))
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             quantization_config=bnb_config,
