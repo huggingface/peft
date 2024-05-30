@@ -44,10 +44,9 @@ class DoraLinearLayer(nn.Module):
             lora_B = lora_B.float()
 
         with gather_params_ctx(base_layer.parameters()):
-            # check if 4bit bnb
-            if base_layer.__class__.__name__ == "Params4bit":
-                # we have to create a copy of the base layer, otherwise, FSDP will throw an error
-                # 8bit does not work yet because Int8Params cannot be correctly deep-copied (attributes vanish)
+            if base_layer.__class__.__name__ == "Linear4bit":
+                # We have to create a copy of the base layer, otherwise, FSDP will throw an error. 8bit does not work
+                # yet because Int8Params cannot be correctly deep-copied (attributes vanish)
                 base_layer = deepcopy(base_layer)
 
             weight = dequantize_module_weight(base_layer)
