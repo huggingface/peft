@@ -826,11 +826,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that we can pass mixed adapter names to the model
         # note that with 8bit, we have quite a bit of imprecision, therefore we use softmax and higher tolerances
         torch.manual_seed(3000)
-        bnb_config = BitsAndBytesConfig(
-            load_in_8bit=True,
-            bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_dtype=torch.float32,
-        )
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             quantization_config=bnb_config,
@@ -951,7 +947,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         ).eval()
 
@@ -964,7 +960,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         )
         torch.manual_seed(0)
@@ -1042,7 +1038,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         ).eval()
 
