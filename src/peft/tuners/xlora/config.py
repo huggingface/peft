@@ -79,9 +79,15 @@ class XLoraConfig(PeftConfig):
         self.peft_type = PeftType.XLORA
 
         if self.hidden_size is None:
-            raise TypeError("Expected value for hidden size.")
+            warnings.warn(
+                "No value was provided for `hidden_size`. This will be set to 4096 by default, please ensure that this is correct."
+            )
+            self.hidden_size = 4096
         if self.adapters is None:
-            raise TypeError("Expected value for adapters.")
+            warnings.warn(
+                "No value was provided for for `adapters`. This will be set to empty, please ensure that this is correct."
+            )
+            self.adapters = {}
 
         if self.enable_softmax_topk and self.top_k_lora is None:
             warnings.warn("`enable_softmax_topk` enabled `top_k_lora` is not set")

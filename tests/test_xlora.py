@@ -64,7 +64,7 @@ class TestXlora:
 
     @pytest.fixture(scope="class")
     def tokenizer(self):
-        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.device)
+        tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
         return tokenizer
 
     @pytest.fixture(scope="function")
@@ -80,7 +80,7 @@ class TestXlora:
             xlora_depth=8,
             adapters=adapters,
         )
-        model = get_peft_model(model, peft_config).to(self.device)
+        model = get_peft_model(model, peft_config).to(self.torch_device)
         return model
 
     @pytest.fixture(scope="function")
@@ -96,7 +96,7 @@ class TestXlora:
             xlora_depth=8,
             adapters=adapters,
         )
-        model = get_peft_model(model, peft_config).to(self.device)
+        model = get_peft_model(model, peft_config).to(self.torch_device)
         return model
 
     @pytest.fixture(scope="function")
@@ -113,7 +113,7 @@ class TestXlora:
             adapters=adapters,
             layerwise_scalings=True,
         )
-        model = get_peft_model(model, peft_config).to(self.device)
+        model = get_peft_model(model, peft_config).to(self.torch_device)
         return model
 
     def test_functional(self, tokenizer, model):
@@ -195,7 +195,9 @@ class TestXlora:
 
         model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir, safe_serialization=False).to(self.device)
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir, safe_serialization=False).to(
+            self.torch_device
+        )
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
@@ -221,7 +223,7 @@ class TestXlora:
 
         model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir).to(self.device)
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir).to(self.torch_device)
 
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
