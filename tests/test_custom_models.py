@@ -1486,7 +1486,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert any("lora_magnitude_vector.default.weight" in k for k in state_dict)
 
         # save the model, check the state dict
-        with tempfile.TemporaryDirectory() as tmp_dirname:
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.mkdtemp()
+        try:
             model.save_pretrained(tmp_dirname)
             state_dict_adapter = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
             # note that in the state dict, the "default" part of the key is removed
@@ -1494,6 +1496,12 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
             del model
             loaded = PeftModel.from_pretrained(AutoModelForCausalLM.from_pretrained("facebook/opt-125m"), tmp_dirname)
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                # windows error
+                pass
 
         state_dict_loaded = loaded.state_dict()
         assert state_dict.keys() == state_dict_loaded.keys()
