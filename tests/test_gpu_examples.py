@@ -29,6 +29,8 @@ from accelerate.utils import patch_environment
 from datasets import Audio, DatasetDict, load_dataset
 from packaging import version
 from parameterized import parameterized
+from torch.distributed import init_process_group
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import (
     AutoModelForCausalLM,
     AutoModelForSeq2SeqLM,
@@ -57,6 +59,7 @@ from peft import (
 )
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 from peft.utils.loftq_utils import NFQuantizer
+from peft.utils.other import fsdp_auto_wrap_policy
 
 from .testing_utils import (
     require_aqlm,
@@ -2921,3 +2924,44 @@ class TestAutoCast(unittest.TestCase):
         with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
             outputs = model(input_ids)
             assert outputs.dtype == precision
+
+
+class TestFSDPWrap:
+    """
+    Test that we can successfully initialize an FSDP instance of the module.
+
+    This is a very simple test, as it does not perform actual FSDP training. Here we just ensure that the FSDP instance
+    can be created. This can fail for several reasons, e.g. int dtype from BNB or inconsistent requires_grad settings
+    due to the auto wrap policy.
+
+    """
+
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_bnb_4bit_wrap_fsdp(self):
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            # float32 must be used, or else FSDP will complain about mixed int and float dtypes
+            bnb_4bit_compute_dtype=torch.float32,
+            bnb_4bit_quant_storage=torch.float32,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=quant_config,
+            torch_dtype=torch.float32,
+        )
+        # model = prepare_model_for_kbit_training(model)
+        config = LoraConfig(
+            target_modules=["q_proj", "v_proj"],
+            task_type="CAUSAL_LM",
+            use_dora=True,
+        )
+        model = get_peft_model(model, config)
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+
+        init_process_group(world_size=1, rank=0)
+        # check that this does not raise:
+        FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
