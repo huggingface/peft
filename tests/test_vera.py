@@ -265,13 +265,18 @@ class TestVera:
             != mlp_same_prng.base_model.model.lin2.vera_lambda_d["other"].data_ptr()
         )
 
-    def test_vera_different_shapes_raises(self, mlp):
-        # It is not possible (currently) to have vera_A and vera_B for different shapes, as they cannot be shared if
-        # their shapes are not identical. lin0 and lin1 have different shapes.
-        config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False)
-        msg = re.escape(
-            "Multiple target layers with different dimensions were specified. VeRA only supports a single dimension "
-            "size. Expected shape (20, 10), got (20, 20)."
-        )
-        with pytest.raises(ValueError, match=msg):
-            get_peft_model(mlp, config)
+    def test_vera_different_shapes(self, mlp):
+        config = VeraConfig(target_modules=["lin0", "lin3"], init_weights=False)
+        mlp_different_shapes = get_peft_model(mlp, config)
+
+        vera_A = mlp_different_shapes.vera_A["default"]
+        vera_B = mlp_different_shapes.vera_B["default"]
+
+        # lin0 has the largest output dimension, lin3 has the largest input dimension
+        # vera_A should have the shape of (rank, largest_in), vera_B should have the shape of (largest_out, rank)
+        assert vera_A.shape == (config.r, mlp.lin3.in_features)
+        assert vera_B.shape == (mlp.lin0.out_features, config.r)
+
+        # should not raise
+        input = torch.randn(5, 10)
+        mlp_different_shapes(input)

@@ -22,7 +22,6 @@ When saving the adapter parameters, it's possible to eschew storing the low rank
 
 VeRA currently has the following constraints:
 
-- All targeted parameters must have the same shape.
 - Only `nn.Linear` layers are supported.
 - Quantized layers are not supported.
 

@@ -252,9 +252,12 @@ class Linear(nn.Linear, VeraLayer):
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
 
+                sliced_A = vera_A[:, : self.in_features]
+                sliced_B = vera_B[: self.out_features, :]
+
                 dropout = self.vera_dropout[active_adapter]
                 x = x.to(lambda_d.dtype)
-                result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)
+                result = result + lambda_b * F.linear(lambda_d * F.linear(dropout(x), sliced_A), sliced_B)
 
         result = result.to(previous_dtype)
         return result
