@@ -15,13 +15,11 @@
 from copy import deepcopy
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
-
-
-F = nn.functional
 
 
 class DoraLinearLayer(nn.Module):
