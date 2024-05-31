@@ -27,6 +27,7 @@ from functools import partial
 import pytest
 import torch
 from parameterized import parameterized
+from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
@@ -1471,6 +1472,33 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         # should not raise an error
         model.merge_and_unload(safe_merge=True)
+
+    def test_dora_save_and_load_remapping(self):
+        # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
+        # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
+        # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        state_dict = model.state_dict()
+
+        # sanity check: state dict contains "lora_magnitude_vector.default.weight" keys
+        assert any("lora_magnitude_vector.default.weight" in k for k in state_dict)
+
+        # save the model, check the state dict
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+            state_dict_adapter = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            # note that in the state dict, the "default" part of the key is removed
+            assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
+
+            del model
+            loaded = PeftModel.from_pretrained(AutoModelForCausalLM.from_pretrained("facebook/opt-125m"), tmp_dirname)
+
+        state_dict_loaded = loaded.state_dict()
+        assert state_dict.keys() == state_dict_loaded.keys()
+        for k in state_dict:
+            assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
 
 class TestMultiRankAdapter(unittest.TestCase):
