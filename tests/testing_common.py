@@ -464,7 +464,7 @@ class PeftCommonTester:
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
-        model = self.transformers_class.from_pretrained(model_id)
+        model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
