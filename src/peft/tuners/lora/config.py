@@ -275,7 +275,8 @@ class LoraConfig(PeftConfig):
         default=1,
         metadata={
             "help": (
-                "Enable MoRA"
+                "type 1 (Sharing) for large lora ranks, Eq. 6 in paper. "
+                "type 6 (RoPE based) for small lora ranks, Eq. 9 in paper."
             )
         },
     )
