@@ -41,6 +41,8 @@ if is_bnb_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_mora: bool = False,
+            mora_type: int = 1,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -56,6 +58,8 @@ if is_bnb_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_mora=use_mora,
+                mora_type=mora_type,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -294,6 +298,8 @@ if is_bnb_4bit_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_mora: bool = False,
+            mora_type: int = 1,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -309,6 +315,8 @@ if is_bnb_4bit_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_mora=use_mora,
+                mora_type=mora_type,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -485,7 +493,10 @@ if is_bnb_4bit_available():
                         expected_dtype = result.dtype
                         x = x.to(lora_A.weight.dtype)
 
-                    if not self.use_dora[active_adapter]:
+                    if self.use_mora[active_adapter]:
+                        x = dropout(x)
+                        output = self._apply_mora(x, lora_A, lora_B, scaling, active_adapter)
+                    elif not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
                     else:
                         x = dropout(x)

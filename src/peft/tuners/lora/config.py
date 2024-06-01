@@ -259,6 +259,26 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    use_mora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable MoRA: High-Rank Updating for Parameter-Efﬁcient Fine-Tuning. This technique employs a square "
+                "matrix to achieve high-rank updating while maintaining the same number of trainable parameters. "
+                "To achieve it, MoRA introduces the corresponding non-parameter operators to reduce the input dimension "
+                "and increase the output dimension for the square matrix. Furthermore, these operators ensure that the "
+                "weight can be merged back into LLMs, which makes the method can be deployed like LoRA."
+            )
+        },
+    )
+    mora_type: int = field(
+        default=1,
+        metadata={
+            "help": (
+                "Enable MoRA"
+            )
+        },
+    )
     # Enables replicating layers in a model to expand it to a larger model.
     layer_replication: Optional[list[tuple[int, int]]] = field(
         default=None,
