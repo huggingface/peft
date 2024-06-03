@@ -28,7 +28,7 @@ For example, load a base model and then load the [artificialguybr/3DRedmond-V1](
 
 ```py
 import torch
-from diffusers import DiffusionPipeline
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 
 pipeline = DiffusionPipeline.from_pretrained(
     "stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16
