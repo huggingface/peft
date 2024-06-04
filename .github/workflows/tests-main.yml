@@ -26,3 +26,11 @@ jobs:
       - name: Test with pytest
         run: |
           make test
+      - name: Post to Slack
+        if: always()
+        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        with:
+          slack_channel: ${{ secrets.SLACK_CHANNEL_ID }}
+          title: 🤗 Results of transformers main tests
+          status: ${{ job.status }}
+          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
