@@ -48,5 +48,4 @@ jobs:
         run: |
           source activate peft
           echo "PEFT_DEBUG_WITH_TORCH_COMPILE=$PEFT_DEBUG_WITH_TORCH_COMPILE"
-          git status
           make tests_torch_compile
