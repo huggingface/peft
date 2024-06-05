@@ -115,6 +115,8 @@ class LoraLayer(BaseTunerLayer):
 
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             self.pissa_init(adapter_name, init_lora_weights)
+        elif init_lora_weights == "olora":
+            self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
@@ -149,6 +151,25 @@ class LoraLayer(BaseTunerLayer):
             # initialize a the same way as the default for nn.linear and b to zero
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
+
+    def olora_init(self, adapter_name):
+        weight_tensor = self.get_base_layer().weight
+        dtype = weight_tensor.dtype
+        scale_factor = self.scaling[adapter_name]
+        r = self.r[adapter_name]
+        if dtype not in (torch.float32, torch.float16, torch.bfloat16):
+            raise TypeError("Unsupported dtype. Please use float32, float16, or bfloat16.")
+        weight_tensor = weight_tensor.to(torch.float32)
+        Q, R = torch.linalg.qr(weight_tensor.data)
+
+        Qr, Rr = Q[:, :r], R[:r]
+
+        self.lora_A[adapter_name].weight.data = Rr.contiguous()
+        self.lora_B[adapter_name].weight.data = Qr.contiguous()
+        
+        weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
+        weight_tensor = weight_tensor.to(dtype)
+        self.get_base_layer().weight.data = weight_tensor
 
     def pissa_init(self, adapter_name, init_lora_weights):
         weight = self.get_base_layer().weight
