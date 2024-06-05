@@ -46,6 +46,22 @@ jobs:
             git checkout tags/v$transformers_version
             cd .. 
           fi
+
+      - name: Test bnb import
+        id: import
+        if: always()
+        run: |
+          python3 -c "import bitsandbytes as bnb"
+
+      - name: Post to Slack
+        if: always()
+        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        with:
+          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          title: 🤗 Results of bitsandbytes import
+          status: ${{ steps.import.status }}
+          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+          
       - name: Run examples on single GPU
         if: always()
         run: |
@@ -108,6 +124,21 @@ jobs:
             git checkout tags/v$transformers_version
             cd ..
           fi 
+
+      - name: Test bnb import
+        id: import
+        if: always()
+        run: |
+          python3 -c "import bitsandbytes as bnb"
+
+      - name: Post to Slack
+        if: always()
+        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        with:
+          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          title: 🤗 Results of bitsandbytes import
+          status: ${{ steps.import.status }}
+          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run core GPU tests on multi-gpu
         if: always()
