@@ -24,6 +24,7 @@ import pytest
 import torch
 import yaml
 from diffusers import StableDiffusionPipeline
+from packaging import version
 
 from peft import (
     AdaLoraConfig,
@@ -463,6 +464,9 @@ class PeftCommonTester:
 
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
+
+        if (self.torch_device in ["cpu"]) and (version.parse(torch.__version__) <= version.parse(2.1)):
+            self.skipTest("PyTorch 2.1 not supported for Half of addmm_impl_cpu_ ")
 
         model = self.transformers_class.from_pretrained(model_id, torch_dtype=torch.float16)
         config = config_cls(
