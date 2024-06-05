@@ -54,6 +54,14 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 ```
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/main/examples/pissa_finetuning).
 
+### OLoRA
+[OLoRA](https://arxiv.org/abs/2406.01775) initializes the LoRA adapter using QR decomposition, which significantly improves stability, accelerates convergence speed, and achieves superior performance.
+You just need to pass a single additional option to use OLoRA:
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="OLoRA", ...)
+```
+
 ### LoftQ
 
 #### Standard approach

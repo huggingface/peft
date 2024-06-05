@@ -41,7 +41,7 @@ class TrainingArguments(TrainingArguments):
     lora_r: int = field(default=16)
     lora_alpha: int = field(default=16)
     lora_dropout: float = field(default=0)
-    convert_pissa_to_lora: bool = field(default=False)
+    convert_mutated_to_lora: bool = field(default=False)
     merge_and_save: bool = field(default=False)
     # dataset configs
     data_path: str = field(default="imdb", metadata={"help": "Path to the training data."})
@@ -140,10 +140,10 @@ trainer = SFTTrainer(
 trainer.train()
 trainer.save_state()
 ############################## Upon training completion, convert and save PiSSA in LoRA format ##############################
-if script_args.convert_pissa_to_lora:
+if script_args.convert_mutated_to_lora:
     peft_model.save_pretrained(
         os.path.join(script_args.output_dir, "pissa_lora"),
-        convert_pissa_to_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
+        convert_mutated_to_lora=os.path.join(script_args.residual_model_name_or_path, "pissa_init"),
     )
 else:
     peft_model.save_pretrained(

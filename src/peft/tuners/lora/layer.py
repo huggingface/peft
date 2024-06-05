@@ -166,7 +166,7 @@ class LoraLayer(BaseTunerLayer):
 
         self.lora_A[adapter_name].weight.data = Rr.contiguous()
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
-        
+
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
         weight_tensor = weight_tensor.to(dtype)
         self.get_base_layer().weight.data = weight_tensor
