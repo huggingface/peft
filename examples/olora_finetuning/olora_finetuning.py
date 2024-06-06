@@ -1,3 +1,19 @@
+# Copyright 2023-present the HuggingFace Inc. team.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# Run this script simply by running `python examples/olora_finetuning/olora_finetuning.py` from the root directory of the repository.
 from typing import List
 
 import torch
@@ -20,7 +36,7 @@ def train(
     num_epochs: int = 1,
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
-    val_set_size: int = 1,
+    val_set_size: int = 16,
     eval_step: int = 100,
     save_step: int = 100,
     device_map: str = "auto",
@@ -60,8 +76,8 @@ def train(
 
         return result
 
-    def generate_and_tokenize_prompt(data_point):
-        full_prompt = generate_prompt(data_point)
+    def generate_and_tokenize_prompt(example):
+        full_prompt = generate_prompt(example)
         tokenized_full_prompt = tokenize(full_prompt)
         return tokenized_full_prompt
 
@@ -78,15 +94,9 @@ def train(
 
     data = load_dataset(data_path)
 
-    model.print_trainable_parameters()
-
-    if val_set_size > 0:
-        train_val = data["train"].train_test_split(test_size=val_set_size, shuffle=True, seed=42)
-        train_data = train_val["train"].shuffle().map(generate_and_tokenize_prompt)
-        val_data = train_val["test"].shuffle().map(generate_and_tokenize_prompt)
-    else:
-        train_data = data["train"].shuffle().map(generate_and_tokenize_prompt)
-        val_data = None
+    train_val = data["train"].train_test_split(test_size=val_set_size, shuffle=True, seed=42)
+    train_data = train_val["train"].shuffle().map(generate_and_tokenize_prompt)
+    val_data = train_val["test"].shuffle().map(generate_and_tokenize_prompt)
 
     trainer = transformers.Trainer(
         model=model,
@@ -101,13 +111,13 @@ def train(
             fp16=True,
             logging_steps=100,
             optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+            evaluation_strategy="steps",
             save_strategy="steps",
-            eval_steps=eval_step if val_set_size > 0 else None,
+            eval_steps=eval_step,
             save_steps=save_step,
             output_dir=output_dir,
             save_total_limit=3,
-            load_best_model_at_end=True if val_set_size > 0 else False,
+            load_best_model_at_end=True,
         ),
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
@@ -117,12 +127,12 @@ def train(
     model.save_pretrained(output_dir)
 
 
-def generate_prompt(data_point):
+def generate_prompt(example):
     return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
             ### Instruction:
-            {data_point["instruction"]}
+            {example["instruction"]}
             ### Response:
-            {data_point["output"]}"""
+            {example["output"]}"""
 
 
 if __name__ == "__main__":

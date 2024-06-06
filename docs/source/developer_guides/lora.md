@@ -59,7 +59,7 @@ For detailed instruction on using PiSSA, please follow [these instructions](http
 You just need to pass a single additional option to use OLoRA:
 ```python
 from peft import LoraConfig
-config = LoraConfig(init_lora_weights="OLoRA", ...)
+config = LoraConfig(init_lora_weights="olora", ...)
 ```
 
 ### LoftQ

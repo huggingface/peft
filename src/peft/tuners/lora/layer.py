@@ -115,7 +115,7 @@ class LoraLayer(BaseTunerLayer):
 
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             self.pissa_init(adapter_name, init_lora_weights)
-        elif init_lora_weights == "olora":
+        elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
             self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)

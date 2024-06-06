@@ -270,7 +270,8 @@ class TestLoraInitialization:
         model = self.get_model()
         output = model(data)[0]
 
-        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"])
+        # Both OLoRA and olora should work
+        config = LoraConfig(init_lora_weights="OLoRA", target_modules=["linear"])
         peft_model = get_peft_model(deepcopy(model), config)
         assert torch.allclose(output, peft_model(data)[0], atol=1e-06)
 
@@ -308,7 +309,9 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
-        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_mutated_to_lora=tmp_path / "init-model")
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -317,6 +320,30 @@ class TestLoraInitialization:
         assert model_converted.peft_config["default"].r == 16
         assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
         # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_pissa_conversion_same_output_after_loading_deprecated(self, data, tmp_path):
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8)
+        peft_model = get_peft_model(deepcopy(model), config)
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "pissa"
+
+        tol = 1e-06
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_pissa = peft_model(data)[0]
+
+        # test the warning
+        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_pissa_to_lora=tmp_path / "init-model")
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_pissa, output_converted, atol=tol, rtol=tol)
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
         assert torch.allclose(
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
         )
@@ -355,7 +382,9 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
-        peft_model.save_pretrained(tmp_path / "olora-model-converted", convert_mutated_to_lora=tmp_path / "init-model")
+        peft_model.save_pretrained(
+            tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
         output_converted = model_converted(data)[0]
 

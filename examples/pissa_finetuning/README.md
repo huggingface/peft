@@ -72,7 +72,7 @@ The main advantage of PiSSA is concentrated during the training phase. For a tra
 peft_model.save_pretrained(output_dir) 
 # Given the matrices $A_0$ and $B_0$, initialized by PiSSA and untrained, and the trained matrices $A$ and $B$, 
 # we can convert these to LoRA by setting $\Delta W = A \times B - A_0 \times B_0 = [A \mid A_0] \times [B \mid -B_0]^T = A'B'$.
-peft_model.save_pretrained(output_dir, convert_mutated_to_lora="pissa_init")
+peft_model.save_pretrained(output_dir, convert_pissa_to_lora="pissa_init")
 
 ```
 This conversion enables the loading of LoRA on top of a standard base model:
@@ -115,7 +115,7 @@ python pissa_finetuning.py \
     --warmup_ratio 0.03 \
     --tf32 True \
     --report_to none \
-    --convert_mutated_to_lora
+    --convert_pissa_to_lora
 ```
 
 This approach ensures the preservation of high-frequency, out-of-distribution parameters in the low-rank PiSSA modules, resulting in reduced quantization errors during the quantization of the residual model.
