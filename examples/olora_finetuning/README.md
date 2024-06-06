@@ -22,7 +22,7 @@ trainer = SFTTrainer(
     model=peft_model,
     train_dataset=dataset,
     dataset_text_field="text",
-    max_seq_length=32,
+    max_seq_length=512,
     tokenizer=tokenizer,
 )
 trainer.train()
@@ -31,7 +31,7 @@ peft_model.save_pretrained("olora-opt-350m")
 
 ## Use the model
 You can load and use the model as any other 🤗 PEFT model
-```
+```python
 from peft import PeftModel
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
