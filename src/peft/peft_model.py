@@ -1566,7 +1566,7 @@ class PeftModelForCausalLM(PeftModel):
                 # In prompt learning methods, past key values are longer when compared to the `input_ids`.
                 # As such only consider the last input ids in the autogressive generation phase.
                 past_key_values = model_kwargs["past_key_values"]
-                if isinstance(past_key_values, tuple):
+                if isinstance(past_key_values, (tuple, list)):
                     seq_len = past_key_values[0][0].shape[-2]
                 else:  # using transformers kv cache
                     seq_len = past_key_values.get_seq_length()
