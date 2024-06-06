@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import warnings
+from copy import deepcopy
 from typing import Any, Optional, Union
 
 import torch
@@ -24,6 +25,7 @@ from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import dequantize_module_weight
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -121,7 +123,6 @@ class LoraLayer(BaseTunerLayer):
             self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
-
         # call this before dora_init
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -153,12 +154,17 @@ class LoraLayer(BaseTunerLayer):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def olora_init(self, adapter_name):
-        weight_tensor = self.get_base_layer().weight
-        dtype = weight_tensor.dtype
+        dtype = self.base_layer.weight.dtype
+        if dtype in [torch.int8, torch.uint8]:
+            warnings.warn("You are using OLoRA with quantized weights. This is still experimental.")
+            base_layer_copy = deepcopy(self.base_layer)  # Make FSDP happy
+            weight_tensor = dequantize_module_weight(base_layer_copy)
+        elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            weight_tensor = self.base_layer.weight
+        else:
+            raise TypeError(f"Unsupported data type for the base layer. Got {dtype}.")
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
-        if dtype not in (torch.float32, torch.float16, torch.bfloat16):
-            raise TypeError("Unsupported dtype. Please use float32, float16, or bfloat16.")
         weight_tensor = weight_tensor.to(torch.float32)
         Q, R = torch.linalg.qr(weight_tensor.data)
 
@@ -180,7 +186,6 @@ class LoraLayer(BaseTunerLayer):
                 "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
         weight = weight.to(torch.float32)
-
         if init_lora_weights == "pissa":
             # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
             V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
