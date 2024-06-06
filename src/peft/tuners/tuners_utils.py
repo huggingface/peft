@@ -137,7 +137,7 @@ class BaseTuner(nn.Module, ABC):
             The model configuration object, it should be a dictionary of `str` to `Any` objects.
         targeted_module_names (`list[str]`):
             The list of module names that were actually adapted. Can be useful to inspect if you want to quickly
-            double-check that the `config.target_modules` where specified correctly.
+            double-check that the `config.target_modules` were specified correctly.
     """
 
     def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
