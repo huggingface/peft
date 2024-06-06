@@ -1565,7 +1565,12 @@ class PeftModelForCausalLM(PeftModel):
                 # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
                 # In prompt learning methods, past key values are longer when compared to the `input_ids`.
                 # As such only consider the last input ids in the autogressive generation phase.
-                if model_kwargs["past_key_values"][0][0].shape[-2] >= model_kwargs["input_ids"].shape[1]:
+                past_key_values = model_kwargs["past_key_values"]
+                if isinstance(past_key_values, tuple):
+                    seq_len = past_key_values[0][0].shape[-2]
+                else:  # using transformers kv cache
+                    seq_len = past_key_values.get_seq_length()
+                if seq_len >= model_kwargs["input_ids"].shape[1]:
                     model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
             if model_kwargs.get("attention_mask", None) is not None:
