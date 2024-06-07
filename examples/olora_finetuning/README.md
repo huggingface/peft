@@ -53,11 +53,12 @@ print(olora_model)
 ```
 
 ## OLoRA and LoRA
-Unlike LoRA, OLoRA mutates the original weights. If you want to use multiple adapters simultaneously you can use `path_initial_model_for_weight_conversion` option. First save your model that initialized by using OLoRA before performing any training:
+Unlike LoRA, OLoRA mutates the original weights. If you want to use multiple adapters simultaneously you can use `path_initial_model_for_weight_conversion` option. First save your model that was initialized with OLoRA **before** performing any training:
 ```python
+init_path = <path-to-untrained-olora-model>
 olora_model.save_pretrained(init_path)
 ```
-
+# After training
 Then you can specify the path of the initialized adapter in the `save_pretrained` method:
 ```python
 from transformers import AutoModelForCausalLM

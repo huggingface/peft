@@ -155,7 +155,6 @@ class LoraLayer(BaseTunerLayer):
     def olora_init(self, adapter_name):
         dtype = self.base_layer.weight.dtype
         if dtype in [torch.int8, torch.uint8]:
-            warnings.warn("You are using OLoRA with quantized weights. This is still experimental.")
             weight_tensor = dequantize_module_weight(self.base_layer)
         elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
             weight_tensor = self.base_layer.weight
