@@ -13,13 +13,13 @@
 # limitations under the License.
 
 
-# Run this script simply by running `python examples/olora_finetuning/olora_finetuning.py` from the root directory of the repository.
 from typing import List
 
+import fire
 import torch
 import transformers
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from peft import (
     LoraConfig,
@@ -28,7 +28,7 @@ from peft import (
 
 
 def train(
-    base_model: str = "TinyLlama/TinyLlama-1.1B-Chat-v0.1",
+    base_model: str = "path/to/model",
     data_path: str = "yahma/alpaca-cleaned",
     output_dir: str = "olora",
     batch_size: int = 16,
@@ -37,6 +37,7 @@ def train(
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
     val_set_size: int = 16,
+    quantize: bool = False,
     eval_step: int = 100,
     save_step: int = 100,
     device_map: str = "auto",
@@ -47,10 +48,17 @@ def train(
     init_lora_weights="olora",
 ):
     gradient_accumulation_steps = batch_size // micro_batch_size
-
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         device_map=device_map,
+        quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        if quantize
+        else None,
         torch_dtype=torch.float16,
     )
 
@@ -137,4 +145,4 @@ def generate_prompt(example):
 
 if __name__ == "__main__":
     torch.manual_seed(42)
-    train()
+    fire.Fire(train)

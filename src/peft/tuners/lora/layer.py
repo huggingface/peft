@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 import warnings
-from copy import deepcopy
 from typing import Any, Optional, Union
 
 import torch
@@ -157,8 +156,7 @@ class LoraLayer(BaseTunerLayer):
         dtype = self.base_layer.weight.dtype
         if dtype in [torch.int8, torch.uint8]:
             warnings.warn("You are using OLoRA with quantized weights. This is still experimental.")
-            base_layer_copy = deepcopy(self.base_layer)  # Make FSDP happy
-            weight_tensor = dequantize_module_weight(base_layer_copy)
+            weight_tensor = dequantize_module_weight(self.base_layer)
         elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
             weight_tensor = self.base_layer.weight
         else:
