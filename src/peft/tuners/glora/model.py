@@ -1,6 +1,6 @@
 from peft.tuners.glora.layer import GLoraLayer, Linear
 from peft.tuners.glora.layer import mark_only_glora_as_trainable
-from import_utils import is_bnb_available, is_bnb_4bit_available
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 import torch
 from tqdm import tqdm
 import re
