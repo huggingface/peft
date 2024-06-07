@@ -1,15 +1,14 @@
 from peft.tuners.glora.layer import GLoraLayer, Linear
 from peft.tuners.glora.layer import mark_only_glora_as_trainable
-from import_utils import is_bnb_available, is_bnb_4bit_available
+from peft.import_utils import  is_bnb_available
 import torch
 from tqdm import tqdm
 import re
 from dataclasses import asdict
 from enum import Enum
 import random
-random.seed(56)
-from peft.utils import (
 
+from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     _freeze_adapter,
     _get_submodules,
@@ -19,6 +18,7 @@ from peft.utils import (
 if is_bnb_available():
     import bitsandbytes as bnb
 
+random.seed(56)
 
 class GLoraModel(torch.nn.Module):
     """
