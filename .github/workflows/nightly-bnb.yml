@@ -51,8 +51,8 @@ jobs:
         id: import
         if: always()
         run: |
-          python3 -c "import bitsandbytes as bnb"
           python3 -m bitsandbytes
+          python3 -c "import bitsandbytes as bnb"
 
       - name: Post to Slack
         if: always()
