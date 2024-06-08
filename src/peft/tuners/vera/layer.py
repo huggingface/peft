@@ -217,9 +217,12 @@ class Linear(nn.Linear, VeraLayer):
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
 
+
+        sliced_A = vera_A[:, : self.in_features]
+        sliced_B = vera_B[: self.out_features, :]
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
-        output_tensor = transpose((lambda_b * vera_B) @ (lambda_d * vera_A), self.fan_in_fan_out)
+        output_tensor = transpose((lambda_b * sliced_B) @ (lambda_d * sliced_A), self.fan_in_fan_out)
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -252,6 +255,9 @@ class Linear(nn.Linear, VeraLayer):
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
 
+                # As adapted layers may have different shapes and VeRA contains a single shared pair of A and B matrices,
+                # we initialize these matrices with the largest required size for each dimension.
+                # During the forward pass, required submatrices are sliced out from the shared vera_A and vera_B.
                 sliced_A = vera_A[:, : self.in_features]
                 sliced_B = vera_B[: self.out_features, :]
 

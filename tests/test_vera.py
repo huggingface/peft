@@ -272,6 +272,9 @@ class TestVera:
         vera_A = mlp_different_shapes.vera_A["default"]
         vera_B = mlp_different_shapes.vera_B["default"]
 
+        # sanity check
+        assert mlp.lin0.base_layer.weight.shape != mlp.lin3.base_layer.weight.shape
+
         # lin0 has the largest output dimension, lin3 has the largest input dimension
         # vera_A should have the shape of (rank, largest_in), vera_B should have the shape of (largest_out, rank)
         assert vera_A.shape == (config.r, mlp.lin3.in_features)
