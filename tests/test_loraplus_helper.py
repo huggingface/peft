@@ -24,21 +24,34 @@ class SimpleNet(nn.Module):
 def test_lora_plus_helper_sucess():
     model = SimpleNet()
     optimizer_cls = bnb.optim.Adam8bit
+    loraplus_lr_ratio = 0.2
     optim_config = {
         "lr": 5e-5,
         "eps": 1e-6,
         "betas": (0.9, 0.999),
         "weight_decay": 0.0,
-        "loraplus_lr_ratio": 0.2,
+        "loraplus_lr_ratio": loraplus_lr_ratio,
     }
+    loraplus_lr_embedding = 1e-6
     optim = create_loraplus_optimizer(
-        model=model, optimizer_cls=optimizer_cls, optimizer_kwargs=optim_config, loraplus_lr_embedding=1e-6
+        model=model,
+        optimizer_cls=optimizer_cls,
+        optimizer_kwargs=optim_config,
+        loraplus_lr_embedding=loraplus_lr_embedding
     )
     assert optim is not None
     assert len(optim.param_groups) == 4
+    assert optim.param_groups[0]["lr"] == optim_config["lr"]
+    assert optim.param_groups[1]["lr"] == loraplus_lr_embedding
+    assert optim.param_groups[2]["lr"] == optim.param_groups[3]["lr"] == (optim_config["lr"] * loraplus_lr_ratio)
+
 
 
 def test_lora_plus_optimizer_sucess():
+    """
+    Test if the optimizer is correctly created and step 
+    function runs without any exception
+    """
     optimizer_cls = bnb.optim.Adam8bit
     optim_config = {
         "lr": 5e-5,
