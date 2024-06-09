@@ -52,6 +52,9 @@ def dequantize_module_weight(module: torch.nn.Module) -> torch.nn.Parameter:
 
     weight = module.weight
     if not isinstance(weight, torch.nn.Parameter):
+        if isinstance(weight, torch.Tensor):
+            # this is an FSDP-specific edge case
+            return weight  # type: ignore
         raise TypeError(f"Input weight should be of type nn.Parameter, got {type(weight)} instead")
 
     cls_name = weight.__class__.__name__

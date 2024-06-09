@@ -106,14 +106,7 @@ class VeraLayer(BaseTunerLayer):
         if init_weights:
             self.reset_vera_parameters(adapter_name, d_initial=d_initial)
 
-        weight = getattr(self.get_base_layer(), "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
-
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_vera_parameters(self, adapter_name, d_initial: float = 0.1):
@@ -265,3 +258,7 @@ class Linear(nn.Linear, VeraLayer):
 
         result = result.to(previous_dtype)
         return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "vera." + rep

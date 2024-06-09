@@ -1565,7 +1565,12 @@ class PeftModelForCausalLM(PeftModel):
                 # change in the logic of `prepare_inputs_for_generation` makes the below code necessary
                 # In prompt learning methods, past key values are longer when compared to the `input_ids`.
                 # As such only consider the last input ids in the autogressive generation phase.
-                if model_kwargs["past_key_values"][0][0].shape[-2] >= model_kwargs["input_ids"].shape[1]:
+                past_key_values = model_kwargs["past_key_values"]
+                if isinstance(past_key_values, (tuple, list)):
+                    seq_len = past_key_values[0][0].shape[-2]
+                else:  # using transformers kv cache
+                    seq_len = past_key_values.get_seq_length()
+                if seq_len >= model_kwargs["input_ids"].shape[1]:
                     model_kwargs["input_ids"] = model_kwargs["input_ids"][:, -1:]
 
             if model_kwargs.get("attention_mask", None) is not None:
@@ -2437,6 +2442,7 @@ class TunerLayerStatus:
     merged_adapters: list[str]
     requires_grad: dict[str, bool | Literal["irregular"]]
     available_adapters: list[str]
+    devices: dict[str, list[str]]
 
 
 def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
@@ -2461,6 +2467,8 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
        `"irregular"`.
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
+    - `devices` (`dict[str, list[str]]`):
+       The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
 
     Args:
         model ([Union[`~PeftModel`, `~transformers.PreTrainedModel`, `nn.Module`]]):
@@ -2510,6 +2518,20 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
 
         requires_grad = {key: check_irrgular(vals) for key, vals in mapping_requires_grad_list.items()}
 
+        devices_dd = collections.defaultdict(list)
+        for adapter_module_name in module.adapter_layer_names + module.other_param_names:
+            adapter_module = getattr(module, adapter_module_name)
+            if isinstance(adapter_module, torch.nn.ModuleDict):
+                for key, submodule in adapter_module.items():
+                    devices_dd[key].extend([param.device.type for param in submodule.parameters()])
+            elif (
+                isinstance(adapter_module, torch.nn.ParameterDict)
+                or (adapter_module.__class__.__name__ == "BufferDict")  # VeRA
+            ):
+                for key, param in adapter_module.items():
+                    devices_dd[key].append(param.device.type)
+        devices = {key: sorted(set(val)) for key, val in devices_dd.items()}
+
         status = TunerLayerStatus(
             name=name,
             module_type=repr(module).partition("(")[0],
@@ -2518,6 +2540,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             merged_adapters=module.merged_adapters,
             requires_grad=requires_grad,
             available_adapters=sorted(module._get_available_adapters()),
+            devices=devices,
         )
         layer_status.append(status)
 
@@ -2543,6 +2566,7 @@ class TunerModelStatus:
     merged_adapters: list[str] | Literal["irregular"]
     requires_grad: dict[str, bool | Literal["irregular"]]
     available_adapters: list[str]
+    devices: dict[str, list[str]]
 
 
 def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
@@ -2577,6 +2601,8 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
        work as expected.
     - `available_adapters` (`list[str]`):
        The names of the available adapters, e.g. `["default"]`.
+    - `devices` (`dict[str, list[str]]`):
+       The devices where the parameters of the given adapter are stored, e.g. `["cuda"]`.
 
     Args:
         model ([Union[`~PeftModel`, `~transformers.PreTrainedModel`, `nn.Module`]]):
@@ -2668,6 +2694,12 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
 
     requires_grad = {key: check_irrgular(vals) for key, vals in requires_grad_all.items()}
 
+    devices_dd = collections.defaultdict(list)
+    for status in layer_status:
+        for key, val in status.devices.items():
+            devices_dd[key].extend(val)
+    devices = {key: sorted(set(val)) for key, val in devices_dd.items()}
+
     adapter_model_status = TunerModelStatus(
         base_model_type=base_model_type,
         adapter_model_type=adapter_model_type,
@@ -2680,5 +2712,6 @@ def get_model_status(model: torch.nn.Module) -> TunerModelStatus:
         merged_adapters=merged_adapters,
         requires_grad=requires_grad,
         available_adapters=available_adapters,
+        devices=devices,
     )
     return adapter_model_status
