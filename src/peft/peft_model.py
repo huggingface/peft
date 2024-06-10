@@ -221,10 +221,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             path_initial_model_for_weight_conversion (`str, *optional*`):
                 The path to the initialized adapter, which is obtained after initializing the model with PiSSA or OLoRA
                 and before performing any training. When `path_initial_model_for_weight_conversion` is not None, the
-                difference in adapter before and after fine-tuning is calculated. This difference can be represented
-                as the parameters of a standard LoRA adapter. Using this converted adapter does not require changes
-                to the base model, thus conveniently allowing the use of multiple PiSSA or OLoRA adapters with
-                LoRA adapters, and the activation or deactivation of any adapters.
+                difference in adapter before and after fine-tuning is calculated. This difference can be represented as
+                the parameters of a standard LoRA adapter. Using this converted adapter does not require changes to the
+                base model, thus conveniently allowing the use of multiple PiSSA or OLoRA adapters with LoRA adapters,
+                and the activation or deactivation of any adapters.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
         """

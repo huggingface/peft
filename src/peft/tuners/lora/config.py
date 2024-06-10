@@ -77,16 +77,15 @@ class LoraConfig(PeftConfig):
             How to initialize the weights of the adapter layers. Passing True (default) results in the default
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
-            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization.
-            Pass `'olora'` to use OLoRA initialization. Passing 'pissa' results in the initialization of PiSSA,
-            which converge more rapidly than LoRA and ultimately achieve superior performance. Moreover, PiSSA
-            reduces the quantization error compared to QLoRA, leading to further enhancements. Passing
-            'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters]
-            indicates the number of subspace iterations to perform FSVD, and must be a nonnegative integer.
-            When the [number of iters] is set to 16, it can complete the initialization of a 7b model within seconds,
-            and the training effect is approximately equivalent to using SVD. For more information, see
-            <a href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors
-            Adaptation</a>.
+            completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Pass
+            `'olora'` to use OLoRA initialization. Passing 'pissa' results in the initialization of PiSSA, which
+            converge more rapidly than LoRA and ultimately achieve superior performance. Moreover, PiSSA reduces the
+            quantization error compared to QLoRA, leading to further enhancements. Passing 'pissa_niter_[number of
+            iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters] indicates the number of
+            subspace iterations to perform FSVD, and must be a nonnegative integer. When the [number of iters] is set
+            to 16, it can complete the initialization of a 7b model within seconds, and the training effect is
+            approximately equivalent to using SVD. For more information, see <a
+            href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation</a>.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
