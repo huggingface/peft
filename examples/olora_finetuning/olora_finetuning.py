@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 
 from typing import List
 
-import fire
 import torch
 import transformers
 from datasets import load_dataset
@@ -32,7 +31,6 @@ def train(
     data_path: str = "yahma/alpaca-cleaned",
     output_dir: str = "olora",
     batch_size: int = 16,
-    micro_batch_size: int = 4,
     num_epochs: int = 1,
     learning_rate: float = 3e-4,
     cutoff_len: int = 256,
@@ -47,7 +45,6 @@ def train(
     lora_target_modules: List[str] = None,
     init_lora_weights="olora",
 ):
-    gradient_accumulation_steps = batch_size // micro_batch_size
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         device_map=device_map,
@@ -111,8 +108,7 @@ def train(
         train_dataset=train_data,
         eval_dataset=val_data,
         args=transformers.TrainingArguments(
-            per_device_train_batch_size=micro_batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
+            per_device_train_batch_size=batch_size,
             warmup_steps=100,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
@@ -144,5 +140,45 @@ def generate_prompt(example):
 
 
 if __name__ == "__main__":
-    torch.manual_seed(42)
-    fire.Fire(train)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base_model", type=str, default="path/to/model")
+    parser.add_argument("--data_path", type=str, default="yahma/alpaca-cleaned")
+    parser.add_argument("--output_dir", type=str, default="olora")
+    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--num_epochs", type=int, default=1)
+    parser.add_argument("--learning_rate", type=float, default=3e-4)
+    parser.add_argument("--cutoff_len", type=int, default=256)
+    parser.add_argument("--val_set_size", type=int, default=16)
+    parser.add_argument("--quantize", action="store_true")
+    parser.add_argument("--eval_step", type=int, default=100)
+    parser.add_argument("--save_step", type=int, default=100)
+    parser.add_argument("--device_map", type=str, default="auto")
+    parser.add_argument("--lora_r", type=int, default=32)
+    parser.add_argument("--lora_alpha", type=int, default=16)
+    parser.add_argument("--lora_dropout", type=float, default=0.05)
+    parser.add_argument("--lora_target_modules", type=str, default=None)
+    parser.add_argument("--init_lora_weights", type=str, default="olora")
+
+    args = parser.parse_args()
+
+    train(
+        base_model=args.base_model,
+        data_path=args.data_path,
+        output_dir=args.output_dir,
+        batch_size=args.batch_size,
+        num_epochs=args.num_epochs,
+        learning_rate=args.learning_rate,
+        cutoff_len=args.cutoff_len,
+        val_set_size=args.val_set_size,
+        quantize=args.quantize,
+        eval_step=args.eval_step,
+        save_step=args.save_step,
+        device_map=args.device_map,
+        lora_r=args.lora_r,
+        lora_alpha=args.lora_alpha,
+        lora_dropout=args.lora_dropout,
+        lora_target_modules=args.lora_target_modules,
+        init_lora_weights=args.init_lora_weights,
+    )

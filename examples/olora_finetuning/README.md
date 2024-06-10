@@ -49,24 +49,27 @@ from peft import PeftModel
 model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
 tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
 olora_model = PeftModel.from_pretrained(model, "olora-opt-350m")
-print(olora_model)
 ```
 
 ## OLoRA and LoRA
-Unlike LoRA, OLoRA mutates the original weights. If you want to use multiple adapters simultaneously you can use `path_initial_model_for_weight_conversion` option. First save your model that was initialized with OLoRA **before** performing any training:
+OLoRA differs from LoRA in that it mutates the original weights. To utilize multiple adapters simultaneously, you can leverage the `path_initial_model_for_weight_conversion` option. Below is a simple template illustrating how to convert OLoRA to conventional LoRA:
 ```python
+base_model = AutoModel.from_pretrained("facebook/opt-350m")
+olora_config = LoraConfig(
+    ...
+    init_lora_weights = "olora" # Initialize the model with OLoRA
+)
+olora_model = get_peft_model(base_model, olora_config)
 init_path = <path-to-untrained-olora-model>
-olora_model.save_pretrained(init_path)
+olora_model.save_pretrained(init_path) # Save the model *before* performing any training
+
+# Train the model
+train(olora_model) # Your training loop
+
+#Save the model after training
+olora_model.save_pretrained(output_dir, path_initial_model_for_weight_conversion=init_path) 
 ```
-# After training
-Then you can specify the path of the initialized adapter in the `save_pretrained` method:
-```python
-from transformers import AutoModelForCausalLM
-model = AutoModelForCausalLM.from_pretrained("facebook/opt-350m")
-olora_model = get_peft_model(model, lora_config)
-olora_model.save_pretrained(save_dir, path_initial_model_for_weight_conversion=init_path)
-```
-Thus converting OLoRA to LoRA to use with multiple adapters.
+After completing training, you can save and convert your OLoRA model to a conventional LoRA model by setting `path_initial_model_for_weight_conversion` to `init_path`, that is the path of your untrained OLoRA model. This conversion enables you to use multiple adapters with your LoRA model.
 
 ## Citation
 ```

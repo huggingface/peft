@@ -251,7 +251,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             path_initial_model_for_weight_conversion = convert_pissa_to_lora
 
         def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
-            if not any(str(peft_config.init_lora_weights).lower().startswith(prefix) for prefix in ["pissa", "olora"]):
+            if not any(
+                str(peft_config.init_lora_weights).lower().startswith(prefix) for prefix in ["pissa", "olora", "true"]
+            ):
                 warnings.warn(
                     "`path_initial_model_for_weight_conversion` only works for converting a PiSSA or OLoRA adapter to a LoRA adapter"
                 )
@@ -312,6 +314,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     for shared_tensor_name in names[1:]:
                         output_state_dict[shared_tensor_name] = output_state_dict[shared_tensor_name].clone()
                 if path_initial_model_for_weight_conversion is not None:
+                    peft_config.init_lora_weights = True
+                    peft_config.save_pretrained(path_initial_model_for_weight_conversion)
                     output_state_dict = save_mutated_as_lora(
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
@@ -322,6 +326,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             elif is_main_process:
                 if path_initial_model_for_weight_conversion is not None:
+                    peft_config.init_lora_weights = True
+                    peft_config.save_pretrained(path_initial_model_for_weight_conversion)
                     output_state_dict = save_mutated_as_lora(
                         peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs
                     )
