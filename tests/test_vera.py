@@ -15,7 +15,6 @@
 # This test file is for tests specific to VeRA, since VeRA has some specific challenges due to the shared weights.
 
 import os
-import re
 
 import pytest
 import torch
