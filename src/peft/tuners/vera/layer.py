@@ -217,7 +217,6 @@ class Linear(nn.Linear, VeraLayer):
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
 
-
         sliced_A = vera_A[:, : self.in_features]
         sliced_B = vera_B[: self.out_features, :]
         lambda_b = lambda_b.unsqueeze(-1)
