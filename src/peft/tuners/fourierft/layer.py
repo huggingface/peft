@@ -66,6 +66,8 @@ class FourierLayer(BaseTunerLayer):
         self.reset_fourier_parameters(adapter_name, init_fourier_weights)
         self.set_adapter(self.active_adapters)
 
+
+    @torch.no_grad()
     def reset_fourier_parameters(self, adapter_name, init_fourier_weights):
         if init_fourier_weights is False:
             return
@@ -82,6 +84,7 @@ class FourierLayer(BaseTunerLayer):
                 pass
             else:
                 raise ValueError(f"Unknown initialization {init_fourier_weights=}")
+
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         spectrum = self.spectrum[adapter]

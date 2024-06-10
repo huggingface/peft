@@ -33,4 +33,4 @@ from .mixed import MixedModel
 from .poly import PolyConfig, PolyModel
 from .ln_tuning import LNTuningConfig, LNTuningModel
 from .vera import VeraConfig, VeraModel
-from .fourier import FourierConfig, FourierModel
+from .fourierft import FourierConfig, FourierModel

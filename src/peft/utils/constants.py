@@ -207,7 +207,7 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
 }
 
-TRANSFORMERS_MODELS_TO_FOURIER_TARGET_MODULES_MAPPING = {
+TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "t5": ["q", "v"],
     "mt5": ["q", "v"],
     "bart": ["q_proj", "v_proj"],
