@@ -1680,7 +1680,7 @@ class TestOLoRA:
     # The error factor indicates by how much the quantization error should be decreased when using OLoRA compared to
     # quantization without OLoRA. Thus 1.03 means that the error should be decreased by 3% at least. This is a very
     # conservative value to prevent flakiness, in practice most gains are > 1.5
-    error_factor = 1.03
+    error_factor = 1.2
 
     def quantize_model(self, model, num_bits=4, device="cuda"):
         # Quantize the `weight.data` of the linear layer in the model to `num_bits` and store it with full precision.
