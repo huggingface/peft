@@ -44,6 +44,7 @@ from peft import (
     PeftModel,
     TaskType,
     VeraConfig,
+    FourierConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -350,6 +351,18 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ########
+    # FourierFT #
+    ########
+    ("Vanilla MLP 1 FourierFT", "MLP", FourierConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 FourierFT", "MLP", FourierConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FourierFT", "MLP", FourierConfig, {"target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 5 FourierFT",
+        "MLP",
+        FourierConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -421,6 +434,7 @@ PREFIXES = {
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
     VeraConfig: "vera_lambda_",
+    FourierConfig: "spectrum_",
 }
 
 
