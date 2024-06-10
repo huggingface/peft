@@ -58,7 +58,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
           status: ${{ steps.import.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -74,7 +74,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes examples tests - single GPU
           status: ${{ steps.examples_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -90,7 +90,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes core tests - single GPU
           status: ${{ steps.core_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -106,7 +106,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes regression tests - single GPU
           status: ${{ steps.regression_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -122,7 +122,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes transformers tests - single GPU
           status: ${{ steps.transformers_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -176,7 +176,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
           status: ${{ steps.import.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -197,7 +197,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes examples tests - multi GPU
           status: ${{ steps.examples_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -213,7 +213,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes core tests - multi GPU
           status: ${{ steps.core_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -229,7 +229,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes transformers tests - multi GPU
           status: ${{ steps.transformers_tests.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
