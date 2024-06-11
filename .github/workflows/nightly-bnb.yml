@@ -51,6 +51,7 @@ jobs:
         id: import
         if: always()
         run: |
+          source activate peft
           python3 -m bitsandbytes
           python3 -c "import bitsandbytes as bnb"
 
