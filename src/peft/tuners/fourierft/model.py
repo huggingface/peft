@@ -95,8 +95,10 @@ class FourierModel(BaseTuner):
         target_name_key = next(filter(lambda key: re.match(f".*\.{key}$", current_key), pattern_keys), current_key)
 
         n_frequency = fourier_config.n_frequency_pattern.get(target_name_key, fourier_config.n_frequency)
+        scaling = fourier_config.scaling
         kwargs = {
             "n_frequency": n_frequency,
+            "scaling": scaling,
             "fan_in_fan_out": fourier_config.fan_in_fan_out,
             "init_fourier_weights": fourier_config.init_fourier_weights,
             "random_loc_seed": fourier_config.random_loc_seed,
@@ -106,6 +108,7 @@ class FourierModel(BaseTuner):
             target.update_layer(
                 adapter_name,
                 n_frequency,
+                scaling,
                 fourier_config.init_fourier_weights,
             )
         else:

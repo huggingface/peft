@@ -29,6 +29,7 @@ class FourierConfig(PeftConfig):
 
     Args:
         n_frequency (`int`): Discrete Fourier Transform frequency dimension.
+        scaling (`float`): The scaling value for the delta W matrix.
         target_modules (`Union[List[str],str]`): The names of the modules to apply FourierFT to.
         fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
             For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
@@ -49,7 +50,8 @@ class FourierConfig(PeftConfig):
             The mapping from layer names or regexp expression to n_frequency which are different from the default.
     """
 
-    n_frequency: int = field(default=1000, metadata={"help": "num of learnable frequencies for the Discrete Fourier Transform."})
+    n_frequency: int = field(default=1000, metadata={"help": "Num of learnable frequencies for the Discrete Fourier Transform."})
+    scaling: float = field(default=150.0, metadata={"help": "The scaling value for the delta W matrix."})
     random_loc_seed: Optional[int] = field(default=777, metadata={"help": "Seed for the random location of the frequencies."})
     fan_in_fan_out: bool = field(
         default=False,

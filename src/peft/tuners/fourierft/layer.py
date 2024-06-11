@@ -24,10 +24,13 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 class FourierLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ["spectrum"]
+    # All names of other parameters that may contain adapter-related parameters
+    # other_param_names = ("rank", "dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
         self.n_frequency = {}
+        self.scaling = {}
         self.spectrum = nn.ParameterDict({})
         self.indices = {}
         # Mark the weight as unmerged
@@ -43,7 +46,7 @@ class FourierLayer(BaseTunerLayer):
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
 
-    def update_layer(self, adapter_name, n_frequency, init_fourier_weights):
+    def update_layer(self, adapter_name, n_frequency, scaling, init_fourier_weights):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         self.n_frequency[adapter_name] = n_frequency
@@ -53,7 +56,7 @@ class FourierLayer(BaseTunerLayer):
         self.indices[adapter_name] = torch.randperm(self.out_features * self.in_features, generator=torch.Generator().manual_seed(self.random_loc_seed))[:n_frequency]
         self.indices[adapter_name] = torch.stack([self.indices[adapter_name] // self.in_features, self.indices[adapter_name] % self.in_features], dim=0)
         self.spectrum[adapter_name] = nn.Parameter(torch.randn(n_frequency), requires_grad=True)
-
+        self.scaling[adapter_name] = scaling
         if weight is not None:
             # the layer is already completely initialized, this is an update
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
@@ -63,6 +66,7 @@ class FourierLayer(BaseTunerLayer):
         
         self.reset_fourier_parameters(adapter_name, init_fourier_weights)
         self.set_adapter(self.active_adapters)
+
 
 
     @torch.no_grad()
@@ -90,8 +94,8 @@ class FourierLayer(BaseTunerLayer):
 
         dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
         dense_spectrum[indices[0,:], indices[1,:]] = spectrum
-        delta_weight = torch.fft.ifft2(dense_spectrum, norm='ortho').real
-    
+        # delta_weight = torch.fft.ifft2(dense_spectrum, norm='ortho').real
+        delta_weight = torch.fft.ifft2(dense_spectrum).real * self.scaling[adapter]
         return delta_weight
 
 #  ------------------------------------------------------------------------------------------
@@ -101,12 +105,13 @@ class FourierLayer(BaseTunerLayer):
 
 
 class FourierLinear(nn.Module, FourierLayer):
-    # FourierFT implemented in a dense layer
+    # Lora implemented in a dense layer
     def __init__(
         self,
         base_layer,
         adapter_name: str,
         n_frequency: int = 1000,
+        scaling: float = 150.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_fourier_weights: Union[bool, str] = True,
         **kwargs,
@@ -115,7 +120,7 @@ class FourierLinear(nn.Module, FourierLayer):
         FourierLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, n_frequency, init_fourier_weights)
+        self.update_layer(adapter_name, n_frequency, scaling, init_fourier_weights)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
