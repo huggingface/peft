@@ -434,7 +434,7 @@ PREFIXES = {
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
     VeraConfig: "vera_lambda_",
-    FourierConfig: "spectrum_",
+    FourierConfig: "spectrum",
 }
 
 
