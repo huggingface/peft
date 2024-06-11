@@ -1,13 +1,19 @@
-from peft.tuners.glora.layer import GLoraLayer, Linear
+from peft.tuners.glora.layer import GLoraLayer
 from peft.tuners.glora.layer import mark_only_glora_as_trainable
-from peft.import_utils import  is_bnb_available
+from peft.import_utils import  is_bnb_available, is_bnb_4bit_available
 import torch
 from tqdm import tqdm
 import re
 from dataclasses import asdict
 from enum import Enum
 import random
-
+from peft.tuners.lora.aqlm import dispatch_aqlm
+from peft.tuners.lora.awq import dispatch_awq
+from peft.tuners.lora.eetq import dispatch_eetq
+from peft.tuners.lora.gptq import dispatch_gptq
+from peft.tuners.lora.hqq import dispatch_hqq
+from peft.tuners.lora.layer import   dispatch_default
+from peft.tuners.lora.tp_layer import dispatch_megatron
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     _freeze_adapter,
@@ -15,8 +21,6 @@ from peft.utils import (
      ModulesToSaveWrapper,
 )
 
-if is_bnb_available():
-    import bitsandbytes as bnb
 
 random.seed(56)
 
@@ -74,6 +78,7 @@ class GLoraModel(torch.nn.Module):
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`GLoraConfig`]): The configuration of the Lora model.
     """
+    prefix: str = "glora_"
 
     def __init__(self, model, config, adapter_name):
         super().__init__()
@@ -103,14 +108,21 @@ class GLoraModel(torch.nn.Module):
             target_module_found = any(key.endswith(target_key) for target_key in glora_config.target_modules)
         return target_module_found
 
-    def _create_new_module(self, lora_config, adapter_name, target):
+    def _create_new_module(self, glora_config, adapter_name, target):
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
-            "r": lora_config.r
+            "r": glora_config.r,
+            "lora_dropout": glora_config.lora_dropout,
+            "fan_in_fan_out": glora_config.fan_in_fan_out,
+            "init_lora_weights": glora_config.init_lora_weights,
+            "use_rslora": glora_config.use_rslora,
+            "use_dora": glora_config.use_dora,
+            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
         if isinstance(target, torch.nn.Linear):
             in_features, out_features = target.in_features, target.out_features
-        new_module = Linear(adapter_name, in_features, out_features, bias=bias, **kwargs)
+        new_module = self._create_new_module(adapter_name, in_features, out_features, bias=bias, **kwargs)
 
         return new_module
 
@@ -236,3 +248,57 @@ class GLoraModel(torch.nn.Module):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
+    
+    @staticmethod
+    def _create_new_module(glora_config, adapter_name, target, **kwargs):
+        # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
+        # because the first match is always used. Therefore, the default layers should be checked last.
+        dispatchers = []
+
+        # avoid eager bnb import
+        if is_bnb_available():
+            from .bnb import dispatch_bnb_8bit
+
+            dispatchers.append(dispatch_bnb_8bit)
+
+        if is_bnb_4bit_available():
+            from .bnb import dispatch_bnb_4bit
+
+            dispatchers.append(dispatch_bnb_4bit)
+
+        dispatchers.extend(
+            [
+                dispatch_eetq,
+                dispatch_aqlm,
+                dispatch_awq,
+                dispatch_gptq,
+                dispatch_hqq,
+                dispatch_megatron,
+                dispatch_default,
+            ]
+        )
+
+        kwargs = {
+            "r": glora_config.r,
+            "lora_dropout": glora_config.lora_dropout,
+            "fan_in_fan_out": glora_config.fan_in_fan_out,
+            "init_lora_weights": glora_config.init_lora_weights,
+            "use_rslora": glora_config.use_rslora,
+            "use_dora": glora_config.use_dora,
+        }
+
+        new_module = None
+        for dispatcher in dispatchers:
+            new_module = dispatcher(target, adapter_name, glora_config=glora_config, **kwargs)
+            if new_module is not None:  # first match wins
+                return new_module
+                
+
+        if new_module is None:
+            # no module could be matched
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+            )
+
+        return new_module
