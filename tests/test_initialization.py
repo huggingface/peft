@@ -369,9 +369,7 @@ class TestLoraInitialization:
         config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8)
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
-        peft_model.peft_config["default"].init_lora_weights = True
         peft_model.save_pretrained(tmp_path / "init-model")
-        peft_model.peft_config["default"].init_lora_weights = "olora"
 
         # modify the weights, or else the adapter performs an identity transformation
         peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
