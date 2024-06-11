@@ -24,8 +24,6 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 class FourierLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
     adapter_layer_names = ["spectrum"]
-    # All names of other parameters that may contain adapter-related parameters
-    # other_param_names = ("rank", "dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -103,7 +101,7 @@ class FourierLayer(BaseTunerLayer):
 
 
 class FourierLinear(nn.Module, FourierLayer):
-    # Lora implemented in a dense layer
+    # FourierFT implemented in a dense layer
     def __init__(
         self,
         base_layer,
