@@ -11,10 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 from .config import GLoraConfig
-from .layer import GLoraLayer, Linear
+from .layer import GLoraLayer
 from .model import GLoraModel
 
+from peft.import_utils import is_bnb_4bit_available, is_bnb_available, is_eetq_available
 
-__all__ = ["GLoraModel", "GLoraLayer", "Linear", "GLoraConfig"]
+
+__all__ = ["GLoraModel", "GLoraLayer",  "GLoraConfig"]
+
+def __getattr__(name):
+    if (name == "Linear8bitLt") and is_bnb_available():
+        from .bnb import Linear8bitLt
+
+        return Linear8bitLt
+
+    if (name == "Linear4bit") and is_bnb_4bit_available():
+        from .bnb import Linear4bit
+
+        return Linear4bit
+
+    raise AttributeError(f"module {__name__} has no attribute {name}")
