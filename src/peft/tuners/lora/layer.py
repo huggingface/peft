@@ -24,6 +24,7 @@ from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
+from peft.utils.integrations import dequantize_module_weight
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -115,11 +116,12 @@ class LoraLayer(BaseTunerLayer):
 
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             self.pissa_init(adapter_name, init_lora_weights)
+        elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
+            self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
             self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
-
         # call this before dora_init
         self._move_adapter_to_device_of_base_layer(adapter_name)
 
@@ -150,6 +152,28 @@ class LoraLayer(BaseTunerLayer):
             nn.init.zeros_(self.lora_embedding_A[adapter_name])
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
+    def olora_init(self, adapter_name):
+        dtype = self.base_layer.weight.dtype
+        if dtype in [torch.int8, torch.uint8]:
+            weight_tensor = dequantize_module_weight(self.base_layer)
+        elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            weight_tensor = self.base_layer.weight
+        else:
+            raise TypeError(f"Unsupported data type for the base layer. Got {dtype}.")
+        scale_factor = self.scaling[adapter_name]
+        r = self.r[adapter_name]
+        weight_tensor = weight_tensor.to(torch.float32)
+        Q, R = torch.linalg.qr(weight_tensor.data)
+
+        Qr, Rr = Q[:, :r], R[:r]
+
+        self.lora_A[adapter_name].weight.data = Rr.contiguous()
+        self.lora_B[adapter_name].weight.data = Qr.contiguous()
+
+        weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
+        weight_tensor = weight_tensor.to(dtype)
+        self.get_base_layer().weight.data = weight_tensor
+
     def pissa_init(self, adapter_name, init_lora_weights):
         weight = self.get_base_layer().weight
         dtype = weight.dtype
@@ -159,7 +183,6 @@ class LoraLayer(BaseTunerLayer):
                 "Subsequently, re-quantize the residual model to help minimize quantization errors."
             )
         weight = weight.to(torch.float32)
-
         if init_lora_weights == "pissa":
             # USV^T = W <-> VSU^T = W^T, where W^T = weight.data in R^{out_channel, in_channel},
             V, S, Uh = torch.linalg.svd(weight.data, full_matrices=False)
