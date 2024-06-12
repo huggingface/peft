@@ -196,6 +196,8 @@ class LoraModel(BaseTuner):
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
+            "use_mora": lora_config.use_mora,
+            "mora_type": lora_config.mora_type,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
         }
@@ -218,6 +220,8 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                use_mora=lora_config.use_mora,
+                mora_type=lora_config.mora_type,
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)
