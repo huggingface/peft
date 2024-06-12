@@ -669,9 +669,7 @@ class BaseTunerLayer(ABC):
                     )
                     self.set_adapter(remaining_adapters[0])
 
-    def _move_adapter_to_device_of_base_layer(
-        self, adapter_name: str, device: Optional[torch.device] = None
-    ) -> torch.device:
+    def _move_adapter_to_device_of_base_layer(self, adapter_name: str, device: Optional[torch.device] = None) -> None:
         """
         Move the adapter of the given name to the device of the base layer.
         """
@@ -702,8 +700,6 @@ class BaseTunerLayer(ABC):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
-
-        return device
 
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
