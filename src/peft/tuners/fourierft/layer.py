@@ -48,8 +48,13 @@ class FourierLayer(BaseTunerLayer):
     def update_layer(self, adapter_name, n_frequency, scaling, init_fourier_weights):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
+        if n_frequency > self.in_features * self.out_features:
+            raise ValueError(
+                f"`n_frequency` should be less than or equal to the product of the input and output dimensions "
+                f"but the value passed is {n_frequency} and the product is {self.in_features * self.out_features}"
+            )
         self.n_frequency[adapter_name] = n_frequency
-
+        
         weight = getattr(self.get_base_layer(), "weight", None)
         # Actual trainable parameters
         self.indices[adapter_name] = torch.randperm(
