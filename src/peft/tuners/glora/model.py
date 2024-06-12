@@ -20,7 +20,7 @@ from peft.utils import (
     _get_submodules,
      ModulesToSaveWrapper,
 )
-
+from .layer import Linear
 
 random.seed(56)
 
@@ -110,19 +110,28 @@ class GLoraModel(torch.nn.Module):
 
     def _create_new_module(self, glora_config, adapter_name, target):
         bias = hasattr(target, "bias") and target.bias is not None
+        # kwargs = {
+        #     "r": glora_config.r,
+        #     "lora_dropout": glora_config.lora_dropout,
+        #     "fan_in_fan_out": glora_config.fan_in_fan_out,
+        #     "init_lora_weights": glora_config.init_lora_weights,
+        #     "use_rslora": glora_config.use_rslora,
+        #     "use_dora": glora_config.use_dora,
+        #     "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
+        #     "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+        # }
+        # if isinstance(target, torch.nn.Linear):
+        #     in_features, out_features = target.in_features, target.out_features
+        # new_module = self._create_new_module(adapter_name, in_features, out_features, bias=bias, **kwargs)
         kwargs = {
-            "r": glora_config.r,
-            "lora_dropout": glora_config.lora_dropout,
-            "fan_in_fan_out": glora_config.fan_in_fan_out,
-            "init_lora_weights": glora_config.init_lora_weights,
-            "use_rslora": glora_config.use_rslora,
-            "use_dora": glora_config.use_dora,
-            "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
-            "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
+            "r": glora_config.r
         }
         if isinstance(target, torch.nn.Linear):
             in_features, out_features = target.in_features, target.out_features
-        new_module = self._create_new_module(adapter_name, in_features, out_features, bias=bias, **kwargs)
+        new_module = Linear(adapter_name = adapter_name, 
+                            in_features = in_features, 
+                            out_features = out_features, 
+                            bias=bias, **kwargs)
 
         return new_module
 
@@ -250,7 +259,7 @@ class GLoraModel(torch.nn.Module):
         return self.model
     
     @staticmethod
-    def _create_new_module(glora_config, adapter_name, target, **kwargs):
+    def _create_new_module_2(glora_config, adapter_name, target, **kwargs):
         # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
@@ -273,19 +282,11 @@ class GLoraModel(torch.nn.Module):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
-                dispatch_megatron,
                 dispatch_default,
             ]
         )
 
-        kwargs = {
-            "r": glora_config.r,
-            "lora_dropout": glora_config.lora_dropout,
-            "fan_in_fan_out": glora_config.fan_in_fan_out,
-            "init_lora_weights": glora_config.init_lora_weights,
-            "use_rslora": glora_config.use_rslora,
-            "use_dora": glora_config.use_dora,
-        }
+        kwargs["fan_in_fan_out"] = False
 
         new_module = None
         for dispatcher in dispatchers:
