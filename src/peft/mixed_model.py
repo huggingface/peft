@@ -97,7 +97,6 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
     Example:
 
     ```py
-
     >>> base_model = ...  # load the base model, e.g. from transformers
     >>> peft_model = PeftMixedModel.from_pretrained(base_model, path_to_adapter1, "adapter1").eval()
     >>> peft_model.load_adapter(path_to_adapter2, "adapter2")
