@@ -36,6 +36,8 @@ from .tuners import (
     AdaptionPromptConfig,
     BOFTConfig,
     BOFTModel,
+    FourierConfig,
+    FourierModel,
     IA3Config,
     IA3Model,
     LNTuningConfig,
@@ -56,8 +58,6 @@ from .tuners import (
     PromptTuningConfig,
     VeraConfig,
     VeraModel,
-    FourierConfig,
-    FourierModel,
 )
 from .tuners.tuners_utils import BaseTuner as _BaseTuner
 from .utils import _prepare_prompt_learning_config

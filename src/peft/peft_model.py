@@ -43,6 +43,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     BOFTModel,
+    FourierModel,
     IA3Model,
     LNTuningModel,
     LoHaModel,
@@ -55,7 +56,6 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
     VeraModel,
-    FourierModel,
 )
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import (

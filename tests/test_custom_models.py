@@ -35,6 +35,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    FourierConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -44,7 +45,6 @@ from peft import (
     PeftModel,
     TaskType,
     VeraConfig,
-    FourierConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer

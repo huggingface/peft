@@ -179,7 +179,7 @@ def get_peft_model_state_dict(
 
     elif config.peft_type == PeftType.FOURIERFT:
         to_return = {k: state_dict[k] for k in state_dict if "spectrum" in k}
-    
+
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 

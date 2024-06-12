@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,7 @@
 # limitations under the License.
 
 from .config import FourierConfig
-from .layer import FourierLinear, FourierLayer
+from .layer import FourierLayer, FourierLinear
 from .model import FourierModel
 
 

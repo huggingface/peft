@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,6 +14,7 @@
 
 import warnings
 from typing import Any, List, Optional, Union
+
 import torch
 import torch.nn as nn
 
@@ -45,7 +45,6 @@ class FourierLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-
     def update_layer(self, adapter_name, n_frequency, scaling, init_fourier_weights):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
@@ -53,8 +52,12 @@ class FourierLayer(BaseTunerLayer):
 
         weight = getattr(self.get_base_layer(), "weight", None)
         # Actual trainable parameters
-        self.indices[adapter_name] = torch.randperm(self.out_features * self.in_features, generator=torch.Generator().manual_seed(self.random_loc_seed))[:n_frequency]
-        self.indices[adapter_name] = torch.stack([self.indices[adapter_name] // self.in_features, self.indices[adapter_name] % self.in_features], dim=0)
+        self.indices[adapter_name] = torch.randperm(
+            self.out_features * self.in_features, generator=torch.Generator().manual_seed(self.random_loc_seed)
+        )[:n_frequency]
+        self.indices[adapter_name] = torch.stack(
+            [self.indices[adapter_name] // self.in_features, self.indices[adapter_name] % self.in_features], dim=0
+        )
         self.spectrum[adapter_name] = nn.Parameter(torch.randn(n_frequency), requires_grad=True)
         self.scaling[adapter_name] = scaling
         if weight is not None:
@@ -63,11 +66,9 @@ class FourierLayer(BaseTunerLayer):
                 self.to(weight.device, dtype=weight.dtype)
             else:
                 self.to(weight.device)
-        
+
         self.reset_fourier_parameters(adapter_name, init_fourier_weights)
         self.set_adapter(self.active_adapters)
-
-
 
     @torch.no_grad()
     def reset_fourier_parameters(self, adapter_name, init_fourier_weights):
@@ -87,16 +88,16 @@ class FourierLayer(BaseTunerLayer):
             else:
                 raise ValueError(f"Unknown initialization {init_fourier_weights=}")
 
-
     def get_delta_weight(self, adapter) -> torch.Tensor:
         spectrum = self.spectrum[adapter]
         indices = self.indices[adapter].to(spectrum.device)
 
         dense_spectrum = torch.zeros(self.out_features, self.in_features, device=spectrum.device, dtype=spectrum.dtype)
-        dense_spectrum[indices[0,:], indices[1,:]] = spectrum
+        dense_spectrum[indices[0, :], indices[1, :]] = spectrum
         # delta_weight = torch.fft.ifft2(dense_spectrum, norm='ortho').real
         delta_weight = torch.fft.ifft2(dense_spectrum).real * self.scaling[adapter]
         return delta_weight
+
 
 #  ------------------------------------------------------------------------------------------
 #  Copyright (c) Microsoft Corporation. All rights reserved.
@@ -195,8 +196,8 @@ class FourierLinear(nn.Module, FourierLayer):
 
                 delta_w = self.get_delta_weight(active_adapter)
                 x = x.to(delta_w.dtype)
-                
-                result += torch.einsum('ijk,kl->ijl', x, delta_w)
+
+                result += torch.einsum("ijk,kl->ijl", x, delta_w)
 
         result = result.to(previous_dtype)
         return result
