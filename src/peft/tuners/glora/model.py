@@ -9,8 +9,8 @@ import torch
 from torch import nn
 from tqdm import tqdm
 
-from peft.tuners.glora.layer import GLoraLayer, mark_only_glora_as_trainable
-from peft.tuners.tuners_utils import BaseTuner
+from peft.tuners.glora.layer import GLoraLayer, dispatch_default, mark_only_glora_as_trainable
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -109,16 +109,34 @@ class GLoraModel(BaseTuner):
             target_module_found = any(key.endswith(target_key) for target_key in glora_config.target_modules)
         return target_module_found
 
-    def _create_new_module(self, glora_config, adapter_name, target):
-        bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {"r": glora_config.r}
-        if isinstance(target, torch.nn.Linear):
-            in_features, out_features = target.in_features, target.out_features
-        new_module = Linear(
-            adapter_name=adapter_name, in_features=in_features, out_features=out_features, bias=bias, **kwargs
+    @staticmethod
+    def _create_new_module(glora_config, adapter_name, target, **kwargs):
+        # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
+        # because the first match is always used. Therefore, the default layers should be checked last.
+        dispatchers = []
+
+
+        dispatchers.extend(
+            [
+                dispatch_default,
+            ]
         )
 
+        new_module = None
+        for dispatcher in dispatchers:
+            new_module = dispatcher(target, adapter_name, lora_config=glora_config, **kwargs)
+            if new_module is not None:  # first match wins
+                break
+
+        if new_module is None:
+            # no module could be matched
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+            )
+
         return new_module
+
 
     def _find_and_replace(self, adapter_name):
         glora_config = self.peft_config[adapter_name]
@@ -337,3 +355,28 @@ class GLoraModel(BaseTuner):
         Call this if you have previously disabled all adapters and want to re-enable them.
         """
         self._set_adapter_layers(enabled=True)
+
+    @staticmethod
+    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
+        # because the first match is always used. Therefore, the default layers should be checked last.
+        dispatchers = []
+
+        dispatchers.extend(
+            [
+                dispatch_default,
+            ]
+        )
+
+        new_module = None
+        for dispatcher in dispatchers:
+            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            if new_module is not None:  # first match wins
+                break
+
+        if new_module is None:
+            # no module could be matched
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`, `torch.nn.Embedding`, `torch.nn.Conv2d`, `transformers.pytorch_utils.Conv1D`."
+            )
