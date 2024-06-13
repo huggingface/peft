@@ -1,8 +1,9 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
-from peft.utils import PeftType
+
 from peft.config import PeftConfig
-from peft.tuners.lora import LoftQConfig
+from peft.utils import PeftType
+
 
 @dataclass
 class GLoraConfig(PeftConfig):
@@ -24,7 +25,7 @@ class GLoraConfig(PeftConfig):
             pattern is not in the common layers pattern.
     """
 
-    r: int = field(default=4, metadata={"help": "Lora attention dimension"})
+    Lr: int = field(default=4, metadata={"help": "Lora attention dimension"})
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
