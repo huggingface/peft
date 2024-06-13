@@ -1,5 +1,6 @@
 import math
 import random
+import warnings
 from typing import Any, Optional
 
 import torch
@@ -18,6 +19,9 @@ from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
+
+from .config import GLoraConfig
+from .linear import Linear
 
 
 # from .dora import DoraConv2dLayer, DoraLinearLayer
@@ -77,3 +81,15 @@ class GLoraLayer(BaseTunerLayer):
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "glora." + rep
+
+
+@staticmethod
+def dispatch_default(qlora_config, adapter_name, target, **kwargs):
+    new_module = None
+    if isinstance(target, BaseTunerLayer):
+        target_base_layer = target.get_base_layer()
+    else:
+        target_base_layer = target
+    if isinstance(target_base_layer, torch.nn.Linear):
+        new_module = Linear(target, adapter_name, **kwargs)
+    return new_module
