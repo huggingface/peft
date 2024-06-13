@@ -666,7 +666,6 @@ class PeftCommonTester:
         )
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
-
         model.eval()
         torch.manual_seed(0)
         model.merge_adapter()

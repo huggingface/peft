@@ -17,15 +17,16 @@ from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from peft.tuners.tuners_utils import BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
 class FourierLayer(BaseTunerLayer):
     # All names of layers that may contain (trainable) adapter weights
-    adapter_layer_names = ["spectrum"]
+    adapter_layer_names = ("spectrum",)
     # All names of other parameters that may contain adapter-related parameters
-    # other_param_names = ("rank", "dropout")
+    other_param_names = ("n_frequency", "scaling", "random_loc_seed")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         self.base_layer = base_layer
@@ -54,7 +55,6 @@ class FourierLayer(BaseTunerLayer):
                 f"but the value passed is {n_frequency} and the product is {self.in_features * self.out_features}"
             )
         self.n_frequency[adapter_name] = n_frequency
-        
         weight = getattr(self.get_base_layer(), "weight", None)
         # Actual trainable parameters
         self.indices[adapter_name] = torch.randperm(
@@ -141,14 +141,19 @@ class FourierLinear(nn.Module, FourierLayer):
                 The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
                 to `None`.
         """
-        if self.merged:
-            warnings.warn(
-                f"Already following adapters were merged {','.join(self.merged_adapters)}. "
-                f"You are now additionally merging {','.join(self.active_adapters)}."
-            )
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
 
-        if adapter_names is None:
-            adapter_names = self.active_adapters
+        # if self.merged:
+        #     warnings.warn(
+        #         f"Already following adapters were merged {','.join(self.merged_adapters)}. "
+        #         f"You are now additionally merging {','.join(self.active_adapters)}."
+        #     )
+
+        # if adapter_names is None:
+        #     adapter_names = self.active_adapters
 
         for active_adapter in adapter_names:
             if active_adapter in self.spectrum.keys():
@@ -201,8 +206,8 @@ class FourierLinear(nn.Module, FourierLayer):
 
                 delta_w = self.get_delta_weight(active_adapter)
                 x = x.to(delta_w.dtype)
-
-                result += torch.einsum("ijk,kl->ijl", x, delta_w)
+                result = result + F.linear(x, delta_w)
+                # result += torch.einsum("ijk,kl->ijl", x, delta_w)
 
         result = result.to(previous_dtype)
         return result

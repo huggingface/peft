@@ -354,14 +354,14 @@ TEST_CASES = [
     ########
     # FourierFT #
     ########
-    ("Vanilla MLP 1 FourierFT", "MLP", FourierConfig, {"target_modules": "lin0"}),
-    ("Vanilla MLP 2 FourierFT", "MLP", FourierConfig, {"target_modules": ["lin0"]}),
-    ("Vanilla MLP 3 FourierFT", "MLP", FourierConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 1 FourierFT", "MLP", FourierConfig, {"n_frequency": 10, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 FourierFT", "MLP", FourierConfig, {"n_frequency": 10, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FourierFT", "MLP", FourierConfig, {"n_frequency": 10, "target_modules": ["lin1"]}),
     (
         "Vanilla MLP 5 FourierFT",
         "MLP",
         FourierConfig,
-        {"target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+        {"n_frequency": 10, "target_modules": ["lin0"], "modules_to_save": ["lin1"]},
     ),
 ]
 
@@ -703,6 +703,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_ia3_weights"] = False
         elif issubclass(config_cls, LNTuningConfig):
             pass
+        elif issubclass(config_cls, FourierConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
@@ -736,6 +738,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_ia3_weights"] = False
         elif issubclass(config_cls, LNTuningConfig):
             # LNTuning do not take init_weights
+            pass
+        elif issubclass(config_cls, FourierConfig):
+            # FourierFT do not take init_weights
             pass
         else:
             config_kwargs["init_weights"] = False
@@ -879,7 +884,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.eval()
-        outputs_before = model(**X)
+        with model.disable_adapter():
+            outputs_before = model(**X)
 
         assert torch.allclose(outputs_base, outputs_before)
 
@@ -930,7 +936,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         )
         model = get_peft_model(model, config)
         model.eval()
-        outputs_before = model(**X)
+        with model.disable_adapter():
+            outputs_before = model(**X)
 
         model.train()
         if isinstance(config_cls, LNTuningConfig):

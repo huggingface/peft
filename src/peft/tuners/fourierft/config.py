@@ -102,7 +102,7 @@ class FourierConfig(PeftConfig):
         },
     )
     init_fourier_weights: Optional[str] = field(
-        default="xavier_dense",
+        default="gaussian",
         metadata={"help": "The initialization of the Fourier weights. Can be 'xavier_dense' or 'gaussian'."},
     )
 

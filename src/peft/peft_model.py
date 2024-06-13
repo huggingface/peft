@@ -2521,6 +2521,7 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
         requires_grad = {key: check_irrgular(vals) for key, vals in mapping_requires_grad_list.items()}
 
         devices_dd = collections.defaultdict(list)
+
         for adapter_module_name in module.adapter_layer_names + module.other_param_names:
             adapter_module = getattr(module, adapter_module_name)
             if isinstance(adapter_module, torch.nn.ModuleDict):
