@@ -20,6 +20,7 @@ from .linear import Linear
 
 random.seed(56)
 
+
 class GLoraModel(BaseTuner):
     """
     Creates Generalized Low Rank Adapter (GLora) model from a pretrained transformers model.
@@ -74,6 +75,7 @@ class GLoraModel(BaseTuner):
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
         - **peft_config** ([`GLoraConfig`]): The configuration of the Lora model.
     """
+
     prefix: str = "glora_"
 
     def __init__(self, model, config, adapter_name):
@@ -106,15 +108,12 @@ class GLoraModel(BaseTuner):
 
     def _create_new_module(self, glora_config, adapter_name, target):
         bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {
-            "r": glora_config.r
-        }
+        kwargs = {"r": glora_config.r}
         if isinstance(target, torch.nn.Linear):
             in_features, out_features = target.in_features, target.out_features
-        new_module = Linear(adapter_name = adapter_name, 
-                            in_features = in_features, 
-                            out_features = out_features, 
-                            bias=bias, **kwargs)
+        new_module = Linear(
+            adapter_name=adapter_name, in_features=in_features, out_features=out_features, bias=bias, **kwargs
+        )
 
         return new_module
 
@@ -137,23 +136,41 @@ class GLoraModel(BaseTuner):
                 f"Please check the target modules and try again."
             )
 
-    def _replace_module(self, parent_module, child_name, new_module, old_module):
-        setattr(parent_module, child_name, new_module)
-        new_module.weight = old_module.weight
-        if hasattr(old_module, "bias"):
-            if old_module.bias is not None:
-                new_module.bias = old_module.bias
+    def _replace_module(self, parent, child_name, new_module, child):
+        setattr(parent, child_name, new_module)
+        # It's not necessary to set requires_grad here, as that is handled by
+        # _mark_only_adapters_as_trainable
 
-        if getattr(old_module, "state", None) is not None:
-            new_module.state = old_module.state
-            new_module.to(old_module.weight.device)
+        # child layer wraps the original module, unpack it
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+
+        if not hasattr(new_module, "base_layer"):
+            if hasattr(new_module, "W_q"):  # HQQ
+                new_module.W_q = child.W_q
+            else:
+                new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
+
+        if getattr(child, "state", None) is not None:
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
+            new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "glora_" in name:
-                module.to(old_module.weight.device)
-            if "ranknum" in name:
-                module.to(old_module.weight.device)
+            if (self.prefix in name) or ("ranknum" in name):
+                weight = (
+                    child.qweight
+                    if hasattr(child, "qweight")
+                    else child.W_q
+                    if hasattr(child, "W_q")
+                    else child.weight
+                )
+                module.to(weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -221,9 +238,8 @@ class GLoraModel(BaseTuner):
         return self._unload_and_optionally_merge(progressbar=progressbar)
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
-
         key_list = [key for key, _ in self.model.named_modules() if "glora" not in key]
-        for key in tqdm(key_list, disable=not progressbar ):
+        for key in tqdm(key_list, disable=not progressbar):
             try:
                 parent, target, target_name = _get_submodules(self.model, key)
             except AttributeError:

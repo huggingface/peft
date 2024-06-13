@@ -76,4 +76,4 @@ class GLoraLayer(BaseTunerLayer):
 
     def __repr__(self) -> str:
         rep = super().__repr__()
-        return "lora." + rep
+        return "glora." + rep
