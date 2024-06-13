@@ -374,6 +374,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
         autocast_adapter_dtype: bool = True,
+        ephemeral_transfers: bool = False,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -421,6 +422,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     token=kwargs.get("token", None),
                 )
             ].from_pretrained(model_id, **kwargs)
+            if ephemeral_transfers:
+                # Set this in incoming config
+                config.ephemeral_transfers = True
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:

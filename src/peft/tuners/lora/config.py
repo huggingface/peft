@@ -122,6 +122,11 @@ class LoraConfig(PeftConfig):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate LoRA adapters attached to them.
+        ephemeral_transfers (`bool`, *optional*):
+            Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in
+            the data involved in intense operations being momentarily copied over to the GPU, and the results copied
+            back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster
+            compared to performing them on the CPU.
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -279,6 +284,17 @@ class LoraConfig(PeftConfig):
                 "   Final model will have this arrangement of original layers: `[0, 1, 2, 3, 2, 3, 4]`\n"
                 "This format is based on what is used for pass-through merges in mergekit. It makes it simple to select sequential "
                 "ranges of a model and stack them while reusing layers at either end of each sequence."
+            )
+        },
+    )
+    ephemeral_transfers: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in"
+                "the data involved in intense operations being momentarily copied over to the GPU, and the results copied"
+                "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster"
+                "compared to performing them on the CPU."
             )
         },
     )

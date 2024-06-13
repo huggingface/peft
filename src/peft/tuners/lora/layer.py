@@ -37,7 +37,7 @@ class LoraLayer(BaseTunerLayer):
     # All names of other parameters that may contain adapter-related parameters
     other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout")
 
-    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+    def __init__(self, base_layer: nn.Module, ephemeral_transfers: bool = False, **kwargs) -> None:
         self.base_layer = base_layer
         self.r = {}
         self.lora_alpha = {}
@@ -54,6 +54,7 @@ class LoraLayer(BaseTunerLayer):
         self.use_dora: dict[str, bool] = {}
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
+        self.ephemeral_transfers: bool = ephemeral_transfers
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -251,8 +252,16 @@ class LoraLayer(BaseTunerLayer):
         dora_layer = DoraLinearLayer(fan_in_fan_out=getattr(self, "fan_in_fan_out", False))
         lora_A = self.lora_A[adapter_name].weight
         lora_B = self.lora_B[adapter_name].weight
+        place_on_cpu = self.ephemeral_transfers and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
+        if self.ephemeral_transfers:
+            if lora_A.device.type == "cuda":
+                lora_B = lora_B.to(lora_A.device)
+            else:
+                if lora_B.device.type != "cuda":
+                    lora_B = lora_B.to("cuda")
+                lora_A = lora_A.to(lora_B.device)
         scaling = self.scaling[adapter_name]
-        dora_layer.update_layer(base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling)
+        dora_layer.update_layer(base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling, place_on_cpu=place_on_cpu)
         self.lora_magnitude_vector[adapter_name] = dora_layer
 
     def _cache_store(self, key: str, value: Any) -> None:
