@@ -1,9 +1,12 @@
 import random
 import re
+import warnings
 from dataclasses import asdict
 from enum import Enum
+from itertools import chain
 
 import torch
+from torch import nn
 from tqdm import tqdm
 
 from peft.tuners.glora.layer import GLoraLayer, mark_only_glora_as_trainable
@@ -79,7 +82,7 @@ class GLoraModel(BaseTuner):
     prefix: str = "glora_"
 
     def __init__(self, model, config, adapter_name):
-        super().__init__()
+        super().__init__(model, config, adapter_name)
         self.model = model
         self.forward = self.model.forward
         self.peft_config = config
@@ -256,3 +259,81 @@ class GLoraModel(BaseTuner):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
+
+    def _create_and_replace(
+        self,
+        glora_config,
+        adapter_name,
+        target,
+        target_name,
+        parent,
+        current_key,
+    ):
+        pattern_keys = list(chain(glora_config.rank_pattern.keys(), glora_config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
+        r = glora_config.rank_pattern.get(target_name_key, glora_config.r)
+        target_modules = glora_config.alpha_pattern.get(target_name_key, glora_config.target_modules)
+
+
+        kwargs = {
+            "r": r,
+            "target_modules" : target_modules
+        }
+        new_module = self._create_new_module(glora_config, adapter_name, target, **kwargs)
+        if adapter_name not in self.active_adapters:
+            # adding an additional adapter: it is not automatically trainable
+            new_module.requires_grad_(False)
+            self._replace_module(parent, target_name, new_module, target)
+
+    def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
+        for n, p in model.named_parameters():
+            if self.prefix not in n:
+                p.requires_grad = False
+
+        for active_adapter in self.active_adapters:
+            bias = self.peft_config[active_adapter].bias
+            if bias == "none":
+                continue
+
+            if bias == "all":
+                for n, p in model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias == "glora_only":
+                for m in model.modules():
+                    if isinstance(m, GLoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                        m.bias.requires_grad = True
+            else:
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+
+    @staticmethod
+    def _prepare_adapter_config(peft_config, model_config):
+        if peft_config.target_modules is None:
+            if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
+                raise ValueError("Please specify `target_modules` in `peft_config`")
+            peft_config.target_modules = set(
+                TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING[model_config["model_type"]]
+            )
+        return peft_config
+
+    def disable_adapter_layers(self) -> None:
+        """Disable all adapters.
+
+        When disabling all adapters, the model output corresponds to the output of the base model.
+        """
+        for active_adapter in self.active_adapters:
+            val = self.peft_config[active_adapter].bias
+            if val != "none":
+                msg = (
+                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+                    "output as the the base model would without adaption."
+                )
+                warnings.warn(msg)
+        self._set_adapter_layers(enabled=False)
+
+    def enable_adapter_layers(self) -> None:
+        """Enable all adapters.
+
+        Call this if you have previously disabled all adapters and want to re-enable them.
+        """
+        self._set_adapter_layers(enabled=True)
