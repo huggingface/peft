@@ -47,6 +47,7 @@ jobs:
             cd .. 
           fi
 
+      # TODO: uncomment this block if error is solved or bnb multi backend branch is merged
       # - name: Test bnb import
       #   id: import
       #   if: always()
