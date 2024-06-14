@@ -18,8 +18,6 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .linear import Linear
-
 
 random.seed(56)
 
@@ -370,7 +368,7 @@ class GLoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(target, adapter_name, lora_config=lora_config, **kwargs)
+            new_module = dispatcher(qlora_config=lora_config,adapter_name = adapter_name,target = target, **kwargs)
             if new_module is not None:  # first match wins
                 break
 
