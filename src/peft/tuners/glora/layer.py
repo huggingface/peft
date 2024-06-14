@@ -8,7 +8,6 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 
-
 random.seed(56)
 
 
@@ -29,6 +28,11 @@ def mark_only_glora_as_trainable(model: nn.Module) -> None:
 
 class GLoraLayer(BaseTunerLayer):
     def __init__(self, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
+        base_layer = self.get_base_layer()
+
+        if isinstance(base_layer, nn.Linear):
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+
         self.r = {}
         self.r[adapter_name] = r
         self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
@@ -71,19 +75,9 @@ class GLoraLayer(BaseTunerLayer):
         return "glora." + rep
 
 
-@staticmethod
-def dispatch_default(qlora_config, adapter_name, target, **kwargs):
-    new_module = None
-    if isinstance(target, BaseTunerLayer):
-        target_base_layer = target.get_base_layer()
-    else:
-        target_base_layer = target
-    if isinstance(target_base_layer, torch.nn.Linear):
-        new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
-    return new_module
 
 
-class Linear(nn.Linear, GLoraLayer):
+class Linear(nn.Module, GLoraLayer):
     # GLora implemented in a dense layer
     def __init__(
         self,
@@ -92,8 +86,9 @@ class Linear(nn.Linear, GLoraLayer):
         out_features: int,
         r: int = 0,
         **kwargs,
-    ):
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
+    )-> None:
+        
+        nn.Module.__init__(self=self, **kwargs)
         GLoraLayer.__init__(self, in_features=in_features, out_features=out_features, r=r, adapter_name=adapter_name)
 
         # Freezing the pre-trained weight matrix

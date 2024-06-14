@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
 from peft.config import PeftConfig
+from peft.tuners.lora import LoftQConfig
 from peft.utils import PeftType
 
 
@@ -39,6 +40,16 @@ class GLoraConfig(PeftConfig):
             "help": (
                 "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
                 "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+            )
+        },
+    )
+        # dict type is used when loading config.json
+    loftq_config: Union[LoftQConfig, dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The configuration of LoftQ. If this is passed, then LoftQ will be used to quantize the backbone "
+                "weights and initialize Lora layers. Also set `init_lora_weights='loftq'` in this case."
             )
         },
     )

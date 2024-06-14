@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from functools import partial
+from typing import Any, Optional, Union
 
 import bitsandbytes as bnb
 import datasets
@@ -44,7 +45,6 @@ def training_function():
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         quantization_config=quant_config,
-        attn_implementation="flash_attention_2",  # use sdpa, alternatively use "flash_attention_2"
         torch_dtype=quant_storage_dtype,
         use_cache=True,  # this is needed for gradient checkpointing
     )
