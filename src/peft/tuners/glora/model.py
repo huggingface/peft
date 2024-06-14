@@ -18,8 +18,6 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .linear import Linear
-
 
 random.seed(56)
 
