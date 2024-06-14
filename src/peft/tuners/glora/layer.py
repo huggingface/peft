@@ -75,16 +75,6 @@ class GLoraLayer(BaseTunerLayer):
         return "glora." + rep
 
 
-@staticmethod
-def dispatch_default(qlora_config, adapter_name, target, **kwargs):
-    new_module = None
-    if isinstance(target, BaseTunerLayer):
-        target_base_layer = target.get_base_layer()
-    else:
-        target_base_layer = target
-    if isinstance(target_base_layer, torch.nn.Linear):
-        new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
-    return new_module
 
 
 class Linear(nn.Module, GLoraLayer):
@@ -97,7 +87,8 @@ class Linear(nn.Module, GLoraLayer):
         r: int = 0,
         **kwargs,
     )-> None:
-        nn.Module.__init__()
+        
+        nn.Module.__init__(self=self, **kwargs)
         GLoraLayer.__init__(self, in_features=in_features, out_features=out_features, r=r, adapter_name=adapter_name)
 
         # Freezing the pre-trained weight matrix

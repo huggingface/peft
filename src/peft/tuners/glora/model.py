@@ -448,7 +448,7 @@ def dispatch_default_glora(
             )
             kwargs["fan_in_fan_out"] = glora_config.fan_in_fan_out = False
         kwargs.update(glora_config.loftq_config)
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv1d):
         if not kwargs["fan_in_fan_out"]:
             warnings.warn(
@@ -456,6 +456,17 @@ def dispatch_default_glora(
             )
             kwargs["fan_in_fan_out"] = glora_config.fan_in_fan_out = True
         kwargs.update(glora_config.loftq_config)
-        new_module = Linear(target, adapter_name, is_target_conv_1d_layer=True, **kwargs)
+        new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
 
     return new_module
+
+# @staticmethod
+# def dispatch_default(qlora_config, adapter_name, target, **kwargs):
+#     new_module = None
+#     if isinstance(target, BaseTunerLayer):
+#         target_base_layer = target.get_base_layer()
+#     else:
+#         target_base_layer = target
+#     if isinstance(target_base_layer, torch.nn.Linear):
+#         new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
+#     return new_module
