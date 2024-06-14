@@ -29,6 +29,11 @@ def mark_only_glora_as_trainable(model: nn.Module) -> None:
 
 class GLoraLayer(BaseTunerLayer):
     def __init__(self, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
+        base_layer = self.get_base_layer()
+
+        if isinstance(base_layer, nn.Linear):
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+
         self.r = {}
         self.r[adapter_name] = r
         self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
@@ -93,7 +98,7 @@ class Linear(nn.Linear, GLoraLayer):
         r: int = 0,
         **kwargs,
     ):
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
+        nn.Linear.__init__(self, in_features=in_features, out_features=out_features)
         GLoraLayer.__init__(self, in_features=in_features, out_features=out_features, r=r, adapter_name=adapter_name)
 
         # Freezing the pre-trained weight matrix

@@ -4,19 +4,22 @@ import warnings
 from dataclasses import asdict
 from enum import Enum
 from itertools import chain
+from typing import Any, Optional, Union
 
 import torch
 from torch import nn
 from tqdm import tqdm
 
 from peft.tuners.glora.layer import GLoraLayer, dispatch_default, mark_only_glora_as_trainable
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
     _freeze_adapter,
     _get_submodules,
 )
+
+from .config import GLoraConfig
 
 
 random.seed(56)
@@ -79,12 +82,13 @@ class GLoraModel(BaseTuner):
 
     prefix: str = "glora_"
 
-    def __init__(self, model, config, adapter_name):
+    def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
-        self.model = model
-        self.forward = self.model.forward
-        self.peft_config = config
-        self.add_adapter(adapter_name, self.peft_config[adapter_name])
+
+    @staticmethod
+    def _check_target_module_exists(poly_config, key):
+        return check_target_module_exists(poly_config, key)
+
 
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
@@ -276,29 +280,51 @@ class GLoraModel(BaseTuner):
 
         return self.model
 
+    # def _create_and_replace(
+    #     self,
+    #     glora_config,
+    #     adapter_name,
+    #     target,
+    #     target_name,
+    #     parent,
+    #     current_key,
+    # ):
+    #     pattern_keys = list(chain(glora_config.rank_pattern.keys(), glora_config.alpha_pattern.keys()))
+    #     target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
+    #     r = glora_config.rank_pattern.get(target_name_key, glora_config.r)
+    #     target_modules = glora_config.alpha_pattern.get(target_name_key, glora_config.target_modules)
+
+
+    #     kwargs = {
+    #         "r": r,
+    #         "target_modules" : target_modules
+    #     }
+    #     new_module = self._create_new_module(glora_config, adapter_name, target, **kwargs)
+    #     if adapter_name not in self.active_adapters:
+    #         # adding an additional adapter: it is not automatically trainable
+    #         new_module.requires_grad_(False)
+    #         self._replace_module(parent, target_name, new_module, target)
+
     def _create_and_replace(
         self,
-        glora_config,
-        adapter_name,
-        target,
-        target_name,
-        parent,
-        current_key,
+        glora_config: GLoraConfig,
+        adapter_name: str,
+        target: nn.Module,
+        target_name: str,
+        parent: nn.Module,
+        **optional_kwargs: Any,
     ):
-        pattern_keys = list(chain(glora_config.rank_pattern.keys(), glora_config.alpha_pattern.keys()))
-        target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
-        r = glora_config.rank_pattern.get(target_name_key, glora_config.r)
-        target_modules = glora_config.alpha_pattern.get(target_name_key, glora_config.target_modules)
-
-
-        kwargs = {
-            "r": r,
-            "target_modules" : target_modules
-        }
-        new_module = self._create_new_module(glora_config, adapter_name, target, **kwargs)
-        if adapter_name not in self.active_adapters:
-            # adding an additional adapter: it is not automatically trainable
-            new_module.requires_grad_(False)
+        if isinstance(target, GLoraLayer):
+            target.update_layer(adapter_name, glora_config)
+        else:
+            new_module = self._create_new_module(
+                glora_config,
+                adapter_name,
+                target,
+            )
+            if adapter_name not in self.active_adapters:
+                # adding an additional adapter: it is not automatically trainable
+                new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
