@@ -368,7 +368,7 @@ class GLoraModel(BaseTuner):
 
         new_module = None
         for dispatcher in dispatchers:
-            new_module = dispatcher(lora_config=lora_config,adapter_name = adapter_name,target = target, **kwargs)
+            new_module = dispatcher(qlora_config=lora_config,adapter_name = adapter_name,target = target, **kwargs)
             if new_module is not None:  # first match wins
                 break
 
