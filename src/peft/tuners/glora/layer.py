@@ -8,7 +8,6 @@ import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer
 
-
 random.seed(56)
 
 
@@ -88,7 +87,7 @@ def dispatch_default(qlora_config, adapter_name, target, **kwargs):
     return new_module
 
 
-class Linear(nn.Linear, GLoraLayer):
+class Linear(nn.Module, GLoraLayer):
     # GLora implemented in a dense layer
     def __init__(
         self,
@@ -97,8 +96,8 @@ class Linear(nn.Linear, GLoraLayer):
         out_features: int,
         r: int = 0,
         **kwargs,
-    ):
-        nn.Linear.__init__(self, in_features=in_features, out_features=out_features)
+    )-> None:
+        nn.Module.__init__()
         GLoraLayer.__init__(self, in_features=in_features, out_features=out_features, r=r, adapter_name=adapter_name)
 
         # Freezing the pre-trained weight matrix
