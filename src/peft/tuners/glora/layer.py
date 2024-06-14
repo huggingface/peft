@@ -79,7 +79,7 @@ def dispatch_default(qlora_config, adapter_name, target, **kwargs):
     else:
         target_base_layer = target
     if isinstance(target_base_layer, torch.nn.Linear):
-        new_module = Linear(target, adapter_name, **kwargs)
+        new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
     return new_module
 
 
