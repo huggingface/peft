@@ -62,7 +62,7 @@ jobs:
       #   with:
       #     slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
       #     title: 🤗 Results of bitsandbytes import
-      #     status: ${{ steps.import.outputs.status }}
+      #     status: ${{ steps.import.outcome }}
       #     slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run examples on single GPU
@@ -78,7 +78,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes examples tests - single GPU
-          status: ${{ steps.examples_tests.outputs.status }}
+          status: ${{ steps.examples_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
       
       - name: Run core tests on single GPU
@@ -94,7 +94,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes core tests - single GPU
-          status: ${{ steps.core_tests.outputs.status }}
+          status: ${{ steps.core_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run BNB regression tests on single GPU
@@ -110,7 +110,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes regression tests - single GPU
-          status: ${{ steps.regression_tests.outputs.status }}
+          status: ${{ steps.regression_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run transformers tests on single GPU
@@ -126,7 +126,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes transformers tests - single GPU
-          status: ${{ steps.transformers_tests.outputs.status }}
+          status: ${{ steps.transformers_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
           
       - name: Generate Report
@@ -182,7 +182,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
-          status: ${{ steps.import.outputs.status }}
+          status: ${{ steps.import.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run core GPU tests on multi-gpu
@@ -203,7 +203,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes examples tests - multi GPU
-          status: ${{ steps.examples_tests.outputs.status }}
+          status: ${{ steps.examples_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
       
       - name: Run core tests on multi GPU
@@ -219,7 +219,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes core tests - multi GPU
-          status: ${{ steps.core_tests.outputs.status }}
+          status: ${{ steps.core_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run transformers tests on multi GPU
@@ -235,7 +235,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes transformers tests - multi GPU
-          status: ${{ steps.transformers_tests.outputs.status }}
+          status: ${{ steps.transformers_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
           
       - name: Generate Report
