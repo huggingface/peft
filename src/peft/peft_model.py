@@ -403,6 +403,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 loaded before calling `from_pretrained`.
             autocast_adapter_dtype (`bool`, *optional*):
                 Whether to autocast the adapter dtype. Defaults to `True`. Only relevant for specific adapter types.
+            ephemeral_transfers (`bool`, *optional*):
+                Whether to use ephemeral transfers for disk-offloaded modules. Defaults to `False`. This is useful
+                when parts of the model and/or components (such as adapters) are kept in CPU memory until they are
+                needed. Rather than perform expensive operations on small data, the data is transferred to the
+                GPU on-demand, the operation(s) performed, and the results moved back to CPU memory. This brings
+                a slight momentary VRAM overhead but gives orders of magnitude speedup in certain cases.
             torch_device (`str`, *optional*, defaults to None):
                 The device to load the adapter on. If `None`, the device will be inferred.
             kwargs: (`optional`):

@@ -126,7 +126,12 @@ class LoraConfig(PeftConfig):
             Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in
             the data involved in intense operations being momentarily copied over to the GPU, and the results copied
             back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster
-            compared to performing them on the CPU.
+            compared to performing them on the CPU. This is useful when parts of the model and/or components (such
+            as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on
+            small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results
+            moved back to CPU memory. This brings a slight momentary VRAM overhead but gives orders of magnitude
+            speedup in certain cases.
+
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -294,7 +299,11 @@ class LoraConfig(PeftConfig):
                 "Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in"
                 "the data involved in intense operations being momentarily copied over to the GPU, and the results copied"
                 "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster"
-                "compared to performing them on the CPU."
+                "compared to performing them on the CPU. This is useful when parts of the model and/or components (such"
+                "as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on"
+                "small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results"
+                "moved back to CPU memory. This brings a slight momentary VRAM overhead but gives orders of magnitude"
+                "speedup in certain cases."
             )
         },
     )
