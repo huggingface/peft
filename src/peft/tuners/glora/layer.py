@@ -87,7 +87,7 @@ class Linear(nn.Module, GLoraLayer):
         r: int = 0,
         **kwargs,
     )-> None:
-        
+        kwargs.pop('fan_in_fan_out')
         nn.Module.__init__(self=self, **kwargs)
         GLoraLayer.__init__(self, in_features=in_features, out_features=out_features, r=r, adapter_name=adapter_name)
 
