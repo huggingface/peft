@@ -428,13 +428,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                     token=kwargs.get("token", None),
                 )
             ].from_pretrained(model_id, **kwargs)
-            if ephemeral_transfers:
-                # Set this in incoming config
-                config.ephemeral_transfers = True
         elif isinstance(config, PeftConfig):
             config.inference_mode = not is_trainable
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
+
+        # Runtime configuration
+        config.runtime.ephemeral_transfers = ephemeral_transfers
 
         if hasattr(model, "hf_device_map"):
             weight_map = dict(named_module_tensors(model, recurse=True))
