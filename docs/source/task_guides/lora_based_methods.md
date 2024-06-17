@@ -307,7 +307,7 @@ Let's load the model from the Hub and test it out on a food image.
 
 ```py
 from peft import PeftConfig, PeftModel
-from transfomers import AutoImageProcessor
+from transformers import AutoImageProcessor
 from PIL import Image
 import requests
 
