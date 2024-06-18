@@ -90,7 +90,7 @@ class PeftConfigMixin(PushToHubMixin):
         os.makedirs(save_directory, exist_ok=True)
         auto_mapping_dict = kwargs.pop("auto_mapping_dict", None)
 
-        output_dict = asdict(self)
+        output_dict = self.to_dict()
         # converting set type to list
         for key, value in output_dict.items():
             if isinstance(value, set):
@@ -101,10 +101,6 @@ class PeftConfigMixin(PushToHubMixin):
         # Add auto mapping details for custom models.
         if auto_mapping_dict is not None:
             output_dict["auto_mapping"] = auto_mapping_dict
-
-        # Drop runtime key
-        if "runtime" in output_dict:
-            output_dict.pop("runtime")
 
         # save it
         with open(output_path, "w") as writer:
