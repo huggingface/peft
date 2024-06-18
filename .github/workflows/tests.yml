@@ -49,7 +49,7 @@ jobs:
           # cpu version of pytorch
           pip install -e .[test]
       - name: Downgrade numpy on MacOS and Windows
-        # TODO: remove numpy downgrade on MacOS once torch fixes numpy 2.0 issue
+        # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash
         if: matrix.os == 'windows-latest' || matrix.os == 'macos-12'
         run: |
