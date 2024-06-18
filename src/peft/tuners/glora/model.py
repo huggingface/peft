@@ -97,6 +97,19 @@ class GLoraModel(BaseTuner):
     def _check_target_module_exists(poly_config, key):
         return check_target_module_exists(poly_config, key)
 
+    def _check_new_adapter_config(self, config: GLoraConfig) -> None:
+        """
+        A helper method to check the config when a new adapter is being added.
+        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
+        """
+        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
+        # does not fully correspond to the error message.
+        if (len(self.peft_config) > 1) and (config.bias != "none"):
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
+        )
+
     def add_adapter(self, adapter_name, config=None):
         if config is not None:
             model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
@@ -431,7 +444,7 @@ def dispatch_default_glora(
     **kwargs,
 ) -> Optional[torch.nn.Module]:
     new_module = None
-    kwargs["fan_in_fan_out"] = False
+    #kwargs["fan_in_fan_out"] = False
     if isinstance(target, BaseTunerLayer):
         target_base_layer = target.get_base_layer()
     else:
@@ -448,7 +461,7 @@ def dispatch_default_glora(
             )
             kwargs["fan_in_fan_out"] = glora_config.fan_in_fan_out = False
         kwargs.update(glora_config.loftq_config)
-        new_module = new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
+        new_module = Linear(target, adapter_name, target.in_features, target.out_features, **kwargs)
     elif isinstance(target_base_layer, torch.nn.Conv1d):
         if not kwargs["fan_in_fan_out"]:
             warnings.warn(
@@ -456,17 +469,6 @@ def dispatch_default_glora(
             )
             kwargs["fan_in_fan_out"] = glora_config.fan_in_fan_out = True
         kwargs.update(glora_config.loftq_config)
-        new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
+        new_module = Linear(target, adapter_name, target.in_features, target.out_features, **kwargs)
 
     return new_module
-
-# @staticmethod
-# def dispatch_default(qlora_config, adapter_name, target, **kwargs):
-#     new_module = None
-#     if isinstance(target, BaseTunerLayer):
-#         target_base_layer = target.get_base_layer()
-#     else:
-#         target_base_layer = target
-#     if isinstance(target_base_layer, torch.nn.Linear):
-#         new_module = Linear(adapter_name, target.in_features, target.out_features, **kwargs)
-#     return new_module
