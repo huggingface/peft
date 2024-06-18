@@ -153,6 +153,19 @@ class PeftConfigTester(unittest.TestCase):
             assert "models--ybelkada--test-st-lora" in os.listdir(tmp_dirname)
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
+    def test_save_pretrained_with_runtime_config(self, config_class):
+        r"""
+        Test if the config correctly removes runtime when saving
+        """
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            for model_name, revision in PEFT_MODELS_TO_TEST:
+                cfg = config_class.from_pretrained(model_name, revision=revision)
+                cfg.runtime.ephemeral_transfers = True
+                cfg.save_pretrained(tmp_dirname)
+                cfg = config_class.from_pretrained(tmp_dirname)
+                assert not cfg.runtime.ephemeral_transfers
+
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_set_attributes(self, config_class):
         # manually set attributes and check if they are correctly written
         config = config_class(peft_type="test")
