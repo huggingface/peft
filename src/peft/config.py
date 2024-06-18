@@ -67,8 +67,11 @@ class PeftConfigMixin(PushToHubMixin):
     def to_dict(self) -> Dict:
         r"""
         Returns the configuration for your adapter model as a dictionary.
+        Does not include the runtime configuration.
         """
-        return asdict(self)
+        rv = asdict(self)
+        rv.pop('runtime')
+        return rv
 
     def save_pretrained(self, save_directory: str, **kwargs) -> None:
         r"""
