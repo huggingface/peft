@@ -13,6 +13,7 @@
 # limitations under the License.
 import gc
 import tempfile
+import time
 import unittest
 
 import pytest
@@ -1082,6 +1083,50 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_dora, out_merged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_dora_cpu_offloading(self):
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            torch_dtype=torch.float32,
+        ).eval()
+
+        config = LoraConfig(
+            r=4096, # too small and the time difference is too small
+            init_lora_weights=False,
+            use_dora=True,
+        )
+        peft_model = get_peft_model(model, config).eval()
+
+        # Save to disk
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+
+            # Load from disk 100% on CPU without ephemeral transfers
+            start_time = time.time()
+            peft_model = PeftModel.from_pretrained(
+                model,
+                tmp_dir,
+                device_map={"": "cpu"},
+            ).eval()
+            elapsed_time = time.time() - start_time
+
+            # Load again, with ephemeral transfers enabled
+            start_time = time.time()
+            peft_model = PeftModel.from_pretrained(
+                model,
+                tmp_dir,
+                device_map={"": "cpu"},
+                ephemeral_transfers=True,
+            ).eval()
+            elapsed_time2 = time.time() - start_time
+
+        # CPU only should be much slower
+        assert elapsed_time > 1.1 * elapsed_time2
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
