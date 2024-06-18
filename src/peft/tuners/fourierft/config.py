@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,47 +15,94 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
 @dataclass
-class FourierConfig(PeftConfig):
+class FourierFTConfig(PeftConfig):
     """
-    This is the configuration class to store the configuration of a [`FourierModel`].
+    This is the configuration class to store the configuration of a [`FourierFTModel`].
 
     Args:
-        n_frequency (`int`): Discrete Fourier Transform frequency dimension.
-        scaling (`float`): The scaling value for the delta W matrix.
-        target_modules (`Union[list[str],str]`): The names of the modules to apply FourierFT to.
-        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
-            For example, gpt-2 uses `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set
-            to `True`.
-        bias (`str`): Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'. If 'all' or 'fourier_only', the
-            corresponding biases will be updated during training. Be aware that this means that, even when disabling
-            the adapters, the model will not produce the same output as the base model would have without adaptation.
-        modules_to_save (`list[str]`):list of modules apart from Fourier layers to be set as trainable
-            and saved in the final checkpoint.
+        n_frequency (`int`): 
+            Num of learnable frequencies for the Discrete Fourier Transform. 'n_frequency' is an integer that
+            is greater than 0 and less than or equal to d^2 (assuming the weight W has dimensions of d by d).
+            Additionally, it is the number of trainable parameters required to update each delta W weight.
+            'n_frequency' will affect the performance and efficiency for PEFT. Specifically, it has little impact
+            on training speed, but higher values of it (typically) result in larger GPU memory costs and better accuracy.
+            The following examples of settings regarding 'n_frequency' can be used as reference for users.
+            For NLU tasks with RoBERTa-base and RoBERTa-large models, adopting 'n_frequency': 100 can almost achieve similar
+            results as 'r': 8 in LoRA. For image classification tasks with ViT-base and Vit-large models, adopting 
+            'n_frequency': 3000 can almost achieve similar results as 'r': 16 in LoRA.
+        scaling (`float`): 
+            The scaling value for the delta W matrix. This is an important hyperparameter used for scaling, similar to the
+            'lora_alpha' parameter in the LoRA method. 'scaling' can be determined during the hyperparameter search process.
+            However, if users want to skip this process, one can refer to the settings in the following scenarios.
+            This parameter can be set to 100.0 or 150.0 for both RoBERTa-base and RoBERTa-large models across all NLU (GLUE) tasks.
+            This parameter can be set to 300.0 for both LLaMA family models for all instruction tuning.
+            This parameter can be set to 300.0 for both ViT-base and ViT-large models across all image classification tasks.
+        random_loc_seed (`int`):
+            Seed for the random location of the frequencies, i.e., the spectral entry matrix.
+        target_modules (`Union[list[str],str]`): 
+            List of module names or regex expression of the module names to replace with FourierFT.
+            For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. 
+            Only linear layers are supported.
+        fan_in_fan_out (`bool`): 
+            Set this to True if the layer to replace stores weight like (fan_in, fan_out).
+        bias (`str`): 
+            Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'.
+        modules_to_save (`list[str]`):
+            List of modules apart from FourierFT layers to be set as trainable and saved in the final checkpoint. For
+            example, in Sequence Classification or Token Classification tasks, the final layer
+            `classifier/score` are randomly initialized and as such need to be trainable and saved.
         layers_to_transform (`Union[list[int],int]`):
-            The layer indexes to transform, if this argument is specified, it will apply the Fourier transformations on
-            the layer indexes that are specified in this list. If a single integer is passed, it will apply the Fourier
-            transformations on the layer at this index.
+            The layer indexes to transform, is this argument is specified, PEFT will transform only the layers
+            indexes that are specified inside this list. If a single integer is passed, PEFT will transform only
+            the layer at this index.
         layers_pattern (`str`):
-            The layer pattern name, used only if `layers_to_transform` is different from `None` and if the layer
+            The layer pattern name, used only if `layers_to_transform` is different to None and if the layer
             pattern is not in the common layers pattern.
         n_frequency_pattern (`dict`):
-            The mapping from layer names or regexp expression to n_frequency which are different from the default.
+            The mapping from layer names or regexp expression to n_frequency which are different from the default specified.
+            For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1000`}.
+        init_weights (`bool`):
+            The initialization of the Fourier weights. Set this to False if the spectrum are initialized to a standard normal distribution.
+            Set this to True if the spectrum are initialized to zeros. 
     """
 
     n_frequency: int = field(
-        default=1000, metadata={"help": "Num of learnable frequencies for the Discrete Fourier Transform."}
+        default=1000, 
+        metadata={
+            "help": (
+                "Num of learnable frequencies for the Discrete Fourier Transform. 'n_frequency' is an integer that"
+                "is greater than 0 and less than or equal to d^2 (assuming the weight W has dimensions of d by d)."
+                "Additionally, it is the number of trainable parameters required to update each delta W weight."
+                "'n_frequency' will affect the performance and efficiency for PEFT. Specifically, it has little impact"
+                "on training speed, but higher values of it (typically) result in larger GPU memory costs and better accuracy."
+                "The following examples of settings regarding 'n_frequency' can be used as reference for users."
+                "For NLU tasks with RoBERTa-base and RoBERTa-large models, adopting 'n_frequency': 100 can almost achieve similar"
+                "results as 'r': 8 in LoRA. For image classification tasks with ViT-base and Vit-large models, adopting"
+                "'n_frequency': 3000 can almost achieve similar results as 'r': 16 in LoRA."
+            )
+        },
     )
-    scaling: float = field(default=150.0, metadata={"help": "The scaling value for the delta W matrix."})
-    random_loc_seed: Optional[int] = field(
-        default=777, metadata={"help": "Seed for the random location of the frequencies."}
+    scaling: float = field(
+        default=150.0, 
+        metadata={
+            "help": (
+                "The scaling value for the delta W matrix. This is an important hyperparameter used for scaling, similar to the"
+                "'lora_alpha' parameter in the LoRA method. 'scaling' can be determined during the hyperparameter search process."
+                "However, if users want to skip this process, one can refer to the settings in the following scenarios."
+                "This parameter can be set to 100.0 or 150.0 for both RoBERTa-base and RoBERTa-large models across all NLU (GLUE) tasks."
+                "This parameter can be set to 300.0 for both LLaMA family models for all instruction tuning."
+                "This parameter can be set to 300.0 for both ViT-base and ViT-large models across all image classification tasks."
+            )
+        },
     )
+    random_loc_seed: Optional[int] = field(default=777, metadata={"help": "Seed for the random location of the frequencies."})
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -63,47 +110,60 @@ class FourierConfig(PeftConfig):
     target_modules: Optional[Union[list[str], str]] = field(
         default=None,
         metadata={
-            "help": "list of module names or regex expression of the module names to replace with FourierFT."
-            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
+            "help": (
+                "List of module names or regex expression of the module names to replace with FourierFT."
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
+                "Only linear layers are supported."
+            )
         },
     )
-    bias: str = field(
-        default="none", metadata={"help": "Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'"}
-    )
+    bias: str = field(default="none", metadata={"help": "Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'."})
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={
-            "help": "list of modules apart from FourierFT layers to be set as trainable and saved in the final checkpoint. "
-            "For example, in Sequence Classification or Token Classification tasks, "
-            "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
+            "help": (
+                "List of modules apart from FourierFT layers to be set as trainable and saved in the final checkpoint. For"
+                " example, in Sequence Classification or Token Classification tasks, the final layer"
+                " `classifier/score` are randomly initialized and as such need to be trainable and saved."
+            )
         },
     )
     layers_to_transform: Optional[Union[list[int], int]] = field(
         default=None,
         metadata={
-            "help": "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers indexes that are specified inside this list. If a single integer is passed, PEFT will transform only the layer at this index. "
-            "This only works when target_modules is a list of str."
+            "help": (
+                "The layer indexes to transform, is this argument is specified, PEFT will transform only the layers"
+                " indexes that are specified inside this list. If a single integer is passed, PEFT will transform only"
+                " the layer at this index."
+            )
         },
     )
-    layers_pattern: Optional[Union[list[str], str]] = field(
+    layers_pattern: Optional[str] = field(
         default=None,
         metadata={
-            "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
-            "This only works when target_modules is a list of str."
+            "help": (
+                "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer"
+                " pattern is not in the common layers pattern."
+            )
         },
     )
     n_frequency_pattern: Optional[dict] = field(
         default_factory=dict,
         metadata={
             "help": (
-                "The mapping from layer names or regexp expression to n_frequency which are different from the default specified. "
-                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1000`}"
+                "The mapping from layer names or regexp expression to n_frequency which are different from the default specified."
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 500`}."
             )
         },
     )
-    init_fourier_weights: Optional[str] = field(
-        default="gaussian",
-        metadata={"help": "The initialization of the Fourier weights. Can be 'xavier_dense' or 'gaussian'."},
+    init_weights: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "The initialization of the Fourier weights. Set this to False if the spectrum are initialized to a standard normal distribution."
+                "Set this to True if the spectrum are initialized to zeros."
+            )
+        },
     )
 
     def __post_init__(self):

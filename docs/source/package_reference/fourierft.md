@@ -29,10 +29,10 @@ The abstract from the paper is:
 
 > Low-rank adaptation (LoRA) has recently gained much interest in fine-tuning foundation models. It effectively reduces the number of trainable parameters by incorporating low-rank matrices A and B to represent the weight change, i.e., Delta W=BA. Despite LoRA's progress, it faces storage challenges when handling extensive customization adaptations or larger base models. In this work, we aim to further compress trainable parameters by enjoying the powerful expressiveness of the Fourier transform. Specifically, we introduce FourierFT, which treats Delta W as a matrix in the spatial domain and learns only a small fraction of its spectral coefficients. With the trained spectral coefficients, we implement the inverse discrete Fourier transform to recover Delta W. Empirically, our FourierFT method shows comparable or better performance with fewer parameters than LoRA on various tasks, including natural language understanding, natural language generation, instruction tuning, and image classification. For example, when performing instruction tuning on the LLaMA2-7B model, FourierFT surpasses LoRA with only 0.064M trainable parameters, compared to LoRA's 33.5M.
 
-## FourierConfig
+## FourierFTConfig
 
-[[autodoc]] tuners.fourierft.config.FourierConfig
+[[autodoc]] tuners.fourierft.config.FourierFTConfig
 
-## FourierModel
+## FourierFTModel
 
-[[autodoc]] tuners.fourierft.model.FourierModel
+[[autodoc]] tuners.fourierft.model.FourierFTModel

@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ from typing import Optional
 
 import torch
 from tqdm import tqdm
+from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
@@ -30,11 +31,11 @@ from peft.utils import (
     _get_submodules,
 )
 
-from .config import FourierConfig
-from .layer import FourierLayer, FourierLinear
+from .config import FourierFTConfig
+from .layer import FourierFTLayer, FourierFTLinear
 
 
-class FourierModel(BaseTuner):
+class FourierFTModel(BaseTuner):
     """
     Creates FourierFT model from a pretrained transformers model.
 
@@ -42,7 +43,7 @@ class FourierModel(BaseTuner):
 
     Args:
         model ([`torch.nn.Module`]): The model to be adapted.
-        config ([`FourierConfig`]): The configuration of the FourierFT model.
+        config ([`FourierFTConfig`]): The configuration of the FourierFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
 
     Returns:
@@ -50,15 +51,15 @@ class FourierModel(BaseTuner):
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`FourierConfig`]): The configuration of the Fourier model.
+        - **peft_config** ([`FourierFTConfig`]): The configuration of the Fourier model.
     """
 
-    prefix: str = "spectrum"
+    prefix: str = "fourierft_"
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
-    def _check_new_adapter_config(self, config: FourierConfig) -> None:
+    def _check_new_adapter_config(self, config: FourierFTConfig) -> None:
         """
         A helper method to check the config when a new adapter is being added.
 
@@ -74,12 +75,12 @@ class FourierModel(BaseTuner):
             )
 
     @staticmethod
-    def _check_target_module_exists(fourier_config, key):
-        return check_target_module_exists(fourier_config, key)
+    def _check_target_module_exists(fourierft_config, key):
+        return check_target_module_exists(fourierft_config, key)
 
     def _create_and_replace(
         self,
-        fourier_config,
+        fourierft_config,
         adapter_name,
         target,
         target_name,
@@ -90,28 +91,29 @@ class FourierModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
         # Regexp matching - Find key which matches current target_name in patterns provided
-        pattern_keys = list(chain(fourier_config.n_frequency_pattern.keys()))
+        pattern_keys = list(chain(fourierft_config.n_frequency_pattern.keys()))
         target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
 
-        n_frequency = fourier_config.n_frequency_pattern.get(target_name_key, fourier_config.n_frequency)
-        scaling = fourier_config.scaling
+        n_frequency = fourierft_config.n_frequency_pattern.get(target_name_key, fourierft_config.n_frequency)
+        scaling = fourierft_config.scaling
+        bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "n_frequency": n_frequency,
             "scaling": scaling,
-            "fan_in_fan_out": fourier_config.fan_in_fan_out,
-            "init_fourier_weights": fourier_config.init_fourier_weights,
-            "random_loc_seed": fourier_config.random_loc_seed,
+            "fan_in_fan_out": fourierft_config.fan_in_fan_out,
+            "init_weights": fourierft_config.init_weights,
+            "random_loc_seed": fourierft_config.random_loc_seed,
         }
-
-        if isinstance(target, FourierLinear):
+        kwargs["bias"] = bias
+        if isinstance(target, FourierFTLinear):
             target.update_layer(
                 adapter_name,
                 n_frequency,
                 scaling,
-                fourier_config.init_fourier_weights,
+                fourierft_config.init_weights,
             )
         else:
-            new_module = self._create_new_module(fourier_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(fourierft_config, adapter_name, target, **kwargs)
             if adapter_name != self.active_adapter:
                 # adding an additional adapter: it is not automatically trainable
                 new_module.requires_grad_(False)
@@ -140,9 +142,8 @@ class FourierModel(BaseTuner):
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if (self.prefix in name) or ("ranknum" in name):
-                weight = child.qweight if hasattr(child, "qweight") else child.weight
-                module.to(weight.device)
+            if "fourierft_" in name:
+                module.to(child.weight.device)
 
     def _mark_only_adapters_as_trainable(self, model: torch.nn.Module) -> None:
         for n, p in model.named_parameters():
@@ -160,13 +161,13 @@ class FourierModel(BaseTuner):
                         p.requires_grad = True
             elif bias == "fourier_only":
                 for m in model.modules():
-                    if isinstance(m, FourierLayer) and hasattr(m, "bias") and m.bias is not None:
+                    if isinstance(m, FourierFTLayer) and hasattr(m, "bias") and m.bias is not None:
                         m.bias.requires_grad = True
             else:
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(fourier_config, adapter_name, target, **kwargs):
+    def _create_new_module(fourierft_config, adapter_name, target, **kwargs):
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
@@ -178,8 +179,22 @@ class FourierModel(BaseTuner):
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = fourier_config.fan_in_fan_out = False
-            new_module = FourierLinear(target, adapter_name, **kwargs)
+                kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = False    
+        elif isinstance(target_base_layer, Conv1D):
+            kwargs["is_target_conv_1d_layer"] = True
+            if not kwargs["fan_in_fan_out"]:
+                warnings.warn(
+                    "fan_in_fan_out is set to False but the target module is `Conv1D`. "
+                    "Setting fan_in_fan_out to True."
+                )
+                kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = True
+        else:
+            raise ValueError(
+                f"Target module {target} is not supported. Currently, only the following modules are supported: "
+                "`torch.nn.Linear`."
+            )
+        
+        new_module = FourierFTLinear(target, adapter_name, **kwargs)
 
         return new_module
 
@@ -233,7 +248,7 @@ class FourierModel(BaseTuner):
             adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
         """
         for module in self.model.modules():
-            if isinstance(module, FourierLayer):
+            if isinstance(module, FourierFTLayer):
                 if module.merged:
                     warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
                     module.unmerge()
@@ -274,6 +289,29 @@ class FourierModel(BaseTuner):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
+    
+    def delete_adapter(self, adapter_name: str):
+        """
+        Deletes an existing adapter.
+
+        Args:
+            adapter_name (str): Name of the adapter to be deleted.
+        """
+        if adapter_name not in list(self.peft_config.keys()):
+            raise ValueError(f"Adapter {adapter_name} does not exist")
+        del self.peft_config[adapter_name]
+
+        # we cannot use self.prefix as we want to include non-trainable fourierft parameters
+        key_list = [key for key, _ in self.model.named_modules() if "fourierft" not in key]
+        new_adapter = None
+        for key in key_list:
+            _, target, _ = _get_submodules(self.model, key)
+            if isinstance(target, FourierFTLayer):
+                target.delete_adapter(adapter_name)
+                if new_adapter is None:
+                    new_adapter = target.active_adapter[:]
+
+        self.active_adapter = new_adapter or []
 
     def merge_and_unload(
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None

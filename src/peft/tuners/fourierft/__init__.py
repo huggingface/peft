@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .config import FourierConfig
-from .layer import FourierLayer, FourierLinear
-from .model import FourierModel
+from .config import FourierFTConfig
+from .layer import FourierFTLayer, FourierFTLinear
+from .model import FourierFTModel
 
 
-__all__ = ["FourierConfig", "FourierLayer", "FourierLinear", "FourierModel"]
+__all__ = ["FourierFTConfig", "FourierFTLayer", "FourierFTLinear", "FourierFTModel"]
