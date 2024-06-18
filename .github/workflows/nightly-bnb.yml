@@ -15,6 +15,7 @@ env:
 
 jobs:
   run_all_tests_single_gpu:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -136,6 +137,7 @@ jobs:
           python scripts/log_reports.py --slack_channel_name bnb-daily-ci-collab >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
