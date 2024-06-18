@@ -49,7 +49,9 @@ jobs:
           python -m pip install --upgrade pip
           # cpu version of pytorch
           pip install -e .[test]
-          if [ "${{ matrix.os }}" == "windows-latest" ] || [ "${{ matrix.os }}" == "macos-12" ]; then
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            pip install --force-reinstall -U "numpy<2.0.0"
+          elif [ "${{ matrix.os }}" == "macos-12" ]; then
             pip install --force-reinstall -U "numpy<2.0.0"
           fi
       - name: Test with pytest
