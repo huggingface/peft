@@ -259,6 +259,8 @@ class LoraModel(BaseTuner):
                     else child.W_q
                     if hasattr(child, "W_q")
                     else child.weight
+                    if hasattr(child, "weight")
+                    else next(child.parameters())
                 )
                 module.to(weight.device)
 
@@ -288,6 +290,26 @@ class LoraModel(BaseTuner):
         # Collect dispatcher functions to decide what backend to use for the replaced LoRA layer. The order matters,
         # because the first match is always used. Therefore, the default layers should be checked last.
         dispatchers = []
+
+        if lora_config._custom_modules:
+            # Experimental custom LoRA module support. Allows users to pass a custom mapping for unsupported layer
+            # types by impelementing their own LoRA layers.
+            def dynamic_dispatch_func(target, adapter_name, lora_config, **kwargs):
+                new_module = None
+
+                if isinstance(target, BaseTunerLayer):
+                    target_base_layer = target.get_base_layer()
+                else:
+                    target_base_layer = target
+
+                for key, custom_cls in lora_config._custom_modules.items():
+                    if isinstance(target_base_layer, key):
+                        new_module = custom_cls(target, adapter_name, **kwargs)
+                        break
+
+                return new_module
+
+            dispatchers.append(dynamic_dispatch_func)
 
         # avoid eager bnb import
         if is_bnb_available():

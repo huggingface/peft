@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
+from torch import nn
+
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
@@ -309,3 +311,10 @@ class LoraConfig(PeftConfig):
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):
             self.loftq_config = vars(self.loftq_config)
+
+        self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
+
+    def _register_custom_module(self, mapping: dict[type[nn.Mmodule], type[nn.Module]]) -> None:
+        if self._custom_modules is None:
+            self._custom_modules = {}
+        self._custom_modules.update(mapping)
