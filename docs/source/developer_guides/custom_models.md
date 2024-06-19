@@ -277,7 +277,8 @@ By supplying a custom mapping, PEFT will take care of checking the layers of the
 
 When creating your custom LoRA module, please follow the same rules as the existing LoRA modules do. For this, check the [LoRA layer implementation](https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py). Notable constraints to consider:
 
-- The custom module should inherit from `nn.Module` and `peft.tuners.lora.layer.LoraLayer`
+- The custom module should inherit from `nn.Module` and `peft.tuners.lora.layer.LoraLayer`.
+- The `__init__` method of the custom module should have the positional arguments `base_layer` and `adapter_name`. After this, there are additional `**kwargs` that you are free to use or ignore.
 - The learnable parameters should be stored in an `nn.ModuleDict` or `nn.ParameterDict`, where the key corresponds to the name of the specific adapter (remember that a model can have more than one adapter at a time).
 - Also, the name of these learnable parameter attributes should start with `"lora_"`, e.g. `self.lora_new_param = ...`.
 - Some methods are optional, e.g. you only need to implement `merge` and `unmerge` if you want to support weight merging.
