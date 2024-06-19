@@ -3,7 +3,8 @@ import re
 import warnings
 from dataclasses import asdict
 from enum import Enum
-from typing import Any, Optional
+from itertools import chain
+from typing import Any, Dict, Optional, Type, Union
 
 import torch
 from torch import nn
@@ -271,50 +272,31 @@ class GLoraModel(BaseTuner):
 
         return self.model
 
-    # def _create_and_replace(
-    #     self,
-    #     glora_config,
-    #     adapter_name,
-    #     target,
-    #     target_name,
-    #     parent,
-    #     current_key,
-    # ):
-    #     pattern_keys = list(chain(glora_config.rank_pattern.keys(), glora_config.alpha_pattern.keys()))
-    #     target_name_key = next(filter(lambda key: re.match(rf".*\.{key}$", current_key), pattern_keys), current_key)
-    #     r = glora_config.rank_pattern.get(target_name_key, glora_config.r)
-    #     target_modules = glora_config.alpha_pattern.get(target_name_key, glora_config.target_modules)
-
-    #     kwargs = {
-    #         "r": r,
-    #         "target_modules" : target_modules
-    #     }
-    #     new_module = self._create_new_module(glora_config, adapter_name, target, **kwargs)
-    #     if adapter_name not in self.active_adapters:
-    #         # adding an additional adapter: it is not automatically trainable
-    #         new_module.requires_grad_(False)
-    #         self._replace_module(parent, target_name, new_module, target)
-
     def _create_and_replace(
         self,
-        glora_config: GLoraConfig,
+        config: GLoraConfig,
         adapter_name: str,
-        target: nn.Module,
+        target: Union[GLoraLayer, nn.Module],
         target_name: str,
         parent: nn.Module,
-        **optional_kwargs: Any,
-    ):
+        current_key: str,
+    ) -> None:
+        """
+        A private method to create and replace the target module with the adapter module.
+        """
+
+        # Regexp matching - Find key which matches current target_name in patterns provided
+        pattern_keys = list(chain(config.rank_pattern.keys(), config.alpha_pattern.keys()))
+        target_name_key = next(filter(lambda key: re.match(rf"(.*\.)?{key}$", current_key), pattern_keys), target_name)
+
+        kwargs = config.to_dict()
+        kwargs["r"] = config.rank_pattern.get(target_name_key, config.r)
+        kwargs["alpha"] = config.alpha_pattern.get(target_name_key, config.alpha)
+
         if isinstance(target, GLoraLayer):
-            target.update_layer(adapter_name, glora_config)
+            target.update_layer(adapter_name, **kwargs)
         else:
-            new_module = self._create_new_module(
-                glora_config,
-                adapter_name,
-                target,
-            )
-            if adapter_name not in self.active_adapters:
-                # adding an additional adapter: it is not automatically trainable
-                new_module.requires_grad_(False)
+            new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
 
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
@@ -370,20 +352,6 @@ class GLoraModel(BaseTuner):
         """
         self._set_adapter_layers(enabled=True)
 
-    # @staticmethod
-    # def _create_new_module(glora_config, adapter_name, target, **kwargs):
-    #     if isinstance(target, BaseTunerLayer):
-    #         target_base_layer = target.get_base_layer()
-    #     else:
-    #         target_base_layer = target
-
-    #     if isinstance(target_base_layer, Linear):
-    #         return Linear(target, adapter_name, glora_config, **kwargs)
-    #     else:
-    #         raise ValueError(
-    #             f"Target module {target} is not supported. Currently, only the following modules are supported: "
-    #             "`torch.nn.Linear`."
-    #         )
 
     @staticmethod
     def _create_new_module(glora_config, adapter_name, target, **kwargs):
@@ -444,7 +412,6 @@ def dispatch_default_glora(
     **kwargs,
 ) -> Optional[torch.nn.Module]:
     new_module = None
-    #kwargs["fan_in_fan_out"] = False
     if isinstance(target, BaseTunerLayer):
         target_base_layer = target.get_base_layer()
     else:

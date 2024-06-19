@@ -26,7 +26,8 @@ class GLoraConfig(PeftConfig):
             pattern is not in the common layers pattern.
     """
 
-    r: int = field(default=4, metadata={"help": "Lora attention dimension"})
+    r: int = field(default=8, metadata={"help": "GLoRa rank"})
+    alpha: int = field(default=8, metadata={"help": "GLoRa alpha"})
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
