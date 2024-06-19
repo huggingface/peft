@@ -23,7 +23,7 @@ from transformers.pytorch_utils import Conv1D
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils.other import transpose
 
-from .buffer_dict import BufferDict
+from .._buffer_dict import BufferDict
 
 
 class VeraLayer(BaseTunerLayer):

@@ -35,7 +35,6 @@ class MLP(nn.Module):
         self.sm = nn.LogSoftmax(dim=-1)
 
     def forward(self, X):
-        X = X.float()
         X = self.lin0(X)
         X = self.relu(X)
         X = self.lin1(X)
@@ -282,3 +281,16 @@ class TestVera:
         # should not raise
         input = torch.randn(5, 10)
         mlp_different_shapes(input)
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_vera_dtypes(self, dtype):
+        # 1872
+        if (dtype == torch.bfloat16) and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
+            pytest.skip("bfloat16 not supported on this system, skipping the test")
+
+        model = MLP().to(dtype)
+        config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False)
+        peft_model = get_peft_model(model, config)
+        inputs = torch.randn(5, 10).to(dtype)
+        output = peft_model(inputs)  # should not raise
+        assert output.dtype == dtype

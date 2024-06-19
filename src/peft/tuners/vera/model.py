@@ -33,8 +33,8 @@ from peft.utils import (
     _get_submodules,
 )
 
+from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
-from .buffer_dict import BufferDict
 from .config import VeraConfig
 from .layer import Linear, VeraLayer
 
