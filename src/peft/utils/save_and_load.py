@@ -133,6 +133,9 @@ def get_peft_model_state_dict(
     elif config.peft_type == PeftType.LOHA:
         to_return = {k: state_dict[k] for k in state_dict if "hada_" in k}
 
+    elif config.peft_type == PeftType.GLORA:
+        to_return = {k: state_dict[k] for k in state_dict if "glora_" in k}
+
     elif config.peft_type == PeftType.LOKR:
         to_return = {k: state_dict[k] for k in state_dict if "lokr_" in k}
 
@@ -314,6 +317,7 @@ def set_peft_model_state_dict(
         PeftType.LN_TUNING,
         PeftType.BOFT,
         PeftType.VERA,
+        PeftType.GLORA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -327,6 +331,7 @@ def set_peft_model_state_dict(
             PeftType.BOFT: "boft_",
             PeftType.LN_TUNING: "ln_tuning_",
             PeftType.VERA: "vera_lambda_",
+            PeftType.GLORA: "glora_"
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:

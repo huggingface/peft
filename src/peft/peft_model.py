@@ -55,6 +55,8 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
     VeraModel,
+    GLoraModel,
+    GLoraConfig,
 )
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import (
@@ -91,6 +93,8 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.POLY: PolyModel,
     PeftType.LN_TUNING: LNTuningModel,
     PeftType.VERA: VeraModel,
+    PeftType.GLORA: GLoraModel,
+
 }
 
 

@@ -81,6 +81,8 @@ from .tuners import (
     LNTuningModel,
     VeraConfig,
     VeraModel,
+    GLoraModel,
+    GLoraConfig,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
