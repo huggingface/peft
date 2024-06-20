@@ -151,7 +151,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", type=int, default=18, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout rate")
     parser.add_argument("--lora_target_modules", type=str, default=None, help="Comma-separated list of target modules for LoRA")
-    parser.add_argument("--hub_model_id", type=str, default="ShirinYamani/llama-3-8-fine-tuned-dora", help="Repository name to push the model on the Hugging Face Hub")
+    parser.add_argument("--hub_model_id", type=str, default=None, help="Repository name to push the model on the Hugging Face Hub")
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push the model to Hugging Face Hub")
     args = parser.parse_args()
     train_model(
