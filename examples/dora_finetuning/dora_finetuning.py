@@ -49,7 +49,7 @@ def train_model(
     else:
         model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token)
 
-        # if use_peft is True THEN, DORA setup
+    # if use_peft is True THEN, DORA setup
     if use_peft: #TODO: add other config than lora  peft_configs = (LoraConfig, AdaptionPromptConfig, PrefixTuningConfig)
         lora_config = LoraConfig(
             use_dora=True, 
@@ -59,7 +59,7 @@ def train_model(
             lora_dropout=lora_dropout, 
             bias="none"
         )
-        # Apply LoRA to the model
+        # Apply LoRA to the model if USE_PEFT=TRUE
         model = get_peft_model(model, lora_config) 
         
     model.to(device) #MODEL TO GPU/CUDA
