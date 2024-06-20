@@ -114,8 +114,6 @@
       title: VeRA
     - local: package_reference/fourierft
       title: FourierFT
-    - local: package_reference/helpers
-      title: Helpers
       
     title: Adapters
   - sections:
