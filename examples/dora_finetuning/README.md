@@ -10,12 +10,11 @@
 ```python
 import torch
 from peft import LoraConfig, get_peft_model
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import SFTTrainer
+from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B", torch_dtype=torch.bfloat16, device_map="auto")
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", torch_dtype=torch.bfloat16, device_map="auto")
+tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 lora_config = LoraConfig(
     use_dora=True
@@ -69,23 +68,14 @@ python train_model.py \
     --use_peft \
     --quantize \
     --eval_step 10 \
-    --save_step 10000 \
+    --save_step 100 \
     --device "cuda:0" \
     --lora_r 16 \
     --lora_alpha 32 \
-    --lora_dropout 0.1 \
+    --lora_dropout 0.05 \
     --lora_target_modules "q_proj,k_proj,v_proj,o_proj" \
     --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
-```
-
-## Use the model
-You can load and use the model as any other 🤗 PEFT model
-```python
-from peft import PeftModel
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Meta-Llama-3-8B")
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
-olora_model = PeftModel.from_pretrained(model, "dora-llama-3-8b")
 ```
 
 ## DoRA vs. LoRA
