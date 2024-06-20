@@ -17,22 +17,24 @@ class GLoraLayer(BaseTunerLayer):
         self.r[adapter_name] = r
 
         # Initialize learnable parameters
-        self.glora_Ad, self.glora_Au = self._make_param((out_features, in_features), f"LoRA_{r}")
-        self.glora_Bd, self.glora_Bu = self._make_param((out_features, in_features), f"LoRA_{r}")
-        self.glora_Cd, self.glora_Cu = self._make_param((in_features, 1), f"LoRA_{r}")
-        self.glora_D = nn.Parameter(torch.zeros(out_features))
-        self.glora_E = nn.Parameter(torch.zeros(out_features))
+        # self.glora_Ad, self.glora_Au = self._make_param((out_features, in_features), f"LoRA_{r}")
+        # self.glora_Bd, self.glora_Bu = self._make_param((out_features, in_features), f"LoRA_{r}")
+        #  self.glora_Cd, self.glora_Cu = self._make_param((in_features, 1), f"LoRA_{r}")
+        # self.glora_D = nn.Parameter(torch.zeros(out_features))
+        # self.glora_E = nn.Parameter(torch.zeros(out_features))
 
         # Generate configurations
         config_A_B = [f"LoRA_{r}", "vector", "constant", "none"]
         config_C = [f"LoRA_{r}", "vector", "none"]
         config_D_E = ["constant", "none", "vector"]
-        self.configs = [{"A": A, "B": B, "C": C, "D": D, "E": E} 
-                        for A in config_A_B
-                        for B in config_A_B
-                        for C in config_C
-                        for D in config_D_E
-                        for E in config_D_E]
+        self.configs = [
+            {"A": A, "B": B, "C": C, "D": D, "E": E}
+            for A in config_A_B
+            for B in config_A_B
+            for C in config_C
+            for D in config_D_E
+            for E in config_D_E
+        ]
 
         # Initialize parameter weights using Kaiming uniform initialization
         nn.init.kaiming_uniform_(self.glora_Au, a=math.sqrt(5))
@@ -40,7 +42,7 @@ class GLoraLayer(BaseTunerLayer):
         nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
 
         # Mark the weight as unmerged ?????
-        #self.merged = False
+        # self.merged = False
         if self.disable_adapters:
             if self.merged:
                 self.unmerge()
@@ -58,27 +60,23 @@ class GLoraLayer(BaseTunerLayer):
 class Linear(nn.Module, GLoraLayer):
     # GLora implemented in a dense layer
     def __init__(
-        self,
-        adapter_name: str,
-        in_features: int,
-        out_features: int,
-        r: int = 0,
-        bias: bool = True,
-        **kwargs
-        ) -> None:
+        self, adapter_name: str, in_features: int, out_features: int, r: int = 0, bias: bool = True, **kwargs
+    ) -> None:
         super().__init__()
         GLoraLayer.__init__(self, in_features, out_features, r, adapter_name)
-        #Initialize nn.Linear parameters
+        print("out_features " + str(out_features))
+        print("out_features " + str(in_features))
+        # Initialize nn.Linear parameters
         self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
         if kwargs.get("bias", True):
             self.bias = nn.Parameter(torch.Tensor(out_features))
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
 
-       # Freezing the pre-trained weight matrix
+        #    Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
         for layer in self.children():
-            if hasattr(layer, 'reset_parameters'):
+            if hasattr(layer, "reset_parameters"):
                 layer.reset_parameters(self)
 
         self.active_adapter = adapter_name
@@ -88,6 +86,7 @@ class Linear(nn.Module, GLoraLayer):
         if self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
+        return
         path_config = self.eval_config
         A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
         B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
@@ -102,6 +101,7 @@ class Linear(nn.Module, GLoraLayer):
         self.merged = True
 
     def forward(self, x: torch.Tensor):
+        return
         previous_dtype = x.dtype
         if self.eval_config is not None:
             path_config = self.eval_config
