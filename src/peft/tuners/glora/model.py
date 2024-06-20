@@ -75,20 +75,20 @@ class GLoraModel(BaseTuner):
         super().__init__(model, config, adapter_name)
 
 
-    def add_adapter(self, adapter_name, config=None):
-        print("add_adapter")
-        if config is not None:
-            model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
-            config = self._prepare_glora_config(config, model_config)
-            self.peft_config[adapter_name] = config
-        self._find_and_replace(adapter_name)
-        if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
-            raise ValueError(
-                "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
-            )
-        mark_only_glora_as_trainable(self.model)
-        if self.peft_config[adapter_name].inference_mode:
-            _freeze_adapter(self.model, adapter_name)
+    # def add_adapter(self, adapter_name, config=None):
+    #     print("add_adapter")
+    #     if config is not None:
+    #         model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
+    #         config = self._prepare_glora_config(config, model_config)
+    #         self.peft_config[adapter_name] = config
+    #     self._find_and_replace(adapter_name)
+    #     if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
+    #         raise ValueError(
+    #             "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
+    #         )
+    #     mark_only_glora_as_trainable(self.model)
+    #     if self.peft_config[adapter_name].inference_mode:
+    #         _freeze_adapter(self.model, adapter_name)
 
     def _check_target_module_exists(self, glora_config, key):
         if isinstance(glora_config.target_modules, str):
@@ -117,23 +117,27 @@ class GLoraModel(BaseTuner):
                 f"Please check the target modules and try again."
             )
 
-    def _replace_module(self, parent_module, child_name, new_module, old_module):
-        setattr(parent_module, child_name, new_module)
-        new_module.weight = old_module.weight
-        if hasattr(old_module, "bias"):
-            if old_module.bias is not None:
-                new_module.bias = old_module.bias
+    def _replace_module(self, parent, child_name, new_module, child):
+        setattr(parent, child_name, new_module)
+        # It's not necessary to set requires_grad here, as that is handled by
+        # _mark_only_adapters_as_trainable
 
-        if getattr(old_module, "state", None) is not None:
-            new_module.state = old_module.state
-            new_module.to(old_module.weight.device)
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
+                new_module.bias = child.bias
+
+        if getattr(child, "state", None) is not None:
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
+            new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
-            if "glora_" in name:
-                module.to(old_module.weight.device)
-            if "ranknum" in name:
-                module.to(old_module.weight.device)
+            if self.prefix in name:
+                module.to(child.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -216,9 +220,10 @@ class GLoraModel(BaseTuner):
 
         return self.model
 
+
     def _create_and_replace(
         self,
-        glora_config: GLoraConfig,
+        config: GLoraConfig,
         adapter_name: str,
         target: Union[GLoraLayer, nn.Module],
         target_name: str,
@@ -228,13 +233,12 @@ class GLoraModel(BaseTuner):
         """
         A private method to create and replace the target module with the adapter module.
         """
-
-        kwargs = glora_config.to_dict()
+        kwargs = config.to_dict()
 
         if isinstance(target, GLoraLayer):
             target.update_layer(adapter_name, **kwargs)
         else:
-            new_module = self._create_new_module(glora_config, adapter_name, target, **kwargs)
+            new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
 
 

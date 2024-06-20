@@ -71,7 +71,7 @@ class Linear(nn.Module, GLoraLayer):
         GLoraLayer.__init__(self, in_features, out_features, r, adapter_name)
 
         #Freezing the pre-trained weight matrix
-        self.weight.requires_grad = False
+        #self.weight.requires_grad = False
         for layer in self.children():
             if hasattr(layer, "reset_parameters"):
                 layer.reset_parameters(self)
