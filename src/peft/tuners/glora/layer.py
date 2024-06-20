@@ -9,12 +9,27 @@ import torch.nn.functional as F
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 
+
 class GLoraLayer(BaseTunerLayer):
-    def __init__(self, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
+    def __init__(self, base_layer: nn.Module, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
         super().__init__()
+        GLoraLayer.__init__(self,
+                            base_layer,
+                            in_features,
+                            out_features,
+                            r,
+                            adapter_name,
+                            **kwargs)
         # Initialize parameters
         self.r = {}
         self.r[adapter_name] = r
+        # LoHa info
+        self.hada_w1_a = nn.ParameterDict({})
+        self.hada_w1_b = nn.ParameterDict({})
+        self.hada_w2_a = nn.ParameterDict({})
+        self.hada_w2_b = nn.ParameterDict({})
+        self.hada_t1 = nn.ParameterDict({})
+        self.hada_t2 = nn.ParameterDict({})
 
         self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
         self.glora_Bd, self.glora_Bu = self.make_param((out_features, in_features), f"LoRA_{r}")
@@ -65,10 +80,10 @@ class GLoraLayer(BaseTunerLayer):
 class Linear(nn.Module, GLoraLayer):
     # GLora implemented in a dense layer
     def __init__(
-        self, adapter_name: str, in_features: int, out_features: int, r: int = 0, bias: bool = True, **kwargs
+        self, base_layer: nn.Module, adapter_name: str, in_features: int, out_features: int, r: int = 0, bias: bool = True, **kwargs
     ) -> None:
         super().__init__()
-        GLoraLayer.__init__(self, in_features, out_features, r, adapter_name)
+        GLoraLayer.__init__(self, in_features, out_features, r, adapter_name, base_layer)
 
         #Freezing the pre-trained weight matrix
         #self.weight.requires_grad = False

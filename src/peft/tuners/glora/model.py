@@ -287,6 +287,7 @@ class GLoraModel(BaseTuner):
         out_features = target_base_layer.out_features
         if isinstance(target_base_layer, torch.nn.Linear):
                         new_module = new_module_cls(target=target,
+                                        base_layer=target_base_layer,
                                         adapter_name=adapter_name,
                                         in_features= in_features,
                                         out_features= out_features,
