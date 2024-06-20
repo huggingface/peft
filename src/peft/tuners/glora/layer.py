@@ -6,50 +6,56 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from peft.tuners.tuners_utils import BaseTunerLayer
 
-class GLoraLayer:
+
+class GLoraLayer(BaseTunerLayer):
     def __init__(self, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
+        super().__init__()
+        # Initialize parameters
         self.r = {}
         self.r[adapter_name] = r
-        self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
-        self.glora_Bd, self.glora_Bu = self.make_param((out_features, in_features), f"LoRA_{r}")
-        self.glora_Cd, self.glora_Cu = self.make_param((in_features, 1), f"LoRA_{r}")
+
+        # Initialize learnable parameters
+        self.glora_Ad, self.glora_Au = self._make_param((out_features, in_features), f"LoRA_{r}")
+        self.glora_Bd, self.glora_Bu = self._make_param((out_features, in_features), f"LoRA_{r}")
+        self.glora_Cd, self.glora_Cu = self._make_param((in_features, 1), f"LoRA_{r}")
         self.glora_D = nn.Parameter(torch.zeros(out_features))
         self.glora_E = nn.Parameter(torch.zeros(out_features))
-        self.eval_config = None
-        nn.init.kaiming_uniform_(self.glora_Au, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.glora_Bu, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
-        # Mark the weight as unmerged
-        self.merged = False
-        self.in_features = in_features
-        self.out_features = out_features
-        self.kwargs = kwargs
+
+        # Generate configurations
         config_A_B = [f"LoRA_{r}", "vector", "constant", "none"]
         config_C = [f"LoRA_{r}", "vector", "none"]
         config_D_E = ["constant", "none", "vector"]
-        self.configs = []
-        for A in config_A_B:
-            for B in config_A_B:
-                for C in config_C:
-                    for D in config_D_E:
-                        for E in config_D_E:
-                            config = {"A": A, "B": B, "C": C, "D": D, "E": E}
-                            self.configs.append(config)
+        self.configs = [{"A": A, "B": B, "C": C, "D": D, "E": E} 
+                        for A in config_A_B
+                        for B in config_A_B
+                        for C in config_C
+                        for D in config_D_E
+                        for E in config_D_E]
 
-    def make_param(self, shape, config=None):
-        if "LoRA" in config:
-            out_feature = shape[0]
-            in_feature = shape[1]
+        # Initialize parameter weights using Kaiming uniform initialization
+        nn.init.kaiming_uniform_(self.glora_Au, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.glora_Bu, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
+
+        # Mark the weight as unmerged ?????
+        #self.merged = False
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+
+    def _make_param(self, shape, config=None):
+        if config and "LoRA" in config:
             try:
                 rank = int(config.split("_")[1])
-            except:
+            except ValueError:
                 rank = 4
-            return nn.Parameter(torch.zeros(out_feature, rank)), nn.Parameter(torch.zeros(rank, in_feature))
+            return nn.Parameter(torch.zeros(shape[0], rank)), nn.Parameter(torch.zeros(rank, shape[1]))
         return nn.Parameter(torch.zeros(*shape))
 
 
-class Linear(nn.Linear, GLoraLayer):
+class Linear(nn.Module, GLoraLayer):
     # GLora implemented in a dense layer
     def __init__(
         self,
@@ -57,15 +63,24 @@ class Linear(nn.Linear, GLoraLayer):
         in_features: int,
         out_features: int,
         r: int = 0,
-        **kwargs,
-    ):
-        nn.Linear.__init__(self, in_features, out_features, **kwargs)
-        GLoraLayer.__init__(self, in_features=in_features, out_features=out_features, r=r, adapter_name=adapter_name)
+        bias: bool = True,
+        **kwargs
+        ) -> None:
+        super().__init__()
+        GLoraLayer.__init__(self, in_features, out_features, r, adapter_name)
+        #Initialize nn.Linear parameters
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        if kwargs.get("bias", True):
+            self.bias = nn.Parameter(torch.Tensor(out_features))
+        else:
+            self.register_parameter('bias', None)
 
-        # Freezing the pre-trained weight matrix
+       # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
+        for layer in self.children():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters(self)
 
-        nn.Linear.reset_parameters(self)
         self.active_adapter = adapter_name
         self.to(self.weight.device)
 

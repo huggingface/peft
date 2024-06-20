@@ -10,8 +10,8 @@ from trl import SFTConfig, SFTTrainer
 from peft.tuners.glora import GLoraConfig
 
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DEVICE
+#DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+#DEVICE
 dataset_id = "roneneldan/TinyStories"
 model_id = "Maykeye/TinyLLama-v0"
 
