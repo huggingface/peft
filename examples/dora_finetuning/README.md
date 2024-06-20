@@ -77,6 +77,12 @@ python train_model.py \
     --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
 ```
+## Use the model
+You can load and use the model as any other 🤗 models.
+```python
+from transformers import AutoModel
+model = AutoModel.from_pretrained("ShirinYamani/huggyllama-llama-7b-finetuned")
+```
 
 ## DoRA vs. LoRA
 In general, DoRA finetuning on diffusion models is still experimental and is likely to require different hyperparameter values to perform best compared to LoRA.
