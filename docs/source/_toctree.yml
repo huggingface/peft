@@ -45,6 +45,8 @@
     title: Troubleshooting
   - local: developer_guides/checkpoint
     title: PEFT checkpoint format
+  - local: package_reference/helpers
+    title: Helpers
 
 - title: 🤗 Accelerate integrations
   sections:
@@ -114,6 +116,7 @@
       title: FourierFT
     - local: package_reference/helpers
       title: Helpers
+      
     title: Adapters
   - sections:
     - local: package_reference/merge_utils

@@ -33,6 +33,7 @@ from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
+from ._buffer_dict import BufferDict
 
 
 logger = logging.getLogger(__name__)
@@ -327,7 +328,7 @@ class BaseTuner(nn.Module, ABC):
                 continue
 
             for submodule in module.modules():
-                if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict)):
+                if not isinstance(submodule, (nn.ModuleDict, nn.ParameterDict, BufferDict)):
                     continue
 
                 if adapter_name not in submodule:
@@ -336,6 +337,11 @@ class BaseTuner(nn.Module, ABC):
                 if isinstance(submodule[adapter_name], nn.Parameter):
                     if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
                         submodule[adapter_name].data = submodule[adapter_name].data.to(torch.float32)
+                    continue
+
+                if isinstance(submodule[adapter_name], torch.Tensor):  # e.g. from a BufferDict
+                    if submodule[adapter_name].dtype in dtypes_to_convert_to_fp32:
+                        submodule[adapter_name] = submodule[adapter_name].to(torch.float32)
                     continue
 
                 for param in submodule[adapter_name].parameters():
@@ -675,8 +681,6 @@ class BaseTunerLayer(ABC):
         """
         Move the adapter of the given name to the device of the base layer.
         """
-        from peft.tuners.vera.buffer_dict import BufferDict
-
         if device is None:
             # check weight and qweight (for GPTQ)
             for weight_name in ("weight", "qweight"):
