@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Union, Literal
+from typing import Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
@@ -27,7 +27,7 @@ class FourierFTConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`FourierFTModel`].
 
     Args:
-        n_frequency (`int`): 
+        n_frequency (`int`):
             Num of learnable frequencies for the Discrete Fourier Transform. 'n_frequency' is an integer that
             is greater than 0 and less than or equal to d^2 (assuming the weight W has dimensions of d by d).
             Additionally, it is the number of trainable parameters required to update each delta W weight.
@@ -35,9 +35,9 @@ class FourierFTConfig(PeftConfig):
             on training speed, but higher values of it (typically) result in larger GPU memory costs and better accuracy.
             The following examples of settings regarding 'n_frequency' can be used as reference for users.
             For NLU tasks with RoBERTa-base and RoBERTa-large models, adopting 'n_frequency': 100 can almost achieve similar
-            results as 'r': 8 in LoRA. For image classification tasks with ViT-base and Vit-large models, adopting 
+            results as 'r': 8 in LoRA. For image classification tasks with ViT-base and Vit-large models, adopting
             'n_frequency': 3000 can almost achieve similar results as 'r': 16 in LoRA.
-        scaling (`float`): 
+        scaling (`float`):
             The scaling value for the delta W matrix. This is an important hyperparameter used for scaling, similar to the
             'lora_alpha' parameter in the LoRA method. 'scaling' can be determined during the hyperparameter search process.
             However, if users want to skip this process, one can refer to the settings in the following scenarios.
@@ -46,13 +46,13 @@ class FourierFTConfig(PeftConfig):
             This parameter can be set to 300.0 for both ViT-base and ViT-large models across all image classification tasks.
         random_loc_seed (`int`):
             Seed for the random location of the frequencies, i.e., the spectral entry matrix.
-        target_modules (`Union[list[str],str]`): 
+        target_modules (`Union[list[str],str]`):
             List of module names or regex expression of the module names to replace with FourierFT.
-            For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. 
+            For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'.
             Only linear layers are supported.
-        fan_in_fan_out (`bool`): 
+        fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out).
-        bias (`str`): 
+        bias (`str`):
             Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'.
         modules_to_save (`list[str]`):
             List of modules apart from FourierFT layers to be set as trainable and saved in the final checkpoint. For
@@ -70,11 +70,11 @@ class FourierFTConfig(PeftConfig):
             For example, `{model.decoder.layers.0.encoder_attn.k_proj: 1000`}.
         init_weights (`bool`):
             The initialization of the Fourier weights. Set this to False if the spectrum are initialized to a standard normal distribution.
-            Set this to True if the spectrum are initialized to zeros. 
+            Set this to True if the spectrum are initialized to zeros.
     """
 
     n_frequency: int = field(
-        default=1000, 
+        default=1000,
         metadata={
             "help": (
                 "Num of learnable frequencies for the Discrete Fourier Transform. 'n_frequency' is an integer that"
@@ -90,7 +90,7 @@ class FourierFTConfig(PeftConfig):
         },
     )
     scaling: float = field(
-        default=150.0, 
+        default=150.0,
         metadata={
             "help": (
                 "The scaling value for the delta W matrix. This is an important hyperparameter used for scaling, similar to the"
@@ -102,7 +102,9 @@ class FourierFTConfig(PeftConfig):
             )
         },
     )
-    random_loc_seed: Optional[int] = field(default=777, metadata={"help": "Seed for the random location of the frequencies."})
+    random_loc_seed: Optional[int] = field(
+        default=777, metadata={"help": "Seed for the random location of the frequencies."}
+    )
     fan_in_fan_out: bool = field(
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
@@ -117,7 +119,9 @@ class FourierFTConfig(PeftConfig):
             )
         },
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'."})
+    bias: str = field(
+        default="none", metadata={"help": "Bias type for FourierFT. Can be 'none', 'all' or 'fourier_only'."}
+    )
     modules_to_save: Optional[list[str]] = field(
         default=None,
         metadata={

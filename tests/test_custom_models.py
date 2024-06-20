@@ -374,7 +374,11 @@ TEST_CASES = [
         "Vanilla MLP 7 FourierFT",
         "MLP",
         FourierFTConfig,
-        {"n_frequency_pattern": {"lin0": 5, "lin1": 10}, "target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+        {
+            "n_frequency_pattern": {"lin0": 5, "lin1": 10},
+            "target_modules": ["lin0", "lin1"],
+            "modules_to_save": ["lin1"],
+        },
     ),
 ]
 

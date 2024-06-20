@@ -227,7 +227,7 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "layoutlm": ["query", "value"],
     "llama": ["q_proj", "v_proj"],
     "chatglm": ["query_key_value"],
-    "gpt_bigcode": ["mlp.c_proj"],   
+    "gpt_bigcode": ["mlp.c_proj"],
     "mpt": ["Wqkv"],
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],

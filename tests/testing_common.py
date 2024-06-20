@@ -29,6 +29,7 @@ from packaging import version
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    FourierFTConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -41,7 +42,6 @@ from peft import (
     PromptLearningConfig,
     PromptTuningConfig,
     VeraConfig,
-    FourierFTConfig,
     get_peft_model,
     get_peft_model_state_dict,
     prepare_model_for_kbit_training,
@@ -489,7 +489,15 @@ class PeftCommonTester:
         _ = model.merge_and_unload()
 
     def _test_merge_layers_nan(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VeraConfig, FourierFTConfig):
+        if config_cls not in (
+            LoraConfig,
+            IA3Config,
+            AdaLoraConfig,
+            LoHaConfig,
+            LoKrConfig,
+            VeraConfig,
+            FourierFTConfig,
+        ):
             # Merge layers only supported for LoRA and IA³
             return
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
@@ -524,7 +532,14 @@ class PeftCommonTester:
         model = model.to(self.torch_device)
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda" in name or "fourierft_spectrum" in name:
+            if (
+                "lora_A" in name
+                or "ia3" in name
+                or "lora_E" in name
+                or "lora_B" in name
+                or "vera_lambda" in name
+                or "fourierft_spectrum" in name
+            ):
                 module.data[0] = torch.nan
 
         with pytest.raises(
@@ -533,7 +548,14 @@ class PeftCommonTester:
             model = model.merge_and_unload(safe_merge=True)
 
         for name, module in model.named_parameters():
-            if "lora_A" in name or "ia3" in name or "lora_E" in name or "lora_B" in name or "vera_lambda" in name or "fourierft_spectrum" in name:
+            if (
+                "lora_A" in name
+                or "ia3" in name
+                or "lora_E" in name
+                or "lora_B" in name
+                or "vera_lambda" in name
+                or "fourierft_spectrum" in name
+            ):
                 module.data[0] = torch.inf
 
         with pytest.raises(

@@ -179,7 +179,7 @@ class FourierFTModel(BaseTuner):
                     "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
                     "Setting fan_in_fan_out to False."
                 )
-                kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = False    
+                kwargs["fan_in_fan_out"] = fourierft_config.fan_in_fan_out = False
         elif isinstance(target_base_layer, Conv1D):
             kwargs["is_target_conv_1d_layer"] = True
             if not kwargs["fan_in_fan_out"]:
@@ -193,7 +193,7 @@ class FourierFTModel(BaseTuner):
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`."
             )
-        
+
         new_module = FourierFTLinear(target, adapter_name, **kwargs)
 
         return new_module
@@ -289,7 +289,7 @@ class FourierFTModel(BaseTuner):
                 setattr(parent, target_name, target.modules_to_save[target.active_adapter])
 
         return self.model
-    
+
     def delete_adapter(self, adapter_name: str):
         """
         Deletes an existing adapter.

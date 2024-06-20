@@ -61,7 +61,8 @@ class FourierFTLayer(BaseTunerLayer):
             )
         self.fourierft_n_frequency[adapter_name] = n_frequency
         self.indices[adapter_name] = torch.randperm(
-            self.out_features * self.in_features, generator=torch.Generator().manual_seed(self.fourierft_random_loc_seed)
+            self.out_features * self.in_features,
+            generator=torch.Generator().manual_seed(self.fourierft_random_loc_seed),
         )[:n_frequency]
         self.indices[adapter_name] = torch.stack(
             [self.indices[adapter_name] // self.in_features, self.indices[adapter_name] % self.in_features], dim=0
@@ -69,17 +70,17 @@ class FourierFTLayer(BaseTunerLayer):
         self.fourierft_scaling[adapter_name] = scaling
         # Actual trainable parameters
         self.fourierft_spectrum[adapter_name] = nn.Parameter(torch.randn(n_frequency), requires_grad=True)
-        
+
         if init_weights:
             self.reset_fourier_parameters(adapter_name)
-        
+
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     @torch.no_grad()
     def reset_fourier_parameters(self, adapter_name):
         if adapter_name in self.fourierft_spectrum.keys():
-                nn.init.zeros_(self.fourierft_spectrum[adapter_name])
+            nn.init.zeros_(self.fourierft_spectrum[adapter_name])
 
     def get_delta_weight(self, adapter) -> torch.Tensor:
         spectrum = self.fourierft_spectrum[adapter]
