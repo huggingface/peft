@@ -32,7 +32,10 @@ def train_model(
     device = torch.device(device)
     print(f"Using device: {device}")
     
-    tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token)    
+    #load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token) 
+     
+    #Load model in Quantized and Peft configz  
     #QDoRA: IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
         model = AutoModelForCausalLM.from_pretrained(
