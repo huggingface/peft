@@ -1,4 +1,5 @@
 import re
+import warnings
 from dataclasses import asdict
 from enum import Enum
 from itertools import chain
@@ -8,7 +9,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from peft.tuners.lycoris_utils import BaseTuner
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -66,15 +67,13 @@ class GLoraModel(BaseTuner):
     """
 
     prefix: str = "glora"
+    layers_mapping: Dict[Type[torch.nn.Module], Type[GLoraLayer]] = {
+        torch.nn.Linear: Linear,
+    }
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
-
-        # self.model = model
-        # self.forward = self.model.forward
-        # self.peft_config = config
-        # self.add_adapter(adapter_name, self.peft_config[adapter_name])
 
     def add_adapter(self, adapter_name, config=None):
         print("add_adapter")
@@ -92,25 +91,14 @@ class GLoraModel(BaseTuner):
             _freeze_adapter(self.model, adapter_name)
 
     def _check_target_module_exists(self, glora_config, key):
-        print("_check_target_module_exists")
         if isinstance(glora_config.target_modules, str):
             target_module_found = re.fullmatch(glora_config.target_modules, key)
         else:
             target_module_found = any(key.endswith(target_key) for target_key in glora_config.target_modules)
         return target_module_found
 
-    def _create_new_module(self, lora_config, adapter_name, target, **kwargs):
-        print("_create_new_module")
-        bias = hasattr(target, "bias") and target.bias is not None
-        r = kwargs.get('r', lora_config.r)
-        if isinstance(target, torch.nn.Linear):
-            in_features, out_features = target.in_features, target.out_features
-        new_module = Linear(adapter_name, in_features, out_features, bias=bias, r=r)
-
-        return new_module
 
     def _find_and_replace(self, adapter_name):
-        print("_find_and_replace")
         glora_config = self.peft_config[adapter_name]
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in self.model.named_modules()]
@@ -130,7 +118,6 @@ class GLoraModel(BaseTuner):
             )
 
     def _replace_module(self, parent_module, child_name, new_module, old_module):
-        print("_replace_module")
         setattr(parent_module, child_name, new_module)
         new_module.weight = old_module.weight
         if hasattr(old_module, "bias"):
@@ -149,7 +136,6 @@ class GLoraModel(BaseTuner):
                 module.to(old_module.weight.device)
 
     def __getattr__(self, name: str):
-        print("__getattr__")
         """Forward missing attributes to the wrapped module."""
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
@@ -157,7 +143,6 @@ class GLoraModel(BaseTuner):
             return getattr(self.model, name)
 
     def get_peft_config_as_dict(self, inference: bool = False):
-        print("get_peft_config_as_dict")
         config_dict = {}
         for key, value in self.peft_config.items():
             config = {k: v.value if isinstance(v, Enum) else v for k, v in asdict(value).items()}
@@ -168,7 +153,6 @@ class GLoraModel(BaseTuner):
 
     @staticmethod
     def _prepare_glora_config(peft_config, model_config):
-        print("_prepare_glora_config")
         if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
@@ -177,7 +161,6 @@ class GLoraModel(BaseTuner):
 
     @staticmethod
     def _replace_module(parent, child_name, new_module, child):
-        print("_replace_module")
         setattr(parent, child_name, new_module)
         new_module.weight = child.weight
         if hasattr(child, "bias"):
@@ -196,7 +179,6 @@ class GLoraModel(BaseTuner):
                 module.to(child.weight.device)
 
     def merge_and_unload(self, progressbar: bool = False):
-        print("merge_and_unload")
         r"""
         This method merges the LoRa layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
@@ -215,7 +197,6 @@ class GLoraModel(BaseTuner):
         return self._unload_and_optionally_merge(progressbar=progressbar)
 
     def _unload_and_optionally_merge(self, merge=True, progressbar: bool = False):
-        print("_unload_and_optionally_merge")
         key_list = [key for key, _ in self.model.named_modules() if "glora" not in key]
         for key in tqdm(key_list, disable=not progressbar):
             try:
@@ -237,52 +218,87 @@ class GLoraModel(BaseTuner):
 
     def _create_and_replace(
         self,
-        glora_config :GLoraConfig,
-        adapter_name,
-        target,
-        target_name,
-        parent,
-        current_key,
-        **optional_kwargs,
-    ):
-        print("_create_and_replace")
-        if current_key is None:
-            raise ValueError("Current Key shouldn't be `None`")
+        glora_config: GLoraConfig,
+        adapter_name: str,
+        target: Union[GLoraLayer, nn.Module],
+        target_name: str,
+        parent: nn.Module,
+        current_key: str,
+    ) -> None:
+        """
+        A private method to create and replace the target module with the adapter module.
+        """
 
-        r = glora_config.r
-        bias = hasattr(target, "bias") and target.bias is not None
-        kwargs = {
-            "r": r,
-            "target_modules": glora_config.target_modules,
-        }
-        kwargs["bias"] = bias
+        kwargs = glora_config.to_dict()
 
-        if isinstance(target, Linear):
-            target.update_layer(
-                adapter_name,
-            )
+        if isinstance(target, GLoraLayer):
+            target.update_layer(adapter_name, **kwargs)
         else:
             new_module = self._create_new_module(glora_config, adapter_name, target, **kwargs)
-            if adapter_name not in self.active_adapter:
-                new_module.requires_grad_(False)
             self._replace_module(parent, target_name, new_module, target)
 
 
+    @classmethod
+    def _create_new_module(cls, config: GLoraConfig, adapter_name: str, target: nn.Module, **kwargs) -> GLoraLayer:
+        # Find corresponding subtype of provided target module
+        new_module_cls = None
+        for subtype, target_cls in cls.layers_mapping.items():
+            if (
+                hasattr(target, "base_layer")
+                and isinstance(target.get_base_layer(), subtype)
+                and isinstance(target, BaseTunerLayer)
+            ):
+                # nested tuner layers are allowed
+                new_module_cls = target_cls
+                break
+            elif isinstance(target, subtype):
+                new_module_cls = target_cls
+                break
+
+        # We didn't find corresponding type, so adapter for this layer is not supported
+        if new_module_cls is None:
+            supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
+            raise ValueError(
+                f"Target module of type {type(target)} not supported, "
+                f"currently only adapters for {supported_modules} are supported"
+            )
+
+        if isinstance(target, BaseTunerLayer):
+            target_base_layer = target.get_base_layer()
+        else:
+            target_base_layer = target
+        kwargs.pop('r', None)
+        in_features = target_base_layer.in_features
+        out_features = target_base_layer.out_features
+        if isinstance(target_base_layer, torch.nn.Linear):
+                        new_module = new_module_cls(target=target,
+                                        adapter_name=adapter_name,
+                                        in_features= in_features,
+                                        out_features= out_features,
+                                        r=config.r,
+                                        **kwargs)
+        else:
+            supported_modules = ", ".join(layer.__name__ for layer in cls.layers_mapping.keys())
+            raise ValueError(
+                f"Target module of type {type(target)} not supported, "
+                f"currently only adapters for {supported_modules} are supported"
+            )
+
+        return new_module
+
+
     def _mark_only_adapters_as_trainable(self, model: nn.Module) -> None:
-        print("_mark_only_adapters_as_trainable")
         for n, p in model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
-        print("_prepare_adapter_config")
         if peft_config.target_modules is None:
             raise ValueError("Please specify `target_modules` in `peft_config`")
         return peft_config
 
     def enable_adapter_layers(self) -> None:
-        print("enable_adapter_layers")
         """Enable all adapters.
 
         Call this if you have previously disabled all adapters and want to re-enable them.
@@ -290,7 +306,6 @@ class GLoraModel(BaseTuner):
         self._set_adapter_layers(enabled=True)
 
     def disable_adapter_layers(self) -> None:
-        print("disable_adapter_layers")
         """Disable all adapters.
 
         When disabling all adapters, the model output corresponds to the output of the base model.
@@ -300,7 +315,6 @@ class GLoraModel(BaseTuner):
 
 @staticmethod
 def mark_only_glora_as_trainable(model: nn.Module) -> None:
-    print("mark_only_glora_as_trainable")
     for n, p in model.named_parameters():
         if "glora_" not in n:
             p.requires_grad = False
