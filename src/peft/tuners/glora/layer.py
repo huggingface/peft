@@ -23,16 +23,12 @@ class GLoraLayer(BaseTunerLayer):
         self.hada_t1 = nn.ParameterDict({})
         self.hada_t2 = nn.ParameterDict({})
 
+        # Initialize learnable parameters
         self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
         self.glora_Bd, self.glora_Bu = self.make_param((out_features, in_features), f"LoRA_{r}")
         self.glora_Cd, self.glora_Cu = self.make_param((in_features, 1), f"LoRA_{r}")
         self.glora_D = nn.Parameter(torch.zeros(out_features))
         self.glora_E = nn.Parameter(torch.zeros(out_features))
-
-        # Initialize learnable parameters
-       #  self.glora_Cd, self.glora_Cu = self._make_param((in_features, 1), f"LoRA_{r}")
-        # self.glora_D = nn.Parameter(torch.zeros(out_features))
-        # self.glora_E = nn.Parameter(torch.zeros(out_features))
 
         # Generate configurations
         config_A_B = [f"LoRA_{r}", "vector", "constant", "none"]
