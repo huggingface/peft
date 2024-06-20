@@ -77,7 +77,7 @@ python train_model.py \
     --hub_model_id "YOUR_HF_REPO" \
     --push_to_hub
 ```
-## Use the model
+## Use the model on 🤗
 You can load and use the model as any other 🤗 models.
 ```python
 from transformers import AutoModel
