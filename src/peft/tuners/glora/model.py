@@ -9,11 +9,10 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
-    _freeze_adapter,
     _get_submodules,
 )
 
@@ -66,13 +65,17 @@ class GLoraModel(BaseTuner):
         - **peft_config** ([`GLoraConfig`]): The configuration of the Lora model.
     """
 
-    prefix: str = "glora"
+    prefix: str = "glora_"
     layers_mapping: Dict[Type[torch.nn.Module], Type[GLoraLayer]] = {
         torch.nn.Linear: Linear,
     }
 
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
+
+    @staticmethod
+    def _check_target_module_exists(poly_config, key):
+        return check_target_module_exists(poly_config, key)
 
 
     # def add_adapter(self, adapter_name, config=None):
@@ -166,20 +169,28 @@ class GLoraModel(BaseTuner):
     @staticmethod
     def _replace_module(parent, child_name, new_module, child):
         setattr(parent, child_name, new_module)
-        new_module.weight = child.weight
-        if hasattr(child, "bias"):
-            if child.bias is not None:
+        # It's not necessary to set requires_grad here, as that is handled by
+        # _mark_only_adapters_as_trainable
+
+        # child layer wraps the original module, unpack it
+        if hasattr(child, "base_layer"):
+            child = child.base_layer
+
+        if not hasattr(new_module, "base_layer"):
+            new_module.weight = child.weight
+            if hasattr(child, "bias"):
                 new_module.bias = child.bias
 
         if getattr(child, "state", None) is not None:
-            new_module.state = child.state
+            if hasattr(new_module, "base_layer"):
+                new_module.base_layer.state = child.state
+            else:
+                new_module.state = child.state
             new_module.to(child.weight.device)
 
         # dispatch to correct device
         for name, module in new_module.named_modules():
             if "glora_" in name:
-                module.to(child.weight.device)
-            if "ranknum" in name:
                 module.to(child.weight.device)
 
     def merge_and_unload(self, progressbar: bool = False):
