@@ -12,15 +12,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 
 class GLoraLayer(BaseTunerLayer):
     def __init__(self, base_layer: nn.Module, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
-        super().__init__()
-        GLoraLayer.__init__(self,
-                            base_layer,
-                            in_features,
-                            out_features,
-                            r,
-                            adapter_name,
-                            **kwargs)
-        # Initialize parameters
+        self.base_layer = base_layer
         self.r = {}
         self.r[adapter_name] = r
         # LoHa info
@@ -33,8 +25,9 @@ class GLoraLayer(BaseTunerLayer):
 
         self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
         self.glora_Bd, self.glora_Bu = self.make_param((out_features, in_features), f"LoRA_{r}")
-        #self.glora_Cd, self.glora_Cu = self.make_param((out_features, in_features), f"LoRA_{r}")
-
+        self.glora_Cd, self.glora_Cu = self.make_param((in_features, 1), f"LoRA_{r}")
+        self.glora_D = nn.Parameter(torch.zeros(out_features))
+        self.glora_E = nn.Parameter(torch.zeros(out_features))
 
         # Initialize learnable parameters
        #  self.glora_Cd, self.glora_Cu = self._make_param((in_features, 1), f"LoRA_{r}")
@@ -57,7 +50,7 @@ class GLoraLayer(BaseTunerLayer):
         # Initialize parameter weights using Kaiming uniform initialization
         nn.init.kaiming_uniform_(self.glora_Au, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.glora_Bu, a=math.sqrt(5))
-        #nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
+        nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
 
         # Mark the weight as unmerged ?????
         # self.merged = False
@@ -97,7 +90,6 @@ class Linear(nn.Module, GLoraLayer):
         if self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
-        return
         path_config = self.eval_config
         A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
         B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
@@ -112,7 +104,6 @@ class Linear(nn.Module, GLoraLayer):
         self.merged = True
 
     def forward(self, x: torch.Tensor):
-        return
         previous_dtype = x.dtype
         if self.eval_config is not None:
             path_config = self.eval_config
