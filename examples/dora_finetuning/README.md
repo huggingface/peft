@@ -1,8 +1,6 @@
 # DoRA: Weight-Decomposed Low-Rank Adaptation
 
-<div style="text-align: center;">
-  <img src="./img/dora.png" alt="overview" />
-</div>
+![dora](https://i.ytimg.com/vi/m7KQdGSr0Dg/maxresdefault.jpg)
 
 
 ## Introduction
