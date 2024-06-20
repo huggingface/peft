@@ -138,7 +138,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
     parser.add_argument("--output_dir", type=str, default="./fine-tuned-model", help="Output directory for the fine-tuned model")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")
+    parser.add_argument("--num_epochs", type=int, default=10, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
     parser.add_argument("--val_set_size", type=int, default=500, help="Validation set size")
