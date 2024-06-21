@@ -9,12 +9,13 @@ import torch.nn.functional as F
 from peft.tuners.tuners_utils import BaseTunerLayer
 
 
-
 class GLoraLayer(BaseTunerLayer):
     def __init__(self, base_layer: nn.Module, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
         self.base_layer = base_layer
         self.r = {}
         self.r[adapter_name] = r
+        self.in_features = in_features
+        self.out_features = out_features
         # LoHa info
         self.hada_w1_a = nn.ParameterDict({})
         self.hada_w1_b = nn.ParameterDict({})
@@ -73,14 +74,16 @@ class Linear(nn.Module, GLoraLayer):
     ) -> None:
         super().__init__()
         GLoraLayer.__init__(self, in_features, out_features, r, adapter_name, base_layer)
-
+        self.in_features = in_features
+        self.out_features = out_features
+        
         #Freezing the pre-trained weight matrix
         #self.weight.requires_grad = False
         for layer in self.children():
             if hasattr(layer, "reset_parameters"):
                 layer.reset_parameters(self)
 
-        #self.to(self.weight.device)
+        #self.weight.requires_grad = False
 
     def merge(self):
         if self.merged:
