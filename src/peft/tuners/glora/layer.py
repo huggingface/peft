@@ -80,22 +80,31 @@ class Linear(nn.Module, GLoraLayer):
     ) -> None:
         super().__init__()
         GLoraLayer.__init__(self, base_layer, in_features, out_features, r, adapter_name, **kwargs)
-        self.weight.requires_grad = False
         self._active_adapter = adapter_name
+
+        self.reset_parameters()
+        #this is from old code  - what is eval_config now ?
+        self.eval_config = None
         self.to(self.weight.device)
-
-        for layer in self.children():
-            if hasattr(layer, "reset_parameters"):
-                layer.reset_parameters()
-
         # Freezing the pre-trained weight matrix
-        # self.weight.requires_grad = False
+        self.weight.requires_grad = False
+
+    #this is a hack  - need to remove later
+    def reset_parameters(self):
+        # Ensure weight is cast to float
+        self.weight.data = self.weight.data.float()
+        print(f"Data type of weight before initialization: {self.weight.dtype}")
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
 
     def merge(self):
         if self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
-        path_config = self._get_evel_conf()
+        path_config = self.eval_config
         A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
         B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
         C = self.prepare_path(path_config["C"], self.glora_Cd, self.glora_Cu).to(self.weight.dtype)
@@ -115,7 +124,10 @@ class Linear(nn.Module, GLoraLayer):
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
-        path_config = self._get_evel_conf()
+        if self.eval_config is not None:
+            path_config = self.eval_config
+        else:
+            path_config = random.choice(self.configs)
 
         A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
         B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
@@ -139,15 +151,6 @@ class Linear(nn.Module, GLoraLayer):
         result = result.to(previous_dtype)
 
         return result
-
-    @staticmethod
-    def _get_evel_conf(self):
-        with torch.no_grad():
-            if self.eval_config is None:
-                path_config = random.choice(self.configs)
-            else:
-                path_config = self.eval_config
-        return path_config
 
     def prepare_path(self, config, Xd, Xu=None):
         if Xu is not None:
