@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_target_module_exists, replicate_layers
 from peft.utils import (
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     ModulesToSaveWrapper,
@@ -73,25 +73,25 @@ class GLoraModel(BaseTuner):
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
+
     @staticmethod
     def _check_target_module_exists(poly_config, key):
         return check_target_module_exists(poly_config, key)
 
+    def _check_new_adapter_config(self, config: GLoraConfig) -> None:
+        """
+        A helper method to check the config when a new adapter is being added.
 
-    # def add_adapter(self, adapter_name, config=None):
-    #     print("add_adapter")
-    #     if config is not None:
-    #         model_config = self.model.config.to_dict() if hasattr(self.model.config, "to_dict") else self.model.config
-    #         config = self._prepare_glora_config(config, model_config)
-    #         self.peft_config[adapter_name] = config
-    #     self._find_and_replace(adapter_name)
-    #     if len(self.peft_config) > 1 and self.peft_config[adapter_name].bias != "none":
-    #         raise ValueError(
-    #             "LoraModel supports only 1 adapter with bias. When using multiple adapters, set bias to 'none' for all adapters."
-    #         )
-    #     mark_only_glora_as_trainable(self.model)
-    #     if self.peft_config[adapter_name].inference_mode:
-    #         _freeze_adapter(self.model, adapter_name)
+        Raise a ValueError if there is something wrong with the config or if it conflicts with existing adapters.
+
+        """
+        # TODO: there should be a check if any of the existing adapters actually has bias != "none", or else the check
+        # does not fully correspond to the error message.
+        if (len(self.peft_config) > 1) and (config.bias != "none"):
+            raise ValueError(
+                f"{self.__class__.__name__} supports only 1 adapter with bias. When using multiple adapters, "
+                "set bias to 'none' for all adapters."
+            )
 
     def _check_target_module_exists(self, glora_config, key):
         if isinstance(glora_config.target_modules, str):
@@ -119,28 +119,6 @@ class GLoraModel(BaseTuner):
                 f"Target modules {glora_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
             )
-
-    def _replace_module(self, parent, child_name, new_module, child):
-        setattr(parent, child_name, new_module)
-        # It's not necessary to set requires_grad here, as that is handled by
-        # _mark_only_adapters_as_trainable
-
-        if not hasattr(new_module, "base_layer"):
-            new_module.weight = child.weight
-            if hasattr(child, "bias"):
-                new_module.bias = child.bias
-
-        if getattr(child, "state", None) is not None:
-            if hasattr(new_module, "base_layer"):
-                new_module.base_layer.state = child.state
-            else:
-                new_module.state = child.state
-            new_module.to(child.weight.device)
-
-        # dispatch to correct device
-        for name, module in new_module.named_modules():
-            if self.prefix in name:
-                module.to(child.weight.device)
 
     def __getattr__(self, name: str):
         """Forward missing attributes to the wrapped module."""
@@ -249,6 +227,7 @@ class GLoraModel(BaseTuner):
         if isinstance(target, GLoraLayer):
             target.update_layer(adapter_name, **kwargs)
         else:
+
             new_module = self._create_new_module(config, adapter_name, target, **kwargs)
             self._replace_module(parent, target_name, new_module, target)
 
@@ -283,8 +262,8 @@ class GLoraModel(BaseTuner):
         else:
             target_base_layer = target
         kwargs.pop('r', None)
-        in_features = target_base_layer.in_features
-        out_features = target_base_layer.out_features
+        in_features = target.in_features
+        out_features = target.out_features
         if isinstance(target_base_layer, torch.nn.Linear):
                         new_module = new_module_cls(target=target,
                                         base_layer=target_base_layer,
@@ -308,6 +287,22 @@ class GLoraModel(BaseTuner):
             if self.prefix not in n:
                 p.requires_grad = False
 
+        for active_adapter in self.active_adapters:
+            bias = self.peft_config[active_adapter].bias
+            if bias == "none":
+                continue
+
+            if bias == "all":
+                for n, p in model.named_parameters():
+                    if "bias" in n:
+                        p.requires_grad = True
+            elif bias == "lora_only":
+                for m in model.modules():
+                    if isinstance(m, GLoraLayer) and hasattr(m, "bias") and m.bias is not None:
+                        m.bias.requires_grad = True
+            else:
+                raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
+
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
         if peft_config.target_modules is None:
@@ -326,11 +321,47 @@ class GLoraModel(BaseTuner):
 
         When disabling all adapters, the model output corresponds to the output of the base model.
         """
+        for active_adapter in self.active_adapters:
+            val = self.peft_config[active_adapter].bias
+            if val != "none":
+                msg = (
+                    f"Careful, disabling adapter layers with bias configured to be '{val}' does not produce the same "
+                    "output as the the base model would without adaption."
+                )
+                warnings.warn(msg)
         self._set_adapter_layers(enabled=False)
 
+    def _set_adapter_layers(self, enabled: bool = True) -> None:
+        for module in self.model.modules():
+            if isinstance(module, (BaseTunerLayer, ModulesToSaveWrapper)):
+                module.enable_adapters(enabled)
 
-@staticmethod
-def mark_only_glora_as_trainable(model: nn.Module) -> None:
-    for n, p in model.named_parameters():
-        if "glora_" not in n:
-            p.requires_grad = False
+    def set_adapter(self, adapter_name: str | list[str]) -> None:
+        """Set the active adapter(s).
+
+        Additionally, this function will set the specified adapters to trainable (i.e., requires_grad=True). If this is
+        not desired, use the following code.
+
+        ```py
+        >>> for name, param in model_peft.named_parameters():
+        ...     if ...:  # some check on name (ex. if 'lora' in name)
+        ...         param.requires_grad = False
+        ```
+
+        Args:
+            adapter_name (`str` or `list[str]`): Name of the adapter(s) to be activated.
+        """
+        for module in self.model.modules():
+            if isinstance(module, GLoraLayer):
+                if module.merged:
+                    warnings.warn("Adapter cannot be set when the model is merged. Unmerging the model first.")
+                    module.unmerge()
+                module.set_adapter(adapter_name)
+        self.active_adapter = adapter_name
+
+
+        @staticmethod
+        def mark_only_glora_as_trainable(model: nn.Module) -> None:
+            for n, p in model.named_parameters():
+                if "glora_" not in n:
+                    p.requires_grad = False

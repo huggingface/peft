@@ -10,7 +10,9 @@ from peft.tuners.tuners_utils import BaseTunerLayer
 
 
 class GLoraLayer(BaseTunerLayer):
-    def __init__(self, base_layer: nn.Module, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs):
+    def __init__(
+        self, base_layer: nn.Module, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs
+    ):
         self.base_layer = base_layer
         self.r = {}
         self.r[adapter_name] = r
@@ -56,45 +58,61 @@ class GLoraLayer(BaseTunerLayer):
                 self.unmerge()
 
     def make_param(self, shape, config=None):
-        if 'LoRA' in config:
+        if "LoRA" in config:
             out_feature = shape[0]
             in_feature = shape[1]
             try:
-                rank = int(config.split('_')[1])
-            except:
+                rank = int(config.split("_")[1])
+            except ValueError:
                 rank = 4
             return nn.Parameter(torch.zeros(out_feature, rank)), nn.Parameter(torch.zeros(rank, in_feature))
         return nn.Parameter(torch.zeros(*shape))
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "glora." + rep
 
 
 class Linear(nn.Module, GLoraLayer):
     # GLora implemented in a dense layer
     def __init__(
-        self, base_layer: nn.Module, adapter_name: str, in_features: int, out_features: int, r: int = 0, bias: bool = True, **kwargs
+        self,
+        base_layer: nn.Module,
+        adapter_name: str,
+        in_features: int,
+        out_features: int,
+        r: int = 0,
+        bias: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__()
-        GLoraLayer.__init__(self, in_features, out_features, r, adapter_name, base_layer)
-        self.in_features = in_features
-        self.out_features = out_features
-        
-        #Freezing the pre-trained weight matrix
-        #self.weight.requires_grad = False
-        for layer in self.children():
-            if hasattr(layer, "reset_parameters"):
-                layer.reset_parameters(self)
+        GLoraLayer.__init__(self, base_layer, in_features, out_features, r, adapter_name, **kwargs)
+        self.weight.requires_grad = False
+        self._active_adapter = adapter_name
+        self.to(self.weight.device)
 
-        #self.weight.requires_grad = False
+        for layer in nn.Module.children(self):
+            if hasattr(layer, "reset_parameters"):
+                layer.reset_parameters()
+
+        # Freezing the pre-trained weight matrix
+        # self.weight.requires_grad = False
 
     def merge(self):
         if self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
-        path_config = self.eval_config
+        path_config = self._get_evel_conf()
         A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
         B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
         C = self.prepare_path(path_config["C"], self.glora_Cd, self.glora_Cu).to(self.weight.dtype)
         D = self.prepare_path(path_config["D"], self.glora_D).to(self.weight.dtype)
         E = self.prepare_path(path_config["E"], self.glora_E).to(self.weight.dtype)
+
+        print(
+            f"merge A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}"
+        )
+
         self.weight.data += self.weight * A + B
         if torch.is_tensor(self.bias):
             self.bias.data += self.bias * D + E + torch.matmul(self.weight, C).squeeze()
@@ -104,15 +122,18 @@ class Linear(nn.Module, GLoraLayer):
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
-        if self.eval_config is not None:
-            path_config = self.eval_config
-        else:
-            path_config = random.choice(self.configs)
+        path_config = self._get_evel_conf()
+
         A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
         B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
         C = self.prepare_path(path_config["C"], self.glora_Cd, self.glora_Cu).to(self.weight.dtype)
         D = self.prepare_path(path_config["D"], self.glora_D).to(self.weight.dtype)
         E = self.prepare_path(path_config["E"], self.glora_E).to(self.weight.dtype)
+
+        print(
+            f"forward A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}"
+        )
+
         if torch.is_tensor(self.bias):
             result = F.linear(
                 x,
@@ -121,14 +142,26 @@ class Linear(nn.Module, GLoraLayer):
             )
         else:
             result = F.linear(x, self.weight + self.weight * A + B, bias=E + torch.matmul(self.weight, C).squeeze())
+
         result = result.to(previous_dtype)
 
         return result
 
+    def _get_evel_conf(self):
+        with torch.no_grad():
+            if self.eval_config is None:
+                path_config = random.choice(self.configs)
+            else:
+                path_config = self.eval_config
+        return path_config
+
     def prepare_path(self, config, Xd, Xu=None):
         if Xu is not None:
             if "LoRA" in config:
-                rank = int(config.split("_")[1])
+                try:
+                    rank = int(config.split("_")[1])
+                except ValueError:
+                    rank = 4
                 X = torch.matmul(Xd[:, :rank], Xu[:rank, :])
             elif "vector" in config:
                 X = Xd[:, 0].unsqueeze(1)
@@ -148,3 +181,7 @@ class Linear(nn.Module, GLoraLayer):
             else:
                 raise ValueError
         return X
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "glora." + rep
