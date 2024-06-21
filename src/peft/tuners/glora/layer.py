@@ -72,101 +72,104 @@ class Linear(nn.Module, GLoraLayer):
     ) -> None:
         super().__init__()
         GLoraLayer.__init__(self, base_layer, in_features, out_features, r, adapter_name, **kwargs)
+        self.base_layer = base_layer
+        self.in_features = in_features
+        self.out_features = out_features
+        self.r = r
+        #self.bias = bias
         self._active_adapter = adapter_name
-
-        self.reset_parameters()
-        #this is from old code  - what is eval_config now ?
         self.eval_config = None
         self.to(self.weight.device)
-        # Freezing the pre-trained weight matrix
         self.weight.requires_grad = False
+        # Initialize support tensors
+        self.glora_Ad = nn.Parameter(torch.randn(out_features, r))
+        self.glora_Au = nn.Parameter(torch.randn(r, in_features))
+        self.glora_Bd = nn.Parameter(torch.randn(out_features, r))
+        self.glora_Bu = nn.Parameter(torch.randn(r, in_features))
+        self.glora_Cd = nn.Parameter(torch.randn(out_features, r))
+        self.glora_Cu = nn.Parameter(torch.randn(r, 1))
+        self.glora_D = nn.Parameter(torch.randn(out_features, 1))
+        self.glora_E = nn.Parameter(torch.randn(out_features, 1))
+
+        self.reset_parameters()
 
     #this is a hack  - need to remove later
     def reset_parameters(self):
-        # Ensure weight is cast to float
+        # Initialize weights and biases
         self.weight.data = self.weight.data.float()
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        nn.init.kaiming_uniform_(self.base_layer.weight, a=math.sqrt(5))
+        if self.bias:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.base_layer.weight)
             bound = 1 / math.sqrt(fan_in)
-            nn.init.uniform_(self.bias, -bound, bound)
+            nn.init.uniform_(self.base_layer.bias, -bound, bound)
+
 
     def merge(self):
         if hasattr(self, 'merged') and self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
-        path_config = self.eval_config
-        A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
-        B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
-        C = self.prepare_path(path_config["C"], self.glora_Cd, self.glora_Cu).to(self.weight.dtype)
-        D = self.prepare_path(path_config["D"], self.glora_D).to(self.weight.dtype)
-        E = self.prepare_path(path_config["E"], self.glora_E).to(self.weight.dtype)
+
+        A = self.prepare_path("A", self.glora_Ad, self.glora_Au)
+        B = self.prepare_path("B", self.glora_Bd, self.glora_Bu)
+        C = self.prepare_path("C", self.glora_Cd, self.glora_Cu)
+        D = self.prepare_path("D", self.glora_D)
+        E = self.prepare_path("E", self.glora_E)
 
         print(
-            f"merge A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}"
-        )
+            f"merge A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}")
 
-        self.weight.data += self.weight * A + B
-        if torch.is_tensor(self.bias):
-            self.bias.data += self.bias * D + E + torch.matmul(self.weight, C).squeeze()
+       # print(f"Before merge - weight shape: {self.base_layer.weight.data.shape}, bias shape: {self.base_layer.bias.data.shape}")
+
+        self.base_layer.weight.data += self.base_layer.weight.data * A + B
+        if self.bias:
+            self.base_layer.bias.data += self.base_layer.bias.data * D + E + torch.matmul(self.base_layer.weight.data, C).squeeze()
         else:
-            self.bias = nn.Parameter(E + torch.matmul(self.weight, C).squeeze())
+            self.base_layer.bias = nn.Parameter(E + torch.matmul(self.base_layer.weight.data, C).squeeze())
+
+       # print(f"After merge - weight shape: {self.base_layer.weight.data.shape}, bias shape: {self.base_layer.bias.data.shape}")
+
         self.merged = True
 
     def forward(self, x: torch.Tensor):
-        previous_dtype = x.dtype
-        if self.eval_config is not None:
-            path_config = self.eval_config
-        else:
-            path_config = random.choice(self.configs)
-
-        A = self.prepare_path(path_config["A"], self.glora_Ad, self.glora_Au).to(self.weight.dtype)
-        B = self.prepare_path(path_config["B"], self.glora_Bd, self.glora_Bu).to(self.weight.dtype)
-        C = self.prepare_path(path_config["C"], self.glora_Cd, self.glora_Cu).to(self.weight.dtype)
-        D = self.prepare_path(path_config["D"], self.glora_D).to(self.weight.dtype)
-        E = self.prepare_path(path_config["E"], self.glora_E).to(self.weight.dtype)
+        A = self.prepare_path("A", self.glora_Ad, self.glora_Au)
+        B = self.prepare_path("B", self.glora_Bd, self.glora_Bu)
+        C = self.prepare_path("C", self.glora_Cd, self.glora_Cu)
+        D = self.prepare_path("D", self.glora_D)
+        E = self.prepare_path("E", self.glora_E)
 
         print(
-            f"forward A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}"
-        )
+            f"forward A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}")
 
-        weight_mod = self.weight + self.weight * A + B
+       # print(f"Before forward - weight shape: {self.base_layer.weight.data.shape}, bias shape: {self.base_layer.bias.data.shape}")
 
-        if torch.is_tensor(self.bias):
-            bias_mod = self.bias + self.bias * D + E + torch.matmul(self.weight, C).squeeze()
+        weight_mod = self.base_layer.weight.data + self.base_layer.weight.data * A + B
+
+        if self.bias:
+            bias_mod = self.base_layer.bias.data + self.base_layer.bias.data * D + E + torch.matmul(self.base_layer.weight.data, C).squeeze()
         else:
-            bias_mod = E + torch.matmul(self.weight, C).squeeze()
+            bias_mod = E + torch.matmul(self.base_layer.weight.data, C).squeeze()
 
         result = F.linear(x, weight_mod, bias=bias_mod)
 
-        result = result.to(previous_dtype)
+        print(f"After forward - weight shape: {self.base_layer.weight.data.shape}, bias shape: {self.base_layer.bias.data.shape}")
 
         return result
 
     def prepare_path(self, config, Xd, Xu=None):
-        if Xu is not None:
-            if "LoRA" in config:
-                rank = int(config.split("_")[1])
-                X = torch.matmul(Xd[:, :rank], Xu[:rank, :])
-            elif "vector" in config:
-                X = Xd[:, 0].unsqueeze(1)
-            elif "scalar" in config:
-                X = Xd[0, 0]
-            elif "none" in config:
-                X = torch.zeros(Xd.shape[0], Xu.shape[1]).to(self.weight.device)
-            else:
-                raise ValueError("Invalid config")
+        if config == 'A':
+            X = torch.matmul(Xd, Xu)
+        elif config == 'B':
+            X = torch.matmul(Xd, Xu)
+        elif config == 'C':
+            X = torch.matmul(Xd, Xu)
+        elif config == 'D':
+            X = Xd
+        elif config == 'E':
+            X = Xd
         else:
-            if "vector" in config:
-                X = Xd
-            elif "scalar" in config:
-                X = Xd[0]
-            elif "none" in config:
-                X = torch.zeros(1).to(self.weight.device)
-            else:
-                raise ValueError("Invalid config")
+            raise ValueError(f"Unsupported config: {config}")
+
         return X
 
     def __repr__(self) -> str:
-        rep = super().__repr__()
-        return "glora." + rep
+        return f"Linear({self.in_features}, {self.out_features}, bias={self.bias})"
