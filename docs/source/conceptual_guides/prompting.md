@@ -64,9 +64,9 @@ Take a look at [P-tuning for sequence classification](../task_guides/ptuning-seq
 <div class="flex justify-center">
     <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/mpt.png"/>
 </div>
-<small><a href="https://hf.co/papers/2103.10385">Multitask prompt tuning enables parameter-efficient transfer learning</a>.</small>
+<small><a href="https://hf.co/papers/2303.02861">Multitask prompt tuning enables parameter-efficient transfer learning</a>.</small>
 
-[Multitask prompt tuning (MPT)](https://hf.co/papers/2103.10385) learns a single prompt from data for multiple task types that can be shared for different target tasks. Other existing approaches learn a separate soft prompt for each task that need to be retrieved or aggregated for adaptation to target tasks. MPT consists of two stages:
+[Multitask prompt tuning (MPT)](https://hf.co/papers/2303.02861) learns a single prompt from data for multiple task types that can be shared for different target tasks. Other existing approaches learn a separate soft prompt for each task that need to be retrieved or aggregated for adaptation to target tasks. MPT consists of two stages:
 
 1. source training - for each task, its soft prompt is decomposed into task-specific vectors. The task-specific vectors are multiplied together to form another matrix W, and the Hadamard product is used between W and a shared prompt matrix P to generate a task-specific prompt matrix. The task-specific prompts are distilled into a single prompt matrix that is shared across all tasks. This prompt is trained with multitask training.
 2. target adaptation - to adapt the single prompt for a target task, a target prompt is initialized and expressed as the Hadamard product of the shared prompt matrix and the task-specific low-rank prompt matrix.

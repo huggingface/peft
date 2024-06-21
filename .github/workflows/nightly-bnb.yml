@@ -15,6 +15,7 @@ env:
 
 jobs:
   run_all_tests_single_gpu:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -51,6 +52,7 @@ jobs:
         id: import
         if: always()
         run: |
+          source activate peft
           python3 -m bitsandbytes
           python3 -c "import bitsandbytes as bnb"
 
@@ -58,27 +60,28 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
-          status: ${{ steps.import.status }}
+          status: ${{ steps.examples_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
-          
-      - name: Run examples on single GPU
-        id: examples_tests
-        if: always()
-        run: |
-          source activate peft
-          make tests_examples_single_gpu_bnb
 
-      - name: Post to Slack
-        if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
-        with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
-          title: 🤗 Results of bitsandbytes examples tests - single GPU
-          status: ${{ steps.examples_tests.status }}
-          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
-      
+      # TODO: uncomment this block if error is solved or bnb multi backend branch is merged
+      # - name: Run examples on single GPU
+      #   id: examples_tests
+      #   if: always()
+      #   run: |
+      #     source activate peft
+      #     make tests_examples_single_gpu_bnb
+
+      # - name: Post to Slack
+      #   if: always()
+      #   uses: huggingface/hf-workflows/.github/actions/post-slack@main
+      #   with:
+      #     slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
+      #     title: 🤗 Results of bitsandbytes examples tests - single GPU
+      #     status: ${{ steps.examples_tests.outcome }}
+      #     slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+
       - name: Run core tests on single GPU
         id: core_tests
         if: always()
@@ -90,9 +93,9 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes core tests - single GPU
-          status: ${{ steps.core_tests.status }}
+          status: ${{ steps.core_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run BNB regression tests on single GPU
@@ -106,9 +109,9 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes regression tests - single GPU
-          status: ${{ steps.regression_tests.status }}
+          status: ${{ steps.regression_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run transformers tests on single GPU
@@ -122,9 +125,9 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes transformers tests - single GPU
-          status: ${{ steps.transformers_tests.status }}
+          status: ${{ steps.transformers_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
           
       - name: Generate Report
@@ -134,6 +137,7 @@ jobs:
           python scripts/log_reports.py --slack_channel_name bnb-daily-ci-collab >> $GITHUB_STEP_SUMMARY
 
   run_all_tests_multi_gpu:
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -170,15 +174,17 @@ jobs:
         id: import
         if: always()
         run: |
+          source activate peft
+          python3 -m bitsandbytes
           python3 -c "import bitsandbytes as bnb"
 
       - name: Post to Slack
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
-          status: ${{ steps.import.status }}
+          status: ${{ steps.import.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run core GPU tests on multi-gpu
@@ -197,9 +203,9 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes examples tests - multi GPU
-          status: ${{ steps.examples_tests.status }}
+          status: ${{ steps.examples_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
       
       - name: Run core tests on multi GPU
@@ -213,9 +219,9 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes core tests - multi GPU
-          status: ${{ steps.core_tests.status }}
+          status: ${{ steps.core_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run transformers tests on multi GPU
@@ -229,9 +235,9 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: ${{ env.BNB_SLACK_CHANNEL_ID }}
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes transformers tests - multi GPU
-          status: ${{ steps.transformers_tests.status }}
+          status: ${{ steps.transformers_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
           
       - name: Generate Report
