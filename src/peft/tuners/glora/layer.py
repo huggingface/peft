@@ -18,6 +18,7 @@ class GLoraLayer(BaseTunerLayer):
         self.r[adapter_name] = r
         self.in_features = in_features
         self.out_features = out_features
+
         # LoHa info
         self.hada_w1_a = nn.ParameterDict({})
         self.hada_w1_b = nn.ParameterDict({})
@@ -91,7 +92,7 @@ class Linear(nn.Module, GLoraLayer):
         self._active_adapter = adapter_name
         self.to(self.weight.device)
 
-        for layer in nn.Module.children(self):
+        for layer in self.children():
             if hasattr(layer, "reset_parameters"):
                 layer.reset_parameters()
 
