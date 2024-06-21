@@ -13,6 +13,7 @@ class GLoraLayer(BaseTunerLayer):
     def __init__(
         self, base_layer: nn.Module, in_features: int, out_features: int, r: int, adapter_name: str, **kwargs
     ):
+        super().__init__()
         self.base_layer = base_layer
         self.r = {}
         self.r[adapter_name] = r
@@ -39,16 +40,7 @@ class GLoraLayer(BaseTunerLayer):
             for E in config_D_E
         ]
 
-        # Initialize parameter weights using Kaiming uniform initialization
-        nn.init.kaiming_uniform_(self.glora_Au, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.glora_Bu, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.glora_Cu, a=math.sqrt(5))
 
-        # Mark the weight as unmerged ?????
-        # self.merged = False
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
 
     def make_param(self, shape, config=None):
         if "LoRA" in config:
@@ -93,7 +85,6 @@ class Linear(nn.Module, GLoraLayer):
     def reset_parameters(self):
         # Ensure weight is cast to float
         self.weight.data = self.weight.data.float()
-        print(f"Data type of weight before initialization: {self.weight.dtype}")
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
             fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
@@ -101,7 +92,7 @@ class Linear(nn.Module, GLoraLayer):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def merge(self):
-        if self.merged:
+        if hasattr(self, 'merged') and self.merged:
             warnings.warn("Already merged. Nothing to do.")
             return
         path_config = self.eval_config
@@ -139,14 +130,14 @@ class Linear(nn.Module, GLoraLayer):
             f"forward A.shape: {A.shape}, B.shape: {B.shape}, C.shape: {C.shape}, D.shape: {D.shape}, E.shape: {E.shape}"
         )
 
+        weight_mod = self.weight + self.weight * A + B
+
         if torch.is_tensor(self.bias):
-            result = F.linear(
-                x,
-                self.weight + self.weight * A + B,
-                bias=self.bias + self.bias * D + E + torch.matmul(self.weight, C).squeeze(),
-            )
+            bias_mod = self.bias + self.bias * D + E + torch.matmul(self.weight, C).squeeze()
         else:
-            result = F.linear(x, self.weight + self.weight * A + B, bias=E + torch.matmul(self.weight, C).squeeze())
+            bias_mod = E + torch.matmul(self.weight, C).squeeze()
+
+        result = F.linear(x, weight_mod, bias=bias_mod)
 
         result = result.to(previous_dtype)
 
@@ -155,28 +146,25 @@ class Linear(nn.Module, GLoraLayer):
     def prepare_path(self, config, Xd, Xu=None):
         if Xu is not None:
             if "LoRA" in config:
-                try:
-                    rank = int(config.split("_")[1])
-                except ValueError:
-                    rank = 4
+                rank = int(config.split("_")[1])
                 X = torch.matmul(Xd[:, :rank], Xu[:rank, :])
             elif "vector" in config:
                 X = Xd[:, 0].unsqueeze(1)
-            elif "constant" in config:
+            elif "scalar" in config:
                 X = Xd[0, 0]
             elif "none" in config:
                 X = torch.zeros(Xd.shape[0], Xu.shape[1]).to(self.weight.device)
             else:
-                raise ValueError
+                raise ValueError("Invalid config")
         else:
             if "vector" in config:
                 X = Xd
-            elif "constant" in config:
+            elif "scalar" in config:
                 X = Xd[0]
             elif "none" in config:
                 X = torch.zeros(1).to(self.weight.device)
             else:
-                raise ValueError
+                raise ValueError("Invalid config")
         return X
 
     def __repr__(self) -> str:
