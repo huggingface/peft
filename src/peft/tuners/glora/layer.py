@@ -19,14 +19,6 @@ class GLoraLayer(BaseTunerLayer):
         self.in_features = in_features
         self.out_features = out_features
 
-        # LoHa info
-        self.hada_w1_a = nn.ParameterDict({})
-        self.hada_w1_b = nn.ParameterDict({})
-        self.hada_w2_a = nn.ParameterDict({})
-        self.hada_w2_b = nn.ParameterDict({})
-        self.hada_t1 = nn.ParameterDict({})
-        self.hada_t2 = nn.ParameterDict({})
-
         # Initialize learnable parameters
         self.glora_Ad, self.glora_Au = self.make_param((out_features, in_features), f"LoRA_{r}")
         self.glora_Bd, self.glora_Bu = self.make_param((out_features, in_features), f"LoRA_{r}")
@@ -148,6 +140,7 @@ class Linear(nn.Module, GLoraLayer):
 
         return result
 
+    @staticmethod
     def _get_evel_conf(self):
         with torch.no_grad():
             if self.eval_config is None:
