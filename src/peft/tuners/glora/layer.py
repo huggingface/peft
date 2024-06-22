@@ -154,24 +154,27 @@ class Linear(nn.Module, GLoraLayer):
         if Xu is not None:
             if 'LoRA' in config:
                 rank = int(config.split('_')[1])
-                X = torch.matmul(Xd[:,:rank], Xu[:rank, :])
+                X = torch.matmul(Xd[:, :rank], Xu[:rank, :])
             elif 'vector' in config:
-                X = Xd[:,0].unsqueeze(1)
+                X = Xd[:, 0].unsqueeze(1)
             elif 'constant' in config:
-                X = Xd[0,0]
+                X = Xd[0, 0].unsqueeze(0).unsqueeze(1)  # Adjust dimensions as needed
             elif 'none' in config:
-                X = torch.zeros(Xd.shape[0], Xu.shape[1]).to(self.weight.device)
+                X = torch.zeros(Xd.shape[0], Xu.shape[1]).to(self.base_layer.weight.device)
             else:
-                raise ValueError
+                raise ValueError(f"Unknown config: {config}")
         else:
             if 'vector' in config:
                 X = Xd
             elif 'constant' in config:
-                X = Xd[0]
+                X = Xd[0].unsqueeze(0)  # Adjust dimensions as needed
             elif 'none' in config:
-                X = torch.zeros(1).to(self.weight.device)
+                X = torch.zeros(1).to(self.base_layer.weight.device)
             else:
-                raise ValueError
+                raise ValueError(f"Unknown config: {config}")
+
+    # Print or log to verify X shape
+        print(f"prepare_path config: {config}, X.shape: {X.shape}, Xd.shape: {Xd.shape}, Xu.shape: {Xu.shape if Xu is not None else 'None'}")
         return X
 
     def __repr__(self) -> str:

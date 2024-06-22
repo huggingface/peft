@@ -35,8 +35,8 @@ def training_function():
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        quantization_config=quant_config,
-        torch_dtype=quant_storage_dtype,
+        #quantization_config=quant_config,
+        #torch_dtype=quant_storage_dtype,
         use_cache=True,  # this is needed for gradient checkpointing
     )
 
@@ -59,8 +59,8 @@ def training_function():
     )
 
     sftp_config = SFTConfig(
-        bf16=True,
-        tf32=True,
+        #bf16=True,
+        #tf32=True,
         logging_steps=10,
         learning_rate=0.0002,
         warmup_ratio=0.3,
