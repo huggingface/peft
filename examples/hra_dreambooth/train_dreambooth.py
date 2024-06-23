@@ -190,7 +190,7 @@ def parse_args(input_args=None):
         "--hra_bias",
         type=str,
         default="none",
-        help="Bias type for BOFT. Can be 'none', 'all' or 'hra_only', only used if use_hra is True",
+        help="Bias type for HRA. Can be 'none', 'all' or 'hra_only', only used if use_hra is True",
     )
     parser.add_argument(
         "--hra_text_encoder_r",
@@ -207,7 +207,7 @@ def parse_args(input_args=None):
         "--hra_text_encoder_bias",
         type=str,
         default="none",
-        help="Bias type for BOFT. Can be 'none', 'all' or 'hra_only', only used if use_hra is True",
+        help="Bias type for HRA. Can be 'none', 'all' or 'hra_only', only used if use_hra is True",
     )
 
     parser.add_argument(
