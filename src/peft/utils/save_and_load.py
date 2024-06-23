@@ -176,7 +176,7 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
-    
+
     elif config.peft_type == PeftType.HRA:
         to_return = {k: state_dict[k] for k in state_dict if "hra_" in k}
 

@@ -25,6 +25,7 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
+    HRAConfig,
     IA3Config,
     LoHaConfig,
     LoraConfig,
@@ -38,7 +39,6 @@ from peft import (
     PromptEncoderConfig,
     PromptTuningConfig,
     VeraConfig,
-    HRAConfig,
 )
 
 

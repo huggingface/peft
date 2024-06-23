@@ -37,6 +37,7 @@ from transformers import (
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    HRAConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -77,6 +78,7 @@ SETTINGS = {
     "lora-with-modules-to-save": (LoraConfig(task_type=TaskType.CAUSAL_LM, modules_to_save=["embed_tokens"]), {}),
     "oft": (OFTConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
     "vera": (VeraConfig(task_type=TaskType.CAUSAL_LM), {}),
+    "hra": (HRAConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),
 }
 
 

@@ -19,7 +19,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import BOFTConfig, LoHaConfig, LoraConfig, OFTConfig, HRAConfig, get_peft_model
+from peft import BOFTConfig, HRAConfig, LoHaConfig, LoraConfig, OFTConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -222,7 +222,9 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "hra"])],
+            filter_params_func=lambda tests: [
+                x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "hra"])
+            ],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):

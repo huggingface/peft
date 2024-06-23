@@ -15,12 +15,12 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
-from peft.tuners.lycoris_utils import LycorisConfig
+from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
 @dataclass
-class HRAConfig(LycorisConfig):
+class HRAConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`HRAModel`].
 
@@ -36,8 +36,6 @@ class HRAConfig(LycorisConfig):
             modules manually.
         init_weights (`bool`):
             Whether to perform initialization of HRA weights.
-        symmetric_init_weights (`bool`):
-            Whether to perform symmetric initialization of HRA weights.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -54,12 +52,15 @@ class HRAConfig(LycorisConfig):
     """
 
     r: int = field(default=8, metadata={"help": "HRA rank"})
+    apply_GS: bool = field(
+        default=False,
+        metadata={"help": "Whether to apply Gram-Schmidt orthogonalization or not."},
+    )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
-            "help": "List of module names or regex expression of the module names to replace with HRA."
-            "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
-            "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
+            "help": "List of module names or regex expression of the module names to replace with HRA.",
+            "example": "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' ",
         },
     )
     init_weights: bool = field(
@@ -68,14 +69,6 @@ class HRAConfig(LycorisConfig):
             "help": (
                 "Whether to initialize the weights of the HRA layers with their default initialization. Don't change "
                 "this setting, except if you know exactly what you're doing."
-            ),
-        },
-    )
-    symmetric_init_weights: bool = field(
-        default=True,
-        metadata={
-            "help": (
-                "Whether to perform symmetric initialization of the weights of the HRA layers. If init_weights is set to False or r is odd, this will default to False."
             ),
         },
     )
@@ -91,6 +84,11 @@ class HRAConfig(LycorisConfig):
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
     )
+    fan_in_fan_out: bool = field(
+        default=False,
+        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
+    )
+    bias: str = field(default="none", metadata={"help": "Bias type for HRA. Can be 'none', 'all' or 'hra_only'"})
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
@@ -99,13 +97,16 @@ class HRAConfig(LycorisConfig):
             "the final layer `classifier/score` are randomly initialized and as such need to be trainable and saved."
         },
     )
-    apply_GS: bool = field(
-        default=False,
-        metadata={"help": "Whether to apply Gram-Schmidt orthogonalization or not."},
-    )
 
     def __post_init__(self):
         self.peft_type = PeftType.HRA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        # if target_modules is a regex expression, then layers_to_transform should be None
+        if isinstance(self.target_modules, str) and self.layers_to_transform is not None:
+            raise ValueError("`layers_to_transform` cannot be used when `target_modules` is a str.")
+
+        # if target_modules is a regex expression, then layers_pattern should be None
+        if isinstance(self.target_modules, str) and self.layers_pattern is not None:
+            raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")

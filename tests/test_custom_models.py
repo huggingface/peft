@@ -35,6 +35,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    HRAConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -44,7 +45,6 @@ from peft import (
     PeftModel,
     TaskType,
     VeraConfig,
-    HRAConfig,
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
@@ -251,10 +251,9 @@ TEST_CASES = [
     ########
     ("Vanilla MLP 1 HRA", "MLP", HRAConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 HRA", "MLP", HRAConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HRA", "MLP", HRAConfig, {"target_modules": ["lin0", "lin1"]}),
     ("Vanilla MLP 5 HRA", "MLP", HRAConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
-    ("Vanilla MLP 7 HRA", "MLP", HRAConfig, {"target_modules": ["lin0"], "apply_GS": True}),
     ("Conv2d 1 HRA", "Conv2d", HRAConfig, {"target_modules": ["conv2d"]}),
-    ("Conv2d 3 HRA", "Conv2d", HRAConfig, {"target_modules": ["conv2d"], "apply_GS": True}),
     #############
     # LN Tuning #
     #############
@@ -1395,7 +1394,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
-            HRAConfig(target_modules=["lin0"], init_weights=False, symmetric_init_weights=False),
+            HRAConfig(target_modules=["lin0"], init_weights=False),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -2569,7 +2568,7 @@ class RequiresGradTester(unittest.TestCase):
             peft_model,
             "base_model.model.lin0.oft_r.adapter1",
         )
-    
+
     def test_requires_grad_hra_different_targets(self):
         # test two different HRA adapters that target different modules
         config0 = HRAConfig(target_modules=["lin0"])

@@ -13,8 +13,8 @@
 # limitations under the License.
 
 from .config import HRAConfig
-from .layer import Conv2d, Linear, HRALayer
+from .layer import HRAConv2d, HRALayer, HRALinear
 from .model import HRAModel
 
 
-__all__ = ["HRAConfig", "HRAModel", "Conv2d", "Linear", "HRALayer"]
+__all__ = ["HRAConfig", "HRAModel", "HRAConv2d", "HRALinear", "HRALayer"]

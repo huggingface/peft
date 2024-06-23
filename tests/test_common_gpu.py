@@ -36,6 +36,7 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
+    HRAConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -1407,3 +1408,21 @@ class TestSameAdapterDifferentDevices:
         assert model.lin0.base_layer.weight.device.type == "cuda"
         assert model.lin0.vera_A.other.device.type == "cuda"
         assert model.lin0.vera_lambda_d.other.device.type == "cuda"
+
+    def test_hra_add_new_adapter_does_not_change_device(self, mlp):
+        # same as first test, but using HRA
+        config = HRAConfig(target_modules=["lin0"])
+        model = get_peft_model(mlp, config)
+        model = model.cuda()
+        model.lin0.hra_u.cpu()
+
+        # check that the adapter is indeed on CPU and the base model on GPU
+        assert model.lin0.hra_u.default.device.type == "cpu"
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+
+        model.add_adapter("other", config)
+        # check that after adding a new adapter, the old adapter is still on CPU
+        assert model.lin0.hra_u.default.device.type == "cpu"
+        # the rest should be on GPU
+        assert model.lin0.base_layer.weight.device.type == "cuda"
+        assert model.lin0.hra_u.other.device.type == "cuda"
