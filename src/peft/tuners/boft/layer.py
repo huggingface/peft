@@ -77,6 +77,7 @@ def get_fbd_cuda():
     if _FBD_CUDA is not None:
         return _FBD_CUDA
 
+    # This import initializes cuda context and should thus be local, see issue 1877
     from torch.utils.cpp_extension import load
 
     curr_dir = os.path.dirname(__file__)
