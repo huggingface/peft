@@ -2,7 +2,7 @@ import os
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingArguments, DataCollatorWithPadding, BitsAndBytesConfig
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, PeftModel
+from peft import LoraConfig, get_peft_model
 
 def train_model(
     base_model: str,
@@ -142,7 +142,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune LLaMA with DoRA and PEFT")
     parser.add_argument("--base_model", type=str, default="huggyllama/llama-7b", help="Base model path or name")
     parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
-    parser.add_argument("--output_dir", type=str, default="ShirinYamani/llama-2-7b-fine-tuned", help="Output directory for the fine-tuned model")
+    parser.add_argument("--output_dir", type=str, default="path/to/output", help="Output directory for the fine-tuned model")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
     parser.add_argument("--use_compile", default=False, help="Use Compile")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
@@ -158,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout rate")
     parser.add_argument("--lora_target_modules", type=str, default=None, help="Comma-separated list of target modules for LoRA")
-    parser.add_argument("--hub_model_id", type=str, default="ShirinYamani/llama-2-7b-fine-tuned", help="Repository name to push the model on the Hugging Face Hub")
+    parser.add_argument("--hub_model_id", type=str, default="path/to/repo", help="Repository name to push the model on the Hugging Face Hub")
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push the model to Hugging Face Hub")
     args = parser.parse_args()
     train_model(
