@@ -49,7 +49,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: "C06LKJB31RU"
+          slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-CPU docker build 
           status: ${{ job.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -89,7 +89,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: "C06LKJB31RU"
+          slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU docker build 
           status: ${{ job.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -129,7 +129,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: "C06LKJB31RU"
+          slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU (bnb source / HF latest) docker build 
           status: ${{ job.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -169,7 +169,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: "C06LKJB31RU"
+          slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU (bnb source / HF source) docker build 
           status: ${{ job.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
@@ -209,7 +209,7 @@ jobs:
         if: always()
         uses: huggingface/hf-workflows/.github/actions/post-slack@main
         with:
-          slack_channel: "C06LKJB31RU"
+          slack_channel: ${{ env.CI_SLACK_CHANNEL }}
           title: 🤗 Results of the PEFT-GPU (bnb source multi-backend / HF latest) docker build 
           status: ${{ job.status }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}

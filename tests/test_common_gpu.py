@@ -826,11 +826,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check that we can pass mixed adapter names to the model
         # note that with 8bit, we have quite a bit of imprecision, therefore we use softmax and higher tolerances
         torch.manual_seed(3000)
-        bnb_config = BitsAndBytesConfig(
-            load_in_8bit=True,
-            bnb_4bit_use_double_quant=False,
-            bnb_4bit_compute_dtype=torch.float32,
-        )
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
             quantization_config=bnb_config,
@@ -951,7 +947,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # check for same result with and without DoRA when initializing with init_lora_weights=False
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         ).eval()
 
@@ -964,7 +960,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         )
         torch.manual_seed(0)
@@ -1010,8 +1006,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         # measure any differences, we need to change the magnitude vector.
         for name, module in model.named_modules():
             if isinstance(module, LoraLinear4bit):
-                module.lora_magnitude_vector["default"] = torch.nn.Parameter(
-                    10 * torch.rand_like(module.lora_magnitude_vector["default"])
+                module.lora_magnitude_vector["default"].weight = torch.nn.Parameter(
+                    10 * torch.rand_like(module.lora_magnitude_vector["default"].weight)
                 )
 
         with torch.inference_mode():
@@ -1042,7 +1038,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            load_in_8bit=True,
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         ).eval()
 
@@ -1062,8 +1058,8 @@ class PeftGPUCommonTests(unittest.TestCase):
         # measure any differences, we need to change the magnitude vector.
         for name, module in model.named_modules():
             if isinstance(module, LoraLinear8bitLt):
-                module.lora_magnitude_vector["default"] = torch.nn.Parameter(
-                    10 * torch.rand_like(module.lora_magnitude_vector["default"])
+                module.lora_magnitude_vector["default"].weight = torch.nn.Parameter(
+                    10 * torch.rand_like(module.lora_magnitude_vector["default"].weight)
                 )
 
         with torch.inference_mode():
@@ -1089,6 +1085,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
+@pytest.mark.single_gpu_tests
 class TestSameAdapterDifferentDevices:
     # 1639
     # The original issue comes down to the following problem: If the user has a base layer on CUDA, moves the adapter to
@@ -1231,19 +1228,19 @@ class TestSameAdapterDifferentDevices:
         # check that the adapter is indeed on CPU and the base model on GPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
-        assert model.lin0.lora_magnitude_vector.default.device.type == "cpu"
+        assert model.lin0.lora_magnitude_vector.default.weight.device.type == "cpu"
         assert model.lin0.base_layer.weight.device.type == "cuda"
 
         model.add_adapter("other", config)
         # check that after adding a new adapter, the old adapter is still on CPU
         assert model.lin0.lora_A.default.weight.device.type == "cpu"
         assert model.lin0.lora_B.default.weight.device.type == "cpu"
-        assert model.lin0.lora_magnitude_vector.default.device.type == "cpu"
+        assert model.lin0.lora_magnitude_vector.default.weight.device.type == "cpu"
         # the rest should be on GPU
         assert model.lin0.base_layer.weight.device.type == "cuda"
         assert model.lin0.lora_A.other.weight.device.type == "cuda"
         assert model.lin0.lora_B.other.weight.device.type == "cuda"
-        assert model.lin0.lora_magnitude_vector.other.device.type == "cuda"
+        assert model.lin0.lora_magnitude_vector.other.weight.device.type == "cuda"
 
     def test_adalora_add_new_adapter_does_not_change_device(self, mlp):
         # same as first test, but using AdaLORA
