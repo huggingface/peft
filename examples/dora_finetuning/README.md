@@ -65,6 +65,7 @@ python train_model.py \
     --learning_rate 3e-4 \
     --cutoff_len 512 \
     --val_set_size 500 \
+    --use_compile True \
     --use_peft \
     --quantize \
     --eval_step 10 \
