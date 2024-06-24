@@ -24,6 +24,7 @@ def train_model(
     lora_target_modules: str,
     hub_model_id: str,
     push_to_hub: bool,
+    use_compile: bool,
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     hf_token = os.getenv("HF_TOKEN")
@@ -64,7 +65,9 @@ def train_model(
         )
         # Apply LoRA to the model if USE_PEFT=TRUE
         model = get_peft_model(model, lora_config) 
-        
+    
+    if use_compile:
+        model = torch.compile(model)    
     model.to(device) #MODEL TO GPU/CUDA
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -139,9 +142,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fine-tune LLaMA with DoRA and PEFT")
     parser.add_argument("--base_model", type=str, default="huggyllama/llama-7b", help="Base model path or name")
     parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
-    parser.add_argument("--output_dir", type=str, default="./result", help="Output directory for the fine-tuned model")
+    parser.add_argument("--output_dir", type=str, default="ShirinYamani/llama-2-7b-fine-tuned", help="Output directory for the fine-tuned model")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=10, help="Number of training epochs")
+    parser.add_argument("--use_compile", default=False, help="Use Compile")
+    parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
     parser.add_argument("--val_set_size", type=int, default=500, help="Validation set size")
@@ -151,10 +155,10 @@ if __name__ == "__main__":
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
     parser.add_argument("--device", type=str, default="cuda:0", help="Device to use for training")
     parser.add_argument("--lora_r", type=int, default=8, help="LoRA rank")
-    parser.add_argument("--lora_alpha", type=int, default=18, help="LoRA alpha")
+    parser.add_argument("--lora_alpha", type=int, default=16, help="LoRA alpha")
     parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout rate")
     parser.add_argument("--lora_target_modules", type=str, default=None, help="Comma-separated list of target modules for LoRA")
-    parser.add_argument("--hub_model_id", type=str, default=None, help="Repository name to push the model on the Hugging Face Hub")
+    parser.add_argument("--hub_model_id", type=str, default="ShirinYamani/llama-2-7b-fine-tuned", help="Repository name to push the model on the Hugging Face Hub")
     parser.add_argument("--push_to_hub", action="store_true", help="Whether to push the model to Hugging Face Hub")
     args = parser.parse_args()
     train_model(
@@ -167,6 +171,7 @@ if __name__ == "__main__":
         cutoff_len=args.cutoff_len,
         val_set_size=args.val_set_size,
         use_peft=args.use_peft,
+        use_compile=args.use_compile,
         quantize=args.quantize,
         eval_step=args.eval_step,
         save_step=args.save_step,
