@@ -13,7 +13,7 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer
 from datasets import load_dataset
 
-model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda") #default model is huggyllama/llama-7b
+model = AutoModelForCausalLM.from_pretrained("huggyllama/llama-7b", device_map="cuda")
 tokenizer = AutoTokenizer.from_pretrained("huggyllama/llama-7b")
 dataset = load_dataset("timdettmers/openassistant-guanaco", split="train")
 lora_config = LoraConfig(
