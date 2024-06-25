@@ -43,7 +43,7 @@ def train_model(
             token=hf_token, 
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True, 
-                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16 ,
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
             )
