@@ -277,8 +277,7 @@ class XLoraModel(BaseTuner):
     Does nothing. X-LoRA needs adapters to be frozen.
     """
 
-    def _mark_only_adapters_as_trainable(self) -> None:
-        ...
+    def _mark_only_adapters_as_trainable(self) -> None: ...
 
     """
     This enables the X-LoRA adapter.
