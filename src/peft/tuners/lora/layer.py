@@ -114,6 +114,7 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
+        # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
             with gather_params_ctx(self.get_base_layer().weight):
                 self.pissa_init(adapter_name, init_lora_weights)
