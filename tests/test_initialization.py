@@ -25,7 +25,7 @@ from peft.utils import infer_device
 
 
 class TestLoraInitialization:
-    """Test class to check the initialization of adapters."""
+    """Test class to check the initialization of LoRA adapters."""
 
     torch_device = infer_device()
 
@@ -520,6 +520,8 @@ class TestLoraInitialization:
 
 
 class TestAdaLoraInitialization:
+    torch_device = infer_device()
+
     def test_adalora_target_modules_set(self):
         config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
         assert config.target_modules == {"linear", "embed", "conv2d"}
@@ -531,6 +533,33 @@ class TestAdaLoraInitialization:
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
             AdaLoraConfig(loftq_config={"loftq": "config"})
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
+
+    def test_adalora_default_init_identity(self, data):
+        # default is True
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)
+        config = AdaLoraConfig(target_modules=["linear"])
+        model = get_peft_model(model, config)
+        output_after = model(data)
+        assert torch.allclose(output_before, output_after)
 
 
 class TestPromptTuningInitialization:
