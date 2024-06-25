@@ -56,7 +56,7 @@ python examples/dora_finetuning/dora_finetuning.py --lora_target_modules "q_proj
 
 ### Full example of the script 
 ```python
-python train_model.py \
+python dora_finetuning.py \
     --base_model "PATH_TO_MODEL" \
     --data_path "PATH_TO_DATASET" \
     --output_dir "PATH_TO_OUTPUT_DIR" \
