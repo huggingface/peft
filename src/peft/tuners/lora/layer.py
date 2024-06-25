@@ -86,7 +86,14 @@ class LoraLayer(BaseTunerLayer):
             # HQQ layers
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
-            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+            # possibly support user provided custom layer types using dynamic dispatch
+            if hasattr(base_layer, "in_features") and hasattr(base_layer, "out_features"):
+                in_features, out_features = base_layer.in_features, base_layer.out_features
+            else:
+                in_features, out_features = None, None
+            warnings.warn(
+                f"Unsupported layer type '{type(base_layer)}' encountered, proceed at your own risk.", UserWarning
+            )
 
         self.in_features = in_features
         self.out_features = out_features

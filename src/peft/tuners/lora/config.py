@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
+from torch import nn
+
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
@@ -309,3 +311,24 @@ class LoraConfig(PeftConfig):
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):
             self.loftq_config = vars(self.loftq_config)
+
+        self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
+
+    def _register_custom_module(self, mapping: dict[type[nn.Mmodule], type[nn.Module]]) -> None:
+        """
+        Experimental API to support providing custom LoRA layers.
+
+        This API is subject to change, you should carefully read the docs before deciding to use it:
+
+        https://huggingface.co/docs/peft/developer_guides/custom_models
+
+        To register custom LoRA module types, call this method with a `mapping` argument that is a dict that maps from
+        the target layer type to the custom LoRA layer type. The dict can contain multiple items if you wish to target
+        multiple layer types. The target layer type can be any nn.Module that we currently don't support in PEFT,
+        whether that is an official PyTorch layer type or a custom layer type. The custom LoRA module class has to be
+        implemented by the user and follow the PEFT conventions for LoRA layers.
+
+        """
+        if self._custom_modules is None:
+            self._custom_modules = {}
+        self._custom_modules.update(mapping)
