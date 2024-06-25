@@ -24,7 +24,6 @@ def train_model(
     lora_target_modules: str,
     hub_model_id: str,
     push_to_hub: bool,
-    use_compile: bool,
 ):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     hf_token = os.getenv("HF_TOKEN")
@@ -65,9 +64,7 @@ def train_model(
         )
         # Apply LoRA to the model if USE_PEFT=TRUE
         model = get_peft_model(model, lora_config) 
-    
-    if use_compile:
-        model = torch.compile(model)    
+     
     model.to(device) #MODEL TO GPU/CUDA
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -144,7 +141,6 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
     parser.add_argument("--output_dir", type=str, default="path/to/output", help="Output directory for the fine-tuned model")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
-    parser.add_argument("--use_compile", default=False, help="Use Compile")
     parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
@@ -171,7 +167,6 @@ if __name__ == "__main__":
         cutoff_len=args.cutoff_len,
         val_set_size=args.val_set_size,
         use_peft=args.use_peft,
-        use_compile=args.use_compile,
         quantize=args.quantize,
         eval_step=args.eval_step,
         save_step=args.save_step,
