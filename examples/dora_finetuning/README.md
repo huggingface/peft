@@ -36,13 +36,10 @@ There is no additional change needed to your standard LoRA procedure, except for
 
 Run the finetuning script simply by running:
 ```python
-python examples/dora_finetuning/dora_finetuning.py --use_peft
+python examples/dora_finetuning/dora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco --use_dora --output_dir "path/to/where/you/want/your/output" 
 ```
 This will set up the cofig to LoRA with `use_dora=True`. Now if you wanna run the script on your own model then you need to simply define; 
 
-```python
-python examples/dora_finetuning/dora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco
-```
 DoRA also supports quantization. To use 4-bit quantization try:
 
 ```python
@@ -65,7 +62,7 @@ python dora_finetuning.py \
     --learning_rate 3e-4 \
     --cutoff_len 512 \
     --val_set_size 500 \
-    --use_peft \
+    -- use_dora \
     --quantize \
     --eval_step 10 \
     --save_step 100 \
