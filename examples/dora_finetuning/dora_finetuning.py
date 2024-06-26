@@ -13,7 +13,7 @@ def train_model(
     learning_rate: float,
     cutoff_len: int,
     val_set_size: int,
-    use_peft: bool,
+    use_dora: bool,
     quantize: bool,
     eval_step: int,
     save_step: int,
@@ -43,7 +43,7 @@ def train_model(
             token=hf_token, 
             quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True, 
-                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16 ,
+                bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float16, #for both CPU/GPU support
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
             )
@@ -52,22 +52,21 @@ def train_model(
     else:
         model = AutoModelForCausalLM.from_pretrained(base_model, token=hf_token)
 
-    # if use_peft is True THEN, DORA setup
-    if use_peft: #TODO: add other config than lora  peft_configs = (LoraConfig, AdaptionPromptConfig, PrefixTuningConfig)
-        lora_config = LoraConfig(
-            use_dora=True, 
-            r=lora_r,  # Rank
-            lora_alpha=lora_alpha, 
-            target_modules=lora_target_modules.split(',') if lora_target_modules else ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"], 
-            lora_dropout=lora_dropout, 
-            bias="none"
+    #LoRa config for the PEFT model 
+    lora_config = LoraConfig(
+        use_dora=use_dora, # to use Dora OR compare to Lora just set the --use_dora
+        r=lora_r,  # Rank of matrix
+        lora_alpha=lora_alpha, 
+        target_modules=lora_target_modules.split(',') if lora_target_modules else ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"], 
+        lora_dropout=lora_dropout, 
+        bias="none"
         )
-        # Apply LoRA to the model if USE_PEFT=TRUE
-        model = get_peft_model(model, lora_config) 
+    
+    # get the peft model with LoRa config 
+    model = get_peft_model(model, lora_config) 
      
     model.to(device) #MODEL TO GPU/CUDA
     tokenizer.pad_token = tokenizer.eos_token
-
 
     # Load the dataset
     dataset = load_dataset(data_path)
@@ -127,12 +126,6 @@ def train_model(
     model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
 
-    # # Save and push the LoRA adapter if used
-    # if use_peft:
-    #     adapter_dir = os.path.join(output_dir, 'adapter')
-    #     model.save_pretrained(adapter_dir)
-    #     adapter = PeftModel(model)
-    #     adapter.push_to_hub(f"{hub_model_id}-adapter", use_temp_dir=False, commit_message="LoRA adapter")
 
 if __name__ == "__main__":
     import argparse
@@ -141,11 +134,11 @@ if __name__ == "__main__":
     parser.add_argument("--data_path", type=str, default="timdettmers/openassistant-guanaco", help="Dataset path or name")
     parser.add_argument("--output_dir", type=str, default="path/to/output", help="Output directory for the fine-tuned model")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size")
-    parser.add_argument("--num_epochs", type=int, default=1, help="Number of training epochs")
+    parser.add_argument("--num_epochs", type=int, default=0.1, help="Number of training epochs")
     parser.add_argument("--learning_rate", type=float, default=3e-4, help="Learning rate")
     parser.add_argument("--cutoff_len", type=int, default=512, help="Cutoff length for tokenization")
     parser.add_argument("--val_set_size", type=int, default=500, help="Validation set size")
-    parser.add_argument("--use_peft", action="store_true", help="Use PEFT (LoRA) for training")
+    parser.add_argument("--use_dora", action="store_true", help="Apply Dora")
     parser.add_argument("--quantize", action="store_true", help="Use quantization")
     parser.add_argument("--eval_step", type=int, default=10, help="Evaluation step interval")
     parser.add_argument("--save_step", type=int, default=100, help="Save step interval")
@@ -166,7 +159,7 @@ if __name__ == "__main__":
         learning_rate=args.learning_rate,
         cutoff_len=args.cutoff_len,
         val_set_size=args.val_set_size,
-        use_peft=args.use_peft,
+        use_dora=args.use_dora,
         quantize=args.quantize,
         eval_step=args.eval_step,
         save_step=args.save_step,
