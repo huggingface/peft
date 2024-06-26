@@ -24,7 +24,7 @@ from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import dequantize_module_weight
+from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -121,12 +121,16 @@ class LoraLayer(BaseTunerLayer):
         else:
             self.scaling[adapter_name] = lora_alpha / r
 
+        # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
-            self.pissa_init(adapter_name, init_lora_weights)
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.pissa_init(adapter_name, init_lora_weights)
         elif isinstance(init_lora_weights, str) and init_lora_weights.lower() == "olora":
-            self.olora_init(adapter_name)
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.olora_init(adapter_name)
         elif init_lora_weights == "loftq":
-            self.loftq_init(adapter_name)
+            with gather_params_ctx(self.get_base_layer().weight):
+                self.loftq_init(adapter_name)
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
         # call this before dora_init
@@ -161,13 +165,14 @@ class LoraLayer(BaseTunerLayer):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def olora_init(self, adapter_name):
-        dtype = self.base_layer.weight.dtype
+        dtype = self.get_base_layer().weight.dtype
         if dtype in [torch.int8, torch.uint8]:
-            weight_tensor = dequantize_module_weight(self.base_layer)
+            weight_tensor = dequantize_module_weight(self.get_base_layer())
         elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
-            weight_tensor = self.base_layer.weight
+            weight_tensor = self.get_base_layer().weight
         else:
             raise TypeError(f"Unsupported data type for the base layer. Got {dtype}.")
+
         scale_factor = self.scaling[adapter_name]
         r = self.r[adapter_name]
         weight_tensor = weight_tensor.to(torch.float32)
