@@ -34,9 +34,8 @@ def train_model(
     
     #load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(base_model, token=hf_token) 
-     
-    #Load model in Quantized and Peft configz  
-    #QDoRA: IF YOU WANNA QUANTIZE THE MODEL
+      
+    #QDoRA (quantized dora): IF YOU WANNA QUANTIZE THE MODEL
     if quantize:
         model = AutoModelForCausalLM.from_pretrained(
             base_model, 
@@ -48,6 +47,7 @@ def train_model(
                 bnb_4bit_quant_type="nf4",
             )
         )
+        #setup for quantized training
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True) #If True, use gradient checkpointing to save memory at the expense of slower backward pass
     
     else:
