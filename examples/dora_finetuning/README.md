@@ -35,28 +35,28 @@ There is no additional change needed to your standard LoRA procedure, except for
 
 
 Run the finetuning script simply by running:
-```python
+```bash
 python examples/dora_finetuning/dora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco
 ```
 This 👆🏻 by default will load the model in peft set up with LoRA config. Now if you wanna quickly compare it with Dora, all you need to do is to input ` --use_dora` in the command line. So same above example would be 👇🏻;
 
-```python
+```bash
 python examples/dora_finetuning/dora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --data_path timdettmers/openassistant-guanaco --use_dora 
 ```
 
 DoRA also supports quantization. To use 4-bit quantization try:
 
-```python
+```bash
 python examples/dora_finetuning/dora_finetuning.py --base_model meta-llama/Meta-Llama-3-8B --quantize
 ```
 
 Similarly, by default the LoRA layers are the attention and MLP layers of LLama model, if you get to choose a different set of layers for LoRA to be applied on, you can simply define it using:
-```python
+```bash
 python examples/dora_finetuning/dora_finetuning.py --lora_target_modules "q_proj,k_proj,v_proj,o_proj" 
 ```
 
 ### Full example of the script 
-```python
+```bash
 python dora_finetuning.py \
     --base_model "PATH_TO_MODEL" \
     --data_path "PATH_TO_DATASET" \
