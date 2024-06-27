@@ -219,9 +219,9 @@ class HRALinear(nn.Module, HRALayer):
                 indices = range(rank)
 
             for i in indices:
-                unit_v = opt_u[:, i].view(-1, 1)
+                ui = opt_u[:, i].view(-1, 1)
                 weight = weight @ (
-                    torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
+                    torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * ui @ ui.t()
                 )
 
         return weight
@@ -385,9 +385,9 @@ class HRAConv2d(nn.Module, HRALayer):
                 indices = range(rank)
 
             for i in indices:
-                unit_v = opt_u[:, i].view(-1, 1)
+                ui = opt_u[:, i].view(-1, 1)
                 weight = weight @ (
-                    torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
+                    torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * ui @ ui.t()
                 )
 
         return weight
