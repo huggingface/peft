@@ -122,12 +122,12 @@ from peft import LoraConfig
 config = LoraConfig(use_dora=True, ...)
 ```
 
-If parts of the model or the DoRA adapter are offloaded to CPU you can get a significant speedup at the cost of some temporary (ephemeral) VRAM overhead by using `ephemeral_transfers=True` in `config.runtime`.
+If parts of the model or the DoRA adapter are offloaded to CPU you can get a significant speedup at the cost of some temporary (ephemeral) VRAM overhead by using `ephemeral_transfers=True` in `config.runtime_config`.
 
 ```py
-from peft import LoraConfig, LoraConfigRuntime
+from peft import LoraConfig, LoraRuntimeConfig
 
-config = LoraConfig(use_dora=True, runtime=LoraConfigRuntime(ephemeral_transfers=True), ...)
+config = LoraConfig(use_dora=True, runtime_config=LoraRuntimeConfig(ephemeral_transfers=True), ...)
 ```
 
 A `PeftModel` with a DoRA adapter can also be loaded with `ephemeral_transfers=True` flag using the `from_pretrained` method as well as the `load_adapter` method.

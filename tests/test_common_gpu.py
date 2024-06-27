@@ -1104,7 +1104,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         )
         peft_model = get_peft_model(model, config).eval()
         # Check that ephemeral transfers are present
-        assert peft_model.peft_config['default'].runtime_config.ephemeral_transfers
+        assert peft_model.peft_config["default"].runtime_config.ephemeral_transfers
 
         # Save to disk
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1120,7 +1120,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             elapsed_time = time.perf_counter() - start_time
 
             # Check that ephemeral transfers are absent
-            assert not peft_model.peft_config['default'].runtime_config.ephemeral_transfers
+            assert not peft_model.peft_config["default"].runtime_config.ephemeral_transfers
 
             # Load again, with ephemeral transfers enabled
             start_time = time.perf_counter()
