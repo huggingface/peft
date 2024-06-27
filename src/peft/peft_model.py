@@ -434,8 +434,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
 
         # Runtime configuration, if supported
-        if hasattr(config, "runtime"):
-            config.runtime.ephemeral_transfers = ephemeral_transfers
+        if hasattr(config, "runtime_config"):
+            config.runtime_config.ephemeral_transfers = ephemeral_transfers
         else:
             if ephemeral_transfers:
                 warnings.warn("Ephemeral transfers are not supported for this model. Ignoring.")

@@ -24,7 +24,7 @@ from peft.utils import PeftType
 
 
 @dataclass
-class LoraConfigRuntime:
+class LoraRuntimeConfig:
     """
     This is the sub-configuration class to store the runtime configurations for the model.
 
@@ -36,12 +36,12 @@ class LoraConfigRuntime:
         default=False,
         metadata={
             "help": (
-                "Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in"
-                "the data involved in intense operations being momentarily copied over to the GPU, and the results copied"
-                "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster"
-                "compared to performing them on the CPU. This is useful when parts of the model and/or components (such"
-                "as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on"
-                "small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results"
+                "Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in "
+                "the data involved in intense operations being momentarily copied over to the GPU, and the results copied "
+                "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster "
+                "compared to performing them on the CPU. This is useful when parts of the model and/or components (such "
+                "as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on "
+                "small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results "
                 "moved back to CPU memory. Currently only affects DoRA initialization."
             )
         },
@@ -147,7 +147,7 @@ class LoraConfig(PeftConfig):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate LoRA adapters attached to them.
-        runtime (`LoraConfigRuntime`):
+        runtime_config (`LoraRuntimeConfig`):
             Runtime configurations (which are not saved or restored).
     """
 
@@ -309,14 +309,16 @@ class LoraConfig(PeftConfig):
             )
         },
     )
-    runtime: LoraConfigRuntime = field(default_factory=LoraConfigRuntime, metadata={"help": "Runtime configurations"})
+    runtime_config: LoraRuntimeConfig = field(
+        default_factory=LoraRuntimeConfig, metadata={"help": "Runtime configurations"}
+    )
 
     def to_dict(self):
         """
         Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
         """
         rv = super().to_dict()
-        rv.pop("runtime")
+        rv.pop("runtime_config")
         return rv
 
     def __post_init__(self):

@@ -155,15 +155,15 @@ class PeftConfigTester(unittest.TestCase):
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_save_pretrained_with_runtime_config(self, config_class):
         r"""
-        Test if the config correctly removes runtime when saving
+        Test if the config correctly removes runtime config when saving
         """
         with tempfile.TemporaryDirectory() as tmp_dirname:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 cfg = config_class.from_pretrained(model_name, revision=revision)
-                cfg.runtime.ephemeral_transfers = True
+                cfg.runtime_config.ephemeral_transfers = True
                 cfg.save_pretrained(tmp_dirname)
                 cfg = config_class.from_pretrained(tmp_dirname)
-                assert not cfg.runtime.ephemeral_transfers
+                assert not cfg.runtime_config.ephemeral_transfers
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_set_attributes(self, config_class):

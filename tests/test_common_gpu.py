@@ -50,7 +50,7 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
-from peft.tuners.lora.config import LoraConfigRuntime
+from peft.tuners.lora.config import LoraRuntimeConfig
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
@@ -1087,7 +1087,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
-    def test_8bit_dora_cpu_offloading(self):
+    def test_dora_ephemeral_transfers(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -1098,6 +1098,9 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=4096,  # too small and the time difference is too small
             init_lora_weights=False,
             use_dora=True,
+            runtime_config=LoraRuntimeConfig(
+                ephemeral_transfers=True
+            ),  # we enable this, but only to verify that it's gone later
         )
         peft_model = get_peft_model(model, config).eval()
 
@@ -1115,7 +1118,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             elapsed_time = time.perf_counter() - start_time
 
             # Load again, with ephemeral transfers enabled
-            start_time = time.time()
+            start_time = time.perf_counter()
             peft_model = PeftModel.from_pretrained(
                 model,
                 tmp_dir,
@@ -1130,7 +1133,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     @require_torch_gpu
     @require_torch_multi_gpu
     @pytest.mark.multi_gpu_tests
-    def test_8bit_dora_cpu_offloading_multigpu(self):
+    def test_dora_ephemeral_transfers_multigpu(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -1141,7 +1144,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=16,  # too small and the time difference is too small
             init_lora_weights=False,
             use_dora=True,
-            runtime=LoraConfigRuntime(ephemeral_transfers=True),
+            runtime_config=LoraRuntimeConfig(ephemeral_transfers=True),
         )
         peft_model = get_peft_model(model, config).eval()
 
