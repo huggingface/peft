@@ -3,7 +3,7 @@
 # module, but to preserve other warnings. So, don't check this module at all
 
 # coding=utf-8
-# Copyright 2024-present the HuggingFace Inc. team.
+# Copyright 2023-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
