@@ -261,7 +261,9 @@ class LoraLayer(BaseTunerLayer):
                     lora_B = lora_B.to("cuda")
                 lora_A = lora_A.to(lora_B.device)
         scaling = self.scaling[adapter_name]
-        dora_layer.update_layer(base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling, place_on_cpu=place_on_cpu)
+        dora_layer.update_layer(
+            base_layer=self.get_base_layer(), lora_A=lora_A, lora_B=lora_B, scaling=scaling, place_on_cpu=place_on_cpu
+        )
         self.lora_magnitude_vector[adapter_name] = dora_layer
 
     def _cache_store(self, key: str, value: Any) -> None:

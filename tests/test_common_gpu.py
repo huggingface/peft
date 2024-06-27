@@ -50,6 +50,7 @@ from peft import (
     prepare_model_for_kbit_training,
 )
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
+from peft.tuners.lora.config import LoraConfigRuntime
 
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
@@ -1086,17 +1087,15 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
-    @require_bitsandbytes
     def test_8bit_dora_cpu_offloading(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
-            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
             torch_dtype=torch.float32,
         ).eval()
 
         config = LoraConfig(
-            r=4096, # too small and the time difference is too small
+            r=4096,  # too small and the time difference is too small
             init_lora_weights=False,
             use_dora=True,
         )
@@ -1107,13 +1106,13 @@ class PeftGPUCommonTests(unittest.TestCase):
             peft_model.save_pretrained(tmp_dir)
 
             # Load from disk 100% on CPU without ephemeral transfers
-            start_time = time.time()
+            start_time = time.perf_counter()
             peft_model = PeftModel.from_pretrained(
                 model,
                 tmp_dir,
                 device_map={"": "cpu"},
             ).eval()
-            elapsed_time = time.time() - start_time
+            elapsed_time = time.perf_counter() - start_time
 
             # Load again, with ephemeral transfers enabled
             start_time = time.time()
@@ -1123,10 +1122,39 @@ class PeftGPUCommonTests(unittest.TestCase):
                 device_map={"": "cpu"},
                 ephemeral_transfers=True,
             ).eval()
-            elapsed_time2 = time.time() - start_time
+            elapsed_time_ephemeral_transfer = time.perf_counter() - start_time
 
         # CPU only should be much slower
-        assert elapsed_time > 1.1 * elapsed_time2
+        assert elapsed_time > 1.1 * elapsed_time_ephemeral_transfer
+
+    @require_torch_gpu
+    @require_torch_multi_gpu
+    @pytest.mark.multi_gpu_tests
+    def test_8bit_dora_cpu_offloading_multigpu(self):
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        config = LoraConfig(
+            r=16,  # too small and the time difference is too small
+            init_lora_weights=False,
+            use_dora=True,
+            runtime=LoraConfigRuntime(ephemeral_transfers=True),
+        )
+        peft_model = get_peft_model(model, config).eval()
+
+        layer = peft_model.base_model.model.model.decoder.layers[0].self_attn.v_proj
+        lora_A, lora_B = layer.lora_A, layer.lora_B
+
+        possible_combinations = ["cpu", "cuda", "cuda:0", "cuda:1"]
+        for device_A in possible_combinations:
+            la = lora_A.to(device_A)
+            for device_B in possible_combinations:
+                lb = lora_B.to(device_B)
+                layer.lora_A, layer.lora_B = la, lb
+                layer.dora_init(layer.active_adapter[0])  # should not raise an error
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")

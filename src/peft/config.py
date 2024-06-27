@@ -24,30 +24,6 @@ from .utils import CONFIG_NAME, PeftType, TaskType
 
 
 @dataclass
-class PeftConfigRuntime:
-    """
-    This is the sub-configuration class to store the runtime configurations for the model.
-
-    Args:
-        ephemeral_transfers (`bool`): Whether to use ephemeral transfers for models partially kept in CPU memory.
-    """
-    ephemeral_transfers: bool = field(
-        default=False,
-        metadata={
-            "help": (
-                "Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in"
-                "the data involved in intense operations being momentarily copied over to the GPU, and the results copied"
-                "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster"
-                "compared to performing them on the CPU. This is useful when parts of the model and/or components (such"
-                "as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on"
-                "small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results"
-                "moved back to CPU memory. This brings a slight momentary VRAM overhead but gives orders of magnitude"
-                "speedup in certain cases."
-            )
-        },
-    )
-
-@dataclass
 class PeftConfigMixin(PushToHubMixin):
     r"""
     This is the base configuration class for PEFT adapter models. It contains all the methods that are common to all
@@ -67,11 +43,8 @@ class PeftConfigMixin(PushToHubMixin):
     def to_dict(self) -> Dict:
         r"""
         Returns the configuration for your adapter model as a dictionary.
-        Does not include the runtime configuration.
         """
-        rv = asdict(self)
-        rv.pop('runtime')
-        return rv
+        return asdict(self)
 
     def save_pretrained(self, save_directory: str, **kwargs) -> None:
         r"""
@@ -263,7 +236,6 @@ class PeftConfig(PeftConfigMixin):
     peft_type: Optional[Union[str, PeftType]] = field(default=None, metadata={"help": "Peft type"})
     task_type: Optional[Union[str, TaskType]] = field(default=None, metadata={"help": "Task type"})
     inference_mode: bool = field(default=False, metadata={"help": "Whether to use inference mode"})
-    runtime: PeftConfigRuntime = field(default_factory=PeftConfigRuntime, metadata={"help": "Runtime configurations"})
 
 
 @dataclass
