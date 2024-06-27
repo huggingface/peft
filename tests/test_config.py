@@ -160,6 +160,8 @@ class PeftConfigTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             for model_name, revision in PEFT_MODELS_TO_TEST:
                 cfg = config_class.from_pretrained(model_name, revision=revision)
+                # NOTE: cfg is always a LoraConfig here, because the configuration of the loaded model was a LoRA.
+                # Hence we can expect a runtime_config to exist regardless of config_class.
                 cfg.runtime_config.ephemeral_transfers = True
                 cfg.save_pretrained(tmp_dirname)
                 cfg = config_class.from_pretrained(tmp_dirname)
