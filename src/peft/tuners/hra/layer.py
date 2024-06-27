@@ -217,7 +217,7 @@ class HRALinear(nn.Module, HRALayer):
                 indices = range(rank - 1, -1, -1)
             else:
                 indices = range(rank)
-                
+
             for i in indices:
                 unit_v = opt_u[:, i].view(-1, 1)
                 weight = weight @ (
@@ -237,7 +237,7 @@ class HRALinear(nn.Module, HRALayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             new_weight = torch.eye(self.in_features, device=x.device)
-            
+
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.hra_u.keys():
                     continue
@@ -383,7 +383,7 @@ class HRAConv2d(nn.Module, HRALayer):
                 indices = range(rank - 1, -1, -1)
             else:
                 indices = range(rank)
-                
+
             for i in indices:
                 unit_v = opt_u[:, i].view(-1, 1)
                 weight = weight @ (
@@ -422,7 +422,7 @@ class HRAConv2d(nn.Module, HRALayer):
             new_weight = torch.mm(orig_weight, new_weight)
             new_weight = new_weight.view(
                 self.out_features,
-                self.in_features, 
+                self.in_features,
                 self.base_layer.kernel_size[0],
                 self.base_layer.kernel_size[0]
             )

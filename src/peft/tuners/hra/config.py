@@ -25,7 +25,7 @@ class HRAConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`HRAModel`].
 
     Args:
-        r (`int`): 
+        r (`int`):
             The rank of HRA across different layers. It is best to set 'r' to an even number; otherwise, the default
             initialization method will not work.
         apply_GS (`bool`):
@@ -54,7 +54,7 @@ class HRAConfig(PeftConfig):
     """
 
     r: int = field(
-        default=8, 
+        default=8,
         metadata={
             "help": "The rank of HRA across different layers.",
             "note": "It is best to set 'r' to an even number; otherwise, the default initialization method will not work.",
