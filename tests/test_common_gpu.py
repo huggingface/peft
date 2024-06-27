@@ -1090,7 +1090,7 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_dora_ephemeral_transfers(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-125m",
+            "facebook/opt-350m",
             torch_dtype=torch.float32,
         ).eval()
 
@@ -1103,6 +1103,8 @@ class PeftGPUCommonTests(unittest.TestCase):
             ),  # we enable this, but only to verify that it's gone later
         )
         peft_model = get_peft_model(model, config).eval()
+        # Check that ephemeral transfers are present
+        assert peft_model.peft_config['default'].runtime_config.ephemeral_transfers
 
         # Save to disk
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1116,6 +1118,9 @@ class PeftGPUCommonTests(unittest.TestCase):
                 device_map={"": "cpu"},
             ).eval()
             elapsed_time = time.perf_counter() - start_time
+
+            # Check that ephemeral transfers are absent
+            assert not peft_model.peft_config['default'].runtime_config.ephemeral_transfers
 
             # Load again, with ephemeral transfers enabled
             start_time = time.perf_counter()
