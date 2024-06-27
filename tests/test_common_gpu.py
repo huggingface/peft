@@ -1083,7 +1083,56 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_dora, out_merged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
+    
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_apply_GS_hra_inference(self):
+        # check for different result with and without apply_GS
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
 
+        torch.manual_seed(0)
+        config_hra = HRAConfig(r=8, init_weights=True, apply_GS=False)
+        model = get_peft_model(model, config_hra).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        logits_hra = model(random_input).logits
+
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        )
+        torch.manual_seed(0)
+        config_hra_GS = HRAConfig(r=8, init_weights=True, apply_GS=True)
+        model = get_peft_model(model, config_hra_GS)
+
+        logits_hra_GS = model(random_input).logits
+
+        assert not torch.allclose(logits_hra, logits_hra_GS)
+        
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_r_odd_hra_inference(self):
+        # check that an untrained HRA adapter can't be initialized as an identity tranformation 
+        # when r is an odd number  
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+        
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+
+        torch.manual_seed(0)
+        logits = model(random_input).logits
+        
+        config_hra = HRAConfig(r=7, init_weights=True, apply_GS=False)
+        model = get_peft_model(model, config_hra).eval()
+        logits_hra = model(random_input).logits
+
+        assert not torch.allclose(logits, logits_hra)
+        
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
 @pytest.mark.single_gpu_tests
