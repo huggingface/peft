@@ -5,5 +5,5 @@ style:
 	@echo "Running flake8 for linting..."
 	flake8 .
 	@echo "Running isort for import sorting..."
-	isort --apply .
+	isort  .
 
