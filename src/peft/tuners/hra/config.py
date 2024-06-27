@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,11 @@ class HRAConfig(PeftConfig):
     This is the configuration class to store the configuration of a [`HRAModel`].
 
     Args:
-        r (`int`): HRA rank.
+        r (`int`): 
+            The rank of HRA across different layers. It is best to set 'r' to an even number; otherwise, the default
+            initialization method will not work.
+        apply_GS (`bool`):
+            Whether to apply Gram-Schmidt orthogonalization.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -47,11 +51,15 @@ class HRAConfig(PeftConfig):
             specified by `r`.
         modules_to_save (`List[str]`):
             List of modules apart from adapter layers to be set as trainable and saved in the final checkpoint.
-        apply_GS (`bool`):
-            Whether to apply Gram-Schmidt orthogonalization.
     """
 
-    r: int = field(default=8, metadata={"help": "HRA rank"})
+    r: int = field(
+        default=8, 
+        metadata={
+            "help": "The rank of HRA across different layers.",
+            "note": "It is best to set 'r' to an even number; otherwise, the default initialization method will not work.",
+        }
+    )
     apply_GS: bool = field(
         default=False,
         metadata={"help": "Whether to apply Gram-Schmidt orthogonalization or not."},
@@ -83,10 +91,6 @@ class HRAConfig(PeftConfig):
         metadata={
             "help": "The layer pattern name, used only if `layers_to_transform` is different to None and if the layer pattern is not in the common layers pattern."
         },
-    )
-    fan_in_fan_out: bool = field(
-        default=False,
-        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     bias: str = field(default="none", metadata={"help": "Bias type for HRA. Can be 'none', 'all' or 'hra_only'"})
     modules_to_save: Optional[List[str]] = field(

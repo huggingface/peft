@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -118,7 +118,6 @@ class HRAModel(BaseTuner):
         kwargs = {
             "r": hra_config.r,
             "apply_GS": hra_config.apply_GS,
-            "fan_in_fan_out": hra_config.fan_in_fan_out,
             "init_weights": hra_config.init_weights,
         }
         kwargs["bias"] = bias
@@ -193,12 +192,6 @@ class HRAModel(BaseTuner):
             target_base_layer = target
 
         if isinstance(target_base_layer, torch.nn.Linear):
-            if kwargs["fan_in_fan_out"]:
-                warnings.warn(
-                    "fan_in_fan_out is set to True but the target module is `torch.nn.Linear`. "
-                    "Setting fan_in_fan_out to False."
-                )
-                kwargs["fan_in_fan_out"] = hra_config.fan_in_fan_out = False
             new_module = HRALinear(target, adapter_name, **kwargs)
         elif isinstance(target_base_layer, torch.nn.Conv2d):
             new_module = HRAConv2d(target, adapter_name, **kwargs)

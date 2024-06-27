@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -133,13 +133,11 @@ class HRALinear(nn.Module, HRALayer):
         adapter_name: str,
         r: int = 0,
         apply_GS: bool = False,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_weights: Union[bool, str] = True,
         **kwargs,
     ) -> None:
         super().__init__()
         HRALayer.__init__(self, base_layer, **kwargs)
-        self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
         self.update_layer(adapter_name, r, apply_GS, init_weights, **kwargs)
 
@@ -216,17 +214,15 @@ class HRALinear(nn.Module, HRALayer):
             opt_u = opt_u / opt_u.norm(dim=0)
             weight = torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype)
             if reverse:
-                for i in range(rank - 1, -1, -1):
-                    unit_v = opt_u[:, i].view(-1, 1)
-                    weight = weight @ (
-                        torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
-                    )
+                indices = range(rank - 1, -1, -1)
             else:
-                for i in range(rank):
-                    unit_v = opt_u[:, i].view(-1, 1)
-                    weight = weight @ (
-                        torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
-                    )
+                indices = range(rank)
+                
+            for i in indices:
+                unit_v = opt_u[:, i].view(-1, 1)
+                weight = weight @ (
+                    torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
+                )
 
         return weight
 
@@ -240,17 +236,19 @@ class HRALinear(nn.Module, HRALayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self.base_layer(x, *args, **kwargs)
+            new_weight = torch.eye(self.in_features, device=x.device)
+            
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.hra_u.keys():
                     continue
-
-                x = x.to(self.get_base_layer().weight.data.dtype)
-                orig_weight = self.get_base_layer().weight.data
                 delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(orig_weight, delta_weight)
+                new_weight = torch.mm(new_weight, delta_weight)
 
-                result = F.linear(input=x, weight=new_weight, bias=self.base_layer.bias)
+            x = x.to(self.get_base_layer().weight.data.dtype)
+            orig_weight = self.get_base_layer().weight.data
+            new_weight = torch.mm(orig_weight, new_weight)
+
+            result = F.linear(input=x, weight=new_weight, bias=self.base_layer.bias)
 
         result = result.to(previous_dtype)
         return result
@@ -382,17 +380,15 @@ class HRAConv2d(nn.Module, HRALayer):
             opt_u = opt_u / opt_u.norm(dim=0)
             weight = torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype)
             if reverse:
-                for i in range(rank - 1, -1, -1):
-                    unit_v = opt_u[:, i].view(-1, 1)
-                    weight = weight @ (
-                        torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
-                    )
+                indices = range(rank - 1, -1, -1)
             else:
-                for i in range(rank):
-                    unit_v = opt_u[:, i].view(-1, 1)
-                    weight = weight @ (
-                        torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
-                    )
+                indices = range(rank)
+                
+            for i in indices:
+                unit_v = opt_u[:, i].view(-1, 1)
+                weight = weight @ (
+                    torch.eye(shape[0], device=opt_u.device, dtype=opt_u.dtype) - 2 * unit_v @ unit_v.t()
+                )
 
         return weight
 
@@ -406,31 +402,38 @@ class HRAConv2d(nn.Module, HRALayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            result = self.base_layer(x, *args, **kwargs)
+            new_weight = torch.eye(
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                device=x.device
+            )
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.hra_u.keys():
                     continue
-
-                x = x.to(self.base_layer.weight.data.dtype)
-
-                orig_weight = self.base_layer.weight.data
-                orig_weight = orig_weight.view(
-                    self.out_features,
-                    self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
-                )
                 delta_weight = self.get_delta_weight(active_adapter)
-                new_weight = torch.mm(orig_weight, delta_weight)
-                new_weight = new_weight.view(
-                    self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
-                )
+                new_weight = torch.mm(new_weight, delta_weight)
 
-                result = F.conv2d(
-                    input=x,
-                    weight=new_weight,
-                    bias=self.base_layer.bias,
-                    padding=self.base_layer.padding[0],
-                    stride=self.base_layer.stride[0],
-                )
+            x = x.to(self.base_layer.weight.data.dtype)
+
+            orig_weight = self.base_layer.weight.data
+            orig_weight = orig_weight.view(
+                self.out_features,
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+            )
+            new_weight = torch.mm(orig_weight, new_weight)
+            new_weight = new_weight.view(
+                self.out_features,
+                self.in_features, 
+                self.base_layer.kernel_size[0],
+                self.base_layer.kernel_size[0]
+            )
+
+            result = F.conv2d(
+                input=x,
+                weight=new_weight,
+                bias=self.base_layer.bias,
+                padding=self.base_layer.padding[0],
+                stride=self.base_layer.stride[0],
+            )
 
         result = result.to(previous_dtype)
         return result
