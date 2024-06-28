@@ -229,6 +229,8 @@ class AdaLoraModel(LoraModel):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == 'model':
+                raise
             return getattr(self.model, name)
 
     def forward(self, *args, **kwargs):

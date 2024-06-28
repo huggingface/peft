@@ -666,6 +666,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == 'base_model':
+                raise
             return getattr(self.base_model, name)
 
     @contextmanager

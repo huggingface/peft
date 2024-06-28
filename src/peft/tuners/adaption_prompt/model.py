@@ -158,4 +158,6 @@ class AdaptionPromptModel(nn.Module):
         except AttributeError:
             # This is necessary as e.g. causal models have various methods that we
             # don't want to re-implement here.
+            if name == 'model':
+                raise
             return getattr(self.model, name)

@@ -194,6 +194,8 @@ class AutoModelForSentenceEmbedding(nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == 'model':
+                raise
             return getattr(self.model, name)
 
 
