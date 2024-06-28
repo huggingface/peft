@@ -34,6 +34,7 @@ from peft import (
     LoHaConfig,
     LoKrConfig,
     LoraConfig,
+    LoReftConfig,
     PeftModel,
     PeftType,
     PrefixTuningConfig,
@@ -541,6 +542,9 @@ class PeftCommonTester:
         if issubclass(config_cls, BOFTConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
+        if issubclass(config_cls, LoReftConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
         if ("gpt2" in model_id.lower()) and (config_cls != LoraConfig):
             self.skipTest("Merging GPT2 adapters not supported for IA³ (yet)")
 
@@ -659,6 +663,8 @@ class PeftCommonTester:
         assert torch.allclose(logits_merged_adapter_default, logits_adapter_1, atol=1e-3, rtol=1e-3)
 
     def _test_merge_layers_is_idempotent(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, LoReftConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
             base_model_name_or_path=model_id,
@@ -681,6 +687,9 @@ class PeftCommonTester:
         assert torch.allclose(logits_0, logits_1, atol=1e-6, rtol=1e-6)
 
     def _test_safe_merge(self, model_id, config_cls, config_kwargs):
+        if issubclass(config_cls, LoReftConfig):
+            return pytest.skip(f"Test not applicable for {config_cls}")
+
         torch.manual_seed(0)
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -902,7 +911,7 @@ class PeftCommonTester:
             model_from_pretrained = PeftModel.from_pretrained(model_from_pretrained, tmp_dirname).to(self.torch_device)
 
             logits_from_pretrained = model_from_pretrained(**inputs)[0][0]
-            assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4)
+            assert torch.allclose(logits, logits_from_pretrained, atol=1e-4, rtol=1e-4), (logits, logits_from_pretrained)
 
     def _test_training_layer_indexing(self, model_id, config_cls, config_kwargs):
         if config_cls not in (LoraConfig,):
@@ -1131,7 +1140,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "LOREFT"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:

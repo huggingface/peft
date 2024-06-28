@@ -19,7 +19,7 @@ import numpy as np
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 
-from peft import BOFTConfig, LoHaConfig, LoraConfig, OFTConfig, get_peft_model
+from peft import BOFTConfig, LoHaConfig, LoraConfig, LoReftConfig, OFTConfig, get_peft_model
 
 from .testing_common import ClassInstantier, PeftCommonTester
 from .testing_utils import temp_seed
@@ -85,6 +85,20 @@ CONFIG_TESTING_KWARGS = (
             "boft_dropout": 0.0,
         },
     },
+    {
+        "text_encoder": {
+            "r": 8,
+            "alpha": 32,
+            "target_modules": ["out_proj"],
+            "dropout": 0.0,
+        },
+        "unet": {
+            "r": 8,
+            "alpha": 32,
+            "target_modules": ["to_out.0"],
+            "dropout": 0.0,
+        },
+    },
 )
 CLASSES_MAPPING = {
     "lora": (LoraConfig, CONFIG_TESTING_KWARGS[0]),
@@ -92,6 +106,7 @@ CLASSES_MAPPING = {
     "lokr": (LoHaConfig, CONFIG_TESTING_KWARGS[1]),
     "oft": (OFTConfig, CONFIG_TESTING_KWARGS[2]),
     "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[3]),
+    "loreft": (LoReftConfig, CONFIG_TESTING_KWARGS[4]),
 }
 
 
@@ -146,6 +161,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "oft_kwargs": {"init_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
             },
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loreft"])],
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
@@ -179,6 +195,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "oft_kwargs": {"init_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
             },
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loreft"])],
         )
     )
     def test_merge_layers_safe_merge(self, test_name, model_id, config_cls, config_kwargs):
@@ -209,7 +226,7 @@ class StableDiffusionModelTester(TestCase, PeftCommonTester):
                 "model_ids": PEFT_DIFFUSERS_SD_MODELS_TO_TEST,
                 "lora_kwargs": {"init_lora_weights": [False]},
             },
-            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft"])],
+            filter_params_func=lambda tests: [x for x in tests if all(s not in x[0] for s in ["loha", "lokr", "oft", "loreft"])],
         )
     )
     def test_add_weighted_adapter_base_unchanged(self, test_name, model_id, config_cls, config_kwargs):

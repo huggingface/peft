@@ -48,6 +48,7 @@ from .tuners import (
     LoHaModel,
     LoKrModel,
     LoraModel,
+    LoReftModel,
     MultitaskPromptEmbedding,
     OFTModel,
     PolyModel,
@@ -89,6 +90,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.IA3: IA3Model,
     PeftType.OFT: OFTModel,
     PeftType.POLY: PolyModel,
+    PeftType.LOREFT: LoReftModel,
     PeftType.LN_TUNING: LNTuningModel,
     PeftType.VERA: VeraModel,
 }
@@ -962,10 +964,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                             for lora_key, lora_val in lora_dict.items():
                                 divide = lora_key.rfind(".")
                                 new_key = lora_key[:divide] + f".{adapter_name}" + lora_key[divide:]
-                                safe_dict[new_key] = lora_val
+                                safe_dict[new_key] = lora_val.contiguous()
                         else:
                             final_key = prefix + block_id + safe_key
-                        safe_dict[final_key] = safe_tensor
+                        safe_dict[final_key] = safe_tensor.contiguous()
                     files_seen.add(new_fname)
 
                     # avoid overwriting original safetensors

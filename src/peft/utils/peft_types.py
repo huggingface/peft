@@ -37,6 +37,7 @@ class PeftType(str, enum.Enum):
     - LOKR
     - OFT
     - POLY
+    - REFT
     - LN_TUNING
     """
 
@@ -53,6 +54,7 @@ class PeftType(str, enum.Enum):
     LOKR = "LOKR"
     OFT = "OFT"
     POLY = "POLY"
+    LOREFT = "LOREFT"
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
 
