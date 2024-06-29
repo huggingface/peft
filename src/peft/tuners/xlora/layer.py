@@ -162,7 +162,7 @@ class XLoraEmbeddingLayer(XLoraLayer):
                 embedding_A = self.target.lora_embedding_A[active_adapter].T
                 embedding_B = self.target.lora_embedding_B[active_adapter].T
                 scaling = self.target.scaling[active_adapter]
-                after_A = self.target._embed(x_mod, embedding_A)  # type: ignore
+                after_A = self.target._embed(x, embedding_A)  # type: ignore
                 if scalings is not None:
                     after_A_mod = self.apply_scalings_to_x(after_A, xlora_scalings, adapter_n)
                     scaling_weight = self.config.global_scaling_weight
