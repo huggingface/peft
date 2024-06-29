@@ -48,9 +48,40 @@ class TestXlora:
         return file_names
 
     @pytest.fixture(scope="class")
+    def saved_lora_embedding_adapters(self, tmp_dir):
+        file_names = []
+        for i in range(1, self.num_loras + 1):
+            torch.manual_seed(i)
+            lora_config = LoraConfig(
+                task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_positions", "embed_tokens"]
+            )
+            model = AutoModelForCausalLM.from_pretrained(self.model_id)
+            peft_model = get_peft_model(model, lora_config)
+            file_name = os.path.join(tmp_dir, f"checkpoint-{i}")
+            peft_model.save_pretrained(file_name)
+            file_names.append(file_name)
+        return file_names
+
+    @pytest.fixture(scope="class")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
         return tokenizer
+
+    @pytest.fixture(scope="function")
+    def embedding_model(self, saved_lora_embedding_adapters):
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        model.config.use_cache = False
+        adapters = {str(i): file_name for i, file_name in enumerate(saved_lora_embedding_adapters)}
+
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=model.config.hidden_size,
+            xlora_depth=8,
+            adapters=adapters,
+        )
+        model = get_peft_model(model, peft_config).to(self.torch_device)
+        return model
 
     @pytest.fixture(scope="function")
     def model(self, saved_lora_adapters):
@@ -265,3 +296,11 @@ class TestXlora:
         assert torch.isfinite(outputs_disabled[: inputs.shape[1] :]).all()
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
         assert not torch.equal(outputs, outputs_disabled)
+
+    def test_functional_embedding(self, tokenizer, embedding_model):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = embedding_model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=32,
+        )
+        assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
