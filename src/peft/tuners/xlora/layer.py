@@ -155,7 +155,7 @@ class XLoraEmbeddingLayer(XLoraLayer):
         if not self.target.merged:
             for adapter_n, active_adapter in enumerate(self.target.active_adapters):
                 # TODO: implement X-LoRA with Lora+Dora layers
-                if self.target.use_dora[active_adapter]:
+                if self.target.use_dora.get(active_adapter, False):
                     raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
                 if active_adapter not in self.target.lora_embedding_A:
                     continue
