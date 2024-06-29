@@ -27,7 +27,7 @@ from peft.tuners.tuners_utils import BaseTuner
 from .. import lora
 from .classifier import XLoraClassifier
 from .config import XLoraConfig
-from .layer import XLoraConv2dLayer, XLoraEmbeddingLayer, XLoraLinearLayer
+from .layer import XLoraConv2dLayer, XLoraLinearLayer
 
 
 def convert_layers_to_xlora(
@@ -46,18 +46,6 @@ def convert_layers_to_xlora(
         if isinstance(module, lora.Linear):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoraLinearLayer(
-                model=xloramodel,
-                target=module,
-                target_forward=module.forward,
-                layer_number=total_swapped,
-                config=config,
-            )
-            all_layers.append(new_layer)
-            module.forward = new_layer.forward  # type: ignore[method-assign]
-            total_swapped += 1
-        elif isinstance(module, lora.Embedding):
-            device = module.lora_embedding_A[next(iter(module.lora_embedding_A))].device
-            new_layer = XLoraEmbeddingLayer(
                 model=xloramodel,
                 target=module,
                 target_forward=module.forward,
