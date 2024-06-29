@@ -128,6 +128,52 @@ class XLoraLinearLayer(XLoraLayer):
         result = result.to(previous_dtype)
         return result
 
+
+class XLoraEmbeddingLayer(XLoraLayer):
+    def __init__(
+        self,
+        model: nn.Module,
+        target: lora.Embedding,
+        target_forward: Callable[..., Any],
+        layer_number: int,
+        config: XLoraConfig,
+    ) -> None:
+        super().__init__(model, target, target_forward, layer_number, config)
+
+    def forward(self, x: Tensor, *args: Any, scalings: Optional[Tensor] = None, **kwargs: Any) -> Tensor:
+        """
+        This method is designed to be a drop-in-replacement for the LoRA layers' .forward method. To use it, a bound
+        method must be created (bound to an instance of the XLoraLayer class).
+        """
+
+        if scalings is not None:
+            xlora_scalings = self.get_maybe_topk_scalings(scalings)
+
+        result = self.target.base_layer(x, *args, **kwargs)
+
+        # Ignore if disabled. We want to make sure this is always run.
+        if not self.target.merged:
+            for adapter_n, active_adapter in enumerate(self.target.active_adapters):
+                # TODO: implement X-LoRA with Lora+Dora layers
+                if self.target.use_dora.get(active_adapter, False):
+                    raise ValueError("X-LoRA currently does not support LoRA layers with DoRA")
+                if active_adapter not in self.target.lora_embedding_A:
+                    continue
+                embedding_A = self.target.lora_embedding_A[active_adapter].T
+                embedding_B = self.target.lora_embedding_B[active_adapter].T
+                scaling = self.target.scaling[active_adapter]
+                after_A = self.target._embed(x_mod, embedding_A)  # type: ignore
+                if scalings is not None:
+                    after_A_mod = self.apply_scalings_to_x(after_A, xlora_scalings, adapter_n)
+                    scaling_weight = self.config.global_scaling_weight
+                else:
+                    after_A_mod = after_A
+                    scaling_weight = 1
+                result += (after_A_mod @ embedding_B) * scaling * scaling_weight
+
+        return result
+
+
 class XLoraConv2dLayer(XLoraLayer):
     def __init__(
         self,
