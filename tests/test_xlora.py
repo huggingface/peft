@@ -53,7 +53,7 @@ class TestXlora:
         for i in range(1, self.num_loras + 1):
             torch.manual_seed(i)
             lora_config = LoraConfig(
-                task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_positions", "embed_tokens"]
+                task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_tokens"]
             )
             model = AutoModelForCausalLM.from_pretrained(self.model_id)
             peft_model = get_peft_model(model, lora_config)
