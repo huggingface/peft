@@ -31,10 +31,9 @@ class TestXlora:
 
     @pytest.fixture(scope="function")
     def tmp_dir(self, tmp_path_factory):
-        # create a class-scoped temp directory
         return tmp_path_factory.mktemp("xlora")
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def saved_lora_adapters(self, tmp_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -47,7 +46,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def saved_lora_embedding_adapters(self, tmp_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
