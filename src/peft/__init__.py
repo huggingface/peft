@@ -96,3 +96,5 @@ from .utils import (
     cast_mixed_precision_params,
 )
 from .config import PeftConfig, PromptLearningConfig
+
+from .optimizers import create_loraplus_optimizer, create_riemannian_optimizer
