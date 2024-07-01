@@ -4,6 +4,7 @@
 import argparse
 import time
 
+from huggingface_hub import snapshot_download
 from transformers import AutoModelForCausalLM
 
 from peft import PeftModel
@@ -30,6 +31,18 @@ def main():
         "device_map": {"": "cpu"},
     }
 
+    # Predownload
+    try:
+        snapshot_download(repo_id=args.model)
+    except Exception as e:
+        print(f"Failed to download model: {e}")
+        # We continue anyway as this might be e.g. a local directory or something
+    try:
+        snapshot_download(repo_id=args.dora)
+    except Exception as e:
+        print(f"Failed to download DoRA: {e}")
+        # We continue anyway as this might be e.g. a local directory or something
+
     start = time.perf_counter()
     print("-" * 20 + " Loading model " + "-" * 20)
     model = AutoModelForCausalLM.from_pretrained(args.model)
@@ -42,9 +55,6 @@ def main():
     print(f"Model loading time: {model_time:.2f}s")
     print(f"PeftModel loading time: {peft_model_time:.2f}s")
     print(f"Use ephemeral GPU offloading: {args.ephemeral_gpu_offload}")
-    print(
-        "\n(Note: if this was the first time you ran the script, or if your cache was cleared, the times shown above are invalid, due to the time taken to download the model and DoRA files. Just re-run the script in this case.)\n"
-    )
 
     if args.merge_model:
         merged_model = peft_model.merge_and_unload(progressbar=True)
