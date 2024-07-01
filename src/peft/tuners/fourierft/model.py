@@ -96,6 +96,7 @@ class FourierFTModel(BaseTuner):
 
         n_frequency = fourierft_config.n_frequency_pattern.get(target_name_key, fourierft_config.n_frequency)
         scaling = fourierft_config.scaling
+        random_loc_seed = fourierft_config.random_loc_seed
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
             "n_frequency": n_frequency,
@@ -111,6 +112,7 @@ class FourierFTModel(BaseTuner):
                 n_frequency,
                 scaling,
                 fourierft_config.init_weights,
+                random_loc_seed,
             )
         else:
             new_module = self._create_new_module(fourierft_config, adapter_name, target, **kwargs)

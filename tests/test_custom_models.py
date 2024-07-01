@@ -889,15 +889,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
 
         outputs_base = model(**X)
-
+        if issubclass(config_cls, FourierFTConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
         model = get_peft_model(model, config)
         model.eval()
-        with model.disable_adapter():
-            outputs_before = model(**X)
+        outputs_before = model(**X)
 
         assert torch.allclose(outputs_base, outputs_before)
 

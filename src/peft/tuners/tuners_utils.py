@@ -651,9 +651,7 @@ class BaseTunerLayer(ABC):
             adapter_name (`str`): The name of the adapter to delete
 
         """
-        print(self.other_param_names)
         for attr in self.adapter_layer_names + self.other_param_names:
-            print(attr)
             if adapter_name in getattr(self, attr):
                 del getattr(self, attr)[adapter_name]
 

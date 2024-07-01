@@ -38,7 +38,7 @@ class FourierFTLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        self.fourierft_random_loc_seed = kwargs.pop("random_loc_seed")
+        self.fourierft_random_loc_seed = {}
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -51,7 +51,7 @@ class FourierFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Unsupported layer type {type(base_layer)}")
 
-    def update_layer(self, adapter_name, n_frequency, scaling, init_weights):
+    def update_layer(self, adapter_name, n_frequency, scaling, init_weights, random_loc_seed):
         if n_frequency <= 0:
             raise ValueError(f"`n_frequency` should be a positive integer value but the value passed is {n_frequency}")
         if n_frequency > self.in_features * self.out_features:
@@ -60,9 +60,10 @@ class FourierFTLayer(BaseTunerLayer):
                 f"but the value passed is {n_frequency} and the product is {self.in_features * self.out_features}"
             )
         self.fourierft_n_frequency[adapter_name] = n_frequency
+        self.fourierft_random_loc_seed[adapter_name] = random_loc_seed
         self.indices[adapter_name] = torch.randperm(
             self.out_features * self.in_features,
-            generator=torch.Generator().manual_seed(self.fourierft_random_loc_seed),
+            generator=torch.Generator().manual_seed(self.fourierft_random_loc_seed[adapter_name]),
         )[:n_frequency]
         self.indices[adapter_name] = torch.stack(
             [self.indices[adapter_name] // self.in_features, self.indices[adapter_name] % self.in_features], dim=0
@@ -91,11 +92,6 @@ class FourierFTLayer(BaseTunerLayer):
         return delta_weight
 
 
-#  ------------------------------------------------------------------------------------------
-#  Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
-#  ------------------------------------------------------------------------------------------
-
-
 class FourierFTLinear(nn.Module, FourierFTLayer):
     # Lora implemented in a dense layer
     def __init__(
@@ -105,14 +101,15 @@ class FourierFTLinear(nn.Module, FourierFTLayer):
         n_frequency: int = 1000,
         scaling: float = 150.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-        init_weights: Union[bool, str] = True,
+        init_weights: Union[bool, str] = False,
+        random_loc_seed: int = 777,
         **kwargs,
     ) -> None:
         super().__init__()
         FourierFTLayer.__init__(self, base_layer, **kwargs)
         self.fan_in_fan_out = fan_in_fan_out
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, n_frequency, scaling, init_weights)
+        self.update_layer(adapter_name, n_frequency, scaling, init_weights, random_loc_seed)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
