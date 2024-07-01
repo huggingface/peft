@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import json
 import os
 import pickle
 import tempfile
@@ -122,7 +123,16 @@ class PeftConfigTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             config.save_pretrained(tmp_dirname)
 
-            config_from_json = config_class.from_json_file(os.path.join(tmp_dirname, "adapter_config.json"))
+            config_path = os.path.join(tmp_dirname, "adapter_config.json")
+            config_from_json = config_class.from_json_file(config_path)
+            assert config.to_dict() == config_from_json
+
+            # Also test with a runtime_config entry -- they should be ignored, even if they
+            # were accidentally saved to disk
+            config_from_json["runtime_config"] = {"ephemeral_gpu_offload": True}
+            json.dump(config_from_json, open(config_path, "w"))
+
+            config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
     @parameterized.expand(ALL_CONFIG_CLASSES)

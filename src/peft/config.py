@@ -14,6 +14,7 @@
 import inspect
 import json
 import os
+import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Dict, Optional, Union
 
@@ -161,6 +162,13 @@ class PeftConfigMixin(PushToHubMixin):
         """
         with open(path_json_file) as file:
             json_object = json.load(file)
+
+        # Sanity check that config does not contain a runtime_config
+        if "runtime_config" in json_object:
+            warnings.warn(
+                "The configuration file contains a `runtime_config` key. This is ignored. Runtime configurations are only valid at runtime."
+            )
+            del json_object["runtime_config"]
 
         return json_object
 
