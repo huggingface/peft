@@ -17,10 +17,10 @@ Example script demonstrating the time difference loading a model with a DoRA usi
 
 Example outputs:
 $ python load_with_dora.py
--------------------- Loading model --------------------
+--- Loading model ---
 Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████| 4/4 [00:04<00:00,  1.03s/it]
--------------------- Loading PeftModel --------------------
--------------------- Done --------------------
+--- Loading PeftModel ---
+--- Done ---
 Model loading time: 4.83s
 PeftModel loading time: 28.14s
 Use ephemeral GPU offloading: False
@@ -28,10 +28,10 @@ Use ephemeral GPU offloading: False
 (Note: if this was the first time you ran the script, or if your cache was cleared, the times shown above are invalid, due to the time taken to download the model and DoRA files. Just re-run the script in this case.)
 
 $ python load_with_dora.py --ephemeral_gpu_offload
--------------------- Loading model --------------------
+--- Loading model ---
 Loading checkpoint shards: 100%|████████████████████████████████████████████████████████████████████████████████████████████████████| 4/4 [00:03<00:00,  1.11it/s]
--------------------- Loading PeftModel --------------------
--------------------- Done --------------------
+--- Loading PeftModel ---
+--- Done ---
 Model loading time: 4.28s
 PeftModel loading time: 16.59s
 Use ephemeral GPU offloading: True
