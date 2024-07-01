@@ -58,7 +58,7 @@ class HRAConfig(PeftConfig):
         metadata={
             "help": "The rank of HRA across different layers.",
             "note": "It is best to set 'r' to an even number; otherwise, the default initialization method will not work.",
-        }
+        },
     )
     apply_GS: bool = field(
         default=False,

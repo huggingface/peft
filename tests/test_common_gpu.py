@@ -1114,6 +1114,35 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
+    def test_apply_GS_hra_conv2d_inference(self):
+        # check for different result with and without apply_GS
+        from datasets import load_dataset
+        from transformers import AutoImageProcessor, AutoModelForImageClassification
+
+        model_id = "microsoft/resnet-18"
+        image_processor = AutoImageProcessor.from_pretrained(model_id)
+        dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)
+        image = dataset["test"]["image"][0]
+        data = image_processor(image, return_tensors="pt")
+
+        model = AutoModelForImageClassification.from_pretrained(model_id).eval()
+        torch.manual_seed(0)
+        config_hra = HRAConfig(r=8, init_weights=True, target_modules=["convolution"], apply_GS=False)
+        model = get_peft_model(model, config_hra).eval()
+
+        logits_hra = model(**data).logits
+
+        model = AutoModelForImageClassification.from_pretrained(model_id).eval()
+        torch.manual_seed(0)
+        config_hra_GS = HRAConfig(r=8, init_weights=True, target_modules=["convolution"], apply_GS=True)
+        model = get_peft_model(model, config_hra_GS)
+
+        logits_hra_GS = model(**data).logits
+
+        assert not torch.allclose(logits_hra, logits_hra_GS)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
     def test_r_odd_hra_inference(self):
         # check that an untrained HRA adapter can't be initialized as an identity tranformation
         # when r is an odd number
@@ -1132,6 +1161,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         logits_hra = model(random_input).logits
 
         assert not torch.allclose(logits, logits_hra)
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
 @pytest.mark.single_gpu_tests

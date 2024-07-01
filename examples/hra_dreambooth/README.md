@@ -1,4 +1,4 @@
-<!--Copyright 2023 The HuggingFace Team. All rights reserved.
+<!--Copyright 2024 The HuggingFace Team. All rights reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
 the License. You may obtain a copy of the License at
@@ -21,8 +21,8 @@ This guide demonstrates how to use Householder reflection adaptation (HRA) metho
 HRA provides a new perspective connecting LoRA to OFT and achieves encouraging performance in various downstream tasks.
 HRA adapts a pre-trained model by multiplying each frozen weight matrix with a chain of r learnable Householder reflections (HRs).
 HRA can be interpreted as either an OFT adapter or an adaptive LoRA. 
-Consequently, it harnesses the advantages of both strategies, reducing parameters and computation costs while penalizing the loss of pre-training knowledge
-For further details on BOFT, please consult the [original HRA paper](https://arxiv.org/abs/2405.17484).
+Consequently, it harnesses the advantages of both strategies, reducing parameters and computation costs while penalizing the loss of pre-training knowledge.
+For further details on HRA, please consult the [original HRA paper](https://arxiv.org/abs/2405.17484).
 
 In this guide we provide a Dreambooth fine-tuning script that is available in [PEFT's GitHub repo examples](https://github.com/huggingface/peft/tree/main/examples/hra_dreambooth). This implementation is adapted from [peft's boft_dreambooth](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth). 
 
@@ -55,10 +55,10 @@ pip install git+https://github.com/huggingface/peft
 
 ## Download the data
 
-Download [dreambooth](https://github.com/google/dreambooth) dataset by running this script.
+Download [dreambooth](https://github.com/google/dreambooth) dataset by running this command.
 
 ```bash
-bash download_dreambooth.sh
+git clone https://github.com/google/dreambooth.git
 ```
 
 After downloading the data, your directory structure should look like this:
@@ -91,7 +91,7 @@ However, this also results in higher memory consumption and longer computation t
 Therefore, r is usually set to 8.
 **Note**, please set r to an even number to avoid potential issues during initialization.
 - `hra_apply_GS`: Applys Gram-Schmidt orthogonalization. Default is `false`.
-- `hra_bias`: specify if the `bias` paramteres should be traind. Can be `none`, `all` or `hra_only`.
+- `hra_bias`: specify if the `bias` parameters should be trained. Can be `none`, `all` or `hra_only`.
 
 If you are running this script on Windows, you may need to set the `--num_dataloader_workers` to 0.
 
