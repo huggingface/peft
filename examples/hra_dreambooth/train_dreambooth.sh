@@ -164,7 +164,8 @@ else
     --class_data_dir="$CLASS_DIR" \
     --output_dir="$OUTPUT_DIR" \
     --instance_prompt="$instance_prompt" \
-    --with_prior_preservation --prior_loss_weight=1.0 \
+    --with_prior_preservation \
+    --prior_loss_weight=1.0 \
     --class_prompt="$class_prompt" \
     --resolution=512 \
     --train_batch_size=1 \

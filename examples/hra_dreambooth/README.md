@@ -77,7 +77,9 @@ You can also put your custom images into `hra_dreambooth/dreambooth/dataset`.
 ## Fine-tune Dreambooth with HRA
 
 ```bash
-./train_dreambooth.sh $prompt_idx $class_idx
+prompt_idx=0
+class_idx=0
+bash ./train_dreambooth.sh $prompt_idx $class_idx
 ```
 
 where the `$prompt_idx` corresponds to different prompts ranging from 0 to 24 and the `$class_idx` corresponds to different subjects ranging from 0 to 29.
@@ -90,7 +92,7 @@ As r increases, the number of trainable parameters increases, which generally le
 However, this also results in higher memory consumption and longer computation times. 
 Therefore, r is usually set to 8.
 **Note**, please set r to an even number to avoid potential issues during initialization.
-- `hra_apply_GS`: Applys Gram-Schmidt orthogonalization. Default is `false`.
+- `hra_apply_GS`: Applies Gram-Schmidt orthogonalization. Default is `false`.
 - `hra_bias`: specify if the `bias` parameters should be trained. Can be `none`, `all` or `hra_only`.
 
 If you are running this script on Windows, you may need to set the `--num_dataloader_workers` to 0.
