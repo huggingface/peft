@@ -29,7 +29,7 @@ class TestXlora:
     model_id = "facebook/opt-125m"
     num_loras = 4
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def tmp_dir(self, tmp_path_factory):
         # create a class-scoped temp directory
         return tmp_path_factory.mktemp("xlora")
@@ -60,7 +60,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="function")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
         return tokenizer
