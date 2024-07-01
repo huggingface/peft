@@ -29,14 +29,15 @@ class LoraRuntimeConfig:
     This is the sub-configuration class to store the runtime configurations for the model.
 
     Args:
-        ephemeral_transfers (`bool`): Whether to use ephemeral transfers for models partially kept in CPU memory.
+        ephemeral_gpu_offload (`bool`):
+            Whether to use ephemeral GPU offloading for models partially kept in CPU memory.
     """
 
-    ephemeral_transfers: bool = field(
+    ephemeral_gpu_offload: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether to use ephemeral transfers for models partially kept in CPU memory. Ephemeral transfers result in "
+                "Whether to use ephemeral GPU offloading for models partially kept in CPU memory. Ephemeral GPU offloading result in "
                 "the data involved in intense operations being momentarily copied over to the GPU, and the results copied "
                 "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster "
                 "compared to performing them on the CPU. This is useful when parts of the model and/or components (such "

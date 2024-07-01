@@ -1087,7 +1087,7 @@ class PeftGPUCommonTests(unittest.TestCase):
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
-    def test_dora_ephemeral_transfers(self):
+    def test_dora_ephemeral_gpu_offload(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-350m",
@@ -1099,18 +1099,18 @@ class PeftGPUCommonTests(unittest.TestCase):
             init_lora_weights=False,
             use_dora=True,
             runtime_config=LoraRuntimeConfig(
-                ephemeral_transfers=True
+                ephemeral_gpu_offload=True
             ),  # we enable this, but only to verify that it's gone later
         )
         peft_model = get_peft_model(model, config).eval()
-        # Check that ephemeral transfers are present
-        assert peft_model.peft_config["default"].runtime_config.ephemeral_transfers
+        # Check that ephemeral GPU offloading is present
+        assert peft_model.peft_config["default"].runtime_config.ephemeral_gpu_offload
 
         # Save to disk
         with tempfile.TemporaryDirectory() as tmp_dir:
             peft_model.save_pretrained(tmp_dir)
 
-            # Load from disk 100% on CPU without ephemeral transfers
+            # Load from disk 100% on CPU without ephemeral GPU offloading
             start_time = time.perf_counter()
             peft_model = PeftModel.from_pretrained(
                 model,
@@ -1119,26 +1119,26 @@ class PeftGPUCommonTests(unittest.TestCase):
             ).eval()
             elapsed_time = time.perf_counter() - start_time
 
-            # Check that ephemeral transfers are absent
-            assert not peft_model.peft_config["default"].runtime_config.ephemeral_transfers
+            # Check that ephemeral GPU offloading is absent
+            assert not peft_model.peft_config["default"].runtime_config.ephemeral_gpu_offload
 
-            # Load again, with ephemeral transfers enabled
+            # Load again, with ephemeral GPU offloading enabled
             start_time = time.perf_counter()
             peft_model = PeftModel.from_pretrained(
                 model,
                 tmp_dir,
                 device_map={"": "cpu"},
-                ephemeral_transfers=True,
+                ephemeral_gpu_offload=True,
             ).eval()
-            elapsed_time_ephemeral_transfer = time.perf_counter() - start_time
+            elapsed_time_ephemeral_gpu_offload = time.perf_counter() - start_time
 
         # CPU only should be much slower
-        assert elapsed_time > 1.1 * elapsed_time_ephemeral_transfer
+        assert elapsed_time > 1.1 * elapsed_time_ephemeral_gpu_offload
 
     @require_torch_gpu
     @require_torch_multi_gpu
     @pytest.mark.multi_gpu_tests
-    def test_dora_ephemeral_transfers_multigpu(self):
+    def test_dora_ephemeral_gpu_offload_multigpu(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
             "facebook/opt-125m",
@@ -1149,7 +1149,7 @@ class PeftGPUCommonTests(unittest.TestCase):
             r=16,  # too small and the time difference is too small
             init_lora_weights=False,
             use_dora=True,
-            runtime_config=LoraRuntimeConfig(ephemeral_transfers=True),
+            runtime_config=LoraRuntimeConfig(ephemeral_gpu_offload=True),
         )
         peft_model = get_peft_model(model, config).eval()
 

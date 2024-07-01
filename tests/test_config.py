@@ -162,10 +162,10 @@ class PeftConfigTester(unittest.TestCase):
                 cfg = config_class.from_pretrained(model_name, revision=revision)
                 # NOTE: cfg is always a LoraConfig here, because the configuration of the loaded model was a LoRA.
                 # Hence we can expect a runtime_config to exist regardless of config_class.
-                cfg.runtime_config.ephemeral_transfers = True
+                cfg.runtime_config.ephemeral_gpu_offload = True
                 cfg.save_pretrained(tmp_dirname)
                 cfg = config_class.from_pretrained(tmp_dirname)
-                assert not cfg.runtime_config.ephemeral_transfers
+                assert not cfg.runtime_config.ephemeral_gpu_offload
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_set_attributes(self, config_class):
