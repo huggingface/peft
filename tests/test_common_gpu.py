@@ -13,7 +13,6 @@
 # limitations under the License.
 import gc
 import tempfile
-import time
 import unittest
 
 import pytest
@@ -1090,12 +1089,12 @@ class PeftGPUCommonTests(unittest.TestCase):
     def test_dora_ephemeral_gpu_offload(self):
         torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(
-            "facebook/opt-350m",
+            "facebook/opt-125m",
             torch_dtype=torch.float32,
         ).eval()
 
         config = LoraConfig(
-            r=4096,  # too small and the time difference is too small
+            r=128,
             init_lora_weights=False,
             use_dora=True,
             runtime_config=LoraRuntimeConfig(
@@ -1111,29 +1110,30 @@ class PeftGPUCommonTests(unittest.TestCase):
             peft_model.save_pretrained(tmp_dir)
 
             # Load from disk 100% on CPU without ephemeral GPU offloading
-            start_time = time.perf_counter()
-            peft_model = PeftModel.from_pretrained(
+            peft_model_cpu = PeftModel.from_pretrained(
                 model,
                 tmp_dir,
                 device_map={"": "cpu"},
             ).eval()
-            elapsed_time = time.perf_counter() - start_time
 
             # Check that ephemeral GPU offloading is absent
-            assert not peft_model.peft_config["default"].runtime_config.ephemeral_gpu_offload
+            assert not peft_model_cpu.peft_config["default"].runtime_config.ephemeral_gpu_offload
 
             # Load again, with ephemeral GPU offloading enabled
-            start_time = time.perf_counter()
-            peft_model = PeftModel.from_pretrained(
+            peft_model_ego = PeftModel.from_pretrained(
                 model,
                 tmp_dir,
                 device_map={"": "cpu"},
                 ephemeral_gpu_offload=True,
             ).eval()
-            elapsed_time_ephemeral_gpu_offload = time.perf_counter() - start_time
 
-        # CPU only should be much slower
-        assert elapsed_time > 1.1 * elapsed_time_ephemeral_gpu_offload
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        with torch.inference_mode():
+            out_peft_model_cpu = F.softmax(peft_model_cpu(random_input).logits, dim=-1)
+            out_peft_model_ego = F.softmax(peft_model_ego(random_input).logits, dim=-1)
+
+        # The results should be the same
+        assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
 
     @require_torch_gpu
     @require_torch_multi_gpu
