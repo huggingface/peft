@@ -14,8 +14,7 @@
 
 import warnings
 from dataclasses import dataclass, field
-from typing import List, Optional, Union
-
+from typing import List, Optional, Union, Literal
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
