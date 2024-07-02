@@ -616,6 +616,7 @@ class TestPromptTuningInitialization:
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
+
 class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
@@ -639,6 +640,7 @@ class TestNoInfiniteRecursionDeepspeed:
             def wrapper(self, *args, **kwargs):
                 hasattr(self, "abc")  # any hasattr will do
                 f(self, *args, **kwargs)
+
             return wrapper
 
         return decorator
