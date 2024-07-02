@@ -22,7 +22,7 @@ from datasets import load_dataset
 from safetensors.torch import load_file
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-from peft import LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
+from peft import HRAConfig, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
 
 
 CONFIGS = {
@@ -30,6 +30,7 @@ CONFIGS = {
     "loha": LoHaConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "lokr": LoKrConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     "oft": OFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
+    "hra": HRAConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"]),
     # TODO: cannot use BOFT because some convolutional kernel dimensions are even (64) and others odd (147). There is no
     # common denominator for the boft_block_size except 1, but using 1 results in an error in the fbd_cuda kernel:
     # > Error in forward_fast_block_diag_cuda_kernel: an illegal memory access was encountered
