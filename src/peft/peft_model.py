@@ -374,6 +374,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         is_trainable: bool = False,
         config: Optional[PeftConfig] = None,
         autocast_adapter_dtype: bool = True,
+        ephemeral_gpu_offload: bool = False,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -402,6 +403,12 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 loaded before calling `from_pretrained`.
             autocast_adapter_dtype (`bool`, *optional*):
                 Whether to autocast the adapter dtype. Defaults to `True`. Only relevant for specific adapter types.
+            ephemeral_gpu_offload (`bool`, *optional*):
+                Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`. This is
+                useful when parts of the model and/or components (such as adapters) are kept in CPU memory until they
+                are needed. Rather than perform expensive operations on small data, the data is transferred to the GPU
+                on-demand, the operation(s) performed, and the results moved back to CPU memory. This brings a slight
+                momentary VRAM overhead but gives orders of magnitude speedup in certain cases.
             torch_device (`str`, *optional*, defaults to None):
                 The device to load the adapter on. If `None`, the device will be inferred.
             kwargs: (`optional`):
@@ -425,6 +432,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             config.inference_mode = not is_trainable
         else:
             raise ValueError(f"The input config must be a PeftConfig, got {config.__class__}")
+
+        # Runtime configuration, if supported
+        if hasattr(config, "runtime_config"):
+            config.runtime_config.ephemeral_gpu_offload = ephemeral_gpu_offload
+        else:
+            if ephemeral_gpu_offload:
+                warnings.warn("Ephemeral GPU offloading is not supported for this model. Ignoring.")
 
         if hasattr(model, "hf_device_map"):
             weight_map = dict(named_module_tensors(model, recurse=True))
@@ -984,6 +998,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         is_trainable: bool = False,
         torch_device: Optional[str] = None,
         autocast_adapter_dtype: bool = True,
+        ephemeral_gpu_offload: bool = False,
         **kwargs: Any,
     ):
         """
@@ -1008,6 +1023,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
                 weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
                 only affect select PEFT tuners.
+            ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
+                Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """
@@ -1026,6 +1043,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 )
             ].from_pretrained(
                 model_id,
+                ephemeral_gpu_offload=ephemeral_gpu_offload,
                 **hf_hub_download_kwargs,
             )
             if peft_config.is_prompt_learning and is_trainable:

@@ -51,6 +51,7 @@ from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     LoraConfig,
+    LoraRuntimeConfig,
     LoftQConfig,
     LoraModel,
     LoHaConfig,
