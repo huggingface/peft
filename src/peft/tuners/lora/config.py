@@ -392,15 +392,14 @@ class LoraConfig(PeftConfig):
             self._custom_modules = {}
         self._custom_modules.update(mapping)
 
+
 @dataclass(init=False)
 class LoraPlusConfig(LoraConfig):
     loraplus_lr_ratio: float = field(
         default_factory=float,
         metadata={
-            "help": (
-                "loraplus_lr_ratio is the ratio of the LR of the optimizer to the LR of the LoraPlus optimizer."
-            )
-        }
+            "help": ("loraplus_lr_ratio is the ratio of the LR of the optimizer to the LR of the LoraPlus optimizer.")
+        },
     )
 
     def __init__(self, *args, **kwargs):

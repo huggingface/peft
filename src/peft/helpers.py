@@ -27,6 +27,7 @@ from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from transformers.trainer_pt_utils import get_parameter_names
 
 from .peft_model import PeftConfig, PeftModel
+from .tuners.lora.layer import Embedding
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -160,6 +161,7 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 def get_module(name, opt_model):
     """
     Retrieve a module from a model using its parameter name.
+
     Args:
         name (str): Full name of the parameter, typically including module path.
         opt_model (torch.nn.Module): The model from which to retrieve the module.
@@ -173,25 +175,24 @@ def get_module(name, opt_model):
     return module
 
 
-def create_loraplus_optimizer(model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict, loraplus_lr_embedding: float=1e-6) -> Optimizer:
+def create_loraplus_optimizer(
+    model: PeftModel,
+    optimizer_cls: type[Optimizer],
+    optimizer_kwargs: dict,
+    loraplus_lr_ratio: float,
+    loraplus_lr_embedding: float = 1e-6,
+) -> Optimizer:
     """
-    Creates a LoraPlus optimizer.
-    Implementing LoRA+ https://arxiv.org/abs/2402.12354
-    Reference: https://github.com/nikhil-ghosh-berkeley/loraplus/
+    Creates a LoraPlus optimizer. Implementing LoRA+ https://arxiv.org/abs/2402.12354 Reference:
+    https://github.com/nikhil-ghosh-berkeley/loraplus/
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
         optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
         optimizer_kwargs (`dict`): Additional keyword arguments to be passed to the optimizer.
-            - **loraplus_lr_ratio** (`float`): The ratio of the learning rate to be used for the embedding layer. Defaults to loraplus_lr_ratio
-            - loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer. Defaults to loraplus_lr_embedding
+        loraplus_lr_ratio (`float`): The ratio of the learning rate to be used for the embedding layer.
+        loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer.
     """
-    from .tuners.lora.layer import Embedding
-    loraplus_lr_ratio = optimizer_kwargs.pop("loraplus_lr_ratio")
-    loraplus_lr_embedding = optimizer_kwargs.pop("loraplus_lr_embedding")
-
-    if loraplus_lr_embedding is None:
-        loraplus_lr_embedding = 1e-6
 
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
