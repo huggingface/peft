@@ -84,9 +84,9 @@ class LoraConfig(PeftConfig):
             href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation
             (PiSSA)</a>, which converges more rapidly than LoRA and ultimately achieves superior performance. Moreover,
             PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements. Passing
-            'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters]
+            `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, where `[number of iters]`
             indicates the number of subspace iterations to perform FSVD, and must be a nonnegative integer. When
-            [number of iters] is set to 16, it can complete the initialization of a 7B model within seconds, and the
+            `[number of iters]` is set to 16, it can complete the initialization of a 7B model within seconds, and the
             training effect is approximately equivalent to using SVD.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
@@ -175,7 +175,7 @@ class LoraConfig(PeftConfig):
                 "to `'False'` leads to completely random initialization and *is discouraged.*"
                 "Passing `'olora'` results in OLoRA initialization."
                 "Passing `'pissa'` results in PiSSA initialization."
-                "Passing <code>'pissa_niter_[number of iters]'</code> initiates Fast-SVD-based PiSSA initialization, "
+                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
