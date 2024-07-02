@@ -175,7 +175,7 @@ class LoraConfig(PeftConfig):
                 "to `'False'` leads to completely random initialization and *is discouraged.*"
                 "Passing `'olora'` results in OLoRA initialization."
                 "Passing `'pissa'` results in PiSSA initialization."
-                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
+                "Passing <code>'pissa_niter_[number of iters]'</code> initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
