@@ -112,6 +112,9 @@
       title: Layernorm tuning
     - local: package_reference/vera
       title: VeRA
+    - local: package_reference/fourierft
+      title: FourierFT
+      
     title: Adapters
   - sections:
     - local: package_reference/merge_utils

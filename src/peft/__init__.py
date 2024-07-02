@@ -82,6 +82,8 @@ from .tuners import (
     LNTuningModel,
     VeraConfig,
     VeraModel,
+    FourierFTConfig,
+    FourierFTModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
