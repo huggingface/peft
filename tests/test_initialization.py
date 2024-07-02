@@ -20,10 +20,21 @@ import torch
 from scipy import stats
 from torch import nn
 
-from peft import AdaLoraConfig, LoraConfig, PeftModel, PromptTuningConfig, VeraConfig, get_peft_model
-from peft import AdaLoraModel, AdaptionPromptModel, BOFTModel, IA3Model, LNTuningModel, LoraModel, PeftMixedModel, PolyModel, VeraModel
-from peft.tuners import MixedModel
-from peft.tuners.lycoris_utils import LycorisTuner
+from peft import (
+    AdaLoraConfig,
+    LoraConfig,
+    PeftMixedModel,
+    PeftModel,
+    PeftModelForCausalLM,
+    PeftModelForFeatureExtraction,
+    PeftModelForQuestionAnswering,
+    PeftModelForSeq2SeqLM,
+    PeftModelForSequenceClassification,
+    PeftModelForTokenClassification,
+    PromptTuningConfig,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.utils import infer_device
 
 
@@ -609,17 +620,13 @@ class TestNoInfiniteRecursionDeepspeed:
     # see #1892 for details
     classes = [
         PeftModel,
-        AdaLoraModel,
-        AdaptionPromptModel,
-        BOFTModel,
-        IA3Model,
-        LNTuningModel,
-        LoraModel,
         PeftMixedModel,
-        PolyModel,
-        VeraModel,
-        MixedModel, 
-        LycorisTuner
+        PeftModelForSequenceClassification,
+        PeftModelForQuestionAnswering,
+        PeftModelForTokenClassification,
+        PeftModelForCausalLM,
+        PeftModelForSeq2SeqLM,
+        PeftModelForFeatureExtraction,
     ]
 
     @pytest.fixture
@@ -642,6 +649,9 @@ class TestNoInfiniteRecursionDeepspeed:
             def __init__(self):
                 super().__init__()
                 self.linear = nn.Linear(10, 10)
+                # to emulate LMs:
+                self.prepare_inputs_for_generation = None
+                self._prepare_encoder_decoder_kwargs_for_generation = None
 
         return MyModule()
 
