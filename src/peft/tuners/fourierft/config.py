@@ -33,10 +33,12 @@ class FourierFTConfig(PeftConfig):
             Additionally, it is the number of trainable parameters required to update each delta W weight.
             'n_frequency' will affect the performance and efficiency for PEFT. Specifically, it has little impact on
             training speed, but higher values of it (typically) result in larger GPU memory costs and better accuracy.
-            The following examples of settings regarding 'n_frequency' can be used as reference for users. For NLU
-            tasks with RoBERTa-base and RoBERTa-large models, adopting 'n_frequency': 100 can almost achieve similar
-            results as 'r': 8 in LoRA. For image classification tasks with ViT-base and Vit-large models, adopting
-            'n_frequency': 3000 can almost achieve similar results as 'r': 16 in LoRA.
+            With the same `target_modules`, the number of parameters of LoRA is (2*d*r/n_frequency) times that of
+            FourierFT. The following examples of settings regarding 'n_frequency' can be used as reference for users.
+            For NLU tasks with the RoBERTa-large model, adopting 'n_frequency': 1000 can almost achieve similar results
+            as 'r': 8 in LoRA. At this time, the number of parameters of LoRA is about 16 times that of FourierFT. For
+            image classification tasks with Vit-large models, adopting 'n_frequency': 3000 can almost achieve similar
+            results as 'r': 16 in LoRA, where the number of parameters of LoRA is about 11 times that of FourierFT.
         scaling (`float`):
             The scaling value for the delta W matrix. This is an important hyperparameter used for scaling, similar to
             the 'lora_alpha' parameter in the LoRA method. 'scaling' can be determined during the hyperparameter search
@@ -77,15 +79,17 @@ class FourierFTConfig(PeftConfig):
         default=1000,
         metadata={
             "help": (
-                "Num of learnable frequencies for the Discrete Fourier Transform. 'n_frequency' is an integer that"
-                "is greater than 0 and less than or equal to d^2 (assuming the weight W has dimensions of d by d)."
+                "Num of learnable frequencies for the Discrete Fourier Transform. 'n_frequency' is an integer that is"
+                "greater than 0 and less than or equal to d^2 (assuming the weight W has dimensions of d by d)."
                 "Additionally, it is the number of trainable parameters required to update each delta W weight."
-                "'n_frequency' will affect the performance and efficiency for PEFT. Specifically, it has little impact"
-                "on training speed, but higher values of it (typically) result in larger GPU memory costs and better accuracy."
-                "The following examples of settings regarding 'n_frequency' can be used as reference for users."
-                "For NLU tasks with RoBERTa-base and RoBERTa-large models, adopting 'n_frequency': 100 can almost achieve similar"
-                "results as 'r': 8 in LoRA. For image classification tasks with ViT-base and Vit-large models, adopting"
-                "'n_frequency': 3000 can almost achieve similar results as 'r': 16 in LoRA."
+                "'n_frequency' will affect the performance and efficiency for PEFT. Specifically, it has little impact on"
+                "training speed, but higher values of it (typically) result in larger GPU memory costs and better accuracy."
+                "With the same `target_modules`, the number of parameters of LoRA is (2*d*r/n_frequency) times that of FourierFT."
+                "The following examples of settings regarding 'n_frequency' can be used as reference for users. For NLU"
+                "tasks with the RoBERTa-large model, adopting 'n_frequency': 1000 can almost achieve similar results as"
+                "'r': 8 in LoRA. At this time, the number of parameters of LoRA is about 16 times that of FourierFT."
+                "For image classification tasks with Vit-large models, adopting 'n_frequency': 3000 can almost achieve"
+                "similar results as 'r': 16 in LoRA, where the number of parameters of LoRA is about 11 times that of FourierFT."
             )
         },
     )

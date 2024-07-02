@@ -106,7 +106,7 @@ class FourierFTModel(BaseTuner):
             "random_loc_seed": fourierft_config.random_loc_seed,
         }
         kwargs["bias"] = bias
-        if isinstance(target, FourierFTLinear):
+        if isinstance(target, FourierFTLayer):
             target.update_layer(
                 adapter_name,
                 n_frequency,

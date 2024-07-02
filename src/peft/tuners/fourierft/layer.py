@@ -35,10 +35,10 @@ class FourierFTLayer(BaseTunerLayer):
         self.fourierft_scaling = {}
         self.fourierft_spectrum = nn.ParameterDict({})
         self.indices = {}
+        self.fourierft_random_loc_seed = {}
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        self.fourierft_random_loc_seed = {}
         self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
@@ -93,7 +93,7 @@ class FourierFTLayer(BaseTunerLayer):
 
 
 class FourierFTLinear(nn.Module, FourierFTLayer):
-    # Lora implemented in a dense layer
+    # FourierFT implemented in a dense layer
     def __init__(
         self,
         base_layer,
