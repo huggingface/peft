@@ -72,6 +72,8 @@ class LNTuningModel(BaseTuner):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.model, name)
 
     # TODO: here need to handle the modules_to_save rather than the target_modules
