@@ -106,7 +106,7 @@ CLASSES_MAPPING = {
     "prompt_tuning": (PromptTuningConfig, CONFIG_TESTING_KWARGS[4]),
     "adalora": (AdaLoraConfig, CONFIG_TESTING_KWARGS[5]),
     "boft": (BOFTConfig, CONFIG_TESTING_KWARGS[6]),
-    "vera": (VeraConfig, CONFIG_TESTING_KWARGS[6]),
+    "vera": (VeraConfig, CONFIG_TESTING_KWARGS[7]),
 }
 
 

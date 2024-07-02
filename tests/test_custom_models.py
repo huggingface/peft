@@ -412,7 +412,18 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
+    # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
+    # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
+    # (remember that VeRA shares these parameters across all layers), which results in an error.
+    (
+        "VeRA Same",
+        "vera",
+        VeraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
 ]
+
 PREFIXES = {
     IA3Config: "ia3_",
     LoraConfig: "lora_",
