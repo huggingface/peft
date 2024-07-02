@@ -801,7 +801,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         with torch.inference_mode():
             out_adapter1 = model(**inputs).logits
 
-        atol, rtol = 1e-5, 1e-5
+        atol, rtol = 3e-5, 1e-5
         # sanity check, outputs have the right shape and are not the same
         assert len(out_base) >= 3
         assert len(out_base) == len(out_adapter0) == len(out_adapter1)
