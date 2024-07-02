@@ -30,31 +30,35 @@ class TestXlora:
     num_loras = 4
 
     @pytest.fixture(scope="function")
-    def tmp_dir(self, tmp_path_factory):
-        return tmp_path_factory.mktemp("xlora")
+    def lora_dir(self, tmp_path_factory):
+        return tmp_path_factory.mktemp("lora")
 
     @pytest.fixture(scope="function")
-    def saved_lora_adapters(self, tmp_dir):
+    def lora_embedding_dir(self, tmp_path_factory):
+        return tmp_path_factory.mktemp("lora_embedding")
+
+    @pytest.fixture(scope="function")
+    def saved_lora_adapters(self, lora_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
             torch.manual_seed(i)
             lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False)
             model = AutoModelForCausalLM.from_pretrained(self.model_id)
             peft_model = get_peft_model(model, lora_config)
-            file_name = os.path.join(tmp_dir, f"checkpoint-{i}")
+            file_name = os.path.join(lora_dir, f"checkpoint-{i}")
             peft_model.save_pretrained(file_name)
             file_names.append(file_name)
         return file_names
 
     @pytest.fixture(scope="function")
-    def saved_lora_embedding_adapters(self, tmp_dir):
+    def saved_lora_embedding_adapters(self, lora_embedding_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
             torch.manual_seed(i)
             lora_config = LoraConfig(task_type="CAUSAL_LM", init_lora_weights=False, target_modules=["embed_tokens"])
             model = AutoModelForCausalLM.from_pretrained(self.model_id)
             peft_model = get_peft_model(model, lora_config)
-            file_name = os.path.join(tmp_dir, f"checkpoint-{i}")
+            file_name = os.path.join(lora_embedding_dir, f"checkpoint-{i}")
             peft_model.save_pretrained(file_name)
             file_names.append(file_name)
         return file_names
@@ -177,7 +181,7 @@ class TestXlora:
 
         assert str(model) is not None
 
-    def test_save_load_functional_pt(self, tokenizer, model, tmp_dir):
+    def test_save_load_functional(self, tokenizer, model, tmp_path):
         inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
             input_ids=inputs.to(self.torch_device),
@@ -186,13 +190,39 @@ class TestXlora:
         before_logits = outputs[: inputs.shape[1] :]
         assert torch.isfinite(before_logits).all()
 
-        model.save_pretrained(save_directory=tmp_dir, safe_serialization=False)
+        model.save_pretrained(save_directory=tmp_path)
 
         del model
 
         model = AutoModelForCausalLM.from_pretrained(self.model_id)
         model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir, safe_serialization=False).to(
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_path).to(self.torch_device)
+
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=32,
+        )
+        after_logits = outputs[: inputs.shape[1] :]
+        assert torch.isfinite(after_logits).all()
+        assert torch.equal(after_logits, before_logits)
+
+    def test_save_load_functional_pt(self, tokenizer, model, tmp_path):
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        outputs = model.generate(
+            input_ids=inputs.to(self.torch_device),
+            max_new_tokens=32,
+        )
+        before_logits = outputs[: inputs.shape[1] :]
+        assert torch.isfinite(before_logits).all()
+
+        model.save_pretrained(save_directory=tmp_path, safe_serialization=False)
+
+        del model
+
+        model = AutoModelForCausalLM.from_pretrained(self.model_id)
+        model.config.use_cache = False
+        model = PeftModel.from_pretrained(model=model, model_id=tmp_path, safe_serialization=False).to(
             self.torch_device
         )
 
@@ -204,32 +234,6 @@ class TestXlora:
         after_logits = outputs[: inputs.shape[1] :]
         assert torch.isfinite(after_logits).all()
         assert torch.equal(after_logits, before_logits), (after_logits, before_logits)
-
-    def test_save_load_functional(self, tokenizer, model, tmp_dir):
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
-        outputs = model.generate(
-            input_ids=inputs.to(self.torch_device),
-            max_new_tokens=32,
-        )
-        before_logits = outputs[: inputs.shape[1] :]
-        assert torch.isfinite(before_logits).all()
-
-        model.save_pretrained(save_directory=tmp_dir)
-
-        del model
-
-        model = AutoModelForCausalLM.from_pretrained(self.model_id)
-        model.config.use_cache = False
-        model = PeftModel.from_pretrained(model=model, model_id=tmp_dir).to(self.torch_device)
-
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
-        outputs = model.generate(
-            input_ids=inputs.to(self.torch_device),
-            max_new_tokens=32,
-        )
-        after_logits = outputs[: inputs.shape[1] :]
-        assert torch.isfinite(after_logits).all()
-        assert torch.equal(after_logits, before_logits)
 
     def test_topk_lora(self, tokenizer, model):
         model.set_topk_lora(2)
