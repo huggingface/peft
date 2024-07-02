@@ -87,7 +87,8 @@ def create_loraplus_optimizer(
     ]
 
     optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
-    if optimizer_cls.__name__ == "Adam8bit":
+    eight_bit_names = ["Adam8bit", "AdamW8bit", "PagedAdam8bit", "PagedAdamW8bit"]
+    if optimizer_cls.__name__ in eight_bit_names:
         import bitsandbytes
 
         manager = bitsandbytes.optim.GlobalOptimManager.get_instance()
