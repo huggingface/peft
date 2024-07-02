@@ -37,7 +37,7 @@ def test_lora_plus_helper_sucess():
         model=model,
         optimizer_cls=optimizer_cls,
         optimizer_kwargs=optim_config,
-        loraplus_lr_embedding=loraplus_lr_embedding
+        loraplus_lr_embedding=loraplus_lr_embedding,
     )
     assert optim is not None
     assert len(optim.param_groups) == 4
@@ -46,11 +46,9 @@ def test_lora_plus_helper_sucess():
     assert optim.param_groups[2]["lr"] == optim.param_groups[3]["lr"] == (optim_config["lr"] * loraplus_lr_ratio)
 
 
-
 def test_lora_plus_optimizer_sucess():
     """
-    Test if the optimizer is correctly created and step 
-    function runs without any exception
+    Test if the optimizer is correctly created and step function runs without any exception
     """
     optimizer_cls = bnb.optim.Adam8bit
     optim_config = {

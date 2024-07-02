@@ -16,16 +16,17 @@ def create_loraplus_optimizer(
     model: PeftModel, optimizer_cls: type[Optimizer], optimizer_kwargs: dict, loraplus_lr_embedding: float = 1e-6
 ) -> Optimizer:
     """
-    Creates a LoraPlus optimizer.
-    Implementing LoRA+ https://arxiv.org/abs/2402.12354
-    Reference: https://github.com/nikhil-ghosh-berkeley/loraplus/
+    Creates a LoraPlus optimizer. Implementing LoRA+ https://arxiv.org/abs/2402.12354 Reference:
+    https://github.com/nikhil-ghosh-berkeley/loraplus/
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
         optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
         optimizer_kwargs (`dict`): Additional keyword arguments to be passed to the optimizer.
-            - **loraplus_lr_ratio** (`float`): The ratio of the learning rate to be used for the embedding layer. Defaults to loraplus_lr_ratio
-            - loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer. Defaults to loraplus_lr_embedding
+            - **loraplus_lr_ratio** (`float`): The ratio of the learning rate to be used for the embedding layer.
+              Defaults to loraplus_lr_ratio
+            - loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer. Defaults to
+              loraplus_lr_embedding
     """
     from ..tuners.lora.layer import Embedding
 
