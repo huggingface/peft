@@ -168,7 +168,7 @@ class FourierFTConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "The initialization of the Fourier weights. Set this to False ifthe spectrum should be initialized to a standardnormal distribution."
+                "The initialization of the Fourier weights. Set this to False if the spectrum should be initialized to a standard normal distribution."
                 "Set this to True if the spectrum should be initialized to zeros."
             )
         },
