@@ -139,3 +139,8 @@ dmypy.json
 
 # More test things
 wandb
+
+moslora_finetuning
+moslora_finetuning/
+log.out
+test.sh

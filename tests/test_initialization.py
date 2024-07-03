@@ -517,6 +517,40 @@ class TestLoraInitialization:
         megatron_config = {"does-not": "matter-here"}
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
+    
+    def test_lora_use_moslora_linear(self, data):
+        # check that moslora is a no-op when initialized
+        torch.manual_seed(0)
+        model = self.get_model()
+        output_base, _, _ = model(data)
+
+        # check scaling factor use_rslora=True
+        config = LoraConfig(target_modules=["linear"], use_moslora=True)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_disabled, _, _ = model(data)
+        output_moslora, _, _ = model(data)
+
+        assert torch.allclose(output_base, output_disabled)
+        assert torch.allclose(output_base, output_moslora)
+
+    def test_lora_use_moslora_linear_init_false(self, data):
+        # with init_lora_weights=False, moslora should not be a no-op
+        torch.manual_seed(0)
+        model = self.get_model()
+        output_base, _, _ = model(data)
+
+        # check scaling factor use_rslora=True
+        config = LoraConfig(target_modules=["linear"], use_moslora=True, init_lora_weights=False)
+        model = get_peft_model(model, config)
+
+        with model.disable_adapter():
+            output_disabled, _, _ = model(data)
+        output_moslora, _, _ = model(data)
+
+        assert torch.allclose(output_base, output_disabled)
+        assert not torch.allclose(output_base, output_moslora)
 
 
 class TestAdaLoraInitialization:
@@ -529,6 +563,10 @@ class TestAdaLoraInitialization:
     def test_adalora_use_dora_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support DoRA"):
             AdaLoraConfig(use_dora=True)
+    
+    def test_adalora_use_moslora_raises(self):
+        with pytest.raises(ValueError, match="ADALORA does not support MoSLoRA"):
+            AdaLoraConfig(use_moslora=True)
 
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):

@@ -62,6 +62,7 @@ SETTINGS = {
     "adalora": (AdaLoraConfig(task_type=TaskType.CAUSAL_LM), {}),
     "boft": (BOFTConfig(task_type=TaskType.CAUSAL_LM), {}),
     "dora": (LoraConfig(task_type=TaskType.CAUSAL_LM, use_dora=True), {}),
+    "moslora": (LoraConfig(task_type=TaskType.CAUSAL_LM, use_moslora=True), {}),
     "ia3": (IA3Config(task_type=TaskType.CAUSAL_LM), {}),
     "ln_tuning": (LNTuningConfig(task_type=TaskType.CAUSAL_LM, target_modules=["final_layer_norm"]), {}),
     "loha": (LoHaConfig(task_type=TaskType.CAUSAL_LM, target_modules=["q_proj", "v_proj"]), {}),

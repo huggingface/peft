@@ -939,7 +939,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(logits_lora, logits_dora)
         # sanity check
         assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.q_proj, LoraLinear4bit)
-        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)
+        assert isinstance(model.base_model.model.model.decoder.layers[0].self_attn.v_proj, LoraLinear4bit)  
 
     @require_torch_gpu
     @pytest.mark.single_gpu_tests
@@ -1164,6 +1164,151 @@ class PeftGPUCommonTests(unittest.TestCase):
                 layer.lora_A, layer.lora_B = la, lb
                 layer.dora_init(layer.active_adapter[0])  # should not raise an error
 
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_4bit_moslora_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=False,
+            bnb_4bit_compute_dtype=torch.float32,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            "trl-internal-testing/tiny-random-LlamaForCausalLM",
+            quantization_config=bnb_config,
+            torch_dtype=torch.float32,
+        ).eval()
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora=True,
+        )
+        model = get_peft_model(model, config).eval()
+
+
+        with torch.inference_mode():
+            out_moslora = F.softmax(model(random_input).logits, dim=-1)
+
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        atol = 1e-5
+        rtol = 1e-3
+        # sanity check that using MoSLoRA changes the results
+        assert not torch.allclose(out_base, out_moslora, atol=atol, rtol=rtol)
+        assert torch.allclose(out_moslora, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_moslora, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_moslora, out_unloaded, atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    @require_bitsandbytes
+    def test_8bit_moslora_merging(self):
+        # Check results for merging, unmerging, unloading
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+            torch_dtype=torch.float32,
+        ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        # compare outputs in probability space, because logits can have outliers
+        # and token ids are not precise enough
+        out_base = F.softmax(model(random_input).logits, dim=-1)
+
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            use_moslora=True,
+        )
+        model = get_peft_model(model, config).eval()
+
+
+        with torch.inference_mode():
+            out_moslora = F.softmax(model(random_input).logits, dim=-1)
+
+            model.merge_adapter()
+            out_merged = F.softmax(model(random_input).logits, dim=-1)
+
+            model.unmerge_adapter()
+            out_unmerged = F.softmax(model(random_input).logits, dim=-1)
+
+            model = model.merge_and_unload()
+            out_unloaded = F.softmax(model(random_input).logits, dim=-1)
+
+        # 8bit merging less precise than 4bit
+        atol = 0.01
+        rtol = 10
+        # sanity check that using MoSLoRA changes the results
+        assert not torch.allclose(out_base, out_moslora, atol=atol, rtol=rtol)
+        assert torch.allclose(out_moslora, out_merged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_moslora, out_unmerged, atol=atol, rtol=rtol)
+        assert torch.allclose(out_moslora, out_unloaded, atol=atol, rtol=rtol)
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_moslora_ephemeral_gpu_offload(self):
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(
+            "facebook/opt-125m",
+            torch_dtype=torch.float32,
+        ).eval()
+
+        config = LoraConfig(
+            r=128,
+            init_lora_weights=False,
+            use_moslora=True,
+            runtime_config=LoraRuntimeConfig(
+                ephemeral_gpu_offload=True
+            ),  # we enable this, but only to verify that it's gone later
+        )
+        peft_model = get_peft_model(model, config).eval()
+        # Check that ephemeral GPU offloading is present
+        assert peft_model.peft_config["default"].runtime_config.ephemeral_gpu_offload
+
+        # Save to disk
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            peft_model.save_pretrained(tmp_dir)
+
+            # Load from disk 100% on CPU without ephemeral GPU offloading
+            peft_model_cpu = PeftModel.from_pretrained(
+                model,
+                tmp_dir,
+                device_map={"": "cpu"},
+            ).eval()
+
+            # Check that ephemeral GPU offloading is absent
+            assert not peft_model_cpu.peft_config["default"].runtime_config.ephemeral_gpu_offload
+
+            # Load again, with ephemeral GPU offloading enabled
+            peft_model_ego = PeftModel.from_pretrained(
+                model,
+                tmp_dir,
+                device_map={"": "cpu"},
+                ephemeral_gpu_offload=True,
+            ).eval()
+
+        random_input = torch.LongTensor([[1, 0, 1, 0, 1, 0]]).to(model.device)
+        with torch.inference_mode():
+            out_peft_model_cpu = F.softmax(peft_model_cpu(random_input).logits, dim=-1)
+            out_peft_model_ego = F.softmax(peft_model_ego(random_input).logits, dim=-1)
+
+        # The results should be the same
+        assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a CUDA GPU")
 @pytest.mark.single_gpu_tests

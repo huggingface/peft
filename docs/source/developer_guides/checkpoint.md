@@ -106,6 +106,8 @@ class LoraLayer(BaseTunerLayer):
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
         self.lora_magnitude_vector: Optional[torch.nn.ParameterDict] = None  # for DoRA
+        self.use_moslora: dict[str, bool] = {}
+        self.lora_mixer = nn.ModuleDict({}) # for MoSLoRA
         self._caches: dict[str, Any] = {}
         self.kwargs = kwargs
 ```
@@ -188,6 +190,7 @@ All the other information needed to load a PEFT model is contained in the `adapt
   ],
   "task_type": null,
   "use_dora": false,
+  "use_moslora": false,
   "use_rslora": false
 }
 ```

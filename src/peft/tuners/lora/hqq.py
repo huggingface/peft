@@ -41,6 +41,7 @@ if is_hqq_available():
             init_lora_weights: bool = True,
             use_rslora: bool = False,
             use_dora: bool = False,
+            use_moslora: bool = False,
             **kwargs,
         ) -> None:
             super().__init__()
@@ -56,6 +57,7 @@ if is_hqq_available():
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
                 use_dora=use_dora,
+                use_moslora=use_moslora,
             )
 
         def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
@@ -139,13 +141,22 @@ if is_hqq_available():
                 self.base_layer = new_hqq_layer
 
         def get_delta_weight(self, adapter):
-            return (
-                transpose(
-                    self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
-                    False,
+            if not self.use_moslora[adapter]:
+                return (
+                    transpose(
+                        self.lora_B[adapter].weight @ self.lora_A[adapter].weight,
+                        False,
+                    )
+                    * self.scaling[adapter]
                 )
-                * self.scaling[adapter]
-            )
+            else:
+                return (
+                    transpose(
+                        self.lora_B[adapter].weight @ self.lora_mixer[adapter].weight @ self.lora_A[adapter].weight,
+                        False,
+                    )
+                    * self.scaling[adapter]
+                )
 
         def _mixed_batch_forward(
             self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
@@ -170,6 +181,9 @@ if is_hqq_available():
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
 
+                if self.use_moslora[active_adapter]:
+                    lora_mixer = self.lora_mixer[active_adapter]
+
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
@@ -180,7 +194,10 @@ if is_hqq_available():
                 # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
                 # layer output
                 sub_batch = x[sub_batch_indices_list[i]]
-                output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                if not self.use_moslora[active_adapter]:
+                    output = lora_B(lora_A(dropout(sub_batch))) * scaling
+                else:
+                    output = lora_B(lora_mixer(lora_A(dropout(sub_batch)))) * scaling
                 if requires_conversion:
                     output = output.to(expected_dtype)
                 result[sub_batch_indices_list[i]] += output
@@ -210,6 +227,9 @@ if is_hqq_available():
                     dropout = self.lora_dropout[active_adapter]
                     scaling = self.scaling[active_adapter]
 
+                    if self.use_moslora[active_adapter]:
+                        lora_mixer = self.lora_mixer[active_adapter]
+
                     requires_conversion = not torch.is_autocast_enabled()
                     if requires_conversion:
                         expected_dtype = result.dtype
@@ -218,7 +238,10 @@ if is_hqq_available():
                             x = x.to(compute_dtype)
 
                     if not self.use_dora[active_adapter]:
-                        output = lora_B(lora_A(dropout(x))) * scaling
+                        if not self.use_moslora[active_adapter]:
+                            output = lora_B(lora_A(dropout(x))) * scaling
+                        else:
+                            output = lora_B(lora_mixer(lora_A(dropout(x)))) * scaling
                     else:
                         output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
                     if requires_conversion:

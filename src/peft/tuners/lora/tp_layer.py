@@ -45,6 +45,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         init_lora_weights: bool = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_moslora: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -52,6 +53,9 @@ class LoraParallelLinear(nn.Module, LoraLayer):
 
         if use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        
+        if use_moslora:
+            raise ValueError(f"{self.__class__.__name__} does not support MoSLoRA yet, please set it to False")
 
         self.backend = backend
         self.is_parallel_a = isinstance(base_layer, backend.RowParallelLinear)
@@ -77,6 +81,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_moslora=use_moslora,
             init_method=init_method,
             input_is_parallel=input_is_parallel,
             gather_output=gather_output,

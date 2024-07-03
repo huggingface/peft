@@ -144,6 +144,10 @@ class LoraConfig(PeftConfig):
             ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger overhead than pure
             LoRA, so it is recommended to merge weights for inference. For more information, see
             https://arxiv.org/abs/2402.09353.
+        use_moslora (`bool`):
+            Enable 'Mixture-of-Subspaces in Low-Rank Adaptation' (MoSLoRA). This technique employs a learnable mixer to fuse
+            more subspaces in vanilla LoRA and more flexibly. In code implement, MoSLoRA inserts a mixer of r*r size between 
+            lora_A and lora_B. For more information, see https://arxiv.org/pdf/2406.11909.
         layer_replication (`List[Tuple[int, int]]`):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
@@ -287,6 +291,16 @@ class LoraConfig(PeftConfig):
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
                 "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
                 "see  https://arxiv.org/abs/2402.09353."
+            )
+        },
+    )
+    use_moslora: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Enable 'Mixture-of-Subspaces in Low-Rank Adaptation' (MoSLoRA). This technique employs a learnable mixer to fuse"
+                "more subspaces in vanilla LoRA and more flexibly. In code implement, MoSLoRA inserts a mixer of r*r size between"
+                "lora_A and lora_B. For more information, see https://arxiv.org/pdf/2406.11909."
             )
         },
     )

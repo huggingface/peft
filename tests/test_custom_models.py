@@ -83,6 +83,14 @@ TEST_CASES = [
         LoraConfig,
         {"target_modules": "lin1", "use_dora": True, "lora_alpha": 32},
     ),
+    ("Vanilla MLP 10 LoRA with MoSLoRA", "MLP", LoraConfig, {"target_modules": ["lin0"], "use_moslora": True}),
+    ("Vanilla MLP 11 LoRA with MoSLoRA", "MLP", LoraConfig, {"target_modules": ["lin0", "lin1"], "use_moslora": True}),
+    (
+        "Vanilla MLP 12 LoRA with MoSLoRA",
+        "MLP",
+        LoraConfig,
+        {"target_modules": "lin1", "use_moslora": True, "lora_alpha": 32},
+    ),
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
@@ -1512,6 +1520,21 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
+    def test_gpt2_moslora_merge_and_unload(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_moslora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload()
+
+    def test_gpt2_moslora_merge_and_unload_safe_merge(self):
+        # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
+        model = AutoModelForCausalLM.from_pretrained("gpt2")
+        config = LoraConfig(task_type="CAUSAL_LM", use_moslora=True)
+        model = get_peft_model(model, config)
+        # should not raise an error
+        model.merge_and_unload(safe_merge=True)
 
 class TestMultiRankAdapter(unittest.TestCase):
     """Tests related to multirank LoRA adapters"""
