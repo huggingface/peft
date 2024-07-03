@@ -21,7 +21,9 @@ import torch.nn.functional as F
 from parameterized import parameterized
 from torch import nn
 from transformers import (
+    AutoImageProcessor,
     AutoModelForCausalLM,
+    AutoModelForImageClassification,
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
@@ -30,6 +32,7 @@ from transformers import (
     LlamaForCausalLM,
     WhisperForConditionalGeneration,
 )
+from datasets import load_dataset
 from transformers.pytorch_utils import Conv1D
 
 from peft import (
@@ -1116,9 +1119,6 @@ class PeftGPUCommonTests(unittest.TestCase):
     @pytest.mark.single_gpu_tests
     def test_apply_GS_hra_conv2d_inference(self):
         # check for different result with and without apply_GS
-        from datasets import load_dataset
-        from transformers import AutoImageProcessor, AutoModelForImageClassification
-
         model_id = "microsoft/resnet-18"
         image_processor = AutoImageProcessor.from_pretrained(model_id)
         dataset = load_dataset("huggingface/cats-image", trust_remote_code=True)

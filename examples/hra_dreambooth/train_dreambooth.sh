@@ -4,7 +4,7 @@ class_idx=$2
 
 hra_r=8
 
-export MODEL_NAME="stabilityai/stable-diffusion-2-1-base"
+export MODEL_NAME="/data/shen_yuan/aliendao/dataroot/models/stabilityai/stable-diffusion-2-1-base"
 
 # Define the unique_token, class_tokens, and subject_names
 unique_token="qwe"
@@ -154,38 +154,34 @@ export OUTPUT_DIR="logs/${name}"
 export INSTANCE_DIR="dreambooth/dataset/${selected_subject}"
 export CLASS_DIR="class_data/${class_token}"
 
-if [ -d "$OUTPUT_DIR" ]; then
-  echo "This directory already exists. Please delete it and try again. : $OUTPUT_DIR"
-else
-  echo "class_token: $class_token, prompt: $validation_prompt"
-  accelerate launch train_dreambooth.py \
-    --pretrained_model_name_or_path=$MODEL_NAME  \
-    --instance_data_dir=$INSTANCE_DIR \
-    --class_data_dir="$CLASS_DIR" \
-    --output_dir="$OUTPUT_DIR" \
-    --instance_prompt="$instance_prompt" \
-    --with_prior_preservation \
-    --prior_loss_weight=1.0 \
-    --class_prompt="$class_prompt" \
-    --resolution=512 \
-    --train_batch_size=1 \
-    --gradient_accumulation_steps=1 \
-    --learning_rate=1e-3 \
-    --report_to="wandb" \
-    --lr_scheduler="constant" \
-    --lr_warmup_steps=0 \
-    --max_train_steps=1705 \
-    --validation_prompt="$validation_prompt" \
-    --seed="0" \
-    --num_class_images=200 \
-    --checkpointing_steps=200 \
-    --validation_steps=200 \
-    --train_text_encoder \
-    --use_hra \
-    --hra_r=$hra_r 
+echo "class_token: $class_token, prompt: $validation_prompt"
+accelerate launch train_dreambooth.py \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --instance_data_dir=$INSTANCE_DIR \
+  --class_data_dir="$CLASS_DIR" \
+  --output_dir="$OUTPUT_DIR" \
+  --instance_prompt="$instance_prompt" \
+  --with_prior_preservation \
+  --prior_loss_weight=1.0 \
+  --class_prompt="$class_prompt" \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --gradient_accumulation_steps=1 \
+  --learning_rate=1e-2 \
+  --report_to="wandb" \
+  --lr_scheduler="constant" \
+  --lr_warmup_steps=0 \
+  --max_train_steps=1410 \
+  --validation_prompt="$validation_prompt" \
+  --seed="0" \
+  --num_class_images=200 \
+  --checkpointing_steps=200 \
+  --validation_steps=200 \
+  --use_hra \
+  --hra_r=$hra_r \
+  --hra_bias="hra_only"
 
-  echo "Please fill in the following parameters in the hra_dreambooth_inference.ipynb"
-  echo "BASE_MODEL_NAME = $MODEL_NAME"
-  echo "ADAPTER_MODEL_PATH = $OUTPUT_DIR"
-  echo "PROMPT = $instance_prompt"
-fi
+echo "Please fill in the following parameters in the hra_dreambooth_inference.ipynb"
+echo "BASE_MODEL_NAME = '$MODEL_NAME'"
+echo "ADAPTER_MODEL_PATH = '$OUTPUT_DIR'"
+echo "PROMPT = '$instance_prompt'"
