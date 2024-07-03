@@ -30,6 +30,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils.constants import DUMMY_TARGET_MODULES
 from peft.utils.peft_types import PeftType
 
 from ..config import PeftConfig
@@ -395,6 +396,11 @@ class BaseTuner(nn.Module, ABC):
         self._prepare_model(peft_config, model)
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
+
+        if getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES:
+            # dummy adapter, we allow not matching any module
+            key_list = []
+            is_target_modules_in_base_model = True
 
         # update peft_config.target_modules if required
         peft_config = _maybe_include_all_linear_layers(peft_config, model)

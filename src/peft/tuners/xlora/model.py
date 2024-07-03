@@ -13,6 +13,7 @@
 # limitations under the License.
 from __future__ import annotations
 
+import copy
 from contextlib import contextmanager
 from functools import partial
 from typing import Optional, Union
@@ -23,6 +24,7 @@ import torch.nn as nn
 from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
+from peft.utils.constants import DUMMY_TARGET_MODULES
 
 from .. import lora
 from .classifier import XLoraClassifier
@@ -140,7 +142,15 @@ class XLoraModel(BaseTuner):
             conf = config[adapter_name]
         else:
             conf = config
-        lora_model = LoraModel(model, config.copy(), adapter_name)
+
+        # Create an empty LoraModel
+        base_lora_config = copy.copy(conf)
+        base_lora_config.target_modules = DUMMY_TARGET_MODULES
+        # Imitate a LoraConfig, fields might need to be updated if LoraConfig is updated
+        base_lora_config.layer_replication = None
+        base_lora_config.bias = "none"
+        lora_model = LoraModel(model, base_lora_config, adapter_name)
+
         self.xlora_config = conf
         self.lora_model = lora_model
 

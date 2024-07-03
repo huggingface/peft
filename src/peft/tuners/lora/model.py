@@ -155,9 +155,7 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _check_target_module_exists(lora_config, key):
-        if hasattr(lora_config, "target_modules"):
-            return check_target_module_exists(lora_config, key)
-        return False
+        return check_target_module_exists(lora_config, key)
 
     def _prepare_model(self, peft_config: LoraConfig, model: nn.Module):
         r"""
@@ -169,8 +167,7 @@ class LoraModel(BaseTuner):
             model (`nn.Module`):
                 The model that is going to be adapted.
         """
-        # Handle X-LoRA case
-        if hasattr(peft_config, "layer_replication") and peft_config.layer_replication:
+        if peft_config.layer_replication:
             replicate_layers(model, peft_config.layer_replication)
 
     def _create_and_replace(
@@ -184,9 +181,6 @@ class LoraModel(BaseTuner):
     ):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
-        # Handle X-LoRA case:
-        if not hasattr(lora_config, "rank_pattern"):
-            return
 
         # Regexp matching - Find key which matches current target_name in patterns provided
         pattern_keys = list(chain(lora_config.rank_pattern.keys(), lora_config.alpha_pattern.keys()))
@@ -276,9 +270,6 @@ class LoraModel(BaseTuner):
                 p.requires_grad = False
 
         for active_adapter in self.active_adapters:
-            # Handle X-LoRA case
-            if not hasattr(self.peft_config[active_adapter], "bias"):
-                return
             bias = self.peft_config[active_adapter].bias
             if bias == "none":
                 continue
@@ -460,7 +451,7 @@ class LoraModel(BaseTuner):
 
     @staticmethod
     def _prepare_adapter_config(peft_config, model_config):
-        if hasattr(peft_config, "target_modules") and peft_config.target_modules is None:
+        if peft_config.target_modules is None:
             if model_config["model_type"] not in TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING:
                 raise ValueError("Please specify `target_modules` in `peft_config`")
             peft_config.target_modules = set(
