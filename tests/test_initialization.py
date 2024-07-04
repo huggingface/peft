@@ -640,7 +640,7 @@ class TestVeraInitialization:
 
         model = get_peft_model(self.get_model(), config0)
         # not full message but enough to identify the error
-        msg = "vera_A has a size of 10 but 20 is or greater required"
+        msg = "vera_A has a size of 10 but 20 or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
@@ -651,7 +651,7 @@ class TestVeraInitialization:
 
         model = get_peft_model(self.get_model(), config0)
         # not full message but enough to identify the error
-        msg = "vera_A has a size of 123 but 456 is or greater required"
+        msg = "vera_A has a size of 123 but 456 or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
