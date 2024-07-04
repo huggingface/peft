@@ -277,7 +277,7 @@ class XLoraModel(BaseTuner):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
-            if name == "base_model":  # see #1892: prevent infinite recursion if class is not initialized
+            if name == "lora_model":  # see #1892: prevent infinite recursion if class is not initialized
                 raise
             return getattr(self.lora_model, name)
 
