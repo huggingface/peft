@@ -51,6 +51,7 @@ from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     LoraConfig,
+    LoraRuntimeConfig,
     LoftQConfig,
     LoraModel,
     LoHaConfig,
@@ -83,6 +84,8 @@ from .tuners import (
     VeraModel,
     FourierFTConfig,
     FourierFTModel,
+    XLoraConfig,
+    XLoraModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,

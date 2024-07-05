@@ -36,6 +36,7 @@ class PeftType(str, enum.Enum):
     - LOHA
     - LOKR
     - OFT
+    - XLORA
     - POLY
     - LN_TUNING
     - VERA
@@ -58,6 +59,7 @@ class PeftType(str, enum.Enum):
     LN_TUNING = "LN_TUNING"
     VERA = "VERA"
     FOURIERFT = "FOURIERFT"
+    XLORA = "XLORA"
 
 
 class TaskType(str, enum.Enum):

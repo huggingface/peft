@@ -78,7 +78,7 @@ class AdaLoraLayer(LoraLayer):
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
-            nn.init.normal_(self.lora_E[adapter_name], mean=0.0, std=0.02)
+            nn.init.zeros_(self.lora_E[adapter_name])
             nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
             nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
 
