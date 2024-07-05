@@ -205,6 +205,8 @@ class FourierFTModel(BaseTuner):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "base_model":
+                raise
             return getattr(self.model, name)
 
     def get_peft_config_as_dict(self, inference: bool = False):
