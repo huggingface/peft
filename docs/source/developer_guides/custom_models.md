@@ -238,3 +238,73 @@ peft_model.print_trainable_parameters()
 ```python
 print(peft_model.targeted_module_names)
 ```
+
+## Unsupported module types
+
+Methods like LoRA only work if the target modules are supported by PEFT. For example, it's possible to apply LoRA to `nn.Linear` and `nn.Conv2d` layers, but not, for instance, to `nn.LSTM`. If you find a layer class you want to apply PEFT to is not supported, you can:
+
+ - define a custom mapping to dynamically dispatch custom modules in LoRA
+ -  open an [issue](https://github.com/huggingface/peft/issues) and request the feature where maintainers will implement it or guide you on how to implement it yourself if demand for this module type is sufficiently high
+
+### Experimental support for dynamic dispatch of custom modules in LoRA
+
+> [!WARNING]
+> This feature is experimental and subject to change, depending on its reception by the community. We will introduce a public and stable API if there is significant demand for it.
+
+PEFT supports an experimental API for custom module types for LoRA. Let's assume you have a LoRA implementation for LSTMs. Normally, you would not be able to tell PEFT to use it, even if it would theoretically work with PEFT. However, this is possible with dynamic dispatch of custom layers.
+
+The experimental API currently looks like this:
+
+```python
+class MyLoraLSTMLayer:
+    ...
+
+base_model = ...  # load the base model that uses LSTMs
+
+# add the LSTM layer names to target_modules
+config = LoraConfig(..., target_modules=["lstm"])
+# define a mapping from base layer type to LoRA layer type
+custom_module_mapping = {nn.LSTM: MyLoraLSTMLayer}
+# register the new mapping
+config._register_custom_module(custom_module_mapping)
+# after registration, create the PEFT model
+peft_model = get_peft_model(base_model, config)
+# do training
+```
+
+<Tip>
+
+When you call [`get_peft_model`], you will see a warning because PEFT does not recognize the targeted module type. In this case, you can ignore this warning.
+
+</Tip>
+
+By supplying a custom mapping, PEFT first checks the base model's layers against the custom mapping and dispatches to the custom LoRA layer type if there is a match. If there is no match, PEFT checks the built-in LoRA layer types for a match.
+
+Therefore, this feature can also be used to override existing dispatch logic, e.g. if you want to use your own LoRA layer for `nn.Linear` instead of using the one provided by PEFT.
+
+When creating your custom LoRA module, please follow the same rules as the [existing LoRA modules](https://github.com/huggingface/peft/blob/main/src/peft/tuners/lora/layer.py). Some important constraints to consider:
+
+- The custom module should inherit from `nn.Module` and `peft.tuners.lora.layer.LoraLayer`.
+- The `__init__` method of the custom module should have the positional arguments `base_layer` and `adapter_name`. After this, there are additional `**kwargs` that you are free to use or ignore.
+- The learnable parameters should be stored in an `nn.ModuleDict` or `nn.ParameterDict`, where the key corresponds to the name of the specific adapter (remember that a model can have more than one adapter at a time).
+- The name of these learnable parameter attributes should start with `"lora_"`, e.g. `self.lora_new_param = ...`.
+- Some methods are optional, e.g. you only need to implement `merge` and `unmerge` if you want to support weight merging.
+
+Currently, the information about the custom module does not persist when you save the model. When loading the model, you have to register the custom modules again.
+
+```python
+# saving works as always and includes the parameters of the custom modules
+peft_model.save_pretrained(<model-path>)
+
+# loading the model later:
+base_model = ...
+# load the LoRA config that you saved earlier
+config = LoraConfig.from_pretrained(<model-path>)
+# register the custom module again, the same way as the first time
+custom_module_mapping = {nn.LSTM: MyLoraLSTMLayer}
+config._register_custom_module(custom_module_mapping)
+# pass the config instance to from_pretrained:
+peft_model = PeftModel.from_pretrained(model, tmp_path / "lora-custom-module", config=config)
+```
+
+If you use this feature and find it useful, or if you encounter problems, let us know by creating an issue or a discussion on GitHub. This allows us to estimate the demand for this feature and add a public API if it is sufficiently high.

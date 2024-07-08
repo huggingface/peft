@@ -23,8 +23,6 @@ from accelerate.hooks import remove_hook_from_submodules
 from torch import nn
 from transformers.utils import PushToHubMixin
 
-from peft.tuners.mixed import COMPATIBLE_TUNER_TYPES
-
 from .config import PeftConfig
 from .peft_model import PeftModel
 from .tuners import (
@@ -36,6 +34,7 @@ from .tuners import (
     MixedModel,
     OFTModel,
 )
+from .tuners.mixed import COMPATIBLE_TUNER_TYPES
 from .utils import PeftType, _set_adapter, _set_trainable
 
 
@@ -191,6 +190,8 @@ class PeftMixedModel(PushToHubMixin, torch.nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "base_model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.base_model, name)
 
     def forward(self, *args: Any, **kwargs: Any):

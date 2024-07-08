@@ -17,8 +17,36 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
+from torch import nn
+
 from peft.config import PeftConfig
 from peft.utils import PeftType
+
+
+@dataclass
+class LoraRuntimeConfig:
+    """
+    This is the sub-configuration class to store the runtime configurations for the model.
+
+    Args:
+        ephemeral_gpu_offload (`bool`):
+            Whether to use ephemeral GPU offloading for models partially kept in CPU memory.
+    """
+
+    ephemeral_gpu_offload: bool = field(
+        default=False,
+        metadata={
+            "help": (
+                "Whether to use ephemeral GPU offloading for models partially kept in CPU memory. Ephemeral GPU offloading result in "
+                "the data involved in intense operations being momentarily copied over to the GPU, and the results copied "
+                "back to CPU. There is a momentary VRAM overhead, but operations are generally orders of magnitude faster "
+                "compared to performing them on the CPU. This is useful when parts of the model and/or components (such "
+                "as adapters) are kept in CPU memory until they are needed. Rather than perform expensive operations on "
+                "small data, the data is transferred to the GPU on-demand, the operation(s) performed, and the results "
+                "moved back to CPU memory. Currently only affects DoRA initialization."
+            )
+        },
+    )
 
 
 @dataclass
@@ -78,14 +106,14 @@ class LoraConfig(PeftConfig):
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
             completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Pass
-            `'olora'` to use OLoRA initialization. Passing 'pissa' results in the initialization of PiSSA, which
-            converge more rapidly than LoRA and ultimately achieve superior performance. Moreover, PiSSA reduces the
-            quantization error compared to QLoRA, leading to further enhancements. Passing 'pissa_niter_[number of
-            iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters] indicates the number of
-            subspace iterations to perform FSVD, and must be a nonnegative integer. When the [number of iters] is set
-            to 16, it can complete the initialization of a 7b model within seconds, and the training effect is
-            approximately equivalent to using SVD. For more information, see <a
-            href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation</a>.
+            `'olora'` to use OLoRA initialization. Passing `'pissa'` results in the initialization of <a
+            href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation
+            (PiSSA)</a>, which converges more rapidly than LoRA and ultimately achieves superior performance. Moreover,
+            PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements. Passing
+            `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, where `[number of iters]`
+            indicates the number of subspace iterations to perform FSVD, and must be a nonnegative integer. When
+            `[number of iters]` is set to 16, it can complete the initialization of a 7B model within seconds, and the
+            training effect is approximately equivalent to using SVD.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -120,6 +148,8 @@ class LoraConfig(PeftConfig):
             Build a new stack of layers by stacking the original model layers according to the ranges specified. This
             allows expanding (or shrinking) the model without duplicating the base model weights. The new layers will
             all have separate LoRA adapters attached to them.
+        runtime_config (`LoraRuntimeConfig`):
+            Runtime configurations (which are not saved or restored).
     """
 
     r: int = field(default=8, metadata={"help": "Lora attention dimension"})
@@ -148,7 +178,7 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "When set to True, uses Rank-Stabilized LoRA doi.org/10.48550/arXiv.2312.03732"
+                "When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a>"
                 " which sets the adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it"
                 " was proven to work better. Otherwise, it will use the original default"
                 " value of `lora_alpha/r`."
@@ -167,13 +197,13 @@ class LoraConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "How to initialize the weights of the LoRA layers. Passing True (default) results in the default "
-                "initialization from the reference implementation from Microsoft. Passing 'gaussian' results "
+                "How to initialize the weights of the LoRA layers. Passing `'True'` (default) results in the default "
+                "initialization from the reference implementation from Microsoft. Passing `'gaussian'` results "
                 "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
-                "to False leads to completely random initialization and is discouraged."
-                "Passing 'olora' results in OLoRA initialization."
-                "Passing 'pissa' results in PiSSA initialization."
-                "Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, "
+                "to `'False'` leads to completely random initialization and *is discouraged.*"
+                "Passing `'olora'` results in OLoRA initialization."
+                "Passing `'pissa'` results in PiSSA initialization."
+                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
@@ -251,12 +281,11 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
+                "Enable <a href='https://arxiv.org/abs/2402.09353'>'Weight-Decomposed Low-Rank Adaptation' (DoRA)</a>. This technique decomposes the updates of the "
                 "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
-                "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
-                "see  https://arxiv.org/abs/2402.09353."
+                "overhead than pure LoRA, so it is recommended to merge weights for inference."
             )
         },
     )
@@ -280,6 +309,17 @@ class LoraConfig(PeftConfig):
             )
         },
     )
+    runtime_config: LoraRuntimeConfig = field(
+        default_factory=LoraRuntimeConfig, metadata={"help": "Runtime configurations"}
+    )
+
+    def to_dict(self):
+        """
+        Returns the configuration for your adapter model as a dictionary. Removes runtime configurations.
+        """
+        rv = super().to_dict()
+        rv.pop("runtime_config")
+        return rv
 
     def __post_init__(self):
         self.peft_type = PeftType.LORA
@@ -309,3 +349,24 @@ class LoraConfig(PeftConfig):
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):
             self.loftq_config = vars(self.loftq_config)
+
+        self._custom_modules: Optional[dict[type[nn.Mmodule], type[nn.Module]]] = None
+
+    def _register_custom_module(self, mapping: dict[type[nn.Mmodule], type[nn.Module]]) -> None:
+        """
+        Experimental API to support providing custom LoRA layers.
+
+        This API is subject to change, you should carefully read the docs before deciding to use it:
+
+        https://huggingface.co/docs/peft/developer_guides/custom_models
+
+        To register custom LoRA module types, call this method with a `mapping` argument that is a dict that maps from
+        the target layer type to the custom LoRA layer type. The dict can contain multiple items if you wish to target
+        multiple layer types. The target layer type can be any nn.Module that we currently don't support in PEFT,
+        whether that is an official PyTorch layer type or a custom layer type. The custom LoRA module class has to be
+        implemented by the user and follow the PEFT conventions for LoRA layers.
+
+        """
+        if self._custom_modules is None:
+            self._custom_modules = {}
+        self._custom_modules.update(mapping)
