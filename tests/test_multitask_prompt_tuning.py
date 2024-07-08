@@ -246,6 +246,7 @@ class MultiTaskPromptTuningTester(TestCase, PeftCommonTester):
         _ = mpt.generate(input_ids=input_ids, task_ids=task_ids)
 
     def test_generate_text_with_random_init(self) -> None:
+        torch.manual_seed(0)
         model = LlamaForCausalLM(self._create_test_llama_config())
 
         config = self._create_multitask_prompt_tuning_config()
