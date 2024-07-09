@@ -156,7 +156,9 @@ def parse_args(input_args=None):
     # hra args
     parser.add_argument("--use_hra", action="store_true", help="Whether to use HRA for parameter efficient tuning.")
     parser.add_argument("--hra_r", type=int, default=8, help="The rank of HRA across different layers.")
-    parser.add_argument("--hra_apply_GS", default=False, action="store_true", help="Whether to apply Gram-Schmidt orthogonalization.")
+    parser.add_argument(
+        "--hra_apply_GS", default=False, action="store_true", help="Whether to apply Gram-Schmidt orthogonalization."
+    )
     parser.add_argument(
         "--hra_bias",
         type=str,
