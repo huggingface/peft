@@ -441,6 +441,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
+    (
+        "FourierFT Same",
+        "fourierft",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+    ),
+    (
+        "FourierFT Different",
+        "fourierft",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+        {"n_frequency": 10, "target_modules": ["lin1"]},
+    ),
 ]
 PREFIXES = {
     IA3Config: "ia3_",
