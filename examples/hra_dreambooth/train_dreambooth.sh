@@ -144,7 +144,7 @@ VALIDATION_PROMPT=${PROMPT_LIST[@]}
 INSTANCE_PROMPT="a photo of ${UNIQUE_TOKEN} ${CLASS_TOKEN}"
 CLASS_PROMPT="a photo of ${CLASS_TOKEN}"
 
-export MODEL_NAME="/data/shen_yuan/aliendao/dataroot/models/stabilityai/stable-diffusion-2-1-base"
+export MODEL_NAME="stabilityai/stable-diffusion-2-1"
 
 PEFT_TYPE="hra"
 HRA_R=8
