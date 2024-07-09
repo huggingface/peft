@@ -43,6 +43,7 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     BOFTModel,
+    FourierFTModel,
     IA3Model,
     LNTuningModel,
     LoHaModel,
@@ -93,6 +94,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.POLY: PolyModel,
     PeftType.LN_TUNING: LNTuningModel,
     PeftType.VERA: VeraModel,
+    PeftType.FOURIERFT: FourierFTModel,
     PeftType.XLORA: XLoraModel,
 }
 

@@ -26,6 +26,7 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
+    FourierFTConfig,
     IA3Config,
     LoHaConfig,
     LoraConfig,
@@ -58,6 +59,7 @@ ALL_CONFIG_CLASSES = (
     PolyConfig,
     BOFTConfig,
     VeraConfig,
+    FourierFTConfig,
 )
 
 
