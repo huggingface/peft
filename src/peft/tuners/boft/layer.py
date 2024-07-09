@@ -27,7 +27,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
-from torch.utils.cpp_extension import load
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -77,6 +76,9 @@ def get_fbd_cuda():
 
     if _FBD_CUDA is not None:
         return _FBD_CUDA
+
+    # This import initializes cuda context and should thus be local, see issue 1877
+    from torch.utils.cpp_extension import load
 
     curr_dir = os.path.dirname(__file__)
     # need ninja to build the extension

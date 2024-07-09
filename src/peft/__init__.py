@@ -51,6 +51,7 @@ from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     LoraConfig,
+    LoraRuntimeConfig,
     LoftQConfig,
     LoraModel,
     LoHaConfig,
@@ -81,6 +82,8 @@ from .tuners import (
     LNTuningModel,
     VeraConfig,
     VeraModel,
+    XLoraConfig,
+    XLoraModel,
     HRAConfig,
     HRAModel,
 )

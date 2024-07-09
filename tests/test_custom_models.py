@@ -3207,3 +3207,191 @@ class TestMixedAdapterBatches:
         times_separate = logs[-3:]
         time_separate = sum(times_separate) / 3
         assert time_separate > time_mixed
+
+
+class TestDynamicDispatch:
+    # These are tests for the dynamic dispatch feature for LoRA. We create a custom module and a custom LoRA layer
+    # that targets it.
+
+    @pytest.fixture(scope="class")
+    def custom_module_cls(self):
+        class MyModule(nn.Module):
+            # A custom layer that just behaves like an nn.Linear layer but is not an instance of nn.Linear. Therefore,
+            # it would normally fail to be targeted.
+            def __init__(self):
+                super().__init__()
+                self.in_features = 10
+                self.out_features = 20
+                self.weight = nn.Parameter(torch.randn(20, 10))
+
+            def forward(self, x):
+                return nn.functional.linear(x, self.weight)
+
+        return MyModule
+
+    @pytest.fixture(scope="class")
+    def custom_lora_cls(self):
+        from peft.tuners import lora
+
+        class MyLora(lora.Linear):
+            # just re-use the lora.Linear code here
+            pass
+
+        return MyLora
+
+    @pytest.fixture(scope="class")
+    def model_cls(self, custom_module_cls):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.relu = nn.ReLU()
+                self.my_module = custom_module_cls()
+                self.lin1 = nn.Linear(20, 2)
+
+            def forward(self, x):
+                x = self.relu(self.lin0(x))
+                x = self.relu(self.my_module(x))
+                x = self.lin1(x)
+                return x
+
+        return MyModel
+
+    def test_custom_lora_layer_used(self, custom_module_cls, custom_lora_cls, model_cls):
+        # check that when we register custom lora layers, they are indeed being used for the intended module
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        peft_model = get_peft_model(model, config)
+        assert isinstance(peft_model.base_model.model.my_module, custom_lora_cls)
+        assert isinstance(peft_model.base_model.model.my_module.base_layer, custom_module_cls)
+        # sanity check that the other lora layer types are still the default ones
+        assert not isinstance(peft_model.base_model.model.lin0.base_layer, custom_module_cls)
+        assert not isinstance(peft_model.base_model.model.lin1.base_layer, custom_module_cls)
+
+    def test_training_works(self, model_cls, custom_module_cls, custom_lora_cls):
+        # check that when we train with custom lora layers, they are indeed updated
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        peft_model = get_peft_model(model, config)
+        sd_before = peft_model.state_dict()
+        inputs = torch.randn(16, 10)
+        optimizer = torch.optim.SGD(peft_model.parameters(), lr=1e-1)
+
+        for _ in range(5):
+            optimizer.zero_grad()
+            output = peft_model(inputs)
+            loss = output.sum() ** 2
+            loss.backward()
+            optimizer.step()
+
+        sd_after = peft_model.state_dict()
+        assert not torch.allclose(
+            sd_before["base_model.model.my_module.lora_A.default.weight"],
+            sd_after["base_model.model.my_module.lora_A.default.weight"],
+        )
+        assert not torch.allclose(
+            sd_before["base_model.model.my_module.lora_B.default.weight"],
+            sd_after["base_model.model.my_module.lora_B.default.weight"],
+        )
+
+    def test_saving_and_loading(self, custom_module_cls, custom_lora_cls, model_cls, tmp_path):
+        # check that we can successfully save and load the custom lora cls
+        torch.manual_seed(0)
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        torch.manual_seed(1)
+        peft_model = get_peft_model(model, config)
+
+        inputs = torch.randn(5, 10)
+        outputs_before = peft_model(inputs)  # does not raise
+
+        sd_before = peft_model.state_dict()
+        peft_model.save_pretrained(tmp_path / "lora-custom-module")
+        del model, peft_model
+
+        torch.manual_seed(0)  # same seed for base model
+        model = model_cls()
+
+        # custom lora mapping is not persisted at the moment, so as a workaround this is needed
+        config = LoraConfig.from_pretrained(tmp_path / "lora-custom-module")
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        # different seed for adapter to ensure it is not identical just because of seed
+        torch.manual_seed(123)
+        peft_model = PeftModel.from_pretrained(model, tmp_path / "lora-custom-module", config=config)
+        assert isinstance(peft_model.base_model.model.my_module, custom_lora_cls)
+        assert isinstance(peft_model.base_model.model.my_module.base_layer, custom_module_cls)
+
+        outputs_after = peft_model(inputs)  # does not raise
+        assert torch.allclose(outputs_before, outputs_after)
+
+        sd_after = peft_model.state_dict()
+        assert sd_before.keys() == sd_after.keys()
+        for key in sd_before.keys():
+            assert torch.allclose(sd_before[key], sd_after[key])
+
+    def test_override_lora_linear(self, custom_lora_cls):
+        # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
+        # being used instead of lora.Linear
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        config = LoraConfig(task_type=TaskType.CAUSAL_LM)
+        config._register_custom_module({nn.Linear: custom_lora_cls})
+        peft_model = get_peft_model(model, config)
+        layers = peft_model.base_model.model.model.decoder.layers
+        for layer in layers:
+            assert isinstance(layer.self_attn.v_proj, custom_lora_cls)
+            assert isinstance(layer.self_attn.q_proj, custom_lora_cls)
+
+    def test_custom_lora_layer_issues_warning(self, custom_module_cls, custom_lora_cls, model_cls, recwarn):
+        # users will get a warning if they target a layer type that is not officially supported
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        get_peft_model(model, config)
+        # check warning message
+        msg = (
+            "Unsupported layer type '<class 'tests.test_custom_models.TestDynamicDispatch.custom_module_cls."
+            "<locals>.MyModule'>' encountered, proceed at your own risk."
+        )
+        assert str(recwarn.list[-1].message) == msg
+
+    def test_target_layer_without_in_features_out_features(self, recwarn):
+        # It should be possible for users to target layers even if we cannot determine in_features and out_features.
+        # Those are only needed to initialize the LoRA layer via update_layer, so as long as users take care of that,
+        # they should be good and not require those attributes to exist
+        from peft.tuners import lora
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(10, 20)
+
+        class MyLora(nn.Module, lora.LoraLayer):
+            def __init__(self, base_layer, adapter_name, **kwargs):
+                super().__init__()
+                lora.LoraLayer.__init__(self, base_layer, **kwargs)
+                self._active_adapter = adapter_name
+
+        model = MyModel()
+        # check that in_features and out_features attributes don't exist on LSTM
+        assert not hasattr(model.lstm, "in_features")
+        assert not hasattr(model.lstm, "out_features")
+
+        config = LoraConfig(target_modules=["lstm"])
+        config._register_custom_module({nn.LSTM: MyLora})
+        peft_model = get_peft_model(model, config)
+
+        # check that custom LoRA layer is correctly applied
+        assert isinstance(peft_model.base_model.lstm, MyLora)
+        assert isinstance(peft_model.base_model.lstm.base_layer, nn.LSTM)
+
+        # we should still get a warning message
+        msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
+        assert str(recwarn.list[-1].message) == msg

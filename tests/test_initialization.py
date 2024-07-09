@@ -20,12 +20,26 @@ import torch
 from scipy import stats
 from torch import nn
 
-from peft import AdaLoraConfig, LoraConfig, PeftModel, PromptTuningConfig, VeraConfig, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    LoraConfig,
+    PeftMixedModel,
+    PeftModel,
+    PeftModelForCausalLM,
+    PeftModelForFeatureExtraction,
+    PeftModelForQuestionAnswering,
+    PeftModelForSeq2SeqLM,
+    PeftModelForSequenceClassification,
+    PeftModelForTokenClassification,
+    PromptTuningConfig,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.utils import infer_device
 
 
 class TestLoraInitialization:
-    """Test class to check the initialization of adapters."""
+    """Test class to check the initialization of LoRA adapters."""
 
     torch_device = infer_device()
 
@@ -520,6 +534,8 @@ class TestLoraInitialization:
 
 
 class TestAdaLoraInitialization:
+    torch_device = infer_device()
+
     def test_adalora_target_modules_set(self):
         config = AdaLoraConfig(target_modules=["linear", "embed", "conv2d"])
         assert config.target_modules == {"linear", "embed", "conv2d"}
@@ -531,6 +547,33 @@ class TestAdaLoraInitialization:
     def test_adalora_loftq_config_raises(self):
         with pytest.raises(ValueError, match="ADALORA does not support LOFTQ"):
             AdaLoraConfig(loftq_config={"loftq": "config"})
+
+    def get_model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                # choose a large weight so that averages are close to expected values
+                self.linear = nn.Linear(1000, 1000)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        return MyModule().eval().to(self.torch_device)
+
+    @pytest.fixture
+    def data(self):
+        return torch.rand(10, 1000).to(self.torch_device)
+
+    def test_adalora_default_init_identity(self, data):
+        # default is True
+        torch.manual_seed(0)
+
+        model = self.get_model()
+        output_before = model(data)
+        config = AdaLoraConfig(target_modules=["linear"])
+        model = get_peft_model(model, config)
+        output_after = model(data)
+        assert torch.allclose(output_before, output_after)
 
 
 class TestPromptTuningInitialization:
@@ -572,3 +615,55 @@ class TestPromptTuningInitialization:
         )
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
+
+
+class TestNoInfiniteRecursionDeepspeed:
+    # see #1892 for details
+    classes = [
+        PeftModel,
+        PeftMixedModel,
+        PeftModelForSequenceClassification,
+        PeftModelForQuestionAnswering,
+        PeftModelForTokenClassification,
+        PeftModelForCausalLM,
+        PeftModelForSeq2SeqLM,
+        PeftModelForFeatureExtraction,
+    ]
+
+    @pytest.fixture
+    def wrap_init(self):
+        # emulates the wrapper from DeepSpeed
+        import functools
+
+        def decorator(f):
+            @functools.wraps(f)
+            def wrapper(self, *args, **kwargs):
+                hasattr(self, "abc")  # any hasattr will do
+                f(self, *args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+    @pytest.fixture
+    def model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+                # to emulate LMs:
+                self.prepare_inputs_for_generation = None
+                self._prepare_encoder_decoder_kwargs_for_generation = None
+
+        return MyModule()
+
+    @pytest.mark.parametrize("cls", classes)
+    def test_no_infinite_recursion(self, cls, model, wrap_init):
+        original_init = cls.__init__
+        try:
+            cls.__init__ = wrap_init(cls.__init__)
+            # this would trigger an infinite loop before the fix in 1892
+            cls(model, LoraConfig(target_modules=["linear"]))
+        finally:
+            # ensure there are no side effects of this test
+            cls.__init__ = original_init

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import copy
+import json
 import os
 import pickle
 import tempfile
@@ -124,7 +125,16 @@ class PeftConfigTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             config.save_pretrained(tmp_dirname)
 
-            config_from_json = config_class.from_json_file(os.path.join(tmp_dirname, "adapter_config.json"))
+            config_path = os.path.join(tmp_dirname, "adapter_config.json")
+            config_from_json = config_class.from_json_file(config_path)
+            assert config.to_dict() == config_from_json
+
+            # Also test with a runtime_config entry -- they should be ignored, even if they
+            # were accidentally saved to disk
+            config_from_json["runtime_config"] = {"ephemeral_gpu_offload": True}
+            json.dump(config_from_json, open(config_path, "w"))
+
+            config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
@@ -153,6 +163,21 @@ class PeftConfigTester(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dirname:
             PeftConfig.from_pretrained("ybelkada/test-st-lora", cache_dir=tmp_dirname)
             assert "models--ybelkada--test-st-lora" in os.listdir(tmp_dirname)
+
+    @parameterized.expand(ALL_CONFIG_CLASSES)
+    def test_save_pretrained_with_runtime_config(self, config_class):
+        r"""
+        Test if the config correctly removes runtime config when saving
+        """
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            for model_name, revision in PEFT_MODELS_TO_TEST:
+                cfg = config_class.from_pretrained(model_name, revision=revision)
+                # NOTE: cfg is always a LoraConfig here, because the configuration of the loaded model was a LoRA.
+                # Hence we can expect a runtime_config to exist regardless of config_class.
+                cfg.runtime_config.ephemeral_gpu_offload = True
+                cfg.save_pretrained(tmp_dirname)
+                cfg = config_class.from_pretrained(tmp_dirname)
+                assert not cfg.runtime_config.ephemeral_gpu_offload
 
     @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_set_attributes(self, config_class):
