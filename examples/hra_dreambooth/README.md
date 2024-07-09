@@ -55,21 +55,16 @@ pip install git+https://github.com/huggingface/peft
 
 ## Download the data
 
-Download [dreambooth](https://github.com/google/dreambooth) dataset by running this command.
-
-```bash
-git clone https://github.com/google/dreambooth.git
-```
-
-After downloading the data, your directory structure should look like this:
+[dreambooth](https://github.com/google/dreambooth) dataset should have been automatically cloned in the following structure when running the training script.
 
 ```
 hra_dreambooth
-├── dreambooth
-│   └── dataset
-│       ├── backpack
-│       └── backpack_dog
-│       ...
+├── data
+│   └── dreambooth
+│       └── dataset
+│           ├── backpack
+│           └── backpack_dog
+│           ...
 ```
 
 You can also put your custom images into `hra_dreambooth/dreambooth/dataset`.
@@ -77,12 +72,11 @@ You can also put your custom images into `hra_dreambooth/dreambooth/dataset`.
 ## Fine-tune Dreambooth with HRA
 
 ```bash
-prompt_idx=0
 class_idx=0
-bash ./train_dreambooth.sh $prompt_idx $class_idx
+bash ./train_dreambooth.sh $class_idx
 ```
 
-where the `$prompt_idx` corresponds to different prompts ranging from 0 to 24 and the `$class_idx` corresponds to different subjects ranging from 0 to 29.
+where the `$class_idx` corresponds to different subjects ranging from 0 to 29.
 
 Launch the training script with `accelerate` and pass hyperparameters, as well as LoRa-specific arguments to it such as:
 
@@ -99,16 +93,6 @@ If you are running this script on Windows, you may need to set the `--num_datalo
 
 To learn more about DreamBooth fine-tuning with prior-preserving loss, check out the [Diffusers documentation](https://huggingface.co/docs/diffusers/training/dreambooth#finetuning-with-priorpreserving-loss).
 
-**Note**, after finishing the fine-tuning stage, the script will output the following information:
-
-```bash
-BASE_MODEL_NAME = XXX
-ADAPTER_MODEL_PATH = XXX
-PROMPT = XXX
-```
-
-Please fill in the information in the `hra_dreambooth_inference.ipynb`.
-
 ## Generate images with the fine-tuned model
 
-To generate images with the fine-tuned model, simply run the jupyter notebook `hra_dreambooth_inference.ipynb` for visualization with `jupyter notebook` under `./examples/hra_dreambooth`.
+To generate images with the fine-tuned model, simply run the jupyter notebook `dreambooth_inference.ipynb` for visualization with `jupyter notebook` under `./examples/hra_dreambooth`.
