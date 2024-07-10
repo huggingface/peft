@@ -254,7 +254,7 @@ def get_peft_model_state_dict(
 def _find_mismatched_keys(
     model: torch.nn.Module, peft_model_state_dict: dict[str, torch.Tensor], ignore_mismatched_sizes: bool = False
 ) -> tuple[dict[str, torch.Tensor], list[tuple[str, tuple[int, ...], tuple[int, ...]]]]:
-    if not ignore_mismatched_sizes:
+    if ignore_mismatched_sizes:
         return peft_model_state_dict, []
 
     mismatched = []
