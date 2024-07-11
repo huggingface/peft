@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 import torch.nn.init as init
 
-from peft.tuners.tuners_utils import check_adapters_to_merge, BaseTunerLayer
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 from peft.utils import transpose
 from peft.utils.integrations import gather_params_ctx
 
@@ -88,7 +88,9 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         )
 
         if is_target_conv_1d_layer:
-            raise ValueError(f"{self.__class__.__name__} does not support target_conv_1d_layer yet, please set it to False")
+            raise ValueError(
+                f"{self.__class__.__name__} does not support target_conv_1d_layer yet, please set it to False"
+            )
         self.is_target_conv_1d_layer = False
 
     def update_layer(
