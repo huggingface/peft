@@ -1,5 +1,4 @@
 import math
-import warnings
 from operator import attrgetter
 from typing import Callable, Iterable, Tuple
 
@@ -16,21 +15,24 @@ def create_riemannian_optimizer(
     optimizer_cls: type[Optimizer],
     optimizer_kwargs: dict,
     lr_embedding: float = 1e-6,
-    reg: float = 1e-6,
+    reg: float = 1e-4,
 ) -> Optimizer:
     """
-    Creates a Riemmanian optimizer. Implementation based on:
-    https://github.com/pilancilab/Riemannian_Preconditioned_LoRA Paper Reference: https://arxiv.org/pdf/2402.02347
+    Creates a Riemmanian optimizer. Used only for LoRA. Implementation based on:
+    https://github.com/pilancilab/Riemannian_Preconditioned_LoRA. Paper reference: https://arxiv.org/pdf/2402.02347.
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
         optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
         optimizer_kwargs (`dict`): Additional keyword arguments to be passed to the optimizer.
             - lr_embedding (`float`): The learning rate to be used for the embedding layer. Defaults to lr_embedding
+            - reg (`float`): Regularization parameter for Riemmanian preconditioner. Included for lora parameters only
+              and is needed for invertability guarantees
     """
 
-    """TEST VERSION FOR ADAMW"""
-    assert optimizer_cls.__name__ == "AdamW", "TEST version only supports AdamW optimizer"
+    # TEST VERSION FOR ADAMW
+    if not issubclass(optimizer_cls, torch.optim.AdamW):
+        raise TypeError("TEST version only supports AdamW optimizer")
     from ..tuners.lora.layer import Embedding
 
     param_groups = {"lora_params": {}, "other_params": {}, "embedding": {}}
@@ -71,16 +73,18 @@ def create_riemannian_optimizer(
         },
     ]
 
-    optimizer = riemannian_AdamW(optimizer_grouped_parameters, **optimizer_kwargs)
-    if optimizer_cls.__name__ == "Adam8bit":
-        raise Exception("bitsandbytes not supported yet")
-
+    optimizer = RiemannianAdamW(optimizer_grouped_parameters, **optimizer_kwargs)
     return optimizer
 
 
-class riemannian_AdamW(Optimizer):
+class RiemannianAdamW(Optimizer):
     """
-    Adapt from AdamW code in transformers.optimization.AdamW
+    This implements a variant of AdamW which combines with Riemannian preconditioner and is specifically designed for
+    LoRA model. Basic AdamW workflow follows implmentation of transformers.optimization.AdamW, with exception that
+    Riemmanian preconditioners are added. More specifically, for each LoRA parameter pair (lora_up, lora_down), we use
+    gradient of form
+                    grad(lora_up) = lora_up@inverse(lora_down.T@lora_down)
+    and vice versa.
 
     Parameters:
         params (`Iterable[nn.parameter.Parameter]`):
@@ -107,16 +111,7 @@ class riemannian_AdamW(Optimizer):
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         correct_bias: bool = True,
-        no_deprecation_warning: bool = False,
     ):
-        print("CREATE Riemannian AdamW")
-        if not no_deprecation_warning:
-            warnings.warn(
-                "This implementation of AdamW is deprecated and will be removed in a future version. Use the PyTorch"
-                " implementation torch.optim.AdamW instead, or set `no_deprecation_warning=True` to disable this"
-                " warning",
-                FutureWarning,
-            )
         require_version("torch>=1.5.0")  # add_ with alpha
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr} - should be >= 0.0")
