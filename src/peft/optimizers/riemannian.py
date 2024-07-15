@@ -19,8 +19,8 @@ def create_riemannian_optimizer(
     reg: float = 1e-6,
 ) -> Optimizer:
     """
-    Creates a Riemmanian optimizer. Implementation based on: https://github.com/pilancilab/Riemannian_Preconditioned_LoRA
-    Paper Reference: https://arxiv.org/pdf/2402.02347
+    Creates a Riemmanian optimizer. Implementation based on:
+    https://github.com/pilancilab/Riemannian_Preconditioned_LoRA Paper Reference: https://arxiv.org/pdf/2402.02347
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
@@ -49,14 +49,13 @@ def create_riemannian_optimizer(
     lr = optimizer_kwargs["lr"]
     weight_decay = optimizer_kwargs.get("weight_decay", 0.0)
 
-
     optimizer_grouped_parameters = [
         {
             "params": list(param_groups["lora_params"].values()),
             "weight_decay": weight_decay,
             "lr": lr,
             "is_lora": True,
-            "reg": reg
+            "reg": reg,
         },
         {
             "params": list(param_groups["embedding"].values()),
@@ -108,7 +107,7 @@ class riemannian_AdamW(Optimizer):
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         correct_bias: bool = True,
-        no_deprecation_warning: bool = False
+        no_deprecation_warning: bool = False,
     ):
         print("CREATE Riemannian AdamW")
         if not no_deprecation_warning:
@@ -127,13 +126,7 @@ class riemannian_AdamW(Optimizer):
             raise ValueError(f"Invalid beta parameter: {betas[1]} - should be in [0.0, 1.0)")
         if not 0.0 <= eps:
             raise ValueError(f"Invalid epsilon value: {eps} - should be >= 0.0")
-        defaults = {
-            "lr": lr,
-            "betas": betas,
-            "eps": eps,
-            "weight_decay": weight_decay,
-            "correct_bias": correct_bias
-        }
+        defaults = {"lr": lr, "betas": betas, "eps": eps, "weight_decay": weight_decay, "correct_bias": correct_bias}
         super().__init__(params, defaults)
 
     @torch.no_grad()

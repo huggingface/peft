@@ -1,8 +1,8 @@
-import bitsandbytes as bnb
 import torch
 from torch import nn
 
 from peft.optimizers import create_riemannian_optimizer
+
 
 # adapt from test_loraplus_helper.py
 class SimpleNet(nn.Module):
@@ -36,11 +36,7 @@ def test_riemannian_helper_sucess():
     lr_embedding = 1e-6
     reg = 1e-4
     optim = create_riemannian_optimizer(
-        model=model,
-        optimizer_cls=optimizer_cls,
-        optimizer_kwargs=optim_config,
-        lr_embedding=lr_embedding,
-        reg = reg
+        model=model, optimizer_cls=optimizer_cls, optimizer_kwargs=optim_config, lr_embedding=lr_embedding, reg=reg
     )
     assert optim is not None
     assert len(optim.param_groups) == 3
@@ -52,28 +48,17 @@ def test_riemannian_helper_sucess():
     assert "reg" not in optim.param_groups[2].keys()
 
 
-
 def test_riemannian_optimizer_sucess():
     """
-    Test if the optimizer is correctly created and step 
-    function runs without any exception
+    Test if the optimizer is correctly created and step function runs without any exception
     """
     optimizer_cls = torch.optim.AdamW
-    optim_config = {
-        "lr": 5e-5,
-        "eps": 1e-6,
-        "betas": (0.9, 0.999),
-        "weight_decay": 0.0
-    }
+    optim_config = {"lr": 5e-5, "eps": 1e-6, "betas": (0.9, 0.999), "weight_decay": 0.0}
     model: SimpleNet = SimpleNet().cuda()
     lr_embedding = 1e-6
     reg = 1e-4
     optim = create_riemannian_optimizer(
-        model=model, 
-        optimizer_cls=optimizer_cls, 
-        optimizer_kwargs=optim_config, 
-        lr_embedding=lr_embedding,
-        reg = reg
+        model=model, optimizer_cls=optimizer_cls, optimizer_kwargs=optim_config, lr_embedding=lr_embedding, reg=reg
     )
     loss = torch.nn.CrossEntropyLoss()
     x = torch.randint(100, (2, 4, 10)).cuda()
