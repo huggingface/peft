@@ -19,8 +19,8 @@ def create_riemannian_optimizer(
     reg: float = 1e-6,
 ) -> Optimizer:
     """
-    Creates a Riemmanian optimizer. Implementation: https://github.com/pilancilab/Riemannian_Preconditioned_LoRA
-    Reference: https://arxiv.org/pdf/2402.02347
+    Creates a Riemmanian optimizer. Implementation based on: https://github.com/pilancilab/Riemannian_Preconditioned_LoRA
+    Paper Reference: https://arxiv.org/pdf/2402.02347
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
