@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from __future__ import annotations
 
 import importlib
 import math
@@ -116,7 +117,7 @@ class LoraParallelLinear(nn.Module, LoraLayer):
         else:
             lora_dropout_layer = nn.Identity()
 
-        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        self.lora_dropout[adapter_name] = lora_dropout_layer
 
         megatron_config = parallel_linear_kwargs["megatron_config"]
         # lora needs to be forced to upgrade to 32-bit precision, otherwise it will overflow
