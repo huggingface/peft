@@ -17,5 +17,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .loraplus import create_loraplus_optimizer
 from .riemannian import create_riemannian_optimizer

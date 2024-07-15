@@ -97,4 +97,4 @@ from .utils import (
 )
 from .config import PeftConfig, PromptLearningConfig
 
-from .optimizers import create_loraplus_optimizer, create_riemannian_optimizer
+from .optimizers import create_riemannian_optimizer
