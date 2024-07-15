@@ -1,8 +1,14 @@
-import bitsandbytes as bnb
 import torch
 from torch import nn
 
+from peft.import_utils import is_bnb_available
 from peft.optimizers import create_loraplus_optimizer
+
+from .testing_utils import require_bitsandbytes
+
+
+if is_bnb_available():
+    import bitsandbytes as bnb
 
 
 class SimpleNet(nn.Module):
@@ -21,6 +27,7 @@ class SimpleNet(nn.Module):
         return X
 
 
+@require_bitsandbytes
 def test_lora_plus_helper_sucess():
     model = SimpleNet()
     optimizer_cls = bnb.optim.Adam8bit
@@ -46,6 +53,7 @@ def test_lora_plus_helper_sucess():
     assert optim.param_groups[2]["lr"] == optim.param_groups[3]["lr"] == (optim_config["lr"] * loraplus_lr_ratio)
 
 
+@require_bitsandbytes
 def test_lora_plus_optimizer_sucess():
     """
     Test if the optimizer is correctly created and step function runs without any exception
