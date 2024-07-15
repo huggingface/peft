@@ -38,7 +38,6 @@ def create_riemannian_optimizer(
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        # print(name, param.shape)
         module = attrgetter(name)(model)
         if isinstance(module, Embedding):
             param_groups["embedding"][name] = param
@@ -50,12 +49,14 @@ def create_riemannian_optimizer(
     lr = optimizer_kwargs["lr"]
     weight_decay = optimizer_kwargs.get("weight_decay", 0.0)
 
+
     optimizer_grouped_parameters = [
         {
             "params": list(param_groups["lora_params"].values()),
             "weight_decay": weight_decay,
             "lr": lr,
             "is_lora": True,
+            "reg": reg
         },
         {
             "params": list(param_groups["embedding"].values()),
@@ -71,7 +72,6 @@ def create_riemannian_optimizer(
         },
     ]
 
-    optimizer_kwargs.update({"reg": reg})
     optimizer = riemannian_AdamW(optimizer_grouped_parameters, **optimizer_kwargs)
     if optimizer_cls.__name__ == "Adam8bit":
         raise Exception("bitsandbytes not supported yet")
@@ -108,8 +108,7 @@ class riemannian_AdamW(Optimizer):
         eps: float = 1e-6,
         weight_decay: float = 0.0,
         correct_bias: bool = True,
-        no_deprecation_warning: bool = False,
-        reg: float = 1e-6,
+        no_deprecation_warning: bool = False
     ):
         print("CREATE Riemannian AdamW")
         if not no_deprecation_warning:
@@ -133,8 +132,7 @@ class riemannian_AdamW(Optimizer):
             "betas": betas,
             "eps": eps,
             "weight_decay": weight_decay,
-            "correct_bias": correct_bias,
-            "reg": reg,
+            "correct_bias": correct_bias
         }
         super().__init__(params, defaults)
 
@@ -174,7 +172,7 @@ class riemannian_AdamW(Optimizer):
                     scaler = p2.data
                     scaler_temp = p1.data
                     try:
-                        reg_I = self.defaults["reg"] * torch.eye(min(p2.shape)).to(p2.device)
+                        reg_I = group["reg"] * torch.eye(min(p2.shape)).to(p2.device)
                         scaler = (
                             torch.inverse(scaler @ scaler.T + reg_I)
                             if p2.shape[0] < p2.shape[1]
@@ -224,7 +222,7 @@ class riemannian_AdamW(Optimizer):
                     state["step"] += 1
                     scaler = scaler_temp
                     try:
-                        reg_I = self.defaults["reg"] * torch.eye(min(p1.shape)).to(p1.device)
+                        reg_I = group["lr"] * torch.eye(min(p1.shape)).to(p1.device)
                         scaler = (
                             torch.inverse(scaler @ scaler.T + reg_I)
                             if p1.shape[0] < p1.shape[1]
