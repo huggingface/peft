@@ -76,3 +76,4 @@ def test_riemannian_optimizer_sucess():
     optim.step()
     output = model(x).permute(0, 3, 1, 2)
     loss_value = loss(output, label)
+
