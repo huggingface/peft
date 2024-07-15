@@ -35,6 +35,7 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    FourierFTConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -351,6 +352,34 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ########
+    # FourierFT #
+    ########
+    ("Vanilla MLP 1 FourierFT", "MLP", FourierFTConfig, {"n_frequency": 10, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 FourierFT", "MLP", FourierFTConfig, {"n_frequency": 10, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FourierFT", "MLP", FourierFTConfig, {"n_frequency": 10, "target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 5 FourierFT",
+        "MLP",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 6 FourierFT",
+        "MLP",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 7 FourierFT",
+        "MLP",
+        FourierFTConfig,
+        {
+            "n_frequency_pattern": {"lin0": 5, "lin1": 10},
+            "target_modules": ["lin0", "lin1"],
+            "modules_to_save": ["lin1"],
+        },
+    ),
 ]
 
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
@@ -412,6 +441,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
+    (
+        "FourierFT Same",
+        "fourierft",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+    ),
+    (
+        "FourierFT Different",
+        "fourierft",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+        {"n_frequency": 10, "target_modules": ["lin1"]},
+    ),
     # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
     # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
     # (remember that VeRA shares these parameters across all layers), which results in an error.
@@ -433,6 +476,7 @@ PREFIXES = {
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
     VeraConfig: "vera_lambda_",
+    FourierFTConfig: "fourierft_",
 }
 
 
@@ -870,7 +914,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
 
         outputs_base = model(**X)
-
+        if issubclass(config_cls, FourierFTConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -922,6 +968,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        if issubclass(config_cls, FourierFTConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -2885,6 +2934,83 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.vera_lambda_d.adapter1",
             "base_model.model.lin2.vera_lambda_b.adapter1",
             "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_fourierft_different_targets(self):
+        # test two different fourierft adapters that target different modules
+        config0 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.fourierft_spectrum.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.fourierft_spectrum.adapter1",
+        )
+
+    def test_requires_grad_fourierft_same_targets(self):
+        # same as previous test, except that AdaLora adapters target the same layer
+        config0 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.adapter1",
         )
 
 
