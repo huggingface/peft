@@ -86,6 +86,8 @@ from .tuners import (
     FourierFTModel,
     XLoraConfig,
     XLoraModel,
+    HRAConfig,
+    HRAModel,
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
