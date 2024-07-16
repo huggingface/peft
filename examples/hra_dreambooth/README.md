@@ -67,7 +67,7 @@ hra_dreambooth
 │           ...
 ```
 
-You can also put your custom images into `hra_dreambooth/dreambooth/dataset`.
+You can also put your custom images into `hra_dreambooth/data/dreambooth/dataset`.
 
 ## Fine-tune Dreambooth with HRA
 

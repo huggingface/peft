@@ -1,3 +1,5 @@
+# adapted from [peft's boft_dreambooth](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth)
+
 import argparse
 import os
 import warnings
@@ -283,12 +285,24 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
+        "--project_name",
+        type=str,
+        default=None,
+        help=("The project name for log tracking"),
+    )
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default=None,
+        help=("The run name for log tracking"),
+    )
+    parser.add_argument(
         "--report_to",
         type=str,
         default="wandb",
         help=(
-            'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
-            ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
+            'The integration to report the results and logs to. Supported platforms are `"wandb"`'
+            ' (default), `"tensorboard"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
         ),
     )
     parser.add_argument(

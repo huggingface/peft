@@ -1,3 +1,5 @@
+# adapted from [peft's boft_dreambooth](https://github.com/huggingface/peft/tree/main/examples/boft_dreambooth)
+
 from pathlib import Path
 
 import torch

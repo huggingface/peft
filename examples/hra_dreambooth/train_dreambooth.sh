@@ -161,8 +161,8 @@ accelerate launch train_dreambooth.py \
   --instance_data_dir=$INSTANCE_DIR \
   --class_data_dir="$CLASS_DIR" \
   --output_dir=$OUTPUT_DIR \
-  --wandb_project_name=$PROJECT_NAME \
-  --wandb_run_name=$RUN_NAME \
+  --project_name=$PROJECT_NAME \
+  --run_name=$RUN_NAME \
   --with_prior_preservation \
   --prior_loss_weight=1.0 \
   --instance_prompt="$INSTANCE_PROMPT" \
@@ -178,8 +178,8 @@ accelerate launch train_dreambooth.py \
   --hra_r=$HRA_R \
   --hra_bias="hra_only" \
   --learning_rate=5e-3 \
-  --max_train_steps=1010 \
+  --max_train_steps=510 \
   --checkpointing_steps=200 \
   --validation_steps=200 \
   --enable_xformers_memory_efficient_attention \
-  --report_to="wandb" \
+  --report_to="none" \

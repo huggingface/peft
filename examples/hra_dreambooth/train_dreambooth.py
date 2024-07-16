@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The implementation is based on "Parameter-Efficient Orthogonal Finetuning
-# via Butterfly Factorization" (https://arxiv.org/abs/2311.06243) in ICLR 2024.
+# The implementation is based on "Bridging The Gap between Low-rank and Orthogonal
+# Adaptation via Householder Reflection Adaptation" (https://arxiv.org/abs/2405.17484).
 
 import hashlib
 import itertools
@@ -89,12 +89,13 @@ def main(args):
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
-        log_with=args.report_to,
+        log_with=args.report_to if args.report_to != "none" else None,
         project_dir=accelerator_project_config,
     )
     if args.report_to == "wandb":
         import wandb
-
+        args.wandb_project_name = args.project_name
+        args.wandb_run_name = args.run_name
         wandb_init = {
             "wandb": {
                 "name": args.wandb_run_name,
@@ -128,7 +129,7 @@ def main(args):
         diffusers.utils.logging.set_verbosity_error()
 
     # If passed along, set the training seed now.
-    global_seed = hash(args.wandb_run_name) % (2**32)
+    global_seed = hash(args.run_name) % (2**32)
     set_seed(global_seed)
 
     # Generate class images if prior preservation is enabled.
@@ -226,7 +227,7 @@ def main(args):
             target_modules=UNET_TARGET_MODULES,
             bias=args.hra_bias,
         )
-        unet = get_peft_model(unet, config, adapter_name=args.wandb_run_name)
+        unet = get_peft_model(unet, config, adapter_name=args.run_name)
         unet.print_trainable_parameters()
 
     vae.requires_grad_(False)
@@ -239,7 +240,7 @@ def main(args):
             target_modules=UNET_TARGET_MODULES,
             bias=args.hra_bias,
         )
-        text_encoder = get_peft_model(text_encoder, config, adapter_name=args.wandb_run_name)
+        text_encoder = get_peft_model(text_encoder, config, adapter_name=args.run_name)
         text_encoder.print_trainable_parameters()
         text_encoder.train()
     else:
@@ -381,7 +382,10 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers(args.wandb_project_name, config=vars(args), init_kwargs=wandb_init)
+        if args.report_to == "wandb":
+            accelerator.init_trackers(args.wandb_project_name, config=vars(args), init_kwargs=wandb_init)
+        else:
+            accelerator.init_trackers(args.project_name, config=vars(args))
 
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
@@ -500,8 +504,8 @@ def main(args):
                 # Checks if the accelerator has performed an optimization step behind the scenes
                 if accelerator.sync_gradients:
                     progress_bar.update(1)
-                    # if args.report_to == "wandb":
-                    #     accelerator.print(progress_bar)
+                    if args.report_to == "wandb":
+                        accelerator.print(progress_bar)
                     global_step += 1
 
                 if global_step % args.checkpointing_steps == 0 and global_step != 0:
@@ -542,16 +546,12 @@ def main(args):
                         generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
                     else:
                         generator = None
-                    # images = []
-                    # for _ in range(args.num_validation_images):
-                    #     image = pipeline(args.validation_prompt, num_inference_steps=25, generator=generator).images[0]
-                    #     images.append(image)
 
                     images = []
                     val_img_dir = os.path.join(
                         args.output_dir,
                         f"validation/{global_step}",
-                        args.wandb_run_name,
+                        args.run_name,
                     )
                     os.makedirs(val_img_dir, exist_ok=True)
 
