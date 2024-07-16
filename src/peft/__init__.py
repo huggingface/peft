@@ -51,7 +51,6 @@ from .tuners import (
     AdaptionPromptConfig,
     AdaptionPromptModel,
     LoraConfig,
-    LoraPlusConfig,
     LoraRuntimeConfig,
     LoftQConfig,
     LoraModel,
@@ -104,3 +103,4 @@ from .utils import (
     cast_mixed_precision_params,
 )
 from .config import PeftConfig, PromptLearningConfig
+from .tuners.lora.config import LoraPlusConfig
