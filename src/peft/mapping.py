@@ -40,6 +40,8 @@ from .tuners import (
     BOFTModel,
     FourierFTConfig,
     FourierFTModel,
+    HRAConfig,
+    HRAModel,
     IA3Config,
     IA3Model,
     LNTuningConfig,
@@ -97,6 +99,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "VERA": VeraConfig,
     "FOURIERFT": FourierFTConfig,
     "XLORA": XLoraConfig,
+    "HRA": HRAConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
@@ -112,6 +115,7 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
     "VERA": VeraModel,
     "FOURIERFT": FourierFTModel,
     "XLORA": XLoraModel,
+    "HRA": HRAModel,
 }
 
 

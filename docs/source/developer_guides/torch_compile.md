@@ -43,6 +43,7 @@ The following adapters were tested successfully:
 - LoRA + DoRA
 - OFT
 - VeRA
+- HRA
 
 The following adapters **don't work** correctly for training or inference when using `torch.compile`:
 

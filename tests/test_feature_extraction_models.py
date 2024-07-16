@@ -47,7 +47,7 @@ def skip_deberta_lora_tests(test_list):
     Skip tests that are checkpointing with lora/ia3/boft/vera/fourierft for Deberta models (couldn't find much info on
     the error)
     """
-    to_skip = ["lora", "ia3", "boft", "vera", "fourierft"]
+    to_skip = ["lora", "ia3", "boft", "vera", "fourierft", "hra"]
     return [test for test in test_list if not (any(k in test[0] for k in to_skip) and "Deberta" in test[0])]
 
 
@@ -112,6 +112,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "FEATURE_EXTRACTION",
             },
         )
@@ -164,6 +165,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "FEATURE_EXTRACTION",
             },
         )
@@ -178,6 +180,7 @@ class PeftFeatureExtractionModelTester(unittest.TestCase, PeftCommonTester):
                 "lora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "FEATURE_EXTRACTION",
             },
         )

@@ -176,12 +176,12 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
-
     elif config.peft_type == PeftType.FOURIERFT:
         to_return = {k: state_dict[k] for k in state_dict if "fourierft_" in k}
-
     elif config.peft_type == PeftType.XLORA:
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
+    elif config.peft_type == PeftType.HRA:
+        to_return = {k: state_dict[k] for k in state_dict if "hra_" in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -320,6 +320,7 @@ def set_peft_model_state_dict(
         PeftType.BOFT,
         PeftType.VERA,
         PeftType.FOURIERFT,
+        PeftType.HRA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -334,6 +335,7 @@ def set_peft_model_state_dict(
             PeftType.LN_TUNING: "ln_tuning_",
             PeftType.VERA: "vera_lambda_",
             PeftType.FOURIERFT: "fourierft_",
+            PeftType.HRA: "hra_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
