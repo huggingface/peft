@@ -470,7 +470,7 @@ class TestLoraInitialization:
         # sanity check: ranks should still be 8 as initially
         assert model_loaded.peft_config["default"].r == 8
         assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
-        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8 ** 0.5)
+        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8**0.5)
         # sanity check: the base model weights were indeed changed
         assert not torch.allclose(
             model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
@@ -488,7 +488,7 @@ class TestLoraInitialization:
         assert model_converted.peft_config["default"].r == 16
         assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
         # same scale as before with a little bit of floating point imprecision
-        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8 ** 0.5))
+        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8**0.5))
         # base model weights should be the same as the initial model
         assert torch.allclose(
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
@@ -498,7 +498,9 @@ class TestLoraInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8, rank_pattern={"linear": 2}, use_rslora=True)
+        config = LoraConfig(
+            init_lora_weights="pissa", target_modules=["linear"], r=8, rank_pattern={"linear": 2}, use_rslora=True
+        )
         peft_model = get_peft_model(model, config)
         peft_model.save_pretrained(tmp_path / "init-model")
 
@@ -512,7 +514,9 @@ class TestLoraInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8, alpha_pattern={"linear": 2}, use_rslora=True)
+        config = LoraConfig(
+            init_lora_weights="pissa", target_modules=["linear"], r=8, alpha_pattern={"linear": 2}, use_rslora=True
+        )
         peft_model = get_peft_model(model, config)
         peft_model.save_pretrained(tmp_path / "init-model")
 
@@ -732,7 +736,7 @@ class TestLoraInitialization:
         # sanity check: ranks should still be 8 as initially
         assert model_loaded.peft_config["default"].r == 8
         assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
-        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8 ** 0.5)
+        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8**0.5)
         # sanity check: the base model weights were indeed changed
         assert not torch.allclose(
             model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
@@ -750,7 +754,7 @@ class TestLoraInitialization:
         assert model_converted.peft_config["default"].r == 16
         assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
         # same scale as before with a little bit of floating point imprecision
-        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8 ** 0.5))
+        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8**0.5))
         # base model weights should be the same as the initial model
         assert torch.allclose(
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
@@ -760,7 +764,9 @@ class TestLoraInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8, rank_pattern={"linear": 2}, use_rslora=True)
+        config = LoraConfig(
+            init_lora_weights="olora", target_modules=["linear"], r=8, rank_pattern={"linear": 2}, use_rslora=True
+        )
         peft_model = get_peft_model(model, config)
         peft_model.save_pretrained(tmp_path / "init-model")
 
@@ -774,7 +780,9 @@ class TestLoraInitialization:
         # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
         # scale is not stored in the state_dict
         model = self.get_model()
-        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8, alpha_pattern={"linear": 2}, use_rslora=True)
+        config = LoraConfig(
+            init_lora_weights="olora", target_modules=["linear"], r=8, alpha_pattern={"linear": 2}, use_rslora=True
+        )
         peft_model = get_peft_model(model, config)
         peft_model.save_pretrained(tmp_path / "init-model")
 

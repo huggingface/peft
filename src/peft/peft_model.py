@@ -379,7 +379,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         peft_config.lora_alpha *= 2
                     else:
                         # with rslora, we have scaling = alpha / sqrt(r), we thus adjust alpha to keep the same scaling
-                        peft_config.lora_alpha *= 2 ** 0.5
+                        peft_config.lora_alpha *= 2**0.5
 
                     if peft_config.rank_pattern:
                         peft_config.rank_pattern = {key: 2 * val for key, val in peft_config.rank_pattern.items()}
