@@ -53,6 +53,10 @@ class AdaLoraConfig(LoraConfig):
 
         if self.use_dora:
             raise ValueError(f"{self.peft_type} does not support DoRA.")
+        
+        if self.use_moslora:
+            raise ValueError(f"{self.peft_type} does not support MoSLoRA.")
+
 
         if self.loftq_config:
             raise ValueError(f"{self.peft_type} does not support LOFTQ.")

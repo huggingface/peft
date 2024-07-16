@@ -33,6 +33,7 @@ if is_eetq_available():
             lora_dropout: float = 0.0,
             init_lora_weights: bool = True,
             use_rslora: bool = False,
+            use_moslora: bool = False,
             **kwargs,
         ):
             super().__init__()
@@ -43,7 +44,7 @@ if is_eetq_available():
             self.quant_linear_module = base_layer
 
             self._active_adapter = adapter_name
-            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+            self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_moslora=use_moslora)
 
         def forward(self, x: torch.Tensor):
             result = self.quant_linear_module(x)
@@ -59,12 +60,19 @@ if is_eetq_available():
                 dropout = self.lora_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
 
+                if self.use_moslora[active_adapter]:
+                    lora_mixer = self.lora_mixer[active_adapter]
+
                 requires_conversion = not torch.is_autocast_enabled()
                 if requires_conversion:
                     expected_dtype = result.dtype
                     x = x.to(lora_A.weight.dtype)
 
-                output = lora_B(lora_A(dropout(x)))
+                if not self.use_moslora[active_adapter]:
+                    output = lora_B(lora_A(dropout(x)))
+                else:
+                    output = lora_B(lora_mixer(lora_A(dropout(x))))
+                    
                 if requires_conversion:
                     output = output.to(expected_dtype)
                 output = output * scaling

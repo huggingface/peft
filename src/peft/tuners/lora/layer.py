@@ -52,6 +52,8 @@ class LoraLayer(BaseTunerLayer):
         self._disable_adapters = False
         self.merged_adapters = []
         self.use_dora: dict[str, bool] = {}
+        self.use_moslora: dict[str, bool] = {}
+        self.lora_mixer = nn.ModuleDict({}) # for MoSLoRA
         self.lora_magnitude_vector = torch.nn.ModuleDict()  # for DoRA
         self._caches: dict[str, Any] = {}
         self.ephemeral_gpu_offload: bool = ephemeral_gpu_offload
@@ -100,7 +102,7 @@ class LoraLayer(BaseTunerLayer):
         self.out_features = out_features
 
     def update_layer(
-        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False
+        self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora: bool = False, use_moslora: bool = False,
     ):
         # This code works for linear layers, override for other layer types
         if r <= 0:
@@ -121,6 +123,13 @@ class LoraLayer(BaseTunerLayer):
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
             self.scaling[adapter_name] = lora_alpha / r
+        
+        if use_moslora:
+            self.lora_mixer[adapter_name] = nn.Linear(r, r, bias=False) # moslora init
+            self.use_moslora[adapter_name] = True
+        else:
+            self.use_moslora[adapter_name] = False
+
 
         # for inits that require access to the base weight, use gather_param_ctx so that the weight is gathered when using DeepSpeed
         if isinstance(init_lora_weights, str) and init_lora_weights.startswith("pissa"):
@@ -142,7 +151,7 @@ class LoraLayer(BaseTunerLayer):
             self.use_dora[adapter_name] = True
         else:
             self.use_dora[adapter_name] = False
-
+        
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name, init_lora_weights):
@@ -158,6 +167,11 @@ class LoraLayer(BaseTunerLayer):
                 nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
             else:
                 raise ValueError(f"Unknown initialization {init_lora_weights=}")
+
+            if self.use_moslora[adapter_name]:
+                nn.init.kaiming_uniform_(self.lora_mixer[adapter_name].weight, a=math.sqrt(5))
+                # nn.init.orthogonal_(self.lora_mixer[adapter_name].weight)
+
             nn.init.zeros_(self.lora_B[adapter_name].weight)
         if adapter_name in self.lora_embedding_A.keys():
             # Initialize A to zeros and B the same way as the default for nn.Embedding, see:
@@ -348,10 +362,17 @@ class LoraLayer(BaseTunerLayer):
             dropout = self.lora_dropout[active_adapter]
             scaling = self.scaling[active_adapter]
 
+            if self.use_moslora[active_adapter]:
+                lora_mixer = self.lora_mixer[active_adapter]
+
             # getting the sub-batch, passing it to LoRA layers and updating the corresponding indices of the linear
             # layer output
             sub_batch = x[sub_batch_indices_list[i]].to(lora_A.weight.dtype)
-            lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
+            if not self.use_moslora[active_adapter]:
+                lora_output = lora_B(lora_A(dropout(sub_batch))) * scaling
+            else:
+                lora_output = lora_B(lora_mixer(lora_A(dropout(sub_batch)))) * scaling
+            
             result[sub_batch_indices_list[i]] += lora_output.to(torch_result_dtype)
 
         return result
@@ -381,6 +402,7 @@ class Linear(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_moslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -396,6 +418,7 @@ class Linear(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_moslora=use_moslora,
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
@@ -513,11 +536,19 @@ class Linear(nn.Module, LoraLayer):
         weight_A = self.lora_A[adapter].weight
         weight_B = self.lora_B[adapter].weight
 
+        if self.use_moslora[adapter]:
+            weight_mixer = self.lora_mixer[adapter].weight
+
         if cast_to_fp32:
             weight_A = weight_A.float()
             weight_B = weight_B.float()
+            if self.use_moslora[adapter]:
+                weight_mixer = weight_mixer.float()
 
-        output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        if not self.use_moslora[adapter]:
+            output_tensor = transpose(weight_B @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
+        else:
+            output_tensor = transpose(weight_B @ weight_mixer @ weight_A, self.fan_in_fan_out) * self.scaling[adapter]
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -525,6 +556,9 @@ class Linear(nn.Module, LoraLayer):
             # cast back the weights
             self.lora_A[adapter].weight.data = weight_A.to(dtype)
             self.lora_B[adapter].weight.data = weight_B.to(dtype)
+
+            if self.use_moslora[adapter]:
+                self.lora_mixer[adapter].weight.data = weight_mixer.to(dtype)
 
         return output_tensor
 
@@ -552,8 +586,14 @@ class Linear(nn.Module, LoraLayer):
                 scaling = self.scaling[active_adapter]
                 x = x.to(lora_A.weight.dtype)
 
+                if self.use_moslora[active_adapter]:
+                    lora_mixer = self.lora_mixer[active_adapter]
+
                 if not self.use_dora[active_adapter]:
-                    result = result + lora_B(lora_A(dropout(x))) * scaling
+                    if not self.use_moslora[active_adapter]:
+                        result = result + lora_B(lora_A(dropout(x))) * scaling
+                    else:
+                        result = result + lora_B(lora_mixer(lora_A(dropout(x)))) * scaling
                 else:
                     x = dropout(x)
                     result = result + self.lora_magnitude_vector[active_adapter](
@@ -585,6 +625,7 @@ class Embedding(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_moslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
@@ -592,6 +633,9 @@ class Embedding(nn.Module, LoraLayer):
 
         if use_dora:
             raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
+        
+        if use_moslora:
+            raise ValueError(f"{self.__class__.__name__} does not support MoSLoRA yet, please set it to False")
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -602,9 +646,10 @@ class Embedding(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_moslora=use_moslora,
         )
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, use_moslora):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 
@@ -804,10 +849,14 @@ class Conv2d(nn.Module, LoraLayer):
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
         use_dora: bool = False,
+        use_moslora: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
         LoraLayer.__init__(self, base_layer)
+
+        if use_moslora:
+            raise ValueError(f"{self.__class__.__name__} does not support MoSLoRA yet, please set it to False")
 
         self._active_adapter = adapter_name
         self.update_layer(
@@ -818,9 +867,12 @@ class Conv2d(nn.Module, LoraLayer):
             init_lora_weights=init_lora_weights,
             use_rslora=use_rslora,
             use_dora=use_dora,
+            use_moslora=use_moslora,
         )
 
-    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora):
+
+
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora, use_dora, use_moslora):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
 

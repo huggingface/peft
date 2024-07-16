@@ -196,6 +196,7 @@ class LoraModel(BaseTuner):
             "init_lora_weights": lora_config.init_lora_weights,
             "use_rslora": lora_config.use_rslora,
             "use_dora": lora_config.use_dora,
+            "use_moslora": lora_config.use_moslora,
             "ephemeral_gpu_offload": lora_config.runtime_config.ephemeral_gpu_offload,
             "loaded_in_8bit": getattr(self.model, "is_loaded_in_8bit", False),
             "loaded_in_4bit": getattr(self.model, "is_loaded_in_4bit", False),
@@ -219,6 +220,7 @@ class LoraModel(BaseTuner):
                 init_lora_weights=lora_config.init_lora_weights,
                 use_rslora=lora_config.use_rslora,
                 use_dora=lora_config.use_dora,
+                use_moslora=lora_config.use_moslora
             )
         else:
             new_module = self._create_new_module(lora_config, adapter_name, target, **kwargs)

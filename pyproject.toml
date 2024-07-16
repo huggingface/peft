@@ -40,5 +40,5 @@ markers = [
     "single_gpu_tests: tests that run on a single GPU",
     "multi_gpu_tests: tests that run on multiple GPUs",
     "regression: whether to run regression suite test",
-    "bitsandbytes: select bitsandbytes integration tests"
-]
+    "bitsandbytes: select bitsandbytes integration tests"]
+pythonpath = [".", "src"]

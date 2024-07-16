@@ -320,6 +320,17 @@ class TestMlp(RegressionTester):
         )
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "lora_dora_mlp")
+    
+    def test_lora_moslora(self):
+        base_model = self.load_base_model()
+        config = LoraConfig(
+            r=8,
+            init_lora_weights=False,
+            target_modules=["lin0"],
+            use_moslora=True,
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "lora_moslora_mlp")
 
     def test_adalora(self):
         base_model = self.load_base_model()
