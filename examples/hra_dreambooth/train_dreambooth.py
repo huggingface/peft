@@ -94,6 +94,7 @@ def main(args):
     )
     if args.report_to == "wandb":
         import wandb
+
         args.wandb_project_name = args.project_name
         args.wandb_run_name = args.run_name
         wandb_init = {
