@@ -94,6 +94,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -173,6 +174,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -206,6 +208,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )

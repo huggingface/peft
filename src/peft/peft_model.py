@@ -29,7 +29,7 @@ import transformers
 from accelerate import dispatch_model, infer_auto_device_map
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory, named_module_tensors
-from huggingface_hub import ModelCard, ModelCardData, hf_hub_download
+from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_download
 from safetensors import safe_open
 from safetensors.torch import save_file as safe_save_file
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
@@ -43,6 +43,8 @@ from .tuners import (
     AdaLoraModel,
     AdaptionPromptModel,
     BOFTModel,
+    FourierFTModel,
+    HRAModel,
     IA3Model,
     LNTuningModel,
     LoHaModel,
@@ -55,6 +57,8 @@ from .tuners import (
     PromptEmbedding,
     PromptEncoder,
     VeraModel,
+    XLoraConfig,
+    XLoraModel,
 )
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import (
@@ -91,6 +95,9 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.POLY: PolyModel,
     PeftType.LN_TUNING: LNTuningModel,
     PeftType.VERA: VeraModel,
+    PeftType.FOURIERFT: FourierFTModel,
+    PeftType.XLORA: XLoraModel,
+    PeftType.HRA: HRAModel,
 }
 
 
@@ -479,6 +486,30 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
         else:
             config.inference_mode = not is_trainable
+        if isinstance(getattr(model, "base_model", None), XLoraModel):
+            if not isinstance(config, XLoraConfig):
+                raise TypeError(f"Expected 'XLoraConfig', got '{type(config)}' instead.")
+            if "adapters" in kwargs:
+                config.adapters = kwargs["adapters"]
+            else:
+                # If the path is on HF hub, then we get the adapter names to create a subfolders list which tells
+                # `load_adapter` where the adapters are.
+                if not os.path.exists(model_id):
+                    s = HfFileSystem()
+
+                    # The names of the adapters which must be in folders
+                    adapter_names = [
+                        file["name"][len(model_id) + 1 :] for file in s.ls(model_id) if file["type"] == "directory"
+                    ]
+                    # Prepare a dict of adapter paths, which really just point to the hf id; we will use the subfolders
+                    adapter_paths = {}
+                    for adapter_name in adapter_names:
+                        adapter_paths[adapter_name] = os.path.join(model_id, model_id)
+                    config.adapters = adapter_paths
+                    config._subfolders = adapter_names
+                else:
+                    if "adapters" not in kwargs:
+                        raise ValueError("If model_id is a local path, then `adapters` must be passed in kwargs.")
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
             model = cls(model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
@@ -486,6 +517,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
                 model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
             )
+
         model.load_adapter(
             model_id, adapter_name, is_trainable=is_trainable, autocast_adapter_dtype=autocast_adapter_dtype, **kwargs
         )
@@ -680,6 +712,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "base_model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.base_model, name)
 
     @contextmanager

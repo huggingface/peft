@@ -30,6 +30,8 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils.constants import DUMMY_TARGET_MODULES
+from peft.utils.peft_types import PeftType
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -141,7 +143,12 @@ class BaseTuner(nn.Module, ABC):
             double-check that the `config.target_modules` were specified correctly.
     """
 
-    def __init__(self, model, peft_config: Union[PeftConfig, dict[str, PeftConfig]], adapter_name: str) -> None:
+    def __init__(
+        self,
+        model,
+        peft_config: Union[PeftConfig, dict[str, PeftConfig]],
+        adapter_name: str,
+    ) -> None:
         super().__init__()
 
         self.model = model
@@ -164,7 +171,8 @@ class BaseTuner(nn.Module, ABC):
 
         self.active_adapter: str | list[str] = adapter_name
         self._pre_injection_hook(self.model, self.peft_config[adapter_name], adapter_name)
-        self.inject_adapter(self.model, adapter_name)
+        if peft_config != PeftType.XLORA or peft_config[adapter_name] != PeftType.XLORA:
+            self.inject_adapter(self.model, adapter_name)
 
         # Copy the peft_config in the injected model.
         self.model.peft_config = self.peft_config
@@ -389,6 +397,11 @@ class BaseTuner(nn.Module, ABC):
         is_target_modules_in_base_model = False
         key_list = [key for key, _ in model.named_modules()]
 
+        if getattr(peft_config, "target_modules", None) == DUMMY_TARGET_MODULES:
+            # dummy adapter, we allow not matching any module
+            key_list = []
+            is_target_modules_in_base_model = True
+
         # update peft_config.target_modules if required
         peft_config = _maybe_include_all_linear_layers(peft_config, model)
 
@@ -417,7 +430,8 @@ class BaseTuner(nn.Module, ABC):
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        if not is_target_modules_in_base_model:
+        # Handle X-LoRA case.
+        if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
             raise ValueError(
                 f"Target modules {peft_config.target_modules} not found in the base model. "
                 f"Please check the target modules and try again."
@@ -776,6 +790,8 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
     Helper function to update `target_modules` to all linear/Conv1D layers if provided as 'all-linear'. Adapted from
     the QLoRA repository: https://github.com/artidoro/qlora/blob/main/qlora.py
     """
+    if not hasattr(peft_config, "target_modules"):
+        return peft_config
 
     # if `target_modules` is a string, convert to lower case and check if it matches "all-linear"
     if not (
