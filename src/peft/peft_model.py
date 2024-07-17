@@ -279,7 +279,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
                         "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the residual model."
                     )
-                output_state_dict = self.base_model.subtract_mutated_init(output_state_dict, initial_adapter_name, kwargs)
+                output_state_dict = self.base_model.subtract_mutated_init(
+                    output_state_dict, initial_adapter_name, kwargs
+                )
             finally:
                 self.delete_adapter(initial_adapter_name)
             return output_state_dict
