@@ -792,6 +792,130 @@ class TestLoraInitialization:
                 tmp_path / "olora-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
             )
 
+    @pytest.mark.parametrize(
+        "config_kwargs, should_warn",
+        [
+            # no warning
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"]}, False),
+            ({"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"]}, False),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"]}, False),
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"], "use_rslora": True}, False),
+            ({"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"], "use_rslora": True}, False),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"], "use_rslora": True}, False),
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"], "rank_pattern": {"linear": 8}}, False),
+            (
+                {"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"], "rank_pattern": {"linear": 8}},
+                False,
+            ),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"], "rank_pattern": {"linear": 8}}, False),
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"], "alpha_pattern": {"linear": 8}}, False),
+            (
+                {"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"], "alpha_pattern": {"linear": 8}},
+                False,
+            ),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"], "alpha_pattern": {"linear": 8}}, False),
+            # warning
+            (
+                {
+                    "init_lora_weights": "pissa",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa_niter_3",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "olora",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa_niter_3",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "olora",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa_niter_3",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "olora",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+        ],
+    )
+    def test_lora_config_pissa_olora_warns(self, config_kwargs, should_warn, recwarn):
+        # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
+        # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
+        # this when they'll eventually call save_pretrained (i.e. if they'll pass
+        # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
+        msg = re.escape("Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion")
+        if should_warn:
+            LoraConfig(**config_kwargs)
+            assert len(recwarn.list) == 1
+            with pytest.warns(UserWarning, match=msg):
+                LoraConfig(**config_kwargs)
+        else:
+            LoraConfig(**config_kwargs)
+            assert not recwarn.list
+
     def test_lora_rslora_scaling(self):
         # default is True
         torch.manual_seed(0)
