@@ -1657,7 +1657,9 @@ class TestPiSSA:
         assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
 
         # save the model with conversion
-        peft_model.save_pretrained(tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model")
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
