@@ -264,22 +264,24 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 warnings.warn(
                     "`path_initial_model_for_weight_conversion` only works for converting a PiSSA or OLoRA adapter to a LoRA adapter"
                 )
-            initial_adapter = os.path.basename(path_initial_model_for_weight_conversion)
-            self.load_adapter(
-                os.path.dirname(path_initial_model_for_weight_conversion),
-                subfolder=initial_adapter,
-                adapter_name=initial_adapter,
-            )
-            if any(
-                str(self.peft_config[initial_adapter].init_lora_weights).lower().startswith(prefix)
-                for prefix in ["pissa", "olora"]
-            ):
-                raise ValueError(
-                    "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
-                    "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the residual model."
+            initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
+            try:
+                self.load_adapter(
+                    os.path.dirname(path_initial_model_for_weight_conversion),
+                    subfolder=initial_adapter_name,
+                    adapter_name=initial_adapter_name,
                 )
-            output_state_dict = self.base_model.subtract_mutated_init(output_state_dict, initial_adapter, kwargs)
-            self.delete_adapter(adapter_name)
+                if any(
+                    str(self.peft_config[initial_adapter_name].init_lora_weights).lower().startswith(prefix)
+                    for prefix in ["pissa", "olora"]
+                ):
+                    raise ValueError(
+                        "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
+                        "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the residual model."
+                    )
+                output_state_dict = self.base_model.subtract_mutated_init(output_state_dict, initial_adapter_name, kwargs)
+            finally:
+                self.delete_adapter(initial_adapter_name)
             return output_state_dict
 
         if is_main_process:

@@ -323,9 +323,13 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
         peft_model.save_pretrained(
             tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        assert peft_config_keys_before == peft_config_keys_after
+
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -408,9 +412,13 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
         peft_model.save_pretrained(
             tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        assert peft_config_keys_before == peft_config_keys_after
+
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
         output_converted = model_converted(data)[0]
 
