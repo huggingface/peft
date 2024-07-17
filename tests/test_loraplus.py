@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
 # Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -55,7 +52,7 @@ def test_lora_plus_helper_sucess():
         "betas": (0.9, 0.999),
         "weight_decay": 0.0,
     }
-    loraplus_lr_ratio = 0.2
+    loraplus_lr_ratio = 1.2
     loraplus_lr_embedding = 1e-6
     optim = create_loraplus_optimizer(
         model=model,
@@ -88,7 +85,7 @@ def test_lora_plus_optimizer_sucess():
         model=model,
         optimizer_cls=optimizer_cls,
         optimizer_kwargs=optim_config,
-        loraplus_lr_ratio=0.2,
+        loraplus_lr_ratio=1.2,
         loraplus_lr_embedding=1e-6,
     )
     loss = torch.nn.CrossEntropyLoss()

@@ -30,22 +30,31 @@ from ..tuners.lora.layer import Embedding
 
 
 def create_loraplus_optimizer(
-    model: PeftModel,
-    optimizer_cls: type[Optimizer],
-    optimizer_kwargs: dict,
-    loraplus_lr_ratio: float,
-    loraplus_lr_embedding: float = 1e-6,
+    model: PeftModel, optimizer_cls: type[Optimizer], loraplus_lr_ratio: float, **kwargs
 ) -> Optimizer:
     """
-    Creates a LoraPlus optimizer. Implementing LoRA+ https://arxiv.org/abs/2402.12354 Reference:
-    https://github.com/nikhil-ghosh-berkeley/loraplus/
+    Creates a LoraPlus optimizer.
+
+    Efficient Low Rank Adaptation of Large Models: https://arxiv.org/abs/2402.12354
+
+    Reference: https://github.com/nikhil-ghosh-berkeley/loraplus/
 
     Args:
         model (`torch.nn.Module`): The model to be optimized.
         optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
-        optimizer_kwargs (`dict`): Additional keyword arguments to be passed to the optimizer.
-        loraplus_lr_ratio (`float`): The ratio of the learning rate to be used for the embedding layer.
-        loraplus_lr_embedding (`float`): The learning rate to be used for the embedding layer.
+        loraplus_lr_ratio (`float`):
+            The ratio of learning ηB/ηA where ηA (lr) is passed in as the optimizer learning rate. Should be ≥1. Should
+            be set in tandem with the optimizer learning rate (lr); should be larger when the task is more difficult
+            and the model needs to update its features to learn well. In this case, it helps to make the learning rate
+            slightly smaller (e.g., by a factor of 2) than typical vanilla LoRA learning rates
+        loraplus_lr_embedding (optional `float`):
+            If LoRA modules are added to embedding layers your can specify a different learning rate for them. Default
+            value 1e-6.
+        kwargs (`dict`): Additional keyword arguments to be passed to the optimizer.
+
+    Returns:
+        `torch.optim.Optimizer`: An instance of the specified optimizer class configured with the model's parameters
+        organized into groups with custom learning rates.
     """
 
     decay_parameters = get_parameter_names(model, ALL_LAYERNORM_LAYERS)
@@ -72,12 +81,9 @@ def create_loraplus_optimizer(
         else:
             param_groups["groupA"][name] = param
 
-    assigned_param_groups = ""
-    for group in param_groups:
-        assigned_param_groups += f"{group}\n {list(param_groups[group].keys())}\n\n"
-
-    lr = optimizer_kwargs["lr"]
-    weight_decay = optimizer_kwargs.get("weight_decay", 0.0)
+    lr = kwargs["lr"]
+    weight_decay = kwargs.get("weight_decay", 0.0)
+    loraplus_lr_embedding = kwargs.get("loraplus_lr_embedding", 1e-6)
 
     optimizer_grouped_parameters = [
         {
@@ -102,7 +108,7 @@ def create_loraplus_optimizer(
         },
     ]
 
-    optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
+    optimizer = optimizer_cls(optimizer_grouped_parameters, **kwargs)
     eight_bit_names = ["Adam8bit", "AdamW8bit", "PagedAdam8bit", "PagedAdamW8bit"]
     if optimizer_cls.__name__ in eight_bit_names:
         import bitsandbytes
