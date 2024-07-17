@@ -262,7 +262,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 str(peft_config.init_lora_weights).lower().startswith(prefix) for prefix in ["pissa", "olora", "true"]
             ):
                 warnings.warn(
-                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA or OLoRA adapter to a LoRA adapter"
+                    "`path_initial_model_for_weight_conversion` only works for converting a PiSSA or OLoRA adapter to "
+                    "a LoRA adapter"
                 )
             initial_adapter_name = os.path.basename(path_initial_model_for_weight_conversion)
             try:
@@ -277,7 +278,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 ):
                     raise ValueError(
                         "The `init_lora_weights` parameter of the initial adapter should be set to `True`. "
-                        "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the residual model."
+                        "Otherwise, `self.load_adapter` will subtract the decomposed values again based on the "
+                        "residual model."
                     )
                 output_state_dict = self.base_model.subtract_mutated_init(
                     output_state_dict, initial_adapter_name, kwargs
