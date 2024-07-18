@@ -398,7 +398,7 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         peft_config.num_attention_heads = num_attention_heads
 
     # For grouped-query attention, see #1901.
-    if peft_config.PeftType == "PREFIX_TUNING" and "num_key_value_heads" in model_config:
+    if peft_config.peft_type == "PREFIX_TUNING" and "num_key_value_heads" in model_config:
         num_key_value_heads = model_config["num_key_value_heads"]
         peft_config.token_dim = peft_config.token_dim // peft_config.num_attention_heads * num_key_value_heads
         peft_config.num_attention_heads = num_key_value_heads
