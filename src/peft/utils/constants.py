@@ -213,9 +213,43 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "qwen2": ["q_proj", "v_proj"],
 }
 
+TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "v"],
+    "mt5": ["q", "v"],
+    "bart": ["q_proj", "v_proj"],
+    "gpt2": ["mlp.c_proj"],
+    "bloom": ["query_key_value"],
+    "blip-2": ["q", "v", "q_proj", "v_proj"],
+    "opt": ["q_proj", "v_proj"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
+    "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
+    "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "value_proj"],
+    "deberta": ["in_proj"],
+    "layoutlm": ["query", "value"],
+    "llama": ["q_proj", "v_proj"],
+    "chatglm": ["query_key_value"],
+    "gpt_bigcode": ["mlp.c_proj"],
+    "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+    "codegen": ["qkv_proj"],
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
+    "stablelm": ["q_proj", "v_proj"],
+    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
+    "gemma": ["q_proj", "v_proj"],
+}
+
 WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
 EMBEDDING_LAYER_NAMES = ["embed_tokens", "lm_head"]
 INCLUDE_LINEAR_LAYERS_SHORTHAND = "all-linear"
 TOKENIZER_CONFIG_NAME = "tokenizer_config.json"
+DUMMY_TARGET_MODULES = "dummy-target-modules"
