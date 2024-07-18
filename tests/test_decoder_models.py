@@ -438,7 +438,7 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
         self._test_generate(model_id, LoraConfig, config_kwargs)
 
-    def test_prompt_learning_with_grouped_query_attention():
+    def test_prompt_learning_with_grouped_query_attention(self):
         # See 1901, fixes a bug with handling GQA
         model_id = "peft-internal-testing/tiny-dummy-qwen2"
         base_model = AutoModelForCausalLM.from_pretrained(model_id)
