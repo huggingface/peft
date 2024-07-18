@@ -90,7 +90,7 @@ peft_model = PeftModel.from_pretrained(model, "pissa-llama-2-7b-lora")
 ```
 Utilizing the converted LoRA does not require modifying the parameters of the base model. When multiple converted LoRAs are needed simultaneously, each adapter operates independently without interference, allowing for the adapters to be freely deleted or added.
 
-
+Note that this conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
 
 ### Fine-tune in 4-bit or 8-bit
 If quantization fine-tuning is desired, it is necessary to first decompose the original model at full precision and then reload the residual model in either 4-bit or 8-bit configurations.

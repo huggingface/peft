@@ -231,9 +231,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 difference in adapter before and after fine-tuning is calculated. This difference can be represented as
                 the parameters of a standard LoRA adapter. Using this converted adapter does not require changes to the
                 base model, thus conveniently allowing the use of multiple PiSSA or OLoRA adapters with LoRA adapters,
-                and the activation or deactivation of any adapters.
+                and the activation or deactivation of any adapters. Note that this conversion is not supported if
+                `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
+
         """
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
