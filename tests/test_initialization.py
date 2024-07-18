@@ -343,7 +343,7 @@ class TestLoraInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        # use rank_pattern here
+        # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
         config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8, rank_pattern={"linear": 32})
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
@@ -394,8 +394,9 @@ class TestLoraInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        # use rank_pattern here
-        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8, alpha_pattern={"linear": 5})
+        # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
+        # overridden
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], alpha_pattern={"linear": 5})
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
         peft_model.peft_config["default"].init_lora_weights = True
@@ -616,6 +617,7 @@ class TestLoraInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
+        # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
         config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8, rank_pattern={"linear": 32})
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
@@ -664,7 +666,9 @@ class TestLoraInitialization:
         model = self.get_model()
         output_base = model(data)[0]
 
-        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8, alpha_pattern={"linear": 5})
+        # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
+        # overridden
+        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], alpha_pattern={"linear": 5})
         peft_model = get_peft_model(deepcopy(model), config)
         # save the initial model
         peft_model.save_pretrained(tmp_path / "init-model")
