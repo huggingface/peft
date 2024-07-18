@@ -244,6 +244,7 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
