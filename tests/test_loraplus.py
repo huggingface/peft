@@ -46,8 +46,8 @@ class SimpleNet(nn.Module):
 def test_lora_plus_helper_sucess():
     model = SimpleNet()
     optimizer_cls = bnb.optim.Adam8bit
+    lr = 5e-5
     optim_config = {
-        "lr": 5e-5,
         "eps": 1e-6,
         "betas": (0.9, 0.999),
         "weight_decay": 0.0,
@@ -57,15 +57,16 @@ def test_lora_plus_helper_sucess():
     optim = create_loraplus_optimizer(
         model=model,
         optimizer_cls=optimizer_cls,
-        optimizer_kwargs=optim_config,
+        lr=lr,
         loraplus_lr_ratio=loraplus_lr_ratio,
         loraplus_lr_embedding=loraplus_lr_embedding,
+        **optim_config,
     )
     assert optim is not None
     assert len(optim.param_groups) == 4
-    assert optim.param_groups[0]["lr"] == optim_config["lr"]
+    assert optim.param_groups[0]["lr"] == lr
     assert optim.param_groups[1]["lr"] == loraplus_lr_embedding
-    assert optim.param_groups[2]["lr"] == optim.param_groups[3]["lr"] == (optim_config["lr"] * loraplus_lr_ratio)
+    assert optim.param_groups[2]["lr"] == optim.param_groups[3]["lr"] == (lr * loraplus_lr_ratio)
 
 
 @require_bitsandbytes
@@ -75,7 +76,6 @@ def test_lora_plus_optimizer_sucess():
     """
     optimizer_cls = bnb.optim.Adam8bit
     optim_config = {
-        "lr": 5e-5,
         "eps": 1e-6,
         "betas": (0.9, 0.999),
         "weight_decay": 0.0,
@@ -84,9 +84,10 @@ def test_lora_plus_optimizer_sucess():
     optim = create_loraplus_optimizer(
         model=model,
         optimizer_cls=optimizer_cls,
-        optimizer_kwargs=optim_config,
+        lr=5e-5,
         loraplus_lr_ratio=1.2,
         loraplus_lr_embedding=1e-6,
+        **optim_config,
     )
     loss = torch.nn.CrossEntropyLoss()
     bnb.optim.GlobalOptimManager.get_instance().register_parameters(model.parameters())

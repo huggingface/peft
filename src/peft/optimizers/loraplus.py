@@ -30,7 +30,7 @@ from ..tuners.lora.layer import Embedding
 
 
 def create_loraplus_optimizer(
-    model: PeftModel, optimizer_cls: type[Optimizer], loraplus_lr_ratio: float, **kwargs
+    model: PeftModel, optimizer_cls: type[Optimizer], *, lr: float, loraplus_lr_ratio: float, **kwargs
 ) -> Optimizer:
     """
     Creates a LoraPlus optimizer.
@@ -42,6 +42,7 @@ def create_loraplus_optimizer(
     Args:
         model (`torch.nn.Module`): The model to be optimized.
         optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
+        lr (`float`): The learning rate to be used for the optimizer.
         loraplus_lr_ratio (`float`):
             The ratio of learning ηB/ηA where ηA (lr) is passed in as the optimizer learning rate. Should be ≥1. Should
             be set in tandem with the optimizer learning rate (lr); should be larger when the task is more difficult
@@ -81,9 +82,8 @@ def create_loraplus_optimizer(
         else:
             param_groups["groupA"][name] = param
 
-    lr = kwargs["lr"]
     weight_decay = kwargs.get("weight_decay", 0.0)
-    loraplus_lr_embedding = kwargs.get("loraplus_lr_embedding", 1e-6)
+    loraplus_lr_embedding = kwargs.pop("loraplus_lr_embedding", 1e-6)
 
     optimizer_grouped_parameters = [
         {
