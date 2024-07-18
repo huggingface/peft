@@ -22,13 +22,13 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    HRAConfig,
     LoraConfig,
     PrefixTuningConfig,
     PromptTuningConfig,
     PromptTuningInit,
     get_peft_model,
 )
-
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
