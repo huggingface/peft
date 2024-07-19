@@ -231,9 +231,11 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 difference in adapter before and after fine-tuning is calculated. This difference can be represented as
                 the parameters of a standard LoRA adapter. Using this converted adapter does not require changes to the
                 base model, thus conveniently allowing the use of multiple PiSSA or OLoRA adapters with LoRA adapters,
-                and the activation or deactivation of any adapters.
+                and the activation or deactivation of any adapters. Note that this conversion is not supported if
+                `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
             kwargs (additional keyword arguments, *optional*):
                 Additional keyword arguments passed along to the `push_to_hub` method.
+
         """
         if os.path.isfile(save_directory):
             raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
@@ -258,6 +260,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             path_initial_model_for_weight_conversion = convert_pissa_to_lora
 
         def save_mutated_as_lora(peft_config, path_initial_model_for_weight_conversion, output_state_dict, kwargs):
+            if peft_config.use_rslora and (peft_config.rank_pattern or peft_config.alpha_pattern):
+                msg = (
+                    "Passing `path_initial_model_for_weight_conversion` to `save_pretrained` is not supported when "
+                    "using `rank_pattern` or `alpha_pattern` at the same time as `use_rslora=True`."
+                )
+                raise ValueError(msg)
+
             if not any(
                 str(peft_config.init_lora_weights).lower().startswith(prefix) for prefix in ["pissa", "olora", "true"]
             ):
@@ -368,7 +377,17 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 if path_initial_model_for_weight_conversion is not None:
                     peft_config.init_lora_weights = True
                     peft_config.r *= 2
-                    peft_config.lora_alpha *= 2
+                    if not peft_config.use_rslora:
+                        peft_config.lora_alpha *= 2
+                    else:
+                        # with rslora, we have scaling = alpha / sqrt(r), we thus adjust alpha to keep the same scaling
+                        peft_config.lora_alpha *= 2**0.5
+
+                    if peft_config.rank_pattern:
+                        peft_config.rank_pattern = {key: 2 * val for key, val in peft_config.rank_pattern.items()}
+                    if peft_config.alpha_pattern:
+                        peft_config.alpha_pattern = {key: 2 * val for key, val in peft_config.alpha_pattern.items()}
+
                 peft_config.save_pretrained(output_dir, auto_mapping_dict=auto_mapping_dict)
             peft_config.inference_mode = inference_mode
 

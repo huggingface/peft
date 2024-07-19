@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
@@ -345,6 +346,26 @@ class LoraConfig(PeftConfig):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
             if self.loftq_config is None:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+
+        # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
+        # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
+        # this when they'll eventually call save_pretrained (i.e. if they'll pass
+        # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
+        if (
+            self.use_rslora
+            and (self.rank_pattern or self.alpha_pattern)
+            and (
+                (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
+                or (self.init_lora_weights == "olora")
+            )
+        ):
+            msg = (
+                "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
+                "base weights (PiSSA, OLoRA) means that you won't be able to pass "
+                "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
+                "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
+            )
+            warnings.warn(msg)
 
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):
