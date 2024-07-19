@@ -69,7 +69,7 @@ train(olora_model) # Your training loop
 #Save the model after training
 olora_model.save_pretrained(output_dir, path_initial_model_for_weight_conversion=init_path) 
 ```
-After completing training, you can save and convert your OLoRA model to a conventional LoRA model by setting `path_initial_model_for_weight_conversion` to `init_path`, that is the path of your untrained OLoRA model. This conversion enables you to use multiple adapters with your LoRA model.
+After completing training, you can save and convert your OLoRA model to a conventional LoRA model by setting `path_initial_model_for_weight_conversion` to `init_path`, that is the path of your untrained OLoRA model. This conversion enables you to use multiple adapters with your LoRA model. Note that this conversion is not supported if `rslora` is used in combination with `rank_pattern` or `alpha_pattern`.
 
 ## Citation
 ```
