@@ -638,20 +638,25 @@ class TestVeraInitialization:
         config0 = VeraConfig(target_modules=["lin0"], r=8)
         config1 = VeraConfig(target_modules=["lin1"])
 
-        model = get_peft_model(self.get_model(), config0)
+        base_model = self.get_model()
+        lin0_in_feat = base_model.lin0.in_features
+        lin1_in_feat = base_model.lin1.in_features
+        model = get_peft_model(base_model, config0)
         # not full message but enough to identify the error
-        msg = "vera_A has a size of 10 but 20 or greater is required"
+        msg = f"vera_A has a size of {lin0_in_feat} but {lin1_in_feat} or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
     def test_vera_add_second_adapter_with_higher_rank(self):
-        config0 = VeraConfig(target_modules=["lin0"], r=123)
+        rank0 = 123
+        rank1 = 456
+        config0 = VeraConfig(target_modules=["lin0"], r=rank0)
         # second adapter has higher rank
-        config1 = VeraConfig(target_modules=["lin0"], r=456)
+        config1 = VeraConfig(target_modules=["lin0"], r=rank1)
 
         model = get_peft_model(self.get_model(), config0)
         # not full message but enough to identify the error
-        msg = "vera_A has a size of 123 but 456 or greater is required"
+        msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 

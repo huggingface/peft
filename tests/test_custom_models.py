@@ -391,6 +391,13 @@ TEST_CASES = [
     ),
 ]
 
+# For this test matrix, each tuple consists of:
+# - test name
+# - tuner method
+# - config_cls
+# - 1st config kwargs
+# - 2nd config kwargs
+# The model used for this test is `MLP`, which uses linear layers `lin0` and `lin1`
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     (
         "LoRA Same",
