@@ -1470,6 +1470,7 @@ class OffloadSaveTests(unittest.TestCase):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
     Tests for PiSSA to ensure that it reduces the quantization error compared to normal LoRA quantization.
@@ -1656,7 +1657,9 @@ class TestPiSSA:
         assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
 
         # save the model with conversion
-        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_mutated_to_lora=tmp_path / "init-model")
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -1672,6 +1675,7 @@ class TestPiSSA:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
     Tests for OLoRA to ensure that it reduces the quantization error compared to normal LoRA quantization.
