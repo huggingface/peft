@@ -19,7 +19,16 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AdaLoraConfig, BOFTConfig, HRAConfig, LoraConfig, PromptTuningConfig, PromptTuningInit, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    BOFTConfig,
+    HRAConfig,
+    LoraConfig,
+    PrefixTuningConfig,
+    PromptTuningConfig,
+    PromptTuningInit,
+    get_peft_model,
+)
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -428,3 +437,13 @@ class PeftDecoderModelTester(unittest.TestCase, PeftCommonTester):
         ), "Expected 8 LoRA adapters since we are adding one each for up and down."
         self._test_prepare_for_training(model_id, LoraConfig, config_kwargs)
         self._test_generate(model_id, LoraConfig, config_kwargs)
+
+    def test_prompt_learning_with_grouped_query_attention(self):
+        # See 1901, fixes a bug with handling GQA
+        model_id = "peft-internal-testing/tiny-dummy-qwen2"
+        base_model = AutoModelForCausalLM.from_pretrained(model_id)
+        peft_config = PrefixTuningConfig(num_virtual_tokens=10, task_type="CAUSAL_LM")
+        model = get_peft_model(base_model, peft_config)
+        x = torch.tensor([[1, 2, 3]])
+        # does not raise
+        model(x)
