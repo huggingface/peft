@@ -391,6 +391,13 @@ TEST_CASES = [
     ),
 ]
 
+# For this test matrix, each tuple consists of:
+# - test name
+# - tuner method
+# - config_cls
+# - 1st config kwargs
+# - 2nd config kwargs
+# The model used for this test is `MLP`, which uses linear layers `lin0` and `lin1`
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     (
         "LoRA Same",
@@ -464,6 +471,16 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"n_frequency": 10, "target_modules": ["lin0"]},
         {"n_frequency": 10, "target_modules": ["lin1"]},
     ),
+    # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
+    # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
+    # (remember that VeRA shares these parameters across all layers), which results in an error.
+    (
+        "VeRA Same",
+        "vera",
+        VeraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
     (
         "HRA Same",
         "hra",
@@ -479,6 +496,7 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin1"], "init_weights": False},
     ),
 ]
+
 PREFIXES = {
     IA3Config: "ia3_",
     LoraConfig: "lora_",
