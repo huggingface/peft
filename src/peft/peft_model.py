@@ -1604,6 +1604,9 @@ class PeftModelForCausalLM(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
+            # check if past_kv already in kwargs
+            if "past_key_values" in kwargs:
+                kwargs.pop("past_key_values")
             return self.base_model(
                 input_ids=input_ids, inputs_embeds=inputs_embeds, past_key_values=past_key_values, **kwargs
             )
@@ -1819,6 +1822,9 @@ class PeftModelForSeq2SeqLM(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
+            # check if past_kv already in kwargs
+            if "past_key_values" in kwargs:
+                kwargs.pop("past_key_values")
             return self.base_model(
                 input_ids=input_ids,
                 decoder_input_ids=decoder_input_ids,
@@ -2519,6 +2525,9 @@ class PeftModelForFeatureExtraction(PeftModel):
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             past_key_values = self.get_prompt(batch_size)
+            # check if past_kv already in kwargs
+            if "past_key_values" in kwargs:
+                kwargs.pop("past_key_values")
             return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
         else:
             if inputs_embeds is None:
