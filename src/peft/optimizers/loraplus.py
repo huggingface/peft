@@ -82,23 +82,23 @@ def create_loraplus_optimizer(
         else:
             param_groups["groupA"][name] = param
 
-    weight_decay = kwargs.pop("weight_decay", 0.0)
+    loraplus_weight_decay = kwargs.pop("loraplus_weight_decay", 0.0)
     loraplus_lr_embedding = kwargs.pop("loraplus_lr_embedding", 1e-6)
 
     optimizer_grouped_parameters = [
         {
             "params": list(param_groups["groupA"].values()),
-            "weight_decay": weight_decay,
+            "weight_decay": loraplus_weight_decay,
             "lr": lr,
         },
         {
             "params": list(param_groups["embedding"].values()),
-            "weight_decay": weight_decay,
+            "weight_decay": loraplus_weight_decay,
             "lr": loraplus_lr_embedding,
         },
         {
             "params": list(param_groups["groupB"].values()),
-            "weight_decay": weight_decay,
+            "weight_decay": loraplus_weight_decay,
             "lr": lr * loraplus_lr_ratio,
         },
         {

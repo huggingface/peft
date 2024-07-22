@@ -50,7 +50,7 @@ def test_lora_plus_helper_sucess():
     optim_config = {
         "eps": 1e-6,
         "betas": (0.9, 0.999),
-        "weight_decay": 0.0,
+        "loraplus_weight_decay": 0.0,
     }
     loraplus_lr_ratio = 1.2
     loraplus_lr_embedding = 1e-6
@@ -78,7 +78,7 @@ def test_lora_plus_optimizer_sucess():
     optim_config = {
         "eps": 1e-6,
         "betas": (0.9, 0.999),
-        "weight_decay": 0.0,
+        "loraplus_weight_decay": 0.0,
     }
     model: SimpleNet = SimpleNet().cuda()
     optim = create_loraplus_optimizer(
