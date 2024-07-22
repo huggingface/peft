@@ -30,7 +30,6 @@ __all__ = [
     "Linear",
     "LoraModel",
     "QuantLinear",
-    "LoraPlusConfig",
 ]
 
 
