@@ -173,6 +173,8 @@ LoRA training can optionally include special purpose optimizers. Currently the o
 
 LoRA training can be optimized using [LoRA+](https://arxiv.org/abs/2402.12354), which uses different learning rates for the adapter matrices A and B, shown to increase finetuning speed by up to 2x and performance by 1-2%.
 
+Assuming you have a properly set up `PeftConfig` for LoRA training:
+
 ```py
 from transformers import Trainer
 from peft.optimizers import create_loraplus_optimizer
