@@ -100,6 +100,28 @@ class VeraLayer(BaseTunerLayer):
             # we can take any of the existing adapter's parameters, as they should all be identical
             vera_A_param = list(self.vera_A.values())[0]
             vera_B_param = list(self.vera_B.values())[0]
+
+            error_tmpl = (
+                "{} has a size of {} but {} or greater is required; this probably happened because an additional VeRA "
+                "adapter was added after the first one with incompatible shapes."
+            )
+            # check input size
+            if vera_A_param.shape[1] < self.in_features:
+                raise ValueError(error_tmpl.format("vera_A", vera_A_param.shape[1], self.in_features))
+            # check output size
+            if vera_B_param.shape[0] < self.out_features:
+                raise ValueError(error_tmpl.format("vera_B", vera_B_param.shape[0], self.out_features))
+            # check r
+            error_tmpl = (
+                "{} has a size of {} but {} or greater is required; this probably happened because an additional VeRA "
+                "adapter with a lower rank was added after the first one; loading the adapters "
+                "in reverse order may solve this."
+            )
+            if vera_A_param.shape[0] < self.r[adapter_name]:
+                raise ValueError(error_tmpl.format("vera_A", vera_A_param.shape[0], self.r[adapter_name]))
+            if vera_B_param.shape[1] < self.r[adapter_name]:
+                raise ValueError(error_tmpl.format("vera_B", vera_B_param.shape[1], self.r[adapter_name]))
+
             self.vera_A[adapter_name] = vera_A_param
             self.vera_B[adapter_name] = vera_B_param
 
