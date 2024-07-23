@@ -426,7 +426,7 @@ class Linear(nn.Module, LoraLayer):
                     orig_weights = base_layer.weight.data.clone()
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        orig_weights = orig_weights + delta_weight
+                        orig_weights += delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -452,7 +452,7 @@ class Linear(nn.Module, LoraLayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        base_layer.weight.data = base_layer.weight.data + delta_weight
+                        base_layer.weight.data += delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -659,7 +659,7 @@ class Embedding(nn.Module, LoraLayer):
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
                     orig_weights = base_layer.weight.data.clone()
-                    orig_weights = orig_weights + self.get_delta_weight(active_adapter)
+                    orig_weights += self.get_delta_weight(active_adapter)
 
                     if not torch.isfinite(orig_weights).all():
                         raise ValueError(
@@ -668,7 +668,7 @@ class Embedding(nn.Module, LoraLayer):
 
                     base_layer.weight.data = orig_weights
                 else:
-                    base_layer.weight.data = base_layer.weight.data + self.get_delta_weight(active_adapter)
+                    base_layer.weight.data += self.get_delta_weight(active_adapter)
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -900,7 +900,7 @@ class Conv2d(nn.Module, LoraLayer):
                     delta_weight = self.get_delta_weight(active_adapter)
 
                     if not self.use_dora[active_adapter]:
-                        orig_weights = orig_weights + delta_weight
+                        orig_weights += delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
@@ -924,7 +924,7 @@ class Conv2d(nn.Module, LoraLayer):
                 else:
                     delta_weight = self.get_delta_weight(active_adapter)
                     if not self.use_dora[active_adapter]:
-                        base_layer.weight.data = base_layer.weight.data + delta_weight
+                        base_layer.weight.data += delta_weight
                     else:
                         # handle dora
                         # since delta_weight already includes scaling, set it to 1 here
