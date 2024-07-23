@@ -152,42 +152,6 @@ The default LoRA settings in PEFT add trainable weights to the query and value l
 config = LoraConfig(target_modules="all-linear", ...)
 ```
 
-### LoRA+ optimized LoRA
-
-LoRA training can be optimized using [LoRA+](https://arxiv.org/abs/2402.12354), which uses different learning rates for the adapter matrices A and B, shown to increase finetuning speed by up to 2x and performance by 1-2%.
-
-Assuming you have a properly configured `PeftModel`, sub-class the `Trainer` replacing the `create_optimizer` method:
-
-```py
-# Snippet based on Axolotl's trainer_builder.py: https://github.com/axolotl-ai-cloud/axolotl/blob/985819d89bec921e919e7e83042a869f04a25974/src/axolotl/core/trainer_builder.py#L305-L384
-from transformers import Trainer
-from peft.optimizers import create_loraplus_optimizer
-
-class MyTrainer(Trainer):
-    def create_optimizer(self):
-        if self.loraplus_lr_ratio is None:
-            return super().create_optimizer()
-
-        opt_model = self.model_wrapped if is_sagemaker_mp_enabled() else self.model
-        if self.optimizer is None:
-            optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(
-                self.args,
-                opt_model,
-            )
-
-            self.optimizer = create_loraplus_optimizer(
-                opt_model,
-                optimizer_cls,
-                loraplus_lr_ratio=self.loraplus_lr_ratio,
-                loraplus_lr_embedding=self.loraplus_lr_embedding,
-                **optimizer_kwargs,
-            )
-
-        # ...
-
-        return self.optimizer
-```
-
 ### Memory efficient Layer Replication with LoRA
 
 An approach used to improve the performance of models is to expand a model by duplicating layers in the model to build a larger model from a pretrained model of a given size. For example increasing a 7B model to a 10B model as described in the [SOLAR](https://arxiv.org/abs/2312.15166) paper. PEFT LoRA supports this kind of expansion in a memory efficient manner that supports further fine-tuning using LoRA adapters attached to the layers post replication of the layers. The replicated layers do not take additional memory as they share the underlying weights so the only additional memory required is the memory for the adapter weights. To use this feature you would create a config with the `layer_replication` argument.
@@ -200,6 +164,28 @@ Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a 
 
 [Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
 [adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
+
+## Optimizers
+
+LoRA training can optionally include special purpose optimizers. Currently the only such optimizer is LoRA+.
+
+### LoRA+ optimized LoRA
+
+LoRA training can be optimized using [LoRA+](https://arxiv.org/abs/2402.12354), which uses different learning rates for the adapter matrices A and B, shown to increase finetuning speed by up to 2x and performance by 1-2%.
+
+```py
+from transformers import Trainer
+from peft.optimizers import create_loraplus_optimizer
+
+optimizer = create_loraplus_optimizer(...)
+scheduler = None
+
+...
+trainer = Trainer(
+    ...,
+    optimizers=(optimizer, scheduler),
+)
+```
 
 ## Merge LoRA weights into the base model
 
