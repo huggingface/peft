@@ -176,8 +176,14 @@ LoRA training can be optimized using [LoRA+](https://arxiv.org/abs/2402.12354), 
 ```py
 from transformers import Trainer
 from peft.optimizers import create_loraplus_optimizer
+import bitsandbytes as bnb
 
-optimizer = create_loraplus_optimizer(...)
+optimizer = create_loraplus_optimizer(
+    model=model,
+    optimizer_cls=bnb.optim.Adam8bit,
+    lr=5e-5,
+    loraplus_lr_ratio=16,
+)
 scheduler = None
 
 ...
