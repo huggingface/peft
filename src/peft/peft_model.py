@@ -59,6 +59,7 @@ from .tuners import (
     VeraModel,
     XLoraConfig,
     XLoraModel,
+    PCLoraModel
 )
 from .tuners.tuners_utils import BaseTuner, BaseTunerLayer
 from .utils import (

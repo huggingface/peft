@@ -11,7 +11,7 @@ from transformers.modeling_outputs import CausalLMOutput, CausalLMOutputWithPast
 class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
     feature_distillation_loss: to.FloatTensor = None
     
-class PCLoRAModel(LoraModel):
+class PCLoraModel(LoraModel):
     def __init__(self, model, lora_config: Union[LoraConfig, Dict]  , adapter_name: str) -> None:        
         super().__init__(model, lora_config, adapter_name)
         
