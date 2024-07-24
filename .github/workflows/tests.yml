@@ -50,9 +50,6 @@ jobs:
           python -m pip install --upgrade pip
           # cpu version of pytorch
           pip install -e .[test]
-          if [ ${{ matrix.os }} == 'windows-latest' ]; then
-            pip install --force-reinstall -U "pytest<8.0.0"
-          fi
       - name: Downgrade numpy on MacOS and Windows
         # TODO: remove numpy downgrade on MacOS & Windows once torch fixes numpy 2.0 issue
         shell: bash

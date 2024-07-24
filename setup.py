@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import platform
 from setuptools import find_packages, setup
 
 
@@ -28,8 +29,14 @@ extras["docs_specific"] = [
     "hf-doc-builder",
 ]
 extras["dev"] = extras["quality"] + extras["docs_specific"]
+
+pytest_version = "pytest"
+# in windows, use pytest<8.0.0
+if platform.system() == "Windows":
+    pytest_version = "pytest<8.0.0"
+
 extras["test"] = extras["dev"] + [
-    "pytest",
+    pytest_version,
     "pytest-cov",
     "pytest-xdist",
     "parameterized",
