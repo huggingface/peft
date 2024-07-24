@@ -1,16 +1,22 @@
-class SetAdapterScale:
-    def __enter__(self, model, scale):
-        print("Enter Context Manager")
-        print("[INFO] MODEL")
-        print(model)
-        print("[INFO] SCALE")
-        print(scale)
-        
-        # 1. Check whether scaling is prohibited on model
-        print("Checking ...")
+from contextlib import contextmanager
+from peft import LoraModel
+from peft.tuners.lora.layer import LoraLayer
 
-        # 2. If scaling is allowed, scale the weights
-        print("Scaling ...")
+@contextmanager
+def set_adapter_scale(model, alpha):
+    # 1. TODO: Check whether scaling is prohibited on model
+    print("Checking ...")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        print("Exit Context Manager")
+    # 2. Modify scaling values
+    original_scaling = {}
+    print("Scaling ...")
+    for module in model.modules():
+        if isinstance(module, LoraLayer):
+            original_scaling[module] = module.scaling.copy()
+            module.scaling = dict((k, v * alpha) for k, v in module.scaling.items())
+    yield
+
+    # 3. Restore original scaling values after exiting the context
+    print("Restoring ...")
+    for module, scaling in original_scaling.items():
+        module.scaling = scaling
