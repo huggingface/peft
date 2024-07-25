@@ -1096,9 +1096,6 @@ class MultiheadAttention(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
 
-        self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
-
         # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
         if isinstance(base_layer.out_proj, nn.Linear):
             self.base_layer.out_proj = Linear(
@@ -1114,6 +1111,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
             )
         else:
             raise ValueError(f"out_proj must be an instance of nn.Linear for {self.__class__.__name__}.")
+
+        self._active_adapter = adapter_name
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights, use_rslora)
+
+    def update_layer(self, *args, **kwargs) -> None:
+        super().update_layer(*args, **kwargs)
+        # Note: LoRA is applied to both in_proj and out_proj. There is currently no way to only specify one of them.
+        self.base_layer.out_proj.update_layer(*args, **kwargs)
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
