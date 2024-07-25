@@ -31,6 +31,7 @@ from peft import (
     LoHaConfig,
     LoraConfig,
     PromptTuningConfig,
+    VeraConfig,
     get_layer_status,
     get_model_status,
     get_peft_model,
@@ -573,6 +574,50 @@ class TestModelAndLayerStatus:
         expected = [["default", "other"], ["default"], ["other"], ["default"]]
         assert result == expected
 
+    def test_devices_all_cpu_small(self, small_model):
+        layer_status = small_model.get_layer_status()
+        result = [status.devices for status in layer_status]
+        expected = [{"default": ["cpu"]}]
+        assert result == expected
+
+    def test_devices_all_cpu_large(self, large_model):
+        layer_status = large_model.get_layer_status()
+        result = [status.devices for status in layer_status]
+        expected = [
+            {"default": ["cpu"], "other": ["cpu"]},
+            {"default": ["cpu"]},
+            {"other": ["cpu"]},
+            {"default": ["cpu"]},
+        ]
+        assert result == expected
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+    def test_devices_all_cuda_large(self, large_model):
+        large_model.to("cuda")
+        layer_status = large_model.get_layer_status()
+        result = [status.devices for status in layer_status]
+        expected = [
+            {"default": ["cuda"], "other": ["cuda"]},
+            {"default": ["cuda"]},
+            {"other": ["cuda"]},
+            {"default": ["cuda"]},
+        ]
+        assert result == expected
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+    def test_devices_cpu_and_cuda_large(self, large_model):
+        # move the embedding layer to CUDA
+        large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to("cuda")
+        layer_status = large_model.get_layer_status()
+        result = [status.devices for status in layer_status]
+        expected = [
+            {"default": ["cpu", "cuda"], "other": ["cpu"]},
+            {"default": ["cpu"]},
+            {"other": ["cpu"]},
+            {"default": ["cpu"]},
+        ]
+        assert result == expected
+
     ################
     # model status #
     ################
@@ -753,8 +798,29 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.available_adapters == ["default", "other"]
 
+    def test_model_devices_all_cpu_small(self, small_model):
+        model_status = small_model.get_model_status()
+        assert model_status.devices == {"default": ["cpu"]}
+
+    def test_model_devices_all_cpu_large(self, large_model):
+        model_status = large_model.get_model_status()
+        assert model_status.devices == {"default": ["cpu"], "other": ["cpu"]}
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+    def test_model_devices_all_cuda_large(self, large_model):
+        large_model.to("cuda")
+        model_status = large_model.get_model_status()
+        assert model_status.devices == {"default": ["cuda"], "other": ["cuda"]}
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+    def test_model_devices_cpu_and_cuda_large(self, large_model):
+        # move the embedding layer to CUDA
+        large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to("cuda")
+        model_status = large_model.get_model_status()
+        assert model_status.devices == {"default": ["cpu", "cuda"], "other": ["cpu"]}
+
     def test_loha_model(self):
-        # ensure that this also works with non-LoRA, it's enough to test one other tuner
+        # ensure that this also works with non-LoRA, it's not necessary to test all tuners
         class SmallModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -765,8 +831,8 @@ class TestModelAndLayerStatus:
         config = LoHaConfig(target_modules=["lin0", "lin1"], init_weights=False)
         model = get_peft_model(base_model, config)
 
-        model_status = get_model_status(model)
-        layer_status = get_layer_status(model)
+        model_status = model.get_model_status()
+        layer_status = model.get_layer_status()
 
         assert model_status.base_model_type == "SmallModel"
         assert model_status.adapter_model_type == "LoHaModel"
@@ -779,6 +845,7 @@ class TestModelAndLayerStatus:
         assert model_status.merged_adapters == []
         assert model_status.requires_grad == {"default": True}
         assert model_status.available_adapters == ["default"]
+        assert model_status.devices == {"default": ["cpu"]}
 
         layer_status0 = layer_status[0]
         assert len(layer_status) == 2
@@ -789,6 +856,50 @@ class TestModelAndLayerStatus:
         assert layer_status0.merged_adapters == []
         assert layer_status0.requires_grad == {"default": True}
         assert layer_status0.available_adapters == ["default"]
+        assert layer_status0.devices == {"default": ["cpu"]}
+
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+    def test_vera_model(self):
+        # let's also test VeRA because it uses BufferDict
+        class SmallModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.lin1 = nn.Linear(10, 10)
+
+        base_model = SmallModel()
+        config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False)
+        model = get_peft_model(base_model, config)
+
+        # move the buffer dict to CUDA
+        model.lin0.vera_A["default"] = model.lin0.vera_A["default"].to("cuda")
+
+        model_status = model.get_model_status()
+        layer_status = model.get_layer_status()
+
+        assert model_status.base_model_type == "SmallModel"
+        assert model_status.adapter_model_type == "VeraModel"
+        assert model_status.peft_types == {"default": "VERA"}
+        assert model_status.trainable_params == 532
+        assert model_status.total_params == 752
+        assert model_status.num_adapter_layers == 2
+        assert model_status.enabled is True
+        assert model_status.active_adapters == ["default"]
+        assert model_status.merged_adapters == []
+        assert model_status.requires_grad == {"default": True}
+        assert model_status.available_adapters == ["default"]
+        assert model_status.devices == {"default": ["cpu", "cuda"]}
+
+        layer_status0 = layer_status[0]
+        assert len(layer_status) == 2
+        assert layer_status0.name == "model.lin0"
+        assert layer_status0.module_type == "vera.Linear"
+        assert layer_status0.enabled is True
+        assert layer_status0.active_adapters == ["default"]
+        assert layer_status0.merged_adapters == []
+        assert layer_status0.requires_grad == {"default": True}
+        assert layer_status0.available_adapters == ["default"]
+        assert layer_status0.devices == {"default": ["cpu", "cuda"]}
 
     ###################
     # non-PEFT models #
@@ -813,6 +924,7 @@ class TestModelAndLayerStatus:
         assert model_status.merged_adapters == []
         assert model_status.requires_grad == {"default": False}
         assert model_status.available_adapters == ["default"]
+        assert model_status.devices == {"default": ["cpu"]}
 
         layer_status0 = layer_status[0]
         assert len(layer_status) == 12
@@ -823,6 +935,7 @@ class TestModelAndLayerStatus:
         assert layer_status0.merged_adapters == []
         assert layer_status0.requires_grad == {"default": False}
         assert layer_status0.available_adapters == ["default"]
+        assert layer_status0.devices == {"default": ["cpu"]}
 
     def test_model_with_injected_layers(self, large_model):
         model = large_model.base_model.model
@@ -840,6 +953,7 @@ class TestModelAndLayerStatus:
         assert model_status.merged_adapters == []
         assert model_status.requires_grad == {"default": True, "other": False}
         assert model_status.available_adapters == ["default", "other"]
+        assert model_status.devices == {"default": ["cpu"], "other": ["cpu"]}
 
         layer_status1 = layer_status[1]
         assert len(layer_status) == 4
@@ -850,6 +964,7 @@ class TestModelAndLayerStatus:
         assert layer_status1.merged_adapters == []
         assert layer_status1.requires_grad == {"default": True}
         assert layer_status1.available_adapters == ["default"]
+        assert layer_status1.devices == {"default": ["cpu"]}
 
     ###############
     # error cases #

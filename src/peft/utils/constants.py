@@ -65,6 +65,7 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "mistral": ["input_layernorm", "post_attention_layernorm", "norm"],
     "phi": ["input_layernorm", "final_layernorm"],
     "gemma": ["input_layernorm", "post_attention_layernorm", "norm"],
+    "qwen2": ["post_attention_layernorm"],
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
@@ -99,6 +100,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
@@ -124,6 +126,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "falcon": ["query_key_value", "dense_4h_to_h"],
     "phi": ["q_proj", "v_proj", "fc2"],
     "gemma": ["q_proj", "v_proj", "down_proj"],
+    "qwen2": ["q_proj", "v_proj", "down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -149,6 +152,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "falcon": ["dense_4h_to_h"],
     "phi": ["fc2"],
     "gemma": ["down_proj"],
+    "qwen2": ["down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
@@ -170,6 +174,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
@@ -205,6 +210,41 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     # "phi": ["q_proj", "v_proj", "fc1", "fc2"],  # tested, does not work because of different shapes
     "phi": ["q_proj", "v_proj"],
     # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "qwen2": ["q_proj", "v_proj"],
+}
+
+TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
+    "t5": ["q", "v"],
+    "mt5": ["q", "v"],
+    "bart": ["q_proj", "v_proj"],
+    "gpt2": ["mlp.c_proj"],
+    "bloom": ["query_key_value"],
+    "blip-2": ["q", "v", "q_proj", "v_proj"],
+    "opt": ["q_proj", "v_proj"],
+    "gptj": ["q_proj", "v_proj"],
+    "gpt_neox": ["query_key_value"],
+    "gpt_neo": ["q_proj", "v_proj"],
+    "bert": ["query", "value"],
+    "roberta": ["query", "value"],
+    "xlm-roberta": ["query", "value"],
+    "electra": ["query", "value"],
+    "deberta-v2": ["query_proj", "value_proj"],
+    "deberta": ["in_proj"],
+    "layoutlm": ["query", "value"],
+    "llama": ["q_proj", "v_proj"],
+    "chatglm": ["query_key_value"],
+    "gpt_bigcode": ["mlp.c_proj"],
+    "mpt": ["Wqkv"],
+    "RefinedWebModel": ["query_key_value"],
+    "RefinedWeb": ["query_key_value"],
+    "falcon": ["query_key_value"],
+    "codegen": ["qkv_proj"],
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
+    "stablelm": ["q_proj", "v_proj"],
+    "phi": ["q_proj", "v_proj", "fc1", "fc2"],
+    "gemma": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 WEIGHTS_NAME = "adapter_model.bin"
@@ -213,3 +253,4 @@ CONFIG_NAME = "adapter_config.json"
 EMBEDDING_LAYER_NAMES = ["embed_tokens", "lm_head"]
 INCLUDE_LINEAR_LAYERS_SHORTHAND = "all-linear"
 TOKENIZER_CONFIG_NAME = "tokenizer_config.json"
+DUMMY_TARGET_MODULES = "dummy-target-modules"

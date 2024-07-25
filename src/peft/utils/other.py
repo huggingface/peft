@@ -34,6 +34,7 @@ from .constants import (
     INCLUDE_LINEAR_LAYERS_SHORTHAND,
     SAFETENSORS_WEIGHTS_NAME,
     TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING,
+    TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
@@ -64,6 +65,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "bloom_model_postprocess_past_key_value",
@@ -394,6 +396,12 @@ def _prepare_prompt_learning_config(peft_config, model_config):
         else:
             raise ValueError("Please specify `num_attention_heads` in `peft_config`")
         peft_config.num_attention_heads = num_attention_heads
+
+    # For grouped-query attention, see #1901.
+    if peft_config.peft_type == "PREFIX_TUNING" and "num_key_value_heads" in model_config:
+        num_key_value_heads = model_config["num_key_value_heads"]
+        peft_config.token_dim = peft_config.token_dim // peft_config.num_attention_heads * num_key_value_heads
+        peft_config.num_attention_heads = num_key_value_heads
 
     if getattr(peft_config, "encoder_hidden_size", None) is None:
         setattr(peft_config, "encoder_hidden_size", peft_config.token_dim)

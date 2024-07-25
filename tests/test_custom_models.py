@@ -27,6 +27,7 @@ from functools import partial
 import pytest
 import torch
 from parameterized import parameterized
+from safetensors.torch import load_file as safe_load_file
 from torch import nn
 from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 from transformers.pytorch_utils import Conv1D
@@ -34,6 +35,8 @@ from transformers.pytorch_utils import Conv1D
 from peft import (
     AdaLoraConfig,
     BOFTConfig,
+    FourierFTConfig,
+    HRAConfig,
     IA3Config,
     LNTuningConfig,
     LoHaConfig,
@@ -246,6 +249,14 @@ TEST_CASES = [
     ("Conv2d 3 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True}),
     ("Conv2d 4 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "block_share": True}),
     ("Conv2d 5 OFT", "Conv2d", OFTConfig, {"target_modules": ["conv2d"], "coft": True, "block_share": True}),
+    ########
+    # HRA #
+    ########
+    ("Vanilla MLP 1 HRA", "MLP", HRAConfig, {"target_modules": "lin0"}),
+    ("Vanilla MLP 2 HRA", "MLP", HRAConfig, {"target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 HRA", "MLP", HRAConfig, {"target_modules": ["lin0", "lin1"]}),
+    ("Vanilla MLP 5 HRA", "MLP", HRAConfig, {"target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
+    ("Conv2d 1 HRA", "Conv2d", HRAConfig, {"target_modules": ["conv2d"]}),
     #############
     # LN Tuning #
     #############
@@ -339,6 +350,7 @@ TEST_CASES = [
     ("Vanilla MLP 1 VeRA", "MLP", VeraConfig, {"target_modules": "lin0"}),
     ("Vanilla MLP 2 VeRA", "MLP", VeraConfig, {"target_modules": ["lin0"]}),
     ("Vanilla MLP 3 VeRA", "MLP", VeraConfig, {"target_modules": ["lin1"]}),
+    ("Vanilla MLP 4 VeRA", "MLP", VeraConfig, {"target_modules": ["lin0", "lin1"]}),
     (
         "Vanilla MLP 5 VeRA",
         "MLP",
@@ -351,8 +363,43 @@ TEST_CASES = [
         VeraConfig,
         {"target_modules": ["conv1d"]},
     ),
+    ########
+    # FourierFT #
+    ########
+    ("Vanilla MLP 1 FourierFT", "MLP", FourierFTConfig, {"n_frequency": 10, "target_modules": "lin0"}),
+    ("Vanilla MLP 2 FourierFT", "MLP", FourierFTConfig, {"n_frequency": 10, "target_modules": ["lin0"]}),
+    ("Vanilla MLP 3 FourierFT", "MLP", FourierFTConfig, {"n_frequency": 10, "target_modules": ["lin1"]}),
+    (
+        "Vanilla MLP 5 FourierFT",
+        "MLP",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 6 FourierFT",
+        "MLP",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0", "lin1"], "modules_to_save": ["lin1"]},
+    ),
+    (
+        "Vanilla MLP 7 FourierFT",
+        "MLP",
+        FourierFTConfig,
+        {
+            "n_frequency_pattern": {"lin0": 5, "lin1": 10},
+            "target_modules": ["lin0", "lin1"],
+            "modules_to_save": ["lin1"],
+        },
+    ),
 ]
 
+# For this test matrix, each tuple consists of:
+# - test name
+# - tuner method
+# - config_cls
+# - 1st config kwargs
+# - 2nd config kwargs
+# The model used for this test is `MLP`, which uses linear layers `lin0` and `lin1`
 MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
     (
         "LoRA Same",
@@ -412,7 +459,46 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_lora_weights": False, "inference_mode": True},
         {"target_modules": ["lin1"], "init_lora_weights": False, "inference_mode": True},
     ),
+    (
+        "FourierFT Same",
+        "fourierft",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+    ),
+    (
+        "FourierFT Different",
+        "fourierft",
+        FourierFTConfig,
+        {"n_frequency": 10, "target_modules": ["lin0"]},
+        {"n_frequency": 10, "target_modules": ["lin1"]},
+    ),
+    # Note: Currently, we cannot target lin0 and lin1 with different adapters when using VeRA. The reason is that the
+    # first adapter being created will result in a vera_A or vera_B shape that is too small for the next adapter
+    # (remember that VeRA shares these parameters across all layers), which results in an error.
+    (
+        "VeRA Same",
+        "vera",
+        VeraConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "HRA Same",
+        "hra",
+        HRAConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin0"], "init_weights": False},
+    ),
+    (
+        "HRA Different",
+        "hra",
+        HRAConfig,
+        {"target_modules": ["lin0"], "init_weights": False},
+        {"target_modules": ["lin1"], "init_weights": False},
+    ),
 ]
+
 PREFIXES = {
     IA3Config: "ia3_",
     LoraConfig: "lora_",
@@ -422,6 +508,8 @@ PREFIXES = {
     BOFTConfig: "boft_",
     LNTuningConfig: "ln_tuning_",
     VeraConfig: "vera_lambda_",
+    FourierFTConfig: "fourierft_",
+    HRAConfig: "hra_",
 }
 
 
@@ -885,7 +973,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
 
         outputs_base = model(**X)
-
+        if issubclass(config_cls, FourierFTConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -937,6 +1027,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # same as test_disable_adapters, but with merging
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        if issubclass(config_cls, FourierFTConfig):
+            config_kwargs = config_kwargs.copy()
+            config_kwargs["init_weights"] = True
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -983,6 +1076,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
+
+        if self.torch_device in ["mlu"] and model_id in ["Conv2d"]:
+            atol, rtol = 1e-3, 1e-2  # MLU
 
         # unmerged or merged should make no difference
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
@@ -1177,7 +1273,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert "default" in model.base_model.classifier.modules_to_save
         assert "other" in model.base_model.classifier.modules_to_save
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save(self, config_cls):
         # See issue 1574
         # Check that we can have a model where one adapter has modules_to_save and the other doesn't. It should be
@@ -1202,7 +1298,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model.set_adapter("other")
         model(**inputs)
 
-    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig])
+    @parameterized.expand([IA3Config, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, HRAConfig])
     def test_multiple_adapters_mixed_modules_to_save_order_switched(self, config_cls):
         # See issue 1574
         # Same test as test_multiple_adapters_mixed_modules_to_save, but this time the 2nd adapter has modules_to_save.
@@ -1407,6 +1503,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             IA3Config(target_modules=["lin0"], feedforward_modules=["lin0"], init_ia3_weights=False),
             OFTConfig(target_modules=["lin0"], init_weights=False),
             BOFTConfig(target_modules=["lin0"], init_weights=False, boft_block_size=2),
+            HRAConfig(target_modules=["lin0"], init_weights=False),
         ]
     )
     def test_adapter_name_makes_no_difference(self, config0):
@@ -1499,6 +1596,41 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         # should not raise an error
         model.merge_and_unload(safe_merge=True)
+
+    def test_dora_save_and_load_remapping(self):
+        # Here we test the refactor of DoRA which changed lora_magnitude_vector from a ParameterDict to a ModuleDict
+        # with a DoraLayer instance. The old parameter is now the "weight" attribute of that layer. Since we want the
+        # state_dict format not to change, we ensure that the ".weight" part of the key is removed.
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        config = LoraConfig(task_type="CAUSAL_LM", use_dora=True)
+        model = get_peft_model(model, config)
+        state_dict = model.state_dict()
+
+        # sanity check: state dict contains "lora_magnitude_vector.default.weight" keys
+        assert any("lora_magnitude_vector.default.weight" in k for k in state_dict)
+
+        # save the model, check the state dict
+        # note: not using the context manager here because it fails on Windows CI for some reason
+        tmp_dirname = tempfile.mkdtemp()
+        try:
+            model.save_pretrained(tmp_dirname)
+            state_dict_adapter = safe_load_file(os.path.join(tmp_dirname, "adapter_model.safetensors"))
+            # note that in the state dict, the "default" part of the key is removed
+            assert not any("lora_magnitude_vector.weight" in k for k in state_dict_adapter)
+
+            del model
+            loaded = PeftModel.from_pretrained(AutoModelForCausalLM.from_pretrained("facebook/opt-125m"), tmp_dirname)
+        finally:
+            try:
+                shutil.rmtree(tmp_dirname)
+            except PermissionError:
+                # windows error
+                pass
+
+        state_dict_loaded = loaded.state_dict()
+        assert state_dict.keys() == state_dict_loaded.keys()
+        for k in state_dict:
+            assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
     def test_mha_gradients_set_correctly(self):
         # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
@@ -2569,6 +2701,83 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin0.oft_r.adapter1",
         )
 
+    def test_requires_grad_hra_different_targets(self):
+        # test two different HRA adapters that target different modules
+        config0 = HRAConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = HRAConfig(target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.hra_u.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.hra_u.default",
+        )
+
+        # change activate pter to pter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.hra_u.adapter1",
+        )
+
+        # disable all pters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.hra_u.adapter1",
+        )
+
+    def test_requires_grad_hra_same_targets(self):
+        # same as previous test, except that HRA adapters target the same layer
+        config0 = HRAConfig(target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = HRAConfig(target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.hra_u.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.hra_u.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.hra_u.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.hra_u.adapter1",
+        )
+
     def test_requires_grad_boft_different_targets(self):
         # test two different OFT adapters that target different modules
         config0 = BOFTConfig(target_modules=["lin0"], boft_block_size=2)
@@ -2887,6 +3096,83 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin2.vera_lambda_d.adapter1",
         )
 
+    def test_requires_grad_fourierft_different_targets(self):
+        # test two different fourierft adapters that target different modules
+        config0 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin1"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.fourierft_spectrum.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.fourierft_spectrum.adapter1",
+        )
+
+    def test_requires_grad_fourierft_same_targets(self):
+        # same as previous test, except that AdaLora adapters target the same layer
+        config0 = FourierFTConfig(n_frequency=10, target_modules=["lin0"])
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = FourierFTConfig(n_frequency=10, target_modules=["lin0"], inference_mode=True)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.fourierft_spectrum.adapter1",
+        )
+
 
 class TestMixedAdapterBatches:
     torch_device = infer_device()
@@ -3116,3 +3402,191 @@ class TestMixedAdapterBatches:
         times_separate = logs[-3:]
         time_separate = sum(times_separate) / 3
         assert time_separate > time_mixed
+
+
+class TestDynamicDispatch:
+    # These are tests for the dynamic dispatch feature for LoRA. We create a custom module and a custom LoRA layer
+    # that targets it.
+
+    @pytest.fixture(scope="class")
+    def custom_module_cls(self):
+        class MyModule(nn.Module):
+            # A custom layer that just behaves like an nn.Linear layer but is not an instance of nn.Linear. Therefore,
+            # it would normally fail to be targeted.
+            def __init__(self):
+                super().__init__()
+                self.in_features = 10
+                self.out_features = 20
+                self.weight = nn.Parameter(torch.randn(20, 10))
+
+            def forward(self, x):
+                return nn.functional.linear(x, self.weight)
+
+        return MyModule
+
+    @pytest.fixture(scope="class")
+    def custom_lora_cls(self):
+        from peft.tuners import lora
+
+        class MyLora(lora.Linear):
+            # just re-use the lora.Linear code here
+            pass
+
+        return MyLora
+
+    @pytest.fixture(scope="class")
+    def model_cls(self, custom_module_cls):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 10)
+                self.relu = nn.ReLU()
+                self.my_module = custom_module_cls()
+                self.lin1 = nn.Linear(20, 2)
+
+            def forward(self, x):
+                x = self.relu(self.lin0(x))
+                x = self.relu(self.my_module(x))
+                x = self.lin1(x)
+                return x
+
+        return MyModel
+
+    def test_custom_lora_layer_used(self, custom_module_cls, custom_lora_cls, model_cls):
+        # check that when we register custom lora layers, they are indeed being used for the intended module
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        peft_model = get_peft_model(model, config)
+        assert isinstance(peft_model.base_model.model.my_module, custom_lora_cls)
+        assert isinstance(peft_model.base_model.model.my_module.base_layer, custom_module_cls)
+        # sanity check that the other lora layer types are still the default ones
+        assert not isinstance(peft_model.base_model.model.lin0.base_layer, custom_module_cls)
+        assert not isinstance(peft_model.base_model.model.lin1.base_layer, custom_module_cls)
+
+    def test_training_works(self, model_cls, custom_module_cls, custom_lora_cls):
+        # check that when we train with custom lora layers, they are indeed updated
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        peft_model = get_peft_model(model, config)
+        sd_before = peft_model.state_dict()
+        inputs = torch.randn(16, 10)
+        optimizer = torch.optim.SGD(peft_model.parameters(), lr=1e-1)
+
+        for _ in range(5):
+            optimizer.zero_grad()
+            output = peft_model(inputs)
+            loss = output.sum() ** 2
+            loss.backward()
+            optimizer.step()
+
+        sd_after = peft_model.state_dict()
+        assert not torch.allclose(
+            sd_before["base_model.model.my_module.lora_A.default.weight"],
+            sd_after["base_model.model.my_module.lora_A.default.weight"],
+        )
+        assert not torch.allclose(
+            sd_before["base_model.model.my_module.lora_B.default.weight"],
+            sd_after["base_model.model.my_module.lora_B.default.weight"],
+        )
+
+    def test_saving_and_loading(self, custom_module_cls, custom_lora_cls, model_cls, tmp_path):
+        # check that we can successfully save and load the custom lora cls
+        torch.manual_seed(0)
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        torch.manual_seed(1)
+        peft_model = get_peft_model(model, config)
+
+        inputs = torch.randn(5, 10)
+        outputs_before = peft_model(inputs)  # does not raise
+
+        sd_before = peft_model.state_dict()
+        peft_model.save_pretrained(tmp_path / "lora-custom-module")
+        del model, peft_model
+
+        torch.manual_seed(0)  # same seed for base model
+        model = model_cls()
+
+        # custom lora mapping is not persisted at the moment, so as a workaround this is needed
+        config = LoraConfig.from_pretrained(tmp_path / "lora-custom-module")
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        # different seed for adapter to ensure it is not identical just because of seed
+        torch.manual_seed(123)
+        peft_model = PeftModel.from_pretrained(model, tmp_path / "lora-custom-module", config=config)
+        assert isinstance(peft_model.base_model.model.my_module, custom_lora_cls)
+        assert isinstance(peft_model.base_model.model.my_module.base_layer, custom_module_cls)
+
+        outputs_after = peft_model(inputs)  # does not raise
+        assert torch.allclose(outputs_before, outputs_after)
+
+        sd_after = peft_model.state_dict()
+        assert sd_before.keys() == sd_after.keys()
+        for key in sd_before.keys():
+            assert torch.allclose(sd_before[key], sd_after[key])
+
+    def test_override_lora_linear(self, custom_lora_cls):
+        # in this test, we check if users can override default PEFT behavior by supplying a custom lora class that is
+        # being used instead of lora.Linear
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        config = LoraConfig(task_type=TaskType.CAUSAL_LM)
+        config._register_custom_module({nn.Linear: custom_lora_cls})
+        peft_model = get_peft_model(model, config)
+        layers = peft_model.base_model.model.model.decoder.layers
+        for layer in layers:
+            assert isinstance(layer.self_attn.v_proj, custom_lora_cls)
+            assert isinstance(layer.self_attn.q_proj, custom_lora_cls)
+
+    def test_custom_lora_layer_issues_warning(self, custom_module_cls, custom_lora_cls, model_cls, recwarn):
+        # users will get a warning if they target a layer type that is not officially supported
+        model = model_cls()
+        config = LoraConfig(target_modules=["lin0", "my_module", "lin1"])
+        config._register_custom_module({custom_module_cls: custom_lora_cls})
+
+        get_peft_model(model, config)
+        # check warning message
+        msg = (
+            "Unsupported layer type '<class 'tests.test_custom_models.TestDynamicDispatch.custom_module_cls."
+            "<locals>.MyModule'>' encountered, proceed at your own risk."
+        )
+        assert str(recwarn.list[-1].message) == msg
+
+    def test_target_layer_without_in_features_out_features(self, recwarn):
+        # It should be possible for users to target layers even if we cannot determine in_features and out_features.
+        # Those are only needed to initialize the LoRA layer via update_layer, so as long as users take care of that,
+        # they should be good and not require those attributes to exist
+        from peft.tuners import lora
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(10, 20)
+
+        class MyLora(nn.Module, lora.LoraLayer):
+            def __init__(self, base_layer, adapter_name, **kwargs):
+                super().__init__()
+                lora.LoraLayer.__init__(self, base_layer, **kwargs)
+                self._active_adapter = adapter_name
+
+        model = MyModel()
+        # check that in_features and out_features attributes don't exist on LSTM
+        assert not hasattr(model.lstm, "in_features")
+        assert not hasattr(model.lstm, "out_features")
+
+        config = LoraConfig(target_modules=["lstm"])
+        config._register_custom_module({nn.LSTM: MyLora})
+        peft_model = get_peft_model(model, config)
+
+        # check that custom LoRA layer is correctly applied
+        assert isinstance(peft_model.base_model.lstm, MyLora)
+        assert isinstance(peft_model.base_model.lstm.base_layer, nn.LSTM)
+
+        # we should still get a warning message
+        msg = "Unsupported layer type '<class 'torch.nn.modules.rnn.LSTM'>' encountered, proceed at your own risk."
+        assert str(recwarn.list[-1].message) == msg

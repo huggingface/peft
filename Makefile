@@ -6,13 +6,13 @@ check_dirs := src tests examples docs scripts docker
 
 # this target runs checks on all files
 quality:
-	ruff $(check_dirs)
+	ruff check $(check_dirs)
 	ruff format --check $(check_dirs)
 	doc-builder style src/peft tests docs/source --max_len 119 --check_only
 
 # Format source code automatically and check is there are any problems left that need manual fixing
 style:
-	ruff $(check_dirs) --fix
+	ruff check --fix $(check_dirs)
 	ruff format $(check_dirs)
 	doc-builder style src/peft tests docs/source --max_len 119
 
@@ -46,6 +46,9 @@ tests_core_multi_gpu_bnb:
 
 tests_core_single_gpu_bnb:
 	python -m pytest -m "single_gpu_tests and bitsandbytes" tests/test_common_gpu.py $(if $(IS_GITHUB_CI),--report-log "core_single_gpu.log",)
+
+tests_gpu_bnb_regression:
+	python -m pytest tests/bnb/test_bnb_regression.py $(if $(IS_GITHUB_CI),--report-log "bnb_regression_gpu.log",)
 
 # For testing transformers tests for bnb runners
 transformers_tests:

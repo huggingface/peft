@@ -98,12 +98,16 @@ if is_bnb_available():
                 else:
                     # handle dora
                     # since output already includes scaling, set it to 1 here
-                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    weight_norm = (
+                        self.lora_magnitude_vector[active_adapter]
+                        .get_weight_norm(output, lora_data, scaling=1)
+                        .detach()
+                    )
                     # We need to cache weight_norm because it has to be based on the original weights. We
                     # cannot calculate it on the fly based on the merged weights when unmerging because its a
                     # different value
                     self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
                     w_data = dora_factor.view(-1, 1) * (output + lora_data)
 
                 if safe_merge and not torch.isfinite(w_data).all():
@@ -144,7 +148,7 @@ if is_bnb_available():
                     w_data = output.to(lora_data.dtype).to(lora_data.device) - lora_data
                 else:
                     weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
-                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
                     w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
                 self.get_base_layer().weight = bnb.nn.Int8Params(
@@ -233,7 +237,14 @@ if is_bnb_available():
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
+                        x = dropout(x)
+                        output = self.lora_magnitude_vector[active_adapter](
+                            x,
+                            lora_A=lora_A,
+                            lora_B=lora_B,
+                            scaling=scaling,
+                            base_layer=self.get_base_layer(),
+                        )
                     if requires_conversion:
                         output = output.to(expected_dtype)
 
@@ -336,12 +347,16 @@ if is_bnb_4bit_available():
                 else:
                     # handle dora
                     # since output already includes scaling, set it to 1 here
-                    weight_norm = self._get_weight_norm(output, lora_data, scaling=1).detach()
+                    weight_norm = (
+                        self.lora_magnitude_vector[active_adapter]
+                        .get_weight_norm(output, lora_data, scaling=1)
+                        .detach()
+                    )
                     # We need to cache weight_norm because it has to be based on the original weights. We
                     # cannot calculate it on the fly based on the merged weights when unmerging because its a
                     # different value
                     self._cache_store(f"{active_adapter}-weight_norm", weight_norm)
-                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
                     w_data = dora_factor.view(-1, 1) * (output + lora_data)
 
                 if safe_merge and not torch.isfinite(w_data).all():
@@ -350,9 +365,9 @@ if is_bnb_4bit_available():
                     )
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    weight.device
-                )
+                kwargs["requires_grad"] = False
+                kwargs.pop("data", None)
+                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
                 self.merged_adapters.append(active_adapter)
 
         def unmerge(self) -> None:
@@ -380,14 +395,14 @@ if is_bnb_4bit_available():
                     w_data = output - lora_data
                 else:
                     weight_norm = self._cache_pop(f"{active_adapter}-weight_norm")
-                    dora_factor = self.lora_magnitude_vector[active_adapter] / weight_norm
+                    dora_factor = self.lora_magnitude_vector[active_adapter].weight / weight_norm
                     w_data = output.data / dora_factor.view(-1, 1) - lora_data
 
                 if "bnb_quantized" in kwargs:
                     kwargs["bnb_quantized"] = False
-                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), requires_grad=False, **kwargs).to(
-                    weight.device
-                )
+                kwargs["requires_grad"] = False
+                kwargs.pop("data", None)
+                self.get_base_layer().weight = bnb.nn.Params4bit(w_data.to("cpu"), **kwargs).to(weight.device)
 
         def get_delta_weight(self, adapter):
             return (
@@ -473,7 +488,14 @@ if is_bnb_4bit_available():
                     if not self.use_dora[active_adapter]:
                         output = lora_B(lora_A(dropout(x))) * scaling
                     else:
-                        output = self._apply_dora(x, lora_A, lora_B, scaling, active_adapter)
+                        x = dropout(x)
+                        output = self.lora_magnitude_vector[active_adapter](
+                            x,
+                            lora_A=lora_A,
+                            lora_B=lora_B,
+                            scaling=scaling,
+                            base_layer=self.get_base_layer(),
+                        )
                     if requires_conversion:
                         output = output.to(expected_dtype)
 

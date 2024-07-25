@@ -33,8 +33,8 @@ from peft.utils import (
     _get_submodules,
 )
 
+from .._buffer_dict import BufferDict
 from ..tuners_utils import _maybe_include_all_linear_layers
-from .buffer_dict import BufferDict
 from .config import VeraConfig
 from .layer import Linear, VeraLayer
 
@@ -101,13 +101,11 @@ class VeraModel(BaseTuner):
     def __init__(self, model, config, adapter_name) -> None:
         super().__init__(model, config, adapter_name)
 
-    def _find_first_dim(self, config) -> tuple[int, int]:
+    def _find_dim(self, config) -> tuple[int, int]:
         """
-        Finds the first linear layer that has been wrapped with Vera, and extract the input and output dimension.
+        Finds the largest input and output dimensions across linear layers that have been wrapped with VeRA.
 
         This will be used for determining the size of the shared vera_A and vera_B matrices.
-
-        This will throw an error if there are multiple layers of the same type with different shapes.
         """
         model_config = getattr(self.model, "config", {"model_type": "custom"})
         if hasattr(model_config, "to_dict"):
@@ -116,7 +114,7 @@ class VeraModel(BaseTuner):
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
-        first_shape = None
+        largest_shape = None
         for key, module in self.model.named_modules():
             if not self._check_target_module_exists(peft_config, key):
                 continue
@@ -128,24 +126,21 @@ class VeraModel(BaseTuner):
             else:
                 continue
 
-            if first_shape is None:
-                first_shape = module_shape
+            if largest_shape is None:
+                largest_shape = module_shape
                 continue
 
-            if module_shape != first_shape:
-                raise ValueError(
-                    "Multiple target layers with different dimensions were specified. VeRA only supports a "
-                    f"single dimension size. Expected shape {first_shape}, got {module_shape}."
-                )
+            if module_shape != largest_shape:
+                largest_shape = tuple(max(a, b) for a, b in zip(largest_shape, module_shape))
 
-        if first_shape is None:
+        if largest_shape is None:
             msg = "No layers types compatible with VeRA were found. Please check `peft_config.target_modules`."
             raise ValueError(msg)
 
-        return first_shape
+        return largest_shape
 
     def _init_vera_A_vera_B(self, config: VeraConfig, adapter_name: str) -> None:
-        first_linear_out_dim, first_linear_in_dim = self._find_first_dim(config)
+        linear_out_dim, linear_in_dim = self._find_dim(config)
 
         # use of persistent to exclude vera_A and vera_B from the state dict if we choose not to save them.
         self.vera_A = BufferDict({}, persistent=config.save_projection)
@@ -153,8 +148,8 @@ class VeraModel(BaseTuner):
 
         # deterministic init of vera_A and vera_B if we know the key
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
-        vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
-        vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
+        vera_A = _kaiming_init((config.r, linear_in_dim), generator=generator)
+        vera_B = _kaiming_init((linear_out_dim, config.r), generator=generator)
         self.vera_A[adapter_name] = vera_A
         self.vera_B[adapter_name] = vera_B
 
@@ -334,6 +329,8 @@ class VeraModel(BaseTuner):
         try:
             return super().__getattr__(name)  # defer to nn.Module's logic
         except AttributeError:
+            if name == "model":  # see #1892: prevent infinite recursion if class is not initialized
+                raise
             return getattr(self.model, name)
 
     def get_peft_config_as_dict(self, inference: bool = False):

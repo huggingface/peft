@@ -81,13 +81,7 @@ class PolyLayer(BaseTunerLayer):
 
         self.reset_poly_parameters(adapter_name, init_weights=poly_config.init_weights)
 
-        weight = getattr(self.get_base_layer(), "weight", None)
-        if weight is not None:
-            # the layer is already completely initialized, this is an update
-            if weight.dtype.is_floating_point or weight.dtype.is_complex:
-                self.to(weight.device, dtype=weight.dtype)
-            else:
-                self.to(weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_poly_parameters(self, adapter_name, init_weights):

@@ -35,7 +35,8 @@ class AdaLoraLayer(LoraLayer):
     # List all names of layers that may contain adapter weights
     # Note: ranknum doesn't need to be included as it is not an nn.Module
     adapter_layer_names = ("lora_A", "lora_B", "lora_E", "lora_embedding_A", "lora_embedding_B")
-    # other_param_names is defined in LoraLayer
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout", "ranknum")
 
     def __init__(self, base_layer: nn.Module) -> None:
         super().__init__(base_layer)
@@ -72,16 +73,12 @@ class AdaLoraLayer(LoraLayer):
         if init_lora_weights:
             self.reset_lora_parameters(adapter_name)
 
-        if hasattr(self.get_base_layer(), "qweight"):
-            # QuantLinear
-            self.to(self.get_base_layer().qweight.device)
-        else:
-            self.to(self.get_base_layer().weight.device)
+        self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
     def reset_lora_parameters(self, adapter_name):
         if adapter_name in self.lora_A.keys():
-            nn.init.normal_(self.lora_E[adapter_name], mean=0.0, std=0.02)
+            nn.init.zeros_(self.lora_E[adapter_name])
             nn.init.normal_(self.lora_A[adapter_name], mean=0.0, std=0.02)
             nn.init.normal_(self.lora_B[adapter_name], mean=0.0, std=0.02)
 

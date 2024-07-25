@@ -54,6 +54,15 @@ lora_config = LoraConfig(init_lora_weights="pissa_niter_[number of iters]", ...)
 ```
 For detailed instruction on using PiSSA, please follow [these instructions](https://github.com/fxmeng/peft/tree/main/examples/pissa_finetuning).
 
+### OLoRA
+[OLoRA](https://arxiv.org/abs/2406.01775) utilizes QR decomposition to initialize the LoRA adapters. OLoRA translates the base weights of the model by a factor of their QR decompositions, i.e., it mutates the weights before performing any training on them. This approach significantly improves stability, accelerates convergence speed, and ultimately achieves superior performance.
+
+You just need to pass a single additional option to use OLoRA:
+```python
+from peft import LoraConfig
+config = LoraConfig(init_lora_weights="olora", ...)
+```
+For more advanced usage, please refer to our [documentation](https://github.com/huggingface/peft/tree/main/examples/olora_finetuning).
 ### LoftQ
 
 #### Standard approach
@@ -113,6 +122,22 @@ from peft import LoraConfig
 config = LoraConfig(use_dora=True, ...)
 ```
 
+If parts of the model or the DoRA adapter are offloaded to CPU you can get a significant speedup at the cost of some temporary (ephemeral) VRAM overhead by using `ephemeral_gpu_offload=True` in `config.runtime_config`.
+
+```py
+from peft import LoraConfig, LoraRuntimeConfig
+
+config = LoraConfig(use_dora=True, runtime_config=LoraRuntimeConfig(ephemeral_gpu_offload=True), ...)
+```
+
+A `PeftModel` with a DoRA adapter can also be loaded with `ephemeral_gpu_offload=True` flag using the `from_pretrained` method as well as the `load_adapter` method.
+
+```py
+from peft import PeftModel
+
+model = PeftModel.from_pretrained(base_model, peft_model_id, ephemeral_gpu_offload=True)
+```
+
 #### Caveats
 
 - DoRA only supports linear and Conv2d layers at the momement.
@@ -140,9 +165,17 @@ Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a 
 [Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
 [adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
 
-## Merge adapters
+## Merge LoRA weights into the base model
 
 While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA adapter. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model. This allows you to use the newly merged model as a standalone model. The [`~LoraModel.merge_and_unload`] function doesn't keep the adapter weights in memory.
+
+Below is a diagram that explains the intuition of LoRA adapter merging:
+
+<div class="flex justify-center">
+    <img src="https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/peft/lora_diagram.png"/>
+</div>
+
+We show in the snippets below how to run that using PEFT.
 
 ```py
 from transformers import AutoModelForCausalLM
