@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from __future__ import annotations
-
+from logging import getLogger
 import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
@@ -23,7 +23,7 @@ from torch import nn
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
-
+logger = getLogger(__name__)
 @dataclass
 class LoraRuntimeConfig:
     """
@@ -323,6 +323,8 @@ class LoraConfig(PeftConfig):
         return rv
 
     def __post_init__(self):
+        logger.info(f"POST INIT IN {self.__class__}")
+        
         self.peft_type = PeftType.LORA
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
