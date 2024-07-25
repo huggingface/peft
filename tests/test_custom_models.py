@@ -3269,6 +3269,18 @@ class TestMixedAdapterBatches:
         inputs = {"X": torch.arange(270).view(6, 5, 3, 3).to(self.torch_device)}
         self.run_checks(peft_model, inputs)
 
+    def test_mixed_adapter_batches_mha_raises(self):
+        base_model = ModelMha().to(self.torch_device).eval()
+        config0 = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["mha"], r=16, init_lora_weights=False)
+        peft_model = get_peft_model(base_model, config0, "adapter0").eval()
+        peft_model.add_adapter("adapter1", config1)
+
+        inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
+        msg = "lora.MultiheadAttention does not support mixed adapter batches"
+        with pytest.raises(TypeError, match=msg):
+            self.run_checks(peft_model, inputs)
+
     def test_mixed_adapter_batches_lora_length_mismatch_raises(self, mlp_lora):
         inputs = {
             "X": torch.arange(90).view(-1, 10).to(self.torch_device),

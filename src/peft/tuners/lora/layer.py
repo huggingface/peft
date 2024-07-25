@@ -1230,8 +1230,14 @@ class MultiheadAttention(nn.Module, LoraLayer):
 
         return output_tensor
 
+    def _check_forward_args(self, x, *args, **kwargs):
+        if "adapter_names" in kwargs:
+            raise TypeError(f"lora.{self.__class__.__name__} does not support mixed adapter batches.")
+        super()._check_forward_args(x, *args, **kwargs)
+
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
         previous_dtype = x.dtype
+        self._check_forward_args(x, *args, **kwargs)
 
         if self.disable_adapters:
             if self.merged:
