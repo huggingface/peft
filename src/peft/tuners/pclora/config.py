@@ -2,9 +2,6 @@ from dataclasses import dataclass, field
 from peft.tuners.lora.config import LoraConfig
 from peft.utils.peft_types import PeftType
 
-from logging import getLogger
-
-logger = getLogger(__name__)
 @dataclass
 class PCLoraConfig(LoraConfig):
     decay_schedule: str = field(default="linear", metadata={"help": "Decay schedule for LoRA."})
@@ -16,4 +13,3 @@ class PCLoraConfig(LoraConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-        logger.info(f"PEFT after post_init in {PCLoraConfig} type: {self.peft_type}")
