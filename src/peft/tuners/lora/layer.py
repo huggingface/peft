@@ -1083,11 +1083,15 @@ class MultiheadAttention(nn.Module, LoraLayer):
         lora_dropout: float = 0.0,
         init_lora_weights: Union[bool, str] = True,
         use_rslora: bool = False,
+        use_dora: bool = False,
         **kwargs,
     ) -> None:
         # TODO work with separate weights
         if not base_layer._qkv_same_embed_dim:
             raise ValueError(f"Only same embed for query/key/value is supported as of now for {self.__class__}.")
+        if use_dora:
+            # TODO: probably not so hard to implement
+            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
 
         super().__init__()
         LoraLayer.__init__(self, base_layer, **kwargs)
@@ -1105,6 +1109,7 @@ class MultiheadAttention(nn.Module, LoraLayer):
                 lora_dropout=lora_dropout,
                 init_lora_weights=init_lora_weights,
                 use_rslora=use_rslora,
+                use_dora=use_dora,
                 **kwargs,
             )
         else:
