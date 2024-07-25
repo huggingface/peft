@@ -71,6 +71,5 @@ class PCLoraModel(LoraModel):
                 
     @staticmethod
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
-        my_logger.info(f"Creating new PCLoRALayer with config: {lora_config}")
         new_module = PCLoRALayer(target, adapter_name, **kwargs)
         return new_module
