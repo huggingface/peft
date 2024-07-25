@@ -13,11 +13,13 @@
 # limitations under the License.
 
 import inspect
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
 
 from .peft_model import PeftConfig, PeftModel
+from .tuners.lora.layer import LoraLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -146,3 +148,20 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
         is_peft_model = False
 
     return is_peft_model
+
+
+@contextmanager
+def set_adapter_scale(model, alpha):
+    # 1. TODO: Check whether scaling is prohibited on model
+
+    # 2. Modify scaling values
+    original_scaling = {}
+    for module in model.modules():
+        if isinstance(module, LoraLayer):
+            original_scaling[module] = module.scaling.copy()
+            module.scaling = {k: v * alpha for k, v in module.scaling.items()}
+    yield
+
+    # 3. Restore original scaling values after exiting the context
+    for module, scaling in original_scaling.items():
+        module.scaling = scaling

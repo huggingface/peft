@@ -13,10 +13,12 @@
 # limitations under the License.
 
 
-from transformers import AutoModelForCausalLM
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import LoraConfig, get_peft_model
-from peft.helpers import check_if_peft_model
+from peft import AutoPeftModelForCausalLM, LoraConfig, get_peft_model
+from peft.helpers import check_if_peft_model, set_adapter_scale
+from peft.tuners.lora.layer import LoraLayer
 
 
 class TestCheckIsPeftModel:
@@ -66,3 +68,51 @@ class TestCheckIsPeftModel:
         # with adapter name
         result = check_if_peft_model(tmp_path / "peft-gpt2-other" / "other")
         assert result is True
+
+    def test_set_adapter_scale(self):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Get the PeftModel
+        model = AutoPeftModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora")
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+
+        # Prepare inputs
+        input_prompt = "Preheat the oven to 350 degrees"
+        inputs = tokenizer(input_prompt, return_tensors="pt")
+
+        # Get logits before scaling
+        with torch.no_grad():
+            inputs = inputs.to(device)
+            model = model.to(device)
+            logits_before_scaling = model(**inputs).logits
+
+        # Store the scale of the lora layers
+        scales_before_scaling = scale_from_modules(model)
+
+        with set_adapter_scale(model=model, alpha=0.5):
+            # Check for scaling
+            scales_during_scaling = scale_from_modules(model)
+            for key in scales_before_scaling.keys():
+                assert scales_before_scaling[key] != scales_during_scaling[key]
+
+            # Generate logits after scaling
+            with torch.no_grad():
+                inputs = inputs.to(device)
+                model = model.to(device)
+                logits_after_scaling = model(**inputs).logits
+
+            assert torch.allclose(logits_before_scaling, logits_after_scaling)
+
+        # Check for restored sclaes
+        scales_after_scaling = scale_from_modules(model)
+        for key in scales_before_scaling.keys():
+            assert scales_before_scaling[key] == scales_after_scaling[key]
+
+
+def scale_from_modules(model):
+    layer_to_scale_map = {}
+    for name, module in model.named_modules():
+        if isinstance(module, LoraLayer):
+            layer_to_scale_map[name] = module.scaling
+
+    return layer_to_scale_map
