@@ -95,18 +95,26 @@ class TestCheckIsPeftModel:
             for key in scales_before_scaling.keys():
                 assert scales_before_scaling[key] != scales_during_scaling[key]
 
-            # Generate logits after scaling
+            # Generate logits during scaling
             with torch.no_grad():
                 inputs = inputs.to(device)
                 model = model.to(device)
-                logits_after_scaling = model(**inputs).logits
+                logits_during_scaling = model(**inputs).logits
 
-            assert torch.allclose(logits_before_scaling, logits_after_scaling)
+            assert torch.allclose(logits_before_scaling, logits_during_scaling)
 
         # Check for restored sclaes
         scales_after_scaling = scale_from_modules(model)
         for key in scales_before_scaling.keys():
             assert scales_before_scaling[key] == scales_after_scaling[key]
+
+        # Get logits after scaling
+        with torch.no_grad():
+            inputs = inputs.to(device)
+            model = model.to(device)
+            logits_after_scaling = model(**inputs).logits
+
+        assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
 
 def scale_from_modules(model):
