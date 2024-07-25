@@ -23,6 +23,7 @@ from enum import Enum
 from functools import partial, reduce
 from itertools import chain
 from typing import Literal, Optional
+from logging import getLogger
 
 import torch
 from torch import nn
@@ -55,6 +56,7 @@ from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
 from .tp_layer import dispatch_megatron
 
+logger = getLogger(__name__)
 
 def _adapter_names_pre_forward_hook(target, args, kwargs, adapter_names):
     # pre-forward hook to inject the adapter_names argument when using mixed adapter batches inference
@@ -179,6 +181,9 @@ class LoraModel(BaseTuner):
         parent,
         current_key,
     ):
+        
+        logger.info(f"Create and replace from original peft lora model")
+        
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 

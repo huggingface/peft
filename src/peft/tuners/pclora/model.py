@@ -1,12 +1,15 @@
 from typing import Dict, Union
-
 import numpy as np
 import torch as to
 from loguru import logger
 from peft.tuners.lora import LoraModel, LoraLayer
 from peft.tuners.pclora.layer import PCLoRALayer
 from peft.tuners.lora.config import LoraConfig
+from peft.tuners.lora.layer import BaseTunerLayer
 from transformers.modeling_outputs import CausalLMOutput, CausalLMOutputWithPast
+from src.utils.logging import setup_logger
+
+logger = setup_logger(__name__)
 
 class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
     feature_distillation_loss: to.FloatTensor = None
@@ -68,3 +71,10 @@ class PCLoraModel(LoraModel):
         for name, module in self.model.named_modules():
             if isinstance(module, LoraLayer) or isinstance(module, PCLoRALayer):
                 yield name, module
+                
+    @staticmethod
+    def _create_new_module(lora_config, adapter_name, target, **kwargs):
+        logger.info(f"Creating new PCLoRALayer with config: {lora_config}")
+        kwargs.update(lora_config)
+        new_module = PCLoRALayer(target, adapter_name, **kwargs)
+        return new_module

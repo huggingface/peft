@@ -428,6 +428,7 @@ class BaseTuner(nn.Module, ABC):
             self.targeted_module_names.append(key)
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
+            logger.info(f"Base Tuner: Create and replace with adapter: {adapter_name} for module: {key} and Peft Config: {peft_config}")
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         # Handle X-LoRA case.
