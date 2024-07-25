@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
+from logging import getLogger
 
 import packaging.version
 import torch
@@ -102,6 +103,8 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.PCLORA: PCLoraModel
 }
 
+
+logger = getLogger(__name__)
 
 class PeftModel(PushToHubMixin, torch.nn.Module):
     """
@@ -311,6 +314,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 adapter_name=adapter_name,
                 save_embedding_layers=save_embedding_layers,
             )
+            logger.info(f"SAVING adapter {adapter_name} to {save_directory}. Saved modules: {list(output_state_dict.keys())}")
+            
             output_dir = os.path.join(save_directory, adapter_name) if adapter_name != "default" else save_directory
             os.makedirs(output_dir, exist_ok=True)
 

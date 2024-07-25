@@ -73,7 +73,7 @@ def get_peft_model_state_dict(
         state_dict = model.state_dict()
 
     # TUNER SPECIFIC CODE
-    if config.peft_type in (PeftType.LORA, PeftType.ADALORA):
+    if config.peft_type in (PeftType.LORA, PeftType.ADALORA, PeftType.PCLORA):
         # to_return = lora_state_dict(model, bias=model.peft_config.bias)
         # adapted from `https://github.com/microsoft/LoRA/blob/main/loralib/utils.py`
         # to be used directly with the state dict which is necessary when using DeepSpeed or FSDP
@@ -321,6 +321,7 @@ def set_peft_model_state_dict(
         PeftType.VERA,
         PeftType.FOURIERFT,
         PeftType.HRA,
+        PeftType.PCLORA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -336,6 +337,7 @@ def set_peft_model_state_dict(
             PeftType.VERA: "vera_lambda_",
             PeftType.FOURIERFT: "fourierft_",
             PeftType.HRA: "hra_",
+            PeftType.PCLORA: "lora_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
