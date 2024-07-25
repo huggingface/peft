@@ -837,8 +837,14 @@ class Conv2d(nn.Module, LoraLayer):
         kernel_size = base_layer.kernel_size
         stride = base_layer.stride
         padding = base_layer.padding
+
         self.lora_A[adapter_name] = nn.Conv2d(self.in_features, r, kernel_size, stride, padding, bias=False)
-        self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
+
+        if use_dora: # ensures correct dimensions for depth-wise convolutional layers
+            self.lora_B[adapter_name] = nn.Conv2d(r, int(self.out_features / self.base_layer.groups), (1, 1), (1, 1), bias=False)
+        else:
+            self.lora_B[adapter_name] = nn.Conv2d(r, self.out_features, (1, 1), (1, 1), bias=False)
+
         if use_rslora:
             self.scaling[adapter_name] = lora_alpha / math.sqrt(r)
         else:
