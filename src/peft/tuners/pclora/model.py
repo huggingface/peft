@@ -1,16 +1,17 @@
 from typing import Dict, Union
+from dataclasses import dataclass
 import numpy as np
 import torch as to
 from loguru import logger
 from peft.tuners.lora import LoraModel, LoraLayer
 from peft.tuners.pclora.layer import PCLoRALayer
 from peft.tuners.lora.config import LoraConfig
-from peft.tuners.lora.layer import BaseTunerLayer
 from transformers.modeling_outputs import CausalLMOutput, CausalLMOutputWithPast
 from src.utils.logging import setup_logger
 
 logger = setup_logger(__name__)
 
+@dataclass
 class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
     feature_distillation_loss: to.FloatTensor = None
     
