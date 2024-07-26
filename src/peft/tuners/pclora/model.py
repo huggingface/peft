@@ -60,8 +60,8 @@ class PCLoraModel(LoraModel):
         student_out.loss += self._distillation_loss_lambda * ft_dist_loss
         
         student_out = PCLoRACausalLLMOutput(**student_out, feature_distillation_loss=ft_dist_loss.detach())
-        my_logger.info(f"Student Out Loss: {student_out.loss}")
-        my_logger.info(f"Student Out Feature Distillation Loss: {ft_dist_loss}")
+        my_logger.debug(f"Student Out Loss: {student_out.loss}")
+        my_logger.debug(f"Student Out Feature Distillation Loss: {ft_dist_loss}")
         return student_out 
         
     def _get_lora_modules(self):
