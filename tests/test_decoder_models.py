@@ -42,6 +42,7 @@ PEFT_DECODER_MODELS_TO_TEST = [
     "hf-internal-testing/tiny-random-GPTJForCausalLM",
     "hf-internal-testing/tiny-random-GPTBigCodeForCausalLM",
     "trl-internal-testing/tiny-random-LlamaForCausalLM",
+    "peft-internal-testing/tiny-dummy-qwen2",
 ]
 
 FULL_GRID = {
