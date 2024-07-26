@@ -1069,7 +1069,6 @@ class TestLoraInitialization:
         model(inputs)
         model.load_state_dict(restore_state_dict)
 
-
     def test_mha_load_init_model_first_with_workaround(self, mha_cls):
         import peft
 
