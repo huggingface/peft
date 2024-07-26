@@ -323,9 +323,13 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
         peft_model.save_pretrained(
             tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        assert peft_config_keys_before == peft_config_keys_after
+
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -597,9 +601,13 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
         peft_model.save_pretrained(
             tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        assert peft_config_keys_before == peft_config_keys_after
+
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -1098,18 +1106,62 @@ class TestPromptTuningInitialization:
         with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', prompt_tuning_init_text can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", tokenizer_name_or_path="t5-base")
 
+
+class TestVeraInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
     def test_vera_mixing_save_projection_raises(self):
         # it is unclear what the right thing to do would be if some adapters save the projection weights and some don't
         # so we better raise an error
 
-        config0 = VeraConfig(target_modules="linear", init_weights=False, save_projection=True)
+        config0 = VeraConfig(target_modules=["lin0"], init_weights=False, save_projection=True)
         model = self.get_model()
         model = get_peft_model(model, config0)
-        config1 = VeraConfig(target_modules="linear", init_weights=False, save_projection=False)
+        config1 = VeraConfig(target_modules=["lin0"], init_weights=False, save_projection=False)
         msg = re.escape(
             "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
             "[False, True]"
         )
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+    def test_vera_add_second_adapter_with_incompatible_input_shape(self):
+        config0 = VeraConfig(target_modules=["lin0"], r=8)
+        config1 = VeraConfig(target_modules=["lin1"])
+
+        base_model = self.get_model()
+        lin0_in_feat = base_model.lin0.in_features
+        lin1_in_feat = base_model.lin1.in_features
+        model = get_peft_model(base_model, config0)
+        # not full message but enough to identify the error
+        msg = f"vera_A has a size of {lin0_in_feat} but {lin1_in_feat} or greater is required"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+    def test_vera_add_second_adapter_with_higher_rank(self):
+        rank0 = 123
+        rank1 = 456
+        config0 = VeraConfig(target_modules=["lin0"], r=rank0)
+        # second adapter has higher rank
+        config1 = VeraConfig(target_modules=["lin0"], r=rank1)
+
+        model = get_peft_model(self.get_model(), config0)
+        # not full message but enough to identify the error
+        msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
 
