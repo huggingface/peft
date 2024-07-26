@@ -1033,6 +1033,73 @@ class TestLoraInitialization:
         with pytest.raises(ValueError, match="DoRA does not support megatron_core"):
             LoraConfig(target_modules=["linear"], use_dora=True, megatron_config=megatron_config)
 
+    @pytest.fixture
+    def mha_cls(self):
+        class ModelMha(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mha = nn.MultiheadAttention(10, 2)
+                self.lin0 = nn.Linear(10, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float()
+                X, _ = self.mha(X, X, X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        return ModelMha
+
+    @pytest.mark.xfail(strict=True)
+    def test_mha_load_init_model_first(self, mha_cls):
+        # this test fails as it currently requires a workaround to pass, see test below
+        # https://github.com/huggingface/peft/pull/1324#issuecomment-2252473980
+        inputs = torch.rand(10, 10, 10)
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        restore_state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+
+        del model
+
+        model = mha_cls()
+        # inferencing with PEFT model first is necessary to trigger the error in load_state_dict
+        model = get_peft_model(model, config)
+        model(inputs)
+        model.load_state_dict(restore_state_dict)
+
+
+    def test_mha_load_init_model_first_with_workaround(self, mha_cls):
+        import peft
+
+        inputs = torch.rand(10, 10, 10)
+        model = mha_cls()
+        config = LoraConfig(target_modules=["mha"], init_lora_weights=False)
+        model = get_peft_model(model, config).eval()
+        with torch.inference_mode():
+            output_before = model(inputs)
+            restore_state_dict = {k: v.detach().cpu() for k, v in model.state_dict().items()}
+
+        del model
+
+        model = mha_cls()
+        model = get_peft_model(model, config)
+        model(inputs)
+
+        # Workaround, see test above. Unfortunately, I could not find a way to hook into load_state_dict to
+        # automatically call _restore_weights, since load_state_dict is not recursive, so the PEFT MultiheadAttention is
+        # never directly invoked
+        for module in model.modules():
+            if isinstance(module, peft.tuners.lora.layer.MultiheadAttention):
+                module._restore_weights()
+
+        model.load_state_dict(restore_state_dict)
+        with torch.inference_mode():
+            output_after = model(inputs)
+
+        assert torch.allclose(output_before, output_after)
+
 
 class TestAdaLoraInitialization:
     torch_device = infer_device()
