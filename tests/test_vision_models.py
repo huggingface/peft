@@ -16,13 +16,28 @@
 # and on stable diffusion models. Instead, this file contains specific tests for bugs that have been found in the past.
 import gc
 
+import numpy as np
 import pytest
 import torch
 from datasets import load_dataset
 from safetensors.torch import load_file
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    AutoProcessor,
+    LlavaForConditionalGeneration,
+)
 
-from peft import HRAConfig, LoHaConfig, LoKrConfig, LoraConfig, OFTConfig, PeftModel, get_peft_model
+from peft import (
+    HRAConfig,
+    LoHaConfig,
+    LoKrConfig,
+    LoraConfig,
+    OFTConfig,
+    PeftModel,
+    PrefixTuningConfig,
+    get_peft_model,
+)
 
 
 CONFIGS = {
@@ -36,6 +51,28 @@ CONFIGS = {
     # > Error in forward_fast_block_diag_cuda_kernel: an illegal memory access was encountered
     # "boft": BOFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], boft_block_size=2),
 }
+
+# Ensure that models like Llava that pass past_key_values automatically do not fail, see #1938
+class TestPastKV:
+    def test_past_kv(self):
+        model_id = "trl-internal-testing/tiny-random-LlavaForConditionalGeneration"
+        prompt = "USER: <image>\nWhat are these?\nASSISTANT:"
+
+        # prepare model and inputs
+        model = LlavaForConditionalGeneration.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
+        )
+        processor = AutoProcessor.from_pretrained(model_id)
+        raw_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
+        inputs = processor(prompt, raw_image, return_tensors='pt').to(torch.float16)
+
+        # get peft model
+        peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
+        model.language_model = get_peft_model(model.language_model, peft_config)
+        # check that this does not raise
+        model(**inputs, output_hidden_states = True)
 
 
 class TestResnet:
