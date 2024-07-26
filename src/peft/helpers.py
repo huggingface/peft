@@ -152,6 +152,32 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 
 @contextmanager
 def set_adapter_scale(model, alpha):
+    """
+    Context manager to temporarily set the scaling of LoraLayer modules in a model.
+
+    This context manager iterates over the modules of the given model and scales
+    the `scaling` attribute of `LoraLayer` instances by the specified `alpha` factor.
+    The original scaling values are restored when the context manager exits.
+
+    Args:
+        model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
+        alpha (float): The scaling factor to be applied. Must be of type float.
+
+    Raises:
+        TypeError: If `alpha` is not of type float.
+        ValueError: If the model does not contain any `LoraLayer` instances,
+                    indicating that the model does not support scaling.
+
+    Yields:
+        None: This context manager does not yield any values.
+
+    Example:
+        >>> model = ModelWithLoraLayer()
+        >>> alpha = 0.5
+        >>> with set_adapter_scale(model, alpha):
+        >>>     # Perform operations with the scaled model
+        >>> # The original scaling values are restored here
+    """
     # initialize the flag with false
     scale_changed = False
 
