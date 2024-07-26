@@ -1298,15 +1298,13 @@ class MultiheadAttention(nn.Module, LoraLayer):
         base_layer = self.get_base_layer()
         weight = base_layer.in_proj_weight
         del base_layer.in_proj_weight
-        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data))
-        base_layer.in_proj_weight.requires_grad = weight.requires_grad
+        base_layer.register_parameter("in_proj_weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
 
         # out_proj
         base_layer = base_layer.out_proj.get_base_layer()
         weight = base_layer.weight
         del base_layer.weight
-        base_layer.register_parameter("weight", nn.Parameter(weight.data))
-        base_layer.weight.requires_grad = weight.requires_grad
+        base_layer.register_parameter("weight", nn.Parameter(weight.data, requires_grad=weight.requires_grad))
 
     def state_dict(self, *args, **kwargs):
         self._restore_weights()
