@@ -52,6 +52,7 @@ CONFIGS = {
     # "boft": BOFTConfig(target_modules=["convolution"], modules_to_save=["classifier", "normalization"], boft_block_size=2),
 }
 
+
 # Ensure that models like Llava that pass past_key_values automatically do not fail, see #1938
 class TestPastKV:
     def test_past_kv(self):
@@ -66,13 +67,13 @@ class TestPastKV:
         )
         processor = AutoProcessor.from_pretrained(model_id)
         raw_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-        inputs = processor(prompt, raw_image, return_tensors='pt').to(torch.float16)
+        inputs = processor(prompt, raw_image, return_tensors="pt").to(torch.float16)
 
         # get peft model
         peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
         model.language_model = get_peft_model(model.language_model, peft_config)
         # check that this does not raise
-        model(**inputs, output_hidden_states = True)
+        model(**inputs, output_hidden_states=True)
 
 
 class TestResnet:

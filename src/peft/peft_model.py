@@ -1610,9 +1610,7 @@ class PeftModelForCausalLM(PeftModel):
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
             # overwrite past_kv in kwargs
             kwargs["past_key_values"] = self.get_prompt(batch_size)
-            return self.base_model(
-                input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs
-            )
+            return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
