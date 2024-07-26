@@ -280,7 +280,11 @@ def _find_mismatched_keys(
 
 
 def set_peft_model_state_dict(
-    model, peft_model_state_dict, adapter_name="default", ignore_mismatched_sizes: bool = False
+    model,
+    peft_model_state_dict,
+    adapter_name="default",
+    ignore_mismatched_sizes: bool = False,
+    init_empty: bool = False,
 ):
     """
     Set the state dict of the Peft model.
@@ -392,7 +396,11 @@ def set_peft_model_state_dict(
     peft_model_state_dict, mismatched_keys = _find_mismatched_keys(
         model, peft_model_state_dict, ignore_mismatched_sizes=ignore_mismatched_sizes
     )
-    load_result = model.load_state_dict(peft_model_state_dict, strict=False)
+    if init_empty:
+        load_result = model.load_state_dict(peft_model_state_dict, strict=False, assign=True)
+    else:
+        load_result = model.load_state_dict(peft_model_state_dict, strict=False)
+
     if config.is_prompt_learning:
         model.prompt_encoder[adapter_name].embedding.load_state_dict(
             {"weight": peft_model_state_dict["prompt_embeddings"]}, strict=True

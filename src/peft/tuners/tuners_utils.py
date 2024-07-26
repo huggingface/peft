@@ -19,10 +19,11 @@ import os
 import re
 import warnings
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, Union
 
 import torch
+from accelerate import init_empty_weights
 from accelerate.hooks import AlignDevicesHook
 from accelerate.utils import named_module_tensors, offload_state_dict
 from torch import nn
@@ -363,7 +364,9 @@ class BaseTuner(nn.Module, ABC):
         """
         pass
 
-    def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
+    def inject_adapter(
+        self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True, init_empty: bool = False
+    ) -> None:
         r"""
         Creates adapter layers and replaces the target modules with the adapter layers. This method is called under the
         hood by `peft.mapping.get_peft_model` if a non-prompt tuning adapter class is passed.
@@ -428,7 +431,9 @@ class BaseTuner(nn.Module, ABC):
             self.targeted_module_names.append(key)
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
-            self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+            ctx = init_empty_weights if init_empty else nullcontext
+            with ctx():
+                self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
         # Handle X-LoRA case.
         if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
@@ -705,6 +710,8 @@ class BaseTunerLayer(ABC):
                 # no break encountered: could not determine the device
                 return
 
+        meta = torch.device("meta")
+
         # loop through all potential adapter layers and move them to the device of the base layer; be careful to only
         # move this specific adapter to the device, as the other adapters could be on different devices
         # see #1639
@@ -714,6 +721,9 @@ class BaseTunerLayer(ABC):
                 continue
             if adapter_name not in adapter_layer:
                 continue
+            if any(p.device == meta for p in adapter_layer.parameters()):
+                continue
+
             if weight.dtype.is_floating_point or weight.dtype.is_complex:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:

@@ -18,7 +18,7 @@ import collections
 import inspect
 import os
 import warnings
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
@@ -26,7 +26,7 @@ from typing import Any, Literal, Optional, Union
 import packaging.version
 import torch
 import transformers
-from accelerate import dispatch_model, infer_auto_device_map
+from accelerate import dispatch_model, infer_auto_device_map, init_empty_weights
 from accelerate.hooks import AlignDevicesHook, add_hook_to_module, remove_hook_from_submodules
 from accelerate.utils import get_balanced_memory, named_module_tensors
 from huggingface_hub import HfFileSystem, ModelCard, ModelCardData, hf_hub_download
@@ -135,6 +135,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         peft_config: PeftConfig,
         adapter_name: str = "default",
         autocast_adapter_dtype: bool = True,
+        init_empty: bool = False,
     ) -> None:
         super().__init__()
         self.modules_to_save = None
@@ -148,11 +149,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         if self._is_prompt_learning:
             self._peft_config = {adapter_name: peft_config}
             self.base_model = model
-            self.add_adapter(adapter_name, peft_config)
+            self.add_adapter(adapter_name, peft_config, init_empty=init_empty)
         else:
             self._peft_config = None
             cls = PEFT_TYPE_TO_MODEL_MAPPING[peft_config.peft_type]
-            self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
+            ctx = init_empty_weights if init_empty else nullcontext
+            with ctx():
+                self.base_model = cls(model, {adapter_name: peft_config}, adapter_name)
             self.set_additional_trainable_modules(peft_config, adapter_name)
 
         if hasattr(self.base_model, "_cast_adapter_dtype"):
@@ -406,6 +409,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         config: Optional[PeftConfig] = None,
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
+        init_empty: bool = False,
         **kwargs: Any,
     ) -> PeftModel:
         r"""
@@ -536,14 +540,21 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                         raise ValueError("If model_id is a local path, then `adapters` must be passed in kwargs.")
 
         if config.task_type not in MODEL_TYPE_TO_PEFT_MODEL_MAPPING.keys():
-            model = cls(model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
+            model = cls(
+                model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype, init_empty=init_empty
+            )
         else:
             model = MODEL_TYPE_TO_PEFT_MODEL_MAPPING[config.task_type](
-                model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype
+                model, config, adapter_name, autocast_adapter_dtype=autocast_adapter_dtype, init_empty=init_empty
             )
 
         model.load_adapter(
-            model_id, adapter_name, is_trainable=is_trainable, autocast_adapter_dtype=autocast_adapter_dtype, **kwargs
+            model_id,
+            adapter_name,
+            is_trainable=is_trainable,
+            autocast_adapter_dtype=autocast_adapter_dtype,
+            init_empty=init_empty,
+            **kwargs,
         )
 
         return model
@@ -832,7 +843,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             else self.base_model.model
         )
 
-    def add_adapter(self, adapter_name: str, peft_config: PeftConfig) -> None:
+    def add_adapter(self, adapter_name: str, peft_config: PeftConfig, init_empty: bool = False) -> None:
         """
         Add an adapter to the model based on the passed configuration.
 
@@ -869,7 +880,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 self.base_model.add_adapter(adapter_name, peft_config)
             else:
                 self.peft_config[adapter_name] = peft_config
-                self.base_model.inject_adapter(self.base_model.model, adapter_name)
+                self.base_model.inject_adapter(self.base_model.model, adapter_name, init_empty=init_empty)
         except Exception:  # something went wrong, roll back
             if adapter_name in self.peft_config:
                 del self.peft_config[adapter_name]
@@ -1057,6 +1068,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         torch_device: Optional[str] = None,
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
+        init_empty: bool = False,  # TODO could be True since we're loading anyway?
         **kwargs: Any,
     ):
         """
@@ -1108,14 +1120,18 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 raise ValueError("Cannot set a prompt learning adapter to trainable when loading pretrained adapter.")
             else:
                 peft_config.inference_mode = not is_trainable
-            self.add_adapter(adapter_name, peft_config)
+            self.add_adapter(adapter_name, peft_config, init_empty=init_empty)
 
         adapters_weights = load_peft_weights(model_id, device=torch_device, **hf_hub_download_kwargs)
 
         # load the weights into the model
         ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
         load_result = set_peft_model_state_dict(
-            self, adapters_weights, adapter_name=adapter_name, ignore_mismatched_sizes=ignore_mismatched_sizes
+            self,
+            adapters_weights,
+            adapter_name=adapter_name,
+            ignore_mismatched_sizes=ignore_mismatched_sizes,
+            init_empty=init_empty,
         )
         if (
             (getattr(self, "hf_device_map", None) is not None)
