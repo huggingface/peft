@@ -152,16 +152,36 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 
 @contextmanager
 def set_adapter_scale(model, alpha):
-    # 1. TODO: Check whether scaling is prohibited on model
+    # initialize the flag with false
+    scale_changed = False
 
-    # 2. Modify scaling values
-    original_scaling = {}
-    for module in model.modules():
-        if isinstance(module, LoraLayer):
-            original_scaling[module] = module.scaling.copy()
-            module.scaling = {k: v * alpha for k, v in module.scaling.items()}
-    yield
+    try:
+        # check if alpha has a valid data type
+        if not isinstance(alpha, float):
+            raise TypeError(f"{alpha} should be of type float, got {type(alpha)}")
 
-    # 3. Restore original scaling values after exiting the context
-    for module, scaling in original_scaling.items():
-        module.scaling = scaling
+        # iterate on the model's modules and grab the original scaling attribute
+        # from the lora layers if present
+        original_scaling = {}
+        for module in model.modules():
+            if isinstance(module, LoraLayer):
+                original_scaling[module] = module.scaling.copy()
+                module.scaling = {k: v * alpha for k, v in module.scaling.items()}
+
+        # check whether scaling is prohibited on model
+        # the original scaling dictionary should be empty
+        # if there were no lora layers
+        # checking empty dictionary: https://stackoverflow.com/a/23177452/10319735
+        if not bool(original_scaling):
+            raise ValueError("model does not support scaling")
+
+        # change the flag to true since the scale has been changed
+        scale_changed = True
+        yield
+
+    finally:
+        # restore original scaling values after exiting the context
+        # only if the scale has been changed
+        if scale_changed and bool(original_scaling):
+            for module, scaling in original_scaling.items():
+                module.scaling = scaling

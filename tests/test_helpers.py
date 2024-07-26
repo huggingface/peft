@@ -13,10 +13,11 @@
 # limitations under the License.
 
 
+import pytest
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from peft import AutoPeftModelForCausalLM, LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model
 from peft.helpers import check_if_peft_model, set_adapter_scale
 from peft.tuners.lora.layer import LoraLayer
 
@@ -69,58 +70,98 @@ class TestCheckIsPeftModel:
         result = check_if_peft_model(tmp_path / "peft-gpt2-other" / "other")
         assert result is True
 
+
+class TestScalingAdapters:
+    def get_scale_from_modules(self, model):
+        layer_to_scale_map = {}
+        for name, module in model.named_modules():
+            if isinstance(module, LoraLayer):
+                layer_to_scale_map[name] = module.scaling
+
+        return layer_to_scale_map
+
     def test_set_adapter_scale(self):
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["k_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            init_lora_weights=False,
+        )
 
-        # Get the PeftModel
-        model = AutoPeftModelForCausalLM.from_pretrained("ybelkada/opt-350m-lora")
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+        model = get_peft_model(model, lora_config)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        inputs = tokenizer("hello world", return_tensors="pt")
 
-        # Prepare inputs
-        input_prompt = "Preheat the oven to 350 degrees"
-        inputs = tokenizer(input_prompt, return_tensors="pt")
-
-        # Get logits before scaling
         with torch.no_grad():
-            inputs = inputs.to(device)
-            model = model.to(device)
-            logits_before_scaling = model(**inputs).logits
+            logits_before_scaling = model(
+                **inputs,
+            ).logits
 
-        # Store the scale of the lora layers
-        scales_before_scaling = scale_from_modules(model)
+        scales_before_scaling = self.get_scale_from_modules(model)
 
         with set_adapter_scale(model=model, alpha=0.5):
-            # Check for scaling
-            scales_during_scaling = scale_from_modules(model)
+            scales_during_scaling = self.get_scale_from_modules(model)
             for key in scales_before_scaling.keys():
                 assert scales_before_scaling[key] != scales_during_scaling[key]
 
-            # Generate logits during scaling
             with torch.no_grad():
-                inputs = inputs.to(device)
-                model = model.to(device)
                 logits_during_scaling = model(**inputs).logits
 
-            assert torch.allclose(logits_before_scaling, logits_during_scaling)
+            assert not torch.allclose(logits_before_scaling, logits_during_scaling)
 
-        # Check for restored sclaes
-        scales_after_scaling = scale_from_modules(model)
+        scales_after_scaling = self.get_scale_from_modules(model)
         for key in scales_before_scaling.keys():
             assert scales_before_scaling[key] == scales_after_scaling[key]
 
-        # Get logits after scaling
         with torch.no_grad():
-            inputs = inputs.to(device)
-            model = model.to(device)
             logits_after_scaling = model(**inputs).logits
 
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
+    def test_wrong_scaling_datatype(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["k_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            init_lora_weights=False,
+        )
 
-def scale_from_modules(model):
-    layer_to_scale_map = {}
-    for name, module in model.named_modules():
-        if isinstance(module, LoraLayer):
-            layer_to_scale_map[name] = module.scaling
+        model = get_peft_model(model, lora_config)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        inputs = tokenizer("hello world", return_tensors="pt")
 
-    return layer_to_scale_map
+        with torch.no_grad():
+            logits_before_scaling = model(**inputs).logits
+
+        scales_before_scaling = self.get_scale_from_modules(model)
+
+        # we expect a type error here becuase of wrong datatpye of alpha
+        with pytest.raises(TypeError):
+            with set_adapter_scale(model=model, alpha="a"):
+                pass
+
+        scales_after_scaling = self.get_scale_from_modules(model)
+        for key in scales_before_scaling.keys():
+            assert scales_before_scaling[key] == scales_after_scaling[key]
+
+        with torch.no_grad():
+            logits_after_scaling = model(**inputs).logits
+
+        assert torch.allclose(logits_before_scaling, logits_after_scaling)
+
+    def test_not_lora_model(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+
+        # we expect a value error here because the model
+        # does not have lora layers
+        with pytest.raises(ValueError):
+            with set_adapter_scale(model=model, alpha=0.5):
+                pass
