@@ -62,12 +62,11 @@ class TestPastKV:
         # prepare model and inputs
         model = LlavaForConditionalGeneration.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
         )
         processor = AutoProcessor.from_pretrained(model_id)
         raw_image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-        inputs = processor(prompt, raw_image, return_tensors="pt").to(torch.float16)
+        inputs = processor(prompt, raw_image, return_tensors="pt")
 
         # get peft model
         peft_config = PrefixTuningConfig(task_type="CAUSAL_LM", num_virtual_tokens=20)
