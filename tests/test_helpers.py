@@ -166,3 +166,34 @@ class TestScalingAdapters:
         with pytest.raises(ValueError, match="scaling is only supported for models with `LoraLayer`s"):
             with set_adapter_scale(model=model, alpha=0.5):
                 pass
+
+    def test_no_scaling(self):
+        base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        inputs = tokenizer("hello world", return_tensors="pt")
+
+        base_model.eval()
+
+        with torch.no_grad():
+            logits_base_model = base_model(
+                **inputs,
+            ).logits
+
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["k_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            init_lora_weights=False,
+        )
+        lora_model = get_peft_model(base_model, lora_config)
+        lora_model.eval()
+
+        with set_adapter_scale(model=lora_model, alpha=0.0):
+            with torch.no_grad():
+                logits_lora_model = lora_model(
+                    **inputs,
+                ).logits
+
+        assert torch.allclose(logits_base_model, logits_lora_model)
