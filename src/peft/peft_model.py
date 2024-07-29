@@ -1608,10 +1608,9 @@ class PeftModelForCausalLM(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
-            return self.base_model(
-                input_ids=input_ids, inputs_embeds=inputs_embeds, past_key_values=past_key_values, **kwargs
-            )
+            # overwrite past_kv in kwargs
+            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1823,12 +1822,12 @@ class PeftModelForSeq2SeqLM(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
+            # overwrite past_kv in kwargs
+            kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(
                 input_ids=input_ids,
                 decoder_input_ids=decoder_input_ids,
                 decoder_inputs_embeds=decoder_inputs_embeds,
-                past_key_values=past_key_values,
                 **kwargs,
             )
         elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
@@ -2523,8 +2522,9 @@ class PeftModelForFeatureExtraction(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
-            return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
+            # overwrite past_kv in kwargs
+            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            return self.base_model(input_ids=input_ids, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
