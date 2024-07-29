@@ -168,46 +168,37 @@ def set_adapter_scale(model, alpha):
         ValueError: If the model does not contain any `LoraLayer` instances,
                     indicating that the model does not support scaling.
 
-    Yields:
-        None: This context manager does not yield any values.
-
     Example:
+
+    ```python
         >>> model = ModelWithLoraLayer()
         >>> alpha = 0.5
         >>> with set_adapter_scale(model, alpha):
         >>>     # Perform operations with the scaled model
         >>> # The original scaling values are restored here
+    ```
     """
-    # initialize the flag with false
-    scale_changed = False
+    # check if alpha has a valid data type
+    if not isinstance(alpha, float):
+        raise TypeError(f"{alpha} should be of type float, got {type(alpha)}")
 
+    # iterate on the model's modules and grab the original scaling attribute
+    # from the lora layers if present
+    original_scaling = {}
+    for module in model.modules():
+        if isinstance(module, LoraLayer):
+            original_scaling[module] = module.scaling.copy()
+            module.scaling = {k: v * alpha for k, v in module.scaling.items()}
+
+    # check whether scaling is prohibited on model
+    # the original scaling dictionary should be empty
+    # if there were no lora layers
+    if not original_scaling:
+        raise ValueError("scaling is only supported for models with `LoraLayer`s")
     try:
-        # check if alpha has a valid data type
-        if not isinstance(alpha, float):
-            raise TypeError(f"{alpha} should be of type float, got {type(alpha)}")
-
-        # iterate on the model's modules and grab the original scaling attribute
-        # from the lora layers if present
-        original_scaling = {}
-        for module in model.modules():
-            if isinstance(module, LoraLayer):
-                original_scaling[module] = module.scaling.copy()
-                module.scaling = {k: v * alpha for k, v in module.scaling.items()}
-
-        # check whether scaling is prohibited on model
-        # the original scaling dictionary should be empty
-        # if there were no lora layers
-        # checking empty dictionary: https://stackoverflow.com/a/23177452/10319735
-        if not bool(original_scaling):
-            raise ValueError("model does not support scaling")
-
-        # change the flag to true since the scale has been changed
-        scale_changed = True
         yield
 
     finally:
         # restore original scaling values after exiting the context
-        # only if the scale has been changed
-        if scale_changed and bool(original_scaling):
-            for module, scaling in original_scaling.items():
-                module.scaling = scaling
+        for module, scaling in original_scaling.items():
+            module.scaling = scaling

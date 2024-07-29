@@ -144,8 +144,9 @@ class TestScalingAdapters:
         scales_before_scaling = self.get_scale_from_modules(model)
 
         # we expect a type error here becuase of wrong datatpye of alpha
-        with pytest.raises(TypeError):
-            with set_adapter_scale(model=model, alpha="a"):
+        alpha = "a"
+        with pytest.raises(TypeError, match=f"{alpha} should be of type float, got {type(alpha)}"):
+            with set_adapter_scale(model=model, alpha=alpha):
                 pass
 
         scales_after_scaling = self.get_scale_from_modules(model)
@@ -162,6 +163,6 @@ class TestScalingAdapters:
 
         # we expect a value error here because the model
         # does not have lora layers
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="scaling is only supported for models with `LoraLayer`s"):
             with set_adapter_scale(model=model, alpha=0.5):
                 pass
