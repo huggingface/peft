@@ -1708,9 +1708,6 @@ class PeftModelForCausalLM(PeftModel):
                 prompts = prompts.to(inputs_embeds.dtype)
                 model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
                 model_kwargs["input_ids"] = None
-                if peft_config.peft_type == PeftType.PREFIX_TUNING:
-                    new_past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
-                    model_kwargs["past_key_values"] = new_past_key_values
 
         # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
         # passed in the forward pass to keep track of the position ids of the cache. We have to
