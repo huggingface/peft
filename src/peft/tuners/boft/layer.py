@@ -91,7 +91,6 @@ def get_fbd_cuda():
                 # build_directory='/tmp/'  # for debugging
             )
             # extra_cuda_cflags = ['-std=c++14', '-ccbin=$$(which gcc-7)']) # cuda10.2 is not compatible with gcc9. Specify gcc 7
-            import fbd_cuda
     except Exception as e:
         warnings.warn(f"Failed to load the CUDA extension: {e}, check if ninja is available.")
         warnings.warn("Setting boft_n_butterfly_factor to 1 to speed up the finetuning process.")
