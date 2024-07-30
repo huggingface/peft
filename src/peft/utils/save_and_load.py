@@ -459,7 +459,7 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
             filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
             use_safetensors = True
         except LocalEntryNotFoundError:
-            # Could not find safetensors, try pickle; if this also fails. It's fine to let the error be raised here, as
+            # Could not find safetensors, try pickle. If this also fails, it's fine to let the error be raised here, as
             # it means that the user tried to load a non-cached model in offline mode.
             hub_filename = get_hub_filename(use_safetensors=False)
             filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
