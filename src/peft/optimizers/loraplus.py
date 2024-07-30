@@ -82,6 +82,7 @@ def create_loraplus_optimizer(
         else:
             param_groups["groupA"][name] = param
 
+    kwargs["lr"] = lr
     loraplus_weight_decay = kwargs.pop("loraplus_weight_decay", 0.0)
     loraplus_lr_embedding = kwargs.pop("loraplus_lr_embedding", 1e-6)
 
