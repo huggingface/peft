@@ -36,6 +36,8 @@ class PCLoraModel(LoraModel):
     def update_lora(self, step: int, **kwargs) -> None:
         lambda_ft_distill = self._decay_schedule(step, self._q)
         
+        my_logger.debug(f"Decay Schedule: \n Lambda: {lambda_ft_distill} \n Step: {step} \n Q: {self._q}")
+        
         for name, module in self._get_lora_modules():
             module.update(lambda_ft_distill, **kwargs)
             
