@@ -17,6 +17,7 @@ import os
 import warnings
 from typing import Optional
 
+import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
@@ -452,7 +453,7 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     elif os.path.exists(os.path.join(path, WEIGHTS_NAME)):
         filename = os.path.join(path, WEIGHTS_NAME)
         use_safetensors = False
-    elif os.environ.get("HF_HUB_OFFLINE", 0) in {"1", "ON", "YES", "TRUE"}:  # same check as in hfh
+    elif huggingface_hub.constants.HF_HUB_OFFLINE:
         # if in offline mode, check if we can find the adapter file locally
         hub_filename = get_hub_filename(use_safetensors=True)
         try:
