@@ -15,6 +15,7 @@
 
 import pytest
 import torch
+from diffusers import StableDiffusionPipeline
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, get_peft_model
@@ -197,3 +198,50 @@ class TestScalingAdapters:
                 ).logits
 
         assert torch.allclose(logits_base_model, logits_lora_model)
+
+    def test_diffusers_pipeline(self):
+        model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
+        pipeline = StableDiffusionPipeline.from_pretrained(model_id)
+
+        text_encoder_kwargs = {
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": ["k_proj", "q_proj", "v_proj", "out_proj", "fc1", "fc2"],
+            "lora_dropout": 0.0,
+            "bias": "none",
+        }
+        unet_kwargs = {
+            "r": 8,
+            "lora_alpha": 32,
+            "target_modules": ["proj_in", "proj_out", "to_k", "to_q", "to_v", "to_out.0", "ff.net.0.proj", "ff.net.2"],
+            "lora_dropout": 0.0,
+            "bias": "none",
+        }
+
+        # Instantiate text_encoder adapter
+        config_text_encoder = LoraConfig(**text_encoder_kwargs)
+        pipeline.text_encoder = get_peft_model(pipeline.text_encoder, config_text_encoder)
+
+        # Instantiate unet adapter
+        config_unet = LoraConfig(**unet_kwargs)
+        pipeline.unet = get_peft_model(pipeline.unet, config_unet)
+
+        text_scales_before_scaling = self.get_scale_from_modules(pipeline.text_encoder)
+        unet_scales_before_scaling = self.get_scale_from_modules(pipeline.unet)
+
+        with set_adapter_scale(model=pipeline.text_encoder, alpha=0.5), set_adapter_scale(
+            model=pipeline.unet, alpha=0.5
+        ):
+            text_scales_during_scaling = self.get_scale_from_modules(pipeline.text_encoder)
+            unet_scales_during_scaling = self.get_scale_from_modules(pipeline.unet)
+            for key in text_scales_before_scaling.keys():
+                assert text_scales_before_scaling[key] != text_scales_during_scaling[key]
+            for key in unet_scales_before_scaling.keys():
+                assert unet_scales_before_scaling[key] != unet_scales_during_scaling[key]
+
+        text_scales_fter_scaling = self.get_scale_from_modules(pipeline.text_encoder)
+        unet_scales_after_scaling = self.get_scale_from_modules(pipeline.unet)
+        for key in text_scales_before_scaling.keys():
+            assert text_scales_before_scaling[key] == text_scales_fter_scaling[key]
+        for key in unet_scales_before_scaling.keys():
+            assert unet_scales_before_scaling[key] == unet_scales_after_scaling[key]

@@ -179,7 +179,7 @@ def set_adapter_scale(model, alpha):
     ```
     """
     # check if alpha has a valid data type
-    if not isinstance(alpha, float):
+    if not isinstance(alpha, (float, int)):
         raise TypeError(f"{alpha} should be of type float, got {type(alpha)}")
 
     # iterate on the model's modules and grab the original scaling attribute
