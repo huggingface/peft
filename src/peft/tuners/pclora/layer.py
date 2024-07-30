@@ -34,7 +34,7 @@ class PCLoRALayer(Linear):
             if not _deactivate_base_layer:
                 result = self.base_layer(x, *args, **kwargs)
             else:
-                result = to.zeros_like(x)
+                result = to.tensor(0., dtype=x.dtype, device=x.device)
                 
             torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:

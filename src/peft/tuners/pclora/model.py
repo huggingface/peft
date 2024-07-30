@@ -32,7 +32,10 @@ class PCLoraModel(LoraModel):
     
     def _identiy(self, step: int, q: int) -> float:
         return 1 if step < q else 0
-        
+    
+    def _linear_cutoff(self, step: int, q: int) -> float:
+        return max(1 - step / q, 0.8) 
+    
     def update_lora(self, step: int, **kwargs) -> None:
         lambda_ft_distill = self._decay_schedule(step, self._q)
         
