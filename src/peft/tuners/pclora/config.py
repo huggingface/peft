@@ -5,8 +5,8 @@ from peft.utils.peft_types import PeftType
 @dataclass
 class PCLoraConfig(LoraConfig):
     decay_schedule: str = field(default="linear", metadata={"help": "Decay schedule for LoRA."})
-    total_steps: int = field(default=None, metadata={"help": "Total number of steps for LoRA."})
-    distillation_loss_lambda: float =field(default=0.1, metadata={"help": "Distillation loss lambda for LoRA."})
+    q: int = field(default=None, metadata={"help": "Hyperparameter for decay schedule. Steps after q will have lambda=0."})
+    task_loss_alpha: float =field(default=0.1, metadata={"help": "Weighting of the task loss. Feature distillation and task loss will be convexly combined"})
     
     def __post_init__(self):
         self.peft_type = PeftType.PCLORA

@@ -10,14 +10,14 @@ class PCLoRALayer(Linear):
         super().__init__(base_layer, adapter_name, **kwargs)
         self._teacher_activations = None
         self._student_activations = None
-        self._alpha = 1.0
+        self._lambda = 1.0
         
     def forward(self, x: to.Tensor, *args: Any, **kwargs: Any) -> to.Tensor:
         # FROM: 
         self._check_forward_args(x, *args, **kwargs)
         adapter_names = kwargs.pop("adapter_names", None)
         
-        _deactivate_base_layer = isclose(self._alpha, 0)
+        _deactivate_base_layer = isclose(self._lambda, 0)
         
         if self.disable_adapters:
             if self.merged:
@@ -48,7 +48,7 @@ class PCLoRALayer(Linear):
 
                 if not self.use_dora[active_adapter]:
                     # THIS IS FOR PCLoRA: SCALING WITH ALPHA SCHEDULE
-                    result = self._alpha * result + lora_B(lora_A(dropout(x))) * scaling
+                    result = self._lambda * result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     # THIS IS FOR DORA, NOT RELEVANT FOR PCLoRA
                     x = dropout(x)
@@ -65,8 +65,8 @@ class PCLoRALayer(Linear):
             self._student_activations = result
         return result
     
-    def update(self, alpha: float, **kwargs):
-        self._alpha = alpha
+    def update(self, lambda_ft_distil: float, **kwargs):
+        self._lambda = lambda_ft_distil
             
     @property
     def teacher_activations(self) -> to.Tensor:

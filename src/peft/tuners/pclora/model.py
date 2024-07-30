@@ -20,23 +20,24 @@ class PCLoraModel(LoraModel):
             self._decay_schedule = getattr(self, f"_{lora_config[adapter_name].decay_schedule}") 
         except AttributeError:
             raise AttributeError(f"Invalid decay schedule: {lora_config[adapter_name].decay_schedule}")
-        self._total_steps = lora_config[adapter_name].total_steps
-        self._distillation_loss_lambda = lora_config[adapter_name].distillation_loss_lambda
         
-    def _linear(self, step: int, total_steps: int) -> float:
-        return 1 - step / total_steps
+        self._task_loss_alpha = lora_config[adapter_name].task_loss_alpha
+        self._q = lora_config[adapter_name].q
+        
+    def _linear(self, step: int, q: int) -> float:
+        return 1 - step / q if step < q else 0
     
-    def _sine(self, step: int, total_steps: int) -> float:
-        return np.sin(np.pi/2 * (1 + step / total_steps))
+    def _sine(self, step: int, q: int) -> float:
+        return np.sin(np.pi/2 * (1 + step / q)) if step < q else 0
     
-    def _identiy(self, step: int, total_steps: int) -> float:
-        return 1
+    def _identiy(self, step: int, q: int) -> float:
+        return 1 if step < q else 0
         
     def update_lora(self, step: int, **kwargs) -> None:
-        alpha = self._decay_schedule(step, self._total_steps)
+        lambda_ft_distill = self._decay_schedule(step, self._q)
         
         for name, module in self._get_lora_modules():
-            module.update(alpha, **kwargs)
+            module.update(lambda_ft_distill, **kwargs)
             
     def forward(self, *args, **kwargs):
         with to.no_grad():
@@ -56,9 +57,10 @@ class PCLoraModel(LoraModel):
                 teacher_activations.requires_grad = False
                 
             ft_dist_loss += to.nn.functional.mse_loss(student_activations, teacher_activations)
+        task_loss = student_out.loss
+        total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
         
-        student_out.loss += self._distillation_loss_lambda * ft_dist_loss
-        
+        student_out.loss = total_loss
         student_out = PCLoRACausalLLMOutput(**student_out, feature_distillation_loss=ft_dist_loss.detach())
         my_logger.debug(f"Student Out Loss: {student_out.loss}")
         my_logger.debug(f"Student Out Feature Distillation Loss: {ft_dist_loss}")
