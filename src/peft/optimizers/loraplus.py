@@ -42,6 +42,7 @@ def create_loraplus_optimizer(
     Args:
         model (`torch.nn.Module`): The model to be optimized.
         optimizer_cls (`torch.optim.Optimizer`): The optimizer class to be used.
+        lr (`float`): The learning rate to be used for the optimizer.
         loraplus_lr_ratio (`float`):
             The ratio of learning ηB/ηA where ηA (lr) is passed in as the optimizer learning rate. Should be ≥1. Should
             be set in tandem with the optimizer learning rate (lr); should be larger when the task is more difficult
