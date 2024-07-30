@@ -30,7 +30,7 @@ from ..tuners.lora.layer import Embedding
 
 
 def create_loraplus_optimizer(
-    model: PeftModel, optimizer_cls: type[Optimizer], *, lr: float, loraplus_lr_ratio: float, **kwargs
+    model: PeftModel, optimizer_cls: type[Optimizer], *, loraplus_lr_ratio: float, **kwargs
 ) -> Optimizer:
     """
     Creates a LoraPlus optimizer.
@@ -82,6 +82,7 @@ def create_loraplus_optimizer(
         else:
             param_groups["groupA"][name] = param
 
+    lr = kwargs['lr']
     loraplus_weight_decay = kwargs.pop("loraplus_weight_decay", 0.0)
     loraplus_lr_embedding = kwargs.pop("loraplus_lr_embedding", 1e-6)
 
