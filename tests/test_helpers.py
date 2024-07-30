@@ -245,3 +245,74 @@ class TestScalingAdapters:
             assert text_scales_before_scaling[key] == text_scales_fter_scaling[key]
         for key in unet_scales_before_scaling.keys():
             assert unet_scales_before_scaling[key] == unet_scales_after_scaling[key]
+
+    def test_multi_adapters(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["k_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            init_lora_weights=False,
+        )
+        model = get_peft_model(model, lora_config)
+        scales_before_scaling = self.get_scale_from_modules(model)
+
+        with set_adapter_scale(model=model, alpha=0.5):
+            model.add_adapter("other", lora_config)
+            model.set_adapter("other")
+
+            scales_during_scaling = self.get_scale_from_modules(model)
+            for key in scales_before_scaling.keys():
+                before = scales_before_scaling[key]
+                during = scales_during_scaling[key]
+                assert len(before.keys()) != len(during.keys())
+
+        scales_after_scaling = self.get_scale_from_modules(model)
+        for key in scales_before_scaling.keys():
+            assert scales_before_scaling[key] == scales_after_scaling[key]
+
+    def test_rank_alpha_pattern(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["k_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            init_lora_weights=False,
+            rank_pattern={"k_proj": 2},
+            alpha_pattern={"k_proj": 8},
+        )
+
+        model = get_peft_model(model, lora_config)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        inputs = tokenizer("hello world", return_tensors="pt")
+
+        with torch.no_grad():
+            logits_before_scaling = model(
+                **inputs,
+            ).logits
+
+        scales_before_scaling = self.get_scale_from_modules(model)
+
+        with set_adapter_scale(model=model, alpha=0.5):
+            scales_during_scaling = self.get_scale_from_modules(model)
+            for key in scales_before_scaling.keys():
+                assert scales_before_scaling[key] != scales_during_scaling[key]
+
+            with torch.no_grad():
+                logits_during_scaling = model(**inputs).logits
+
+            assert not torch.allclose(logits_before_scaling, logits_during_scaling)
+
+        scales_after_scaling = self.get_scale_from_modules(model)
+        for key in scales_before_scaling.keys():
+            assert scales_before_scaling[key] == scales_after_scaling[key]
+
+        with torch.no_grad():
+            logits_after_scaling = model(**inputs).logits
+
+        assert torch.allclose(logits_before_scaling, logits_after_scaling)
