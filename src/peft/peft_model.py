@@ -179,6 +179,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def active_adapters(self) -> list[str]:
         try:
             adapters = self.base_model.active_adapters
+            if not isinstance(adapters, list):
+                # Base model is probably a transformers model, see:
+                # https://github.com/huggingface/transformers/pull/30790#issuecomment-2253808249
+                # Unfortunately, transformers models also have an active_adapters method but it's 1) not a property and
+                # 2) calling it fails because the base model (usually) has no loaded adapter. The base model can be a
+                # transformers model for prompt learning, where the base model is not wrapped in a LoraModel or similar.
+                adapters = self.active_adapter
+                if isinstance(adapters, str):
+                    adapters = [adapters]
         except AttributeError:
             adapters = self.active_adapter
             if isinstance(adapters, str):
