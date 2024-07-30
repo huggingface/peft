@@ -209,14 +209,13 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
-    # "btlm": ["c_proj", "c_attn"],  # tested, does not work because of different shapes
+    "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
-    # "mistral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
-    # "mixtral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
-    # "phi": ["q_proj", "v_proj", "fc1", "fc2"],  # tested, does not work because of different shapes
     "phi": ["q_proj", "v_proj"],
-    # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "gemma": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
 }
 
