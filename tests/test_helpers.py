@@ -316,3 +316,34 @@ class TestScalingAdapters:
             logits_after_scaling = model(**inputs).logits
 
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
+
+    # TODO (ariG23498): This currently fails
+    def test_merging_adapter(self):
+        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        lora_config = LoraConfig(
+            r=4,
+            lora_alpha=4,
+            target_modules=["k_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            init_lora_weights=False,
+        )
+
+        model = get_peft_model(model, lora_config)
+        model.eval()
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
+        inputs = tokenizer("hello world", return_tensors="pt")
+
+        with set_adapter_scale(model=model, alpha=0.5):
+            with torch.no_grad():
+                logits_unmerged_scaling = model(
+                    **inputs,
+                ).logits
+            model = model.merge_and_unload()
+
+        with torch.no_grad():
+            logits_merged_scaling = model(
+                **inputs,
+            ).logits
+
+        assert torch.allclose(logits_merged_scaling, logits_unmerged_scaling)
