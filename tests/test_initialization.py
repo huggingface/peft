@@ -1223,6 +1223,8 @@ class TestNoInfiniteRecursionDeepspeed:
 
 
 class TestLoadAdapterOfflineMode:
+    # make sure that PEFT honors offline mode
+
     @contextmanager
     def hub_offline_ctx(self):
         # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
@@ -1232,7 +1234,6 @@ class TestLoadAdapterOfflineMode:
             yield
         reset_sessions()
 
-    # make sure that PEFT honors offline mode
     def test_load_from_hub_then_offline_model(self):
         # this uses LoRA but it's the same mechanism for other methods
         peft_model_id = "peft-internal-testing/gpt2-lora-random"
