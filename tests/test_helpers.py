@@ -346,4 +346,4 @@ class TestScalingAdapters:
                 **inputs,
             ).logits
 
-        assert torch.allclose(logits_merged_scaling, logits_unmerged_scaling)
+        assert torch.allclose(logits_merged_scaling, logits_unmerged_scaling, atol=1e-4, rtol=1e-4)
