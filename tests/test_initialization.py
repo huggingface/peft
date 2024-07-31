@@ -13,12 +13,16 @@
 # limitations under the License.
 
 import re
+from contextlib import contextmanager
 from copy import deepcopy
+from unittest.mock import patch
 
 import pytest
 import torch
+from huggingface_hub.utils import reset_sessions
 from scipy import stats
 from torch import nn
+from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
@@ -1216,3 +1220,31 @@ class TestNoInfiniteRecursionDeepspeed:
         finally:
             # ensure there are no side effects of this test
             cls.__init__ = original_init
+
+
+class TestLoadAdapterOfflineMode:
+    # make sure that PEFT honors offline mode
+
+    @contextmanager
+    def hub_offline_ctx(self):
+        # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
+        # because the value is checked only once at the start of the session
+        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+            reset_sessions()
+            yield
+        reset_sessions()
+
+    def test_load_from_hub_then_offline_model(self):
+        # this uses LoRA but it's the same mechanism for other methods
+        peft_model_id = "peft-internal-testing/gpt2-lora-random"
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+        # first ensure that the adapter model has been downloaded
+        PeftModel.from_pretrained(base_model, peft_model_id)
+
+        del base_model
+
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with self.hub_offline_ctx():
+            # does not raise
+            PeftModel.from_pretrained(base_model, peft_model_id)
