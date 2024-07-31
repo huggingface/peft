@@ -27,8 +27,11 @@ class PCLoraModel(LoraModel):
     def _linear(self, step: int, q: int) -> float:
         return 1 - step / q if step < q else 0
     
-    def _sine(self, step: int, q: int) -> float:
+    def _cosine(self, step: int, q: int) -> float:
         return np.sin(np.pi/2 * (1 + step / q)) if step < q else 0
+    
+    def _sine(self, step: int, q: int) -> float:
+        return 1 - np.sin(np.pi/2 * (step / q)) if step < q else 0
     
     def _identiy(self, step: int, q: int) -> float:
         return 1 if step < q else 0
