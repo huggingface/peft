@@ -19,7 +19,8 @@ env:
 
 jobs:
   run_tests_with_compile:
-    runs-on: [self-hosted, single-gpu, nvidia-gpu, a10, ci]
+    runs-on:
+      group: aws-g6-4xlarge-plus
     env:
       PEFT_DEBUG_WITH_TORCH_COMPILE: 1
       CUDA_VISIBLE_DEVICES: "0"
