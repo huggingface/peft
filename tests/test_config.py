@@ -295,12 +295,7 @@ class PeftConfigTester(unittest.TestCase):
     def test_adalora_config_r_warning(self):
         # This test checks that a warning is raised when r is set other than default in AdaLoraConfig
         # No warning should be raised when initializing AdaLoraConfig with default values.
-        kwargs = {
-            "peft_type":"ADALORA",
-            "task_type":"SEQ_2_SEQ_LM",
-            "init_r":12,
-            "lora_alpha":32
-            }
+        kwargs = {"peft_type": "ADALORA", "task_type": "SEQ_2_SEQ_LM", "init_r": 12, "lora_alpha": 32}
         # Test that no warning is raised with default initialization
         with warnings.catch_warnings():
             warnings.simplefilter("error")
@@ -309,7 +304,5 @@ class PeftConfigTester(unittest.TestCase):
             except Warning:
                 pytest.fail("AdaLoraConfig raised a warning with default initialization.")
         # Test that a warning is raised when r != 8 in AdaLoraConfig
-        with pytest.warns(UserWarning, match= "Note that `r` is not used in AdaLora and will be ignored."):
+        with pytest.warns(UserWarning, match="Note that `r` is not used in AdaLora and will be ignored."):
             AdaLoraConfig(r=10)
-
-
