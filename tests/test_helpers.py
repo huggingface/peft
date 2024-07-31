@@ -98,9 +98,7 @@ class TestScalingAdapters:
         inputs = tokenizer("hello world", return_tensors="pt")
 
         with torch.no_grad():
-            logits_before_scaling = model(
-                **inputs,
-            ).logits
+            logits_before_scaling = model(**inputs).logits
 
         scales_before_scaling = self.get_scale_from_modules(model)
 
@@ -135,29 +133,12 @@ class TestScalingAdapters:
         )
 
         model = get_peft_model(model, lora_config)
-        model.eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
-        inputs = tokenizer("hello world", return_tensors="pt")
-
-        with torch.no_grad():
-            logits_before_scaling = model(**inputs).logits
-
-        scales_before_scaling = self.get_scale_from_modules(model)
 
         # we expect a type error here becuase of wrong datatpye of alpha
         alpha = "a"
         with pytest.raises(TypeError, match=f"{alpha} should be of type float, got {type(alpha)}"):
             with set_adapter_scale(model=model, alpha=alpha):
                 pass
-
-        scales_after_scaling = self.get_scale_from_modules(model)
-        for key in scales_before_scaling.keys():
-            assert scales_before_scaling[key] == scales_after_scaling[key]
-
-        with torch.no_grad():
-            logits_after_scaling = model(**inputs).logits
-
-        assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
     def test_not_lora_model(self):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
@@ -168,7 +149,7 @@ class TestScalingAdapters:
             with set_adapter_scale(model=model, alpha=0.5):
                 pass
 
-    def test_no_scaling(self):
+    def test_scaling_set_to_zero(self):
         base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
@@ -176,9 +157,7 @@ class TestScalingAdapters:
         base_model.eval()
 
         with torch.no_grad():
-            logits_base_model = base_model(
-                **inputs,
-            ).logits
+            logits_base_model = base_model(**inputs).logits
 
         lora_config = LoraConfig(
             r=4,
@@ -193,9 +172,7 @@ class TestScalingAdapters:
 
         with set_adapter_scale(model=lora_model, alpha=0.0):
             with torch.no_grad():
-                logits_lora_model = lora_model(
-                    **inputs,
-                ).logits
+                logits_lora_model = lora_model(**inputs).logits
 
         assert torch.allclose(logits_base_model, logits_lora_model)
 
@@ -248,6 +225,7 @@ class TestScalingAdapters:
 
     def test_multi_adapters(self):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -257,21 +235,35 @@ class TestScalingAdapters:
             init_lora_weights=False,
         )
         model = get_peft_model(model, lora_config)
+        inputs = tokenizer("hello world", return_tensors="pt")
+
+        # add another adaper and activate it
+        model.add_adapter("other", lora_config)
+        model.set_adapter("other")
+
         scales_before_scaling = self.get_scale_from_modules(model)
+        model.eval()
+        with torch.no_grad():
+            logits_before = model(**inputs).logits
 
         with set_adapter_scale(model=model, alpha=0.5):
-            model.add_adapter("other", lora_config)
-            model.set_adapter("other")
-
             scales_during_scaling = self.get_scale_from_modules(model)
             for key in scales_before_scaling.keys():
-                before = scales_before_scaling[key]
-                during = scales_during_scaling[key]
-                assert len(before.keys()) != len(during.keys())
+                assert scales_before_scaling[key] != scales_during_scaling[key]
+
+            with torch.no_grad():
+                logits_during = model(**inputs).logits
+
+            assert not torch.allclose(logits_before, logits_during)
 
         scales_after_scaling = self.get_scale_from_modules(model)
         for key in scales_before_scaling.keys():
             assert scales_before_scaling[key] == scales_after_scaling[key]
+
+        with torch.no_grad():
+            logits_after = model(**inputs).logits
+
+        assert torch.allclose(logits_before, logits_after)
 
     def test_rank_alpha_pattern(self):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
@@ -292,9 +284,7 @@ class TestScalingAdapters:
         inputs = tokenizer("hello world", return_tensors="pt")
 
         with torch.no_grad():
-            logits_before_scaling = model(
-                **inputs,
-            ).logits
+            logits_before_scaling = model(**inputs).logits
 
         scales_before_scaling = self.get_scale_from_modules(model)
 
@@ -317,7 +307,6 @@ class TestScalingAdapters:
 
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
-    # TODO (ariG23498): This currently fails
     def test_merging_adapter(self):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         lora_config = LoraConfig(
@@ -336,14 +325,10 @@ class TestScalingAdapters:
 
         with set_adapter_scale(model=model, alpha=0.5):
             with torch.no_grad():
-                logits_unmerged_scaling = model(
-                    **inputs,
-                ).logits
+                logits_unmerged_scaling = model(**inputs).logits
             model = model.merge_and_unload()
 
         with torch.no_grad():
-            logits_merged_scaling = model(
-                **inputs,
-            ).logits
+            logits_merged_scaling = model(**inputs).logits
 
         assert torch.allclose(logits_merged_scaling, logits_unmerged_scaling, atol=1e-4, rtol=1e-4)
