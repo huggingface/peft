@@ -223,6 +223,46 @@ class TestScalingAdapters:
         for key in unet_scales_before_scaling.keys():
             assert unet_scales_before_scaling[key] == unet_scales_after_scaling[key]
 
+    def test_transformers_pipeline(self, tmp_path):
+        # first create a peft checkpoint
+        model_id = "facebook/opt-125m"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        config = LoraConfig(init_lora_weights=False)
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path / "opt-lora")
+        del model
+
+        # load directly into transformers model
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model.load_adapter(tmp_path / "opt-lora")
+        # type(model.model.decoder.layers[0].self_attn.v_proj)  # => peft.tuners.lora.layer.Linear
+
+        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
+        inputs = tokenizer("hello world", return_tensors="pt")
+
+        model = model.eval()
+
+        with torch.no_grad():
+            logits_before_scaling = model(**inputs).logits
+        scales_before_scaling = self.get_scale_from_modules(model)
+
+        with set_adapter_scale(model=model, alpha=0.5):
+            scales_during_scaling = self.get_scale_from_modules(model)
+            for key in scales_before_scaling.keys():
+                assert scales_before_scaling[key] != scales_during_scaling[key]
+            with torch.no_grad():
+                logits_during_scaling = model(**inputs).logits
+            assert not torch.allclose(logits_before_scaling, logits_during_scaling)
+        scales_after_scaling = self.get_scale_from_modules(model)
+
+        for key in scales_before_scaling.keys():
+            assert scales_before_scaling[key] == scales_after_scaling[key]
+
+        with torch.no_grad():
+            logits_after_scaling = model(**inputs).logits
+
+        assert torch.allclose(logits_before_scaling, logits_after_scaling)
+
     def test_multi_adapters(self):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
