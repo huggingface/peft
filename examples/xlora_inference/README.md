@@ -9,5 +9,5 @@ Mistral.rs features X-LoRA support and incorporates techniques such as a dual-KV
 Links:
 
 - Installation: https://github.com/EricLBuehler/mistral.rs/blob/master/mistralrs-pyo3/README.md
-- Runable example: https://github.com/EricLBuehler/mistral.rs/blob/master/examples/python/xlora_zephyr.py
+- Runnable example: https://github.com/EricLBuehler/mistral.rs/blob/master/examples/python/xlora_zephyr.py
 - Adapter model docs and making the ordering file: https://github.com/EricLBuehler/mistral.rs/blob/master/docs/ADAPTER_MODELS.md
