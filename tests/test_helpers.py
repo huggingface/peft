@@ -72,6 +72,11 @@ class TestCheckIsPeftModel:
         assert result is True
 
 
+@pytest.fixture(scope="class")
+def tokenizer():
+    return AutoTokenizer.from_pretrained("facebook/opt-125m")
+
+
 class TestScalingAdapters:
     def get_scale_from_modules(self, model):
         layer_to_scale_map = {}
@@ -81,7 +86,7 @@ class TestScalingAdapters:
 
         return layer_to_scale_map
 
-    def test_set_adapter_scale(self):
+    def test_set_adapter_scale(self, tokenizer):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         lora_config = LoraConfig(
             r=4,
@@ -94,7 +99,6 @@ class TestScalingAdapters:
 
         model = get_peft_model(model, lora_config)
         model.eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         with torch.no_grad():
@@ -149,9 +153,8 @@ class TestScalingAdapters:
             with set_adapter_scale(model=model, alpha=0.5):
                 pass
 
-    def test_scaling_set_to_zero(self):
+    def test_scaling_set_to_zero(self, tokenizer):
         base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         base_model.eval()
@@ -223,8 +226,8 @@ class TestScalingAdapters:
         for key in unet_scales_before_scaling.keys():
             assert unet_scales_before_scaling[key] == unet_scales_after_scaling[key]
 
-    def test_transformers_pipeline(self, tmp_path):
-        # first create a peft checkpoint
+    def test_transformers_pipeline(self, tmp_path, tokenizer):
+        # this uses a transformers model that loads the adapter directly
         model_id = "facebook/opt-125m"
         model = AutoModelForCausalLM.from_pretrained(model_id)
         config = LoraConfig(init_lora_weights=False)
@@ -235,9 +238,7 @@ class TestScalingAdapters:
         # load directly into transformers model
         model = AutoModelForCausalLM.from_pretrained(model_id)
         model.load_adapter(tmp_path / "opt-lora")
-        # type(model.model.decoder.layers[0].self_attn.v_proj)  # => peft.tuners.lora.layer.Linear
 
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-350m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         model = model.eval()
@@ -263,9 +264,8 @@ class TestScalingAdapters:
 
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
-    def test_multi_adapters(self):
+    def test_multi_adapters(self, tokenizer):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         lora_config = LoraConfig(
             r=4,
             lora_alpha=4,
@@ -305,7 +305,7 @@ class TestScalingAdapters:
 
         assert torch.allclose(logits_before, logits_after)
 
-    def test_rank_alpha_pattern(self):
+    def test_rank_alpha_pattern(self, tokenizer):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         lora_config = LoraConfig(
             r=4,
@@ -320,7 +320,6 @@ class TestScalingAdapters:
 
         model = get_peft_model(model, lora_config)
         model.eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         with torch.no_grad():
@@ -347,7 +346,7 @@ class TestScalingAdapters:
 
         assert torch.allclose(logits_before_scaling, logits_after_scaling)
 
-    def test_merging_adapter(self):
+    def test_merging_adapter(self, tokenizer):
         model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         lora_config = LoraConfig(
             r=4,
@@ -360,7 +359,6 @@ class TestScalingAdapters:
 
         model = get_peft_model(model, lora_config)
         model.eval()
-        tokenizer = AutoTokenizer.from_pretrained("facebook/opt-125m")
         inputs = tokenizer("hello world", return_tensors="pt")
 
         with set_adapter_scale(model=model, alpha=0.5):
