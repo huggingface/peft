@@ -10,3 +10,8 @@ A collection of helper functions for PEFT.
 
 [[autodoc]] helpers.check_if_peft_model
     - all
+
+## Temporarily Setting Adapter Scale in LoraLayer Modules
+
+[[autodoc]] helpers.set_adapter_scale
+    - all
