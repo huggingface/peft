@@ -72,12 +72,11 @@ class TestCheckIsPeftModel:
         assert result is True
 
 
-@pytest.fixture(scope="class")
-def tokenizer():
-    return AutoTokenizer.from_pretrained("facebook/opt-125m")
-
-
 class TestScalingAdapters:
+    @pytest.fixture(scope="class")
+    def tokenizer(self):
+        return AutoTokenizer.from_pretrained("facebook/opt-125m")
+
     def get_scale_from_modules(self, model):
         layer_to_scale_map = {}
         for name, module in model.named_modules():
