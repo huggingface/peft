@@ -1,15 +1,3 @@
-"""
-Perform inference of an X-LoRA model using the inference engine mistral.rs
-
-This will allow vastly improved throughput, with dual KV cache and non-granular scalings.
-
-Links:
-
-- Installation: https://github.com/EricLBuehler/mistral.rs/blob/master/mistralrs-pyo3/README.md
-- Runable example: https://github.com/EricLBuehler/mistral.rs/blob/master/examples/python/xlora_zephyr.py
-- Adapter model docs and making the ordering file: https://github.com/EricLBuehler/mistral.rs/blob/master/docs/ADAPTER_MODELS.md
-"""
-
 from mistralrs import ChatCompletionRequest, Runner, Which
 
 
