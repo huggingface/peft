@@ -11,7 +11,7 @@ accelerate launch --config_file "configs/deepspeed_config_z3_qlora.yaml"  train.
 --logging_steps 5 \
 --log_level "info" \
 --logging_strategy "steps" \
---evaluation_strategy "epoch" \
+--eval_strategy "epoch" \
 --save_strategy "epoch" \
 --push_to_hub \
 --hub_private_repo True \
