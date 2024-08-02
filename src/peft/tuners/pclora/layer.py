@@ -30,11 +30,11 @@ class PCLoRALayer(Linear):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            # DEACTIVATE BASE LAYER IF ALPHA IS 0
+            # DEACTIVATE BASE LAYER IF LAMBDA IS 0
             if not _deactivate_base_layer:
                 result = self.base_layer(x, *args, **kwargs)
             else:
-                result = to.tensor(0., dtype=x.dtype, device=x.device)
+                result = to.tensor(0., dtype=x.dtype, device=x.device) # Maybe 0.0 is enough
                 
             torch_result_dtype = result.dtype
             for active_adapter in self.active_adapters:
@@ -47,7 +47,7 @@ class PCLoRALayer(Linear):
                 x = x.to(lora_A.weight.dtype)
 
                 if not self.use_dora[active_adapter]:
-                    # THIS IS FOR PCLoRA: SCALING WITH ALPHA SCHEDULE
+                    # THIS IS FOR PCLoRA: SCALING WITH LAMBDA SCHEDULE
                     result = self._lambda * result + lora_B(lora_A(dropout(x))) * scaling
                 else:
                     # THIS IS FOR DORA, NOT RELEVANT FOR PCLoRA

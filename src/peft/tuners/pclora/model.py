@@ -11,6 +11,7 @@ from transformers.modeling_outputs import CausalLMOutput, CausalLMOutputWithPast
 @dataclass
 class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
     feature_distillation_loss: to.FloatTensor = None
+    task_loss: to.FloatTensor = None
     
 class PCLoraModel(LoraModel):
     def __init__(self, model, lora_config: Union[LoraConfig, Dict]  , adapter_name: str) -> None:        
@@ -41,13 +42,13 @@ class PCLoraModel(LoraModel):
     
     def update_lora(self, step: int, **kwargs) -> None:
         lambda_ft_distill = self._decay_schedule(step, self._q)
-        
-        my_logger.debug(f"Decay Schedule: \n Lambda: {lambda_ft_distill} \n Step: {step} \n Q: {self._q}")
-        
         for name, module in self._get_lora_modules():
             module.update(lambda_ft_distill, **kwargs)
             
     def forward(self, *args, **kwargs):
+        my_logger.info(f"Forwarding through PCLoRA Model")
+        kwargs["output_hidden_states"] = False
+        
         with to.no_grad():
             self.disable_adapter_layers()
             teacher_out: CausalLMOutput = self.model.forward(*args, **kwargs)
@@ -65,13 +66,14 @@ class PCLoraModel(LoraModel):
                 teacher_activations.requires_grad = False
                 
             ft_dist_loss += to.nn.functional.mse_loss(student_activations, teacher_activations)
-        task_loss = student_out.loss
+            
+        task_loss = student_out.loss 
         total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
-        
+        student_out = PCLoRACausalLLMOutput(**student_out,
+                                            feature_distillation_loss=ft_dist_loss.detach(),
+                                            task_loss=task_loss.detach()
+                                            )
         student_out.loss = total_loss
-        student_out = PCLoRACausalLLMOutput(**student_out, feature_distillation_loss=ft_dist_loss.detach())
-        my_logger.debug(f"Student Out Loss: {student_out.loss}")
-        my_logger.debug(f"Student Out Feature Distillation Loss: {ft_dist_loss}")
         return student_out 
         
     def _get_lora_modules(self):
@@ -83,3 +85,6 @@ class PCLoraModel(LoraModel):
     def _create_new_module(lora_config, adapter_name, target, **kwargs):
         new_module = PCLoRALayer(target, adapter_name, **kwargs)
         return new_module
+    
+    def schedule_parameters(self, step: int, **kwargs):
+        return {"q": self._q, "step": step, "lambda_ft_distill": self._decay_schedule(step, self._q)}
