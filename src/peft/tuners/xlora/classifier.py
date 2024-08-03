@@ -66,36 +66,36 @@ class XLoraClassifier(nn.Module):
 
         self.scalings_logging = False
 
-        dtype = next(model.parameters()).dtype
+        self.dtype = next(model.parameters()).dtype
         add_dropout = config.xlora_dropout_p > 0.0
 
         layers = []
         if self.config.xlora_depth == 1:
             if config.layerwise_scalings:  # bias=False if we have just one layer
-                last = nn.Linear(config.hidden_size, n_classes * n_layers, bias=True).to(device).to(dtype)
+                last = nn.Linear(config.hidden_size, n_classes * n_layers, bias=True).to(device).to(self.dtype)
             else:
-                last = nn.Linear(config.hidden_size, n_classes, bias=True).to(device).to(dtype)
+                last = nn.Linear(config.hidden_size, n_classes, bias=True).to(device).to(self.dtype)
         else:
             if self.config.xlora_depth <= 0:
                 raise ValueError("X-LoRA depth must be strictly positive.")
 
-            layers.append(nn.Linear(config.hidden_size, config.xlora_size, bias=True).to(device).to(dtype))
+            layers.append(nn.Linear(config.hidden_size, config.xlora_size, bias=True).to(device).to(self.dtype))
 
             layers.append(nn.ReLU())
             if add_dropout:
                 layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             for _ in range(config.xlora_depth - 2):
-                layers.append(nn.Linear(config.xlora_size, config.xlora_size, bias=True).to(device).to(dtype))
+                layers.append(nn.Linear(config.xlora_size, config.xlora_size, bias=True).to(device).to(self.dtype))
 
                 layers.append(nn.ReLU())
                 if add_dropout:
                     layers.append(nn.Dropout(p=config.xlora_dropout_p))
 
             if config.layerwise_scalings:
-                last = nn.Linear(config.xlora_size, n_classes * n_layers, bias=True).to(device).to(dtype)
+                last = nn.Linear(config.xlora_size, n_classes * n_layers, bias=True).to(device).to(self.dtype)
             else:
-                last = nn.Linear(config.xlora_size, n_classes, bias=True).to(device).to(dtype)
+                last = nn.Linear(config.xlora_size, n_classes, bias=True).to(device).to(self.dtype)
         self.layers = nn.Sequential(*layers, last)
 
     def make_dummy_scalings(
@@ -119,10 +119,14 @@ class XLoraClassifier(nn.Module):
             device = inputs_embeds.device
             seq_len = inputs_embeds.shape[1]
 
-        return torch.full(  # type: ignore
-            (batch_size, seq_len, self.n_layers, self.n_classes),
-            self.override_scaling_pass_value,
-        ).to(device)
+        return (
+            torch.full(  # type: ignore
+                (batch_size, seq_len, self.n_layers, self.n_classes),
+                self.override_scaling_pass_value,
+            )
+            .to(device)
+            .to(self.dtype)
+        )
 
     def forward(
         self,
