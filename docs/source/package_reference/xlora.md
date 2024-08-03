@@ -24,6 +24,25 @@ The abstract from the paper is:
 
 *We report a mixture of expert strategy to create fine-tuned large language models using a deep layer-wise token-level approach based on low-rank adaptation (LoRA). Starting with a set of pre-trained LoRA adapters, our gating strategy uses the hidden states to dynamically mix adapted layers, allowing the resulting X-LoRA model to draw upon different capabilities and create never-before-used deep layer-wise combinations to solve tasks. The design is inspired by the biological principles of universality and diversity, where neural network building blocks are reused in different hierarchical manifestations. Hence, the X-LoRA model can be easily implemented for any existing large language model (LLM) without a need for modifications of the underlying structure. We develop a tailored X-LoRA model that offers scientific capabilities including forward/inverse analysis tasks and enhanced reasoning capability, focused on biomaterial analysis, protein mechanics and design. The impact of this work include access to readily expandable and adaptable models with strong domain knowledge and the capability to integrate across areas of knowledge. Featuring experts in biology, mathematics, reasoning, bio-inspired materials, mechanics and materials, chemistry, protein biophysics, mechanics and quantum-mechanics based molecular properties, we conduct a series of physics-focused case studies. We examine knowledge recall, protein mechanics forward/inverse tasks, protein design, adversarial agentic modeling including ontological knowledge graph construction, as well as molecular design. The model is capable not only of making quantitative predictions of nanomechanical properties of proteins or quantum mechanical molecular properties, but also reasons over the results and correctly predicts likely mechanisms that explain distinct molecular behaviors.*.
 
+Please cite X-LoRA as:
+```bibtex
+@article{10.1063/5.0203126,
+    author = {Buehler, Eric L. and Buehler, Markus J.},
+    title = "{X-LoRA: Mixture of low-rank adapter experts, a flexible framework for large language models with applications in protein mechanics and molecular design}",
+    journal = {APL Machine Learning},
+    volume = {2},
+    number = {2},
+    pages = {026119},
+    year = {2024},
+    month = {05},
+    abstract = "{We report a mixture of expert strategy to create fine-tuned large language models using a deep layer-wise token-level approach based on low-rank adaptation (LoRA). Starting with a set of pre-trained LoRA adapters, our gating strategy uses the hidden states to dynamically mix adapted layers, allowing the resulting X-LoRA model to draw upon different capabilities and create never-before-used deep layer-wise combinations to solve tasks. The design is inspired by the biological principles of universality and diversity, where neural network building blocks are reused in different hierarchical manifestations. Hence, the X-LoRA model can be easily implemented for any existing large language model without a need for modifications of the underlying structure. We develop a tailored X-LoRA model that offers scientific capabilities, including forward/inverse analysis tasks and enhanced reasoning capability, focused on biomaterial analysis, protein mechanics, and design. The impact of this work includes access to readily expandable and adaptable models with strong domain knowledge and the capability to integrate across areas of knowledge. Featuring experts in biology, mathematics, reasoning, bio-inspired materials, mechanics and materials, chemistry, protein biophysics, mechanics, and quantum-mechanics based molecular properties, we conduct a series of physics-focused case studies. We examine knowledge recall, protein mechanics forward/inverse tasks, protein design, adversarial agentic modeling including ontological knowledge graph construction, and molecular design. The model is capable not only of making quantitative predictions of nanomechanical properties of proteins or quantum mechanical molecular properties but also reasoning over the results and correctly predicting likely mechanisms that explain distinct molecular behaviors.}",
+    issn = {2770-9019},
+    doi = {10.1063/5.0203126},
+    url = {https://doi.org/10.1063/5.0203126},
+    eprint = {https://pubs.aip.org/aip/aml/article-pdf/doi/10.1063/5.0203126/19964043/026119\_1\_5.0203126.pdf},
+}
+```
+
 ## XLoraConfig
 
 [[autodoc]] tuners.xlora.config.XLoraConfig
