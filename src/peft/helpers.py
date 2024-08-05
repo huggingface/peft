@@ -151,12 +151,18 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 
 
 @contextmanager
-def set_adapter_scale(model, alpha):
+def rescale_adapter_scale(model, alpha):
     """
-    Context manager to temporarily set the scaling of the LoRA adapter in a model.
+    Context manager to temporarily rescale the scaling of the LoRA adapter in a model.
 
     The original scaling values are restored when the context manager exits. This context manager works with the
     transformers and diffusers models that have directly loaded LoRA adapters.
+
+    For LoRA, applying this context manager with alpha in [0, 1] is strictly equivalent to
+    applying [wise-ft](https://arxiv.org/abs/2109.01903)
+    (see [#1940](https://github.com/huggingface/peft/issues/1940) for details).
+    It can improve the performances of the model if there is a distribution shiftbetween the training data used
+    for fine-tuning, and the test data used during inference.
 
     Args:
         model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
@@ -171,7 +177,7 @@ def set_adapter_scale(model, alpha):
     ```python
     >>> model = ModelWithLoraLayer()
     >>> alpha = 0.5
-    >>> with set_adapter_scale(model, alpha):
+    >>> with rescale_adapter_scale(model, alpha):
     ...     outputs = model(**inputs)  # Perform operations with the scaled model
     >>> outputs = model(**inputs)  # The original scaling values are restored here
     ```
