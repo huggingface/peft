@@ -27,7 +27,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Function
-from torch.utils.cpp_extension import load
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -77,6 +76,7 @@ def get_fbd_cuda():
 
     if _FBD_CUDA is not None:
         return _FBD_CUDA
+    
     # This import initializes cuda context and should thus be local, see issue 1877
     from torch.utils.cpp_extension import load
     
@@ -639,6 +639,7 @@ class Linear(nn.Module, BOFTLayer):
             rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * boft_scale
+            
             scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
             if self.base_layer.bias is not None:
                 self.base_layer.bias = self.base_layer.bias.to(previous_dtype)
