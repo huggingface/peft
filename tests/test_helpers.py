@@ -105,7 +105,7 @@ class TestScalingAdapters:
 
         scales_before_scaling = self.get_scale_from_modules(model)
 
-        with rescale_adapter_scale(model=model, alpha=0.5):
+        with rescale_adapter_scale(model=model, multiplier=0.5):
             scales_during_scaling = self.get_scale_from_modules(model)
             for key in scales_before_scaling.keys():
                 assert scales_before_scaling[key] != scales_during_scaling[key]
@@ -137,10 +137,10 @@ class TestScalingAdapters:
 
         model = get_peft_model(model, lora_config)
 
-        # we expect a type error here becuase of wrong datatpye of alpha
-        alpha = "a"
-        with pytest.raises(TypeError, match=f"{alpha} should be of type float, got {type(alpha)}"):
-            with rescale_adapter_scale(model=model, alpha=alpha):
+        # we expect a type error here becuase of wrong datatpye of multiplier
+        multiplier = "a"
+        with pytest.raises(TypeError, match=f"{multiplier} should be of type float, got {type(multiplier)}"):
+            with rescale_adapter_scale(model=model, multiplier=multiplier):
                 pass
 
     def test_not_lora_model(self):
@@ -149,7 +149,7 @@ class TestScalingAdapters:
         # we expect a value error here because the model
         # does not have lora layers
         with pytest.raises(ValueError, match="scaling is only supported for models with `LoraLayer`s"):
-            with rescale_adapter_scale(model=model, alpha=0.5):
+            with rescale_adapter_scale(model=model, multiplier=0.5):
                 pass
 
     def test_scaling_set_to_zero(self, tokenizer):
@@ -172,7 +172,7 @@ class TestScalingAdapters:
         lora_model = get_peft_model(base_model, lora_config)
         lora_model.eval()
 
-        with rescale_adapter_scale(model=lora_model, alpha=0.0):
+        with rescale_adapter_scale(model=lora_model, multiplier=0.0):
             with torch.no_grad():
                 logits_lora_model = lora_model(**inputs).logits
 
@@ -208,8 +208,8 @@ class TestScalingAdapters:
         text_scales_before_scaling = self.get_scale_from_modules(pipeline.text_encoder)
         unet_scales_before_scaling = self.get_scale_from_modules(pipeline.unet)
 
-        with rescale_adapter_scale(model=pipeline.text_encoder, alpha=0.5), rescale_adapter_scale(
-            model=pipeline.unet, alpha=0.5
+        with rescale_adapter_scale(model=pipeline.text_encoder, multiplier=0.5), rescale_adapter_scale(
+            model=pipeline.unet, multiplier=0.5
         ):
             text_scales_during_scaling = self.get_scale_from_modules(pipeline.text_encoder)
             unet_scales_during_scaling = self.get_scale_from_modules(pipeline.unet)
@@ -246,7 +246,7 @@ class TestScalingAdapters:
             logits_before_scaling = model(**inputs).logits
         scales_before_scaling = self.get_scale_from_modules(model)
 
-        with rescale_adapter_scale(model=model, alpha=0.5):
+        with rescale_adapter_scale(model=model, multiplier=0.5):
             scales_during_scaling = self.get_scale_from_modules(model)
             for key in scales_before_scaling.keys():
                 assert scales_before_scaling[key] != scales_during_scaling[key]
@@ -285,7 +285,7 @@ class TestScalingAdapters:
         with torch.no_grad():
             logits_before = model(**inputs).logits
 
-        with rescale_adapter_scale(model=model, alpha=0.5):
+        with rescale_adapter_scale(model=model, multiplier=0.5):
             scales_during_scaling = self.get_scale_from_modules(model)
             for key in scales_before_scaling.keys():
                 assert scales_before_scaling[key] != scales_during_scaling[key]
@@ -326,7 +326,7 @@ class TestScalingAdapters:
 
         scales_before_scaling = self.get_scale_from_modules(model)
 
-        with rescale_adapter_scale(model=model, alpha=0.5):
+        with rescale_adapter_scale(model=model, multiplier=0.5):
             scales_during_scaling = self.get_scale_from_modules(model)
             for key in scales_before_scaling.keys():
                 assert scales_before_scaling[key] != scales_during_scaling[key]
@@ -360,7 +360,7 @@ class TestScalingAdapters:
         model.eval()
         inputs = tokenizer("hello world", return_tensors="pt")
 
-        with rescale_adapter_scale(model=model, alpha=0.5):
+        with rescale_adapter_scale(model=model, multiplier=0.5):
             with torch.no_grad():
                 logits_unmerged_scaling = model(**inputs).logits
             model = model.merge_and_unload()

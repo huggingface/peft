@@ -151,21 +151,21 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
 
 
 @contextmanager
-def rescale_adapter_scale(model, alpha):
+def rescale_adapter_scale(model, multiplier):
     """
     Context manager to temporarily rescale the scaling of the LoRA adapter in a model.
 
     The original scaling values are restored when the context manager exits. This context manager works with the
     transformers and diffusers models that have directly loaded LoRA adapters.
 
-    For LoRA, applying this context manager with alpha in [0, 1] is strictly equivalent to applying
+    For LoRA, applying this context manager with multiplier in [0, 1] is strictly equivalent to applying
     [wise-ft](https://arxiv.org/abs/2109.01903) (see [#1940](https://github.com/huggingface/peft/issues/1940) for
     details). It can improve the performances of the model if there is a distribution shiftbetween the training data
     used for fine-tuning, and the test data used during inference.
 
     Args:
         model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
-        alpha (float or int): The scaling factor to be applied. Must be of type float or int.
+        multiplier (float or int): The multiplier that rescales the `scaling` attribute. Must be of type float or int.
 
     Raises:
         ValueError: If the model does not contain any `LoraLayer`
@@ -175,15 +175,15 @@ def rescale_adapter_scale(model, alpha):
 
     ```python
     >>> model = ModelWithLoraLayer()
-    >>> alpha = 0.5
-    >>> with rescale_adapter_scale(model, alpha):
+    >>> multiplier = 0.5
+    >>> with rescale_adapter_scale(model, multiplier):
     ...     outputs = model(**inputs)  # Perform operations with the scaled model
     >>> outputs = model(**inputs)  # The original scaling values are restored here
     ```
     """
-    # check if alpha has a valid data type
-    if not isinstance(alpha, (float, int)):
-        raise TypeError(f"{alpha} should be of type float, got {type(alpha)}")
+    # check if multiplier has a valid data type
+    if not isinstance(multiplier, (float, int)):
+        raise TypeError(f"{multiplier} should be of type float, got {type(multiplier)}")
 
     # iterate on the model's modules and grab the original scaling attribute
     # from the lora layers if present
@@ -191,7 +191,7 @@ def rescale_adapter_scale(model, alpha):
     for module in model.modules():
         if isinstance(module, LoraLayer):
             original_scaling[module] = module.scaling.copy()
-            module.scaling = {k: v * alpha for k, v in module.scaling.items()}
+            module.scaling = {k: v * multiplier for k, v in module.scaling.items()}
 
     # check whether scaling is prohibited on model
     # the original scaling dictionary should be empty
