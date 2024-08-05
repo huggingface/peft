@@ -76,10 +76,10 @@ def get_fbd_cuda():
 
     if _FBD_CUDA is not None:
         return _FBD_CUDA
-    
+
     # This import initializes cuda context and should thus be local, see issue 1877
     from torch.utils.cpp_extension import load
-    
+
     curr_dir = os.path.dirname(__file__)
     # need ninja to build the extension
     try:
@@ -594,8 +594,8 @@ class Linear(nn.Module, BOFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            boft_rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype) 
-            boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype) 
+            boft_rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype)
+            boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
@@ -615,9 +615,9 @@ class Linear(nn.Module, BOFTLayer):
                     orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
                     block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
                     block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
-                
+
                 # The BOFT author's cayley_batch, dropout and FastBlockDiag ONLY return fp32 outputs.
-                boft_P = self.boft_P.to(x) 
+                boft_P = self.boft_P.to(x)
                 block_diagonal_butterfly = block_diagonal_butterfly.to(x)
                 butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
                 butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
@@ -625,7 +625,7 @@ class Linear(nn.Module, BOFTLayer):
 
                 for i in range(1, butterfly_oft_mat_batch.shape[0]):
                     butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
-                    
+
                 boft_rotation = butterfly_oft_mat @ boft_rotation
                 boft_scale = boft_s * boft_scale
 
@@ -639,7 +639,7 @@ class Linear(nn.Module, BOFTLayer):
             rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * boft_scale
-            
+
             scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
             if self.base_layer.bias is not None:
                 self.base_layer.bias = self.base_layer.bias.to(previous_dtype)

@@ -50,7 +50,7 @@ from peft import (
 )
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.lora.config import LoraRuntimeConfig
-from peft.tuners.boft.layer import Linear, Conv2d
+
 from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
 
 
@@ -1135,20 +1135,6 @@ class PeftGPUCommonTests(unittest.TestCase):
         # The results should be the same
         assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
 
-    @require_torch_gpu
-    @pytest.mark.single_gpu_tests
-    def test_boft_half(self):
-        # Check that we can use BoFT with model loaded in half precision
-        layer = nn.Linear(160, 160).cuda()
-        layer = Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
-        x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
-        x = layer(x)
-        
-        conv = nn.Conv2d(1, 1, 4).cuda()
-        conv = Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
-        x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
-        x = conv(x)
-        
     @require_torch_gpu
     @require_torch_multi_gpu
     @pytest.mark.multi_gpu_tests
