@@ -78,6 +78,7 @@ from .utils import (
     set_peft_model_state_dict,
     shift_tokens_right,
 )
+from .utils.patches import SUPPORTED_MULTILORA_MULTIHEAD_MAP, patch_multi_lora_forward
 
 
 PEFT_TYPE_TO_MODEL_MAPPING = {
@@ -767,6 +768,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         Forward pass of the model.
         """
         with self._enable_peft_forward_hooks(*args, **kwargs):
+            # Patch the forward functiona dynamically to support LoRA weights
+            if "adapter_names" in kwargs.keys() and self.get_base_model().__class__ in SUPPORTED_MULTILORA_MULTIHEAD_MAP.keys():
+                return patch_multi_lora_forward(self.get_base_model())(*args, **kwargs)
             kwargs = {k: v for k, v in kwargs.items() if k not in self.special_peft_forward_args}
             return self.get_base_model()(*args, **kwargs)
 
