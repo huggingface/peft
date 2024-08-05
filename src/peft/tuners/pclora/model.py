@@ -46,7 +46,6 @@ class PCLoraModel(LoraModel):
             module.update(lambda_ft_distill, **kwargs)
             
     def forward(self, *args, **kwargs):
-        my_logger.info(f"Forwarding through PCLoRA Model")
         kwargs["output_hidden_states"] = False
         
         with to.no_grad():
@@ -56,25 +55,30 @@ class PCLoraModel(LoraModel):
         self.enable_adapter_layers()
         student_out: CausalLMOutput = self.model.forward(*args, **kwargs)
         
-        ft_dist_loss = 0
-        for name, module in self._get_lora_modules():
-            teacher_activations: to.Tensor = module.teacher_activations
-            student_activations: to.Tensor = module.student_activations
-            
-            if teacher_activations.requires_grad:
-                my_logger.warning(f"Teacher activations for {name} require grad. Disabling grad for teacher activations.")
-                teacher_activations.requires_grad = False
+        if not self.training:
+            student_out: CausalLMOutput = self.model.forward(*args, **kwargs)
+            return student_out
+        else:
+
+            ft_dist_loss = 0
+            for name, module in self._get_lora_modules():
+                teacher_activations: to.Tensor = module.teacher_activations
+                student_activations: to.Tensor = module.student_activations
                 
-            ft_dist_loss += to.nn.functional.mse_loss(student_activations, teacher_activations)
-            
-        task_loss = student_out.loss 
-        total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
-        student_out = PCLoRACausalLLMOutput(**student_out,
-                                            feature_distillation_loss=ft_dist_loss.detach(),
-                                            task_loss=task_loss.detach()
-                                            )
-        student_out.loss = total_loss
-        return student_out 
+                if teacher_activations.requires_grad:
+                    my_logger.warning(f"Teacher activations for {name} require grad. Disabling grad for teacher activations.")
+                    teacher_activations.requires_grad = False
+                    
+                ft_dist_loss += to.nn.functional.mse_loss(student_activations, teacher_activations)
+                
+            task_loss = student_out.loss 
+            total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
+            student_out = PCLoRACausalLLMOutput(**student_out,
+                                                feature_distillation_loss=ft_dist_loss.detach(),
+                                                task_loss=task_loss.detach()
+                                                )
+            student_out.loss = total_loss
+            return student_out 
         
     def _get_lora_modules(self):
         for name, module in self.model.named_modules():
