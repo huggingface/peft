@@ -168,13 +168,11 @@ model = get_peft_model(model, config)
 
 The models that is quantized using Half-Quadratic Quantization of Large Machine Learning Models ([HQQ](https://mobiusml.github.io/hqq_blog/)) support LoRA adapter tuning. To tune the quantized model, you'll need to install the `hqq` library with: `pip install hqq`.
 
-```py
+```python
 from hqq.engine.hf import HQQModelForCausalLM
 
 quantized_model = HQQModelForCausalLM.from_quantized(save_dir_or_hfhub, device='cuda')
-
 peft_config = LoraConfig(...)
-
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
 
@@ -184,11 +182,8 @@ Or using transformers version that is compatible with HQQ (e.g. by installing it
 from transformers import HqqConfig, AutoModelForCausalLM
 
 quant_config = HqqConfig(nbits=4, group_size=64)
-
-quantized_model = AutoModelForCausalLM.from_pretrained(save_dir_or_hfhub, device='cuda', quantization_config=quant_config)
-
+quantized_model = AutoModelForCausalLM.from_pretrained(save_dir_or_hfhub, device_map=device_map, quantization_config=quant_config)
 peft_config = LoraConfig(...)
-
 quantized_model = get_peft_model(quantized_model, peft_config)
 ```
 

@@ -11,7 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import torch
+from transformers import BloomPreTrainedModel
 
 
 # needed for prefix-tuning of bloom model
@@ -40,9 +42,14 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
 
 
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
-    "bloom": bloom_model_postprocess_past_key_value,
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
+
+if hasattr(BloomPreTrainedModel, "_convert_to_standard_cache"):
+    # special handling for bloom architecture was fixed in:
+    # https://github.com/huggingface/transformers/pull/31445
+    # the _convert_to_standard_cache method is removed in the PR and thus serves as an indicator
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["bloom"] = bloom_model_postprocess_past_key_value
 
 TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "llama": ["input_layernorm", "post_attention_layernorm", "norm"],
@@ -65,6 +72,7 @@ TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "mistral": ["input_layernorm", "post_attention_layernorm", "norm"],
     "phi": ["input_layernorm", "final_layernorm"],
     "gemma": ["input_layernorm", "post_attention_layernorm", "norm"],
+    "qwen2": ["post_attention_layernorm"],
 }
 
 TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
@@ -99,6 +107,7 @@ TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING = {
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
@@ -124,6 +133,7 @@ TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING = {
     "falcon": ["query_key_value", "dense_4h_to_h"],
     "phi": ["q_proj", "v_proj", "fc2"],
     "gemma": ["q_proj", "v_proj", "down_proj"],
+    "qwen2": ["q_proj", "v_proj", "down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
@@ -149,6 +159,7 @@ TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING = {
     "falcon": ["dense_4h_to_h"],
     "phi": ["fc2"],
     "gemma": ["down_proj"],
+    "qwen2": ["down_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
@@ -170,6 +181,7 @@ TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING = {
     "gpt_bigcode": ["c_attn"],
     "deberta": ["in_proj"],
     # "layoutlm": ["query", "value"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
@@ -197,14 +209,14 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
-    # "btlm": ["c_proj", "c_attn"],  # tested, does not work because of different shapes
+    "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
-    # "mistral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
-    # "mixtral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
-    # "phi": ["q_proj", "v_proj", "fc1", "fc2"],  # tested, does not work because of different shapes
     "phi": ["q_proj", "v_proj"],
-    # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "gemma": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
@@ -238,6 +250,7 @@ TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING = {
     "stablelm": ["q_proj", "v_proj"],
     "phi": ["q_proj", "v_proj", "fc1", "fc2"],
     "gemma": ["q_proj", "v_proj"],
+    "qwen2": ["q_proj", "v_proj"],
 }
 
 WEIGHTS_NAME = "adapter_model.bin"

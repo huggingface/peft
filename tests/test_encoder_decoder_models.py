@@ -18,7 +18,7 @@ import torch
 from parameterized import parameterized
 from transformers import AutoModelForSeq2SeqLM, AutoModelForTokenClassification
 
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, PromptEncoderConfig, TaskType, get_peft_model
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
@@ -94,6 +94,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "adalora_kwargs": {"init_lora_weights": [False]},
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -173,6 +174,7 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
@@ -206,12 +208,21 @@ class PeftEncoderDecoderModelTester(unittest.TestCase, PeftCommonTester):
                 "ia3_kwargs": {"init_ia3_weights": [False]},
                 "boft_kwargs": {"init_weights": [False]},
                 "vera_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
                 "task_type": "SEQ_2_SEQ_LM",
             },
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
+
+    def test_active_adapters_prompt_learning(self):
+        # see issue https://github.com/huggingface/transformers/pull/30790#issuecomment-2253808249
+        model = AutoModelForSeq2SeqLM.from_pretrained("hf-internal-testing/tiny-random-BartForConditionalGeneration")
+        # any prompt learning method would work here
+        config = PromptEncoderConfig(task_type=TaskType.SEQ_2_SEQ_LM, num_virtual_tokens=10)
+        model = get_peft_model(model, config)
+        assert model.active_adapters == ["default"]
 
 
 class PeftEncoderDecoderCustomModelTester(unittest.TestCase):

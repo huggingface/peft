@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -67,3 +68,10 @@ class AdaLoraConfig(LoraConfig):
         # if target_modules is a regex expression, then layers_pattern should be None
         if isinstance(self.target_modules, str) and self.layers_pattern is not None:
             raise ValueError("`layers_pattern` cannot be used when `target_modules` is a str.")
+
+        # Check if 'r' has been set to a non-default value
+        if self.r != 8:  # 8 is the default value for 'r' in LoraConfig
+            warnings.warn(
+                "Note that `r` is not used in AdaLora and will be ignored."
+                "If you intended to set the initial rank, use `init_r` instead."
+            )
