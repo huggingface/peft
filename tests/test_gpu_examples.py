@@ -3083,12 +3083,12 @@ class TestFSDPWrap:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
 
 
-@require_torch_gpu
 class TestBOFT:
     """
     Test that we can correctly use half-precision models with BOFT.
     """
 
+    @require_torch_gpu
     @pytest.mark.single_gpu_tests
     def test_boft_half_linear(self):
         # Check that we can use BoFT with model loaded in half precision
@@ -3097,6 +3097,7 @@ class TestBOFT:
         x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
         layer(x)  # does not raise
 
+    @require_torch_gpu
     @pytest.mark.single_gpu_tests
     def test_boft_half_conv(self):
         conv = torch.nn.Conv2d(1, 1, 4).cuda()
