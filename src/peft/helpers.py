@@ -163,6 +163,9 @@ def rescale_adapter_scale(model, multiplier):
     details). It can improve the performances of the model if there is a distribution shiftbetween the training data
     used for fine-tuning, and the test data used during inference.
 
+    Warning: It has been reported that when using Apple's MPS backend for PyTorch, it is necessary to add a short sleep
+        time after exiting the context before the scales are fully restored.
+
     Args:
         model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
         multiplier (float or int): The multiplier that rescales the `scaling` attribute. Must be of type float or int.
