@@ -34,7 +34,7 @@ class PCLoraModel(LoraModel):
     def _sine(self, step: int, q: int) -> float:
         return 1 - np.sin(np.pi/2 * (step / q)) if step < q else 0
     
-    def _identiy(self, step: int, q: int) -> float:
+    def _identity(self, step: int, q: int) -> float:
         return 1 if step < q else 0
     
     def _linear_cutoff(self, step: int, q: int) -> float:
