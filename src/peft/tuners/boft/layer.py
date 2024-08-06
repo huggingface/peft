@@ -916,7 +916,7 @@ class Conv2d(nn.Module, BOFTLayer):
             boft_rotation = torch.eye(
                 self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                 device=x.device,
-                dtype=x.dtype
+                dtype=x.dtype,
             )
             boft_scale = torch.ones((1, int(self.out_features)), device=x.device, dtype=x.dtype)
 

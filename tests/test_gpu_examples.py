@@ -3078,6 +3078,7 @@ class TestFSDPWrap:
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
 
+
 @require_torch_gpu
 class TestBOFT:
     """
@@ -3090,11 +3091,11 @@ class TestBOFT:
         layer = torch.nn.Linear(160, 160).cuda()
         layer = boft.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
         x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
-        layer(x) # does not raise
+        layer(x)  # does not raise
 
     @pytest.mark.single_gpu_tests
     def test_boft_half_conv(self):
         conv = torch.nn.Conv2d(1, 1, 4).cuda()
         conv = boft.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
         x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
-        conv(x) # does not raise
+        conv(x)  # does not raise
