@@ -11,7 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+import packaging.version
 import torch
+import transformers
 
 
 # needed for prefix-tuning of bloom model
@@ -40,9 +43,13 @@ def starcoder_model_postprocess_past_key_value(past_key_values):
 
 
 TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
-    "bloom": bloom_model_postprocess_past_key_value,
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
+
+if packaging.version.parse(transformers.__version__) <= packaging.version.parse("4.43.3"):
+    # special handling for bloom architecture was fixed in:
+    # https://github.com/huggingface/transformers/pull/31445
+    TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["bloom"] = bloom_model_postprocess_past_key_value
 
 TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING = {
     "llama": ["input_layernorm", "post_attention_layernorm", "norm"],
@@ -202,14 +209,13 @@ TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING = {
     "RefinedWebModel": ["query_key_value"],
     "RefinedWeb": ["query_key_value"],
     "falcon": ["query_key_value"],
-    # "btlm": ["c_proj", "c_attn"],  # tested, does not work because of different shapes
+    "btlm": ["c_proj", "c_attn"],
     "codegen": ["qkv_proj"],
-    # "mistral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
-    # "mixtral": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "mistral": ["q_proj", "v_proj"],
+    "mixtral": ["q_proj", "v_proj"],
     "stablelm": ["q_proj", "v_proj"],
-    # "phi": ["q_proj", "v_proj", "fc1", "fc2"],  # tested, does not work because of different shapes
     "phi": ["q_proj", "v_proj"],
-    # "gemma": ["q_proj", "v_proj"],  # tested, does not work because of different shapes
+    "gemma": ["q_proj", "v_proj"],
     "qwen2": ["q_proj", "v_proj"],
 }
 

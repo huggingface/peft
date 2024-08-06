@@ -165,6 +165,39 @@ Assuming the original model had 5 layers `[0, 1, 2 ,3, 4]`, this would create a 
 [Fewshot-Metamath-OrcaVicuna-Mistral-10B](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B) is an example of a model trained using this method on Mistral-7B expanded to 10B. The
 [adapter_config.json](https://huggingface.co/abacusai/Fewshot-Metamath-OrcaVicuna-Mistral-10B/blob/main/adapter_config.json) shows a sample LoRA adapter config applying this method for fine-tuning.
 
+## Optimizers
+
+LoRA training can optionally include special purpose optimizers. Currently the only such optimizer is LoRA+.
+
+### LoRA+ optimized LoRA
+
+LoRA training can be optimized using [LoRA+](https://arxiv.org/abs/2402.12354), which uses different learning rates for the adapter matrices A and B, shown to increase finetuning speed by up to 2x and performance by 1-2%.
+
+```py
+from peft import LoraConfig, get_peft_model
+from peft.optimizers import create_loraplus_optimizer
+from transformers import Trainer
+import bitsandbytes as bnb
+
+base_model = ...
+config = LoraConfig(...)
+model = get_peft_model(base_model, config)
+
+optimizer = create_loraplus_optimizer(
+    model=model,
+    optimizer_cls=bnb.optim.Adam8bit,
+    lr=5e-5,
+    loraplus_lr_ratio=16,
+)
+scheduler = None
+
+...
+trainer = Trainer(
+    ...,
+    optimizers=(optimizer, scheduler),
+)
+```
+
 ## Merge LoRA weights into the base model
 
 While LoRA is significantly smaller and faster to train, you may encounter latency issues during inference due to separately loading the base model and the LoRA adapter. To eliminate latency, use the [`~LoraModel.merge_and_unload`] function to merge the adapter weights with the base model. This allows you to use the newly merged model as a standalone model. The [`~LoraModel.merge_and_unload`] function doesn't keep the adapter weights in memory.

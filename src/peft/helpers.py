@@ -13,11 +13,13 @@
 # limitations under the License.
 
 import inspect
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import update_wrapper
 from types import MethodType
 
 from .peft_model import PeftConfig, PeftModel
+from .tuners.lora.layer import LoraLayer
 
 
 def update_forward_signature(model: PeftModel) -> None:
@@ -146,3 +148,55 @@ def check_if_peft_model(model_name_or_path: str) -> bool:
         is_peft_model = False
 
     return is_peft_model
+
+
+@contextmanager
+def set_adapter_scale(model, alpha):
+    """
+    Context manager to temporarily set the scaling of the LoRA adapter in a model.
+
+    The original scaling values are restored when the context manager exits. This context manager works with the
+    transformers and diffusers models that have directly loaded LoRA adapters.
+
+    Args:
+        model: The model containing `LoraLayer` modules whose scaling is to be adjusted.
+        alpha (float or int): The scaling factor to be applied. Must be of type float or int.
+
+    Raises:
+        ValueError: If the model does not contain any `LoraLayer`
+            instances, indicating that the model does not support scaling.
+
+    Example:
+
+    ```python
+    >>> model = ModelWithLoraLayer()
+    >>> alpha = 0.5
+    >>> with set_adapter_scale(model, alpha):
+    ...     outputs = model(**inputs)  # Perform operations with the scaled model
+    >>> outputs = model(**inputs)  # The original scaling values are restored here
+    ```
+    """
+    # check if alpha has a valid data type
+    if not isinstance(alpha, (float, int)):
+        raise TypeError(f"{alpha} should be of type float, got {type(alpha)}")
+
+    # iterate on the model's modules and grab the original scaling attribute
+    # from the lora layers if present
+    original_scaling = {}
+    for module in model.modules():
+        if isinstance(module, LoraLayer):
+            original_scaling[module] = module.scaling.copy()
+            module.scaling = {k: v * alpha for k, v in module.scaling.items()}
+
+    # check whether scaling is prohibited on model
+    # the original scaling dictionary should be empty
+    # if there were no lora layers
+    if not original_scaling:
+        raise ValueError("scaling is only supported for models with `LoraLayer`s")
+    try:
+        yield
+
+    finally:
+        # restore original scaling values after exiting the context
+        for module, scaling in original_scaling.items():
+            module.scaling = scaling

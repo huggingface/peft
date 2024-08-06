@@ -88,6 +88,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
     "LOHA": LoHaConfig,
+    "LORAPLUS": LoraConfig,
     "LOKR": LoKrConfig,
     "ADALORA": AdaLoraConfig,
     "BOFT": BOFTConfig,
