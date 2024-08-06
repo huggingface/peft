@@ -12,9 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import packaging.version
 import torch
-import transformers
+from transformers import BloomPreTrainedModel
 
 
 # needed for prefix-tuning of bloom model
@@ -46,7 +45,7 @@ TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING = {
     "gpt_bigcode": starcoder_model_postprocess_past_key_value,
 }
 
-if packaging.version.parse(transformers.__version__) <= packaging.version.parse("4.43.3"):
+if not BloomPreTrainedModel._supports_cache_class:
     # special handling for bloom architecture was fixed in:
     # https://github.com/huggingface/transformers/pull/31445
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING["bloom"] = bloom_model_postprocess_past_key_value
