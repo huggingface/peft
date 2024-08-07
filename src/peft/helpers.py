@@ -186,7 +186,7 @@ def rescale_adapter_scale(model, multiplier):
     """
     # check if multiplier has a valid data type
     if not isinstance(multiplier, (float, int)):
-        raise TypeError(f"{multiplier} should be of type float, got {type(multiplier)}")
+        raise TypeError(f"Argument multiplier should be of type float, got {type(multiplier)}")
 
     # iterate on the model's modules and grab the original scaling attribute
     # from the lora layers if present

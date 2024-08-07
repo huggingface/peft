@@ -139,7 +139,7 @@ class TestScalingAdapters:
 
         # we expect a type error here becuase of wrong datatpye of multiplier
         multiplier = "a"
-        with pytest.raises(TypeError, match=f"{multiplier} should be of type float, got {type(multiplier)}"):
+        with pytest.raises(TypeError, match=f"Argument multiplier should be of type float, got {type(multiplier)}"):
             with rescale_adapter_scale(model=model, multiplier=multiplier):
                 pass
 
