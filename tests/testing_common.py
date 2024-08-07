@@ -763,6 +763,10 @@ class PeftCommonTester:
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 
+        # serializing with safetensors works
+        from safetensors.torch import save_file
+        save_file(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.safetensors"))
+
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument
         if config_cls not in (LoraConfig,):
