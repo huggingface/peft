@@ -26,6 +26,7 @@ import torch
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
+from safetensors.torch import save_file
 
 from peft import (
     AdaLoraConfig,
@@ -52,7 +53,6 @@ from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
 
 from .testing_utils import get_state_dict
-from safetensors.torch import save_file
 
 
 CONFIG_TESTING_KWARGS = (

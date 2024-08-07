@@ -25,8 +25,8 @@ from torch import nn
 from tqdm import tqdm
 
 from peft.tuners.tuners_utils import (
-    BaseTuner, 
-    BaseTunerLayer, 
+    BaseTuner,
+    BaseTunerLayer,
     check_target_module_exists,
     onload_layer,
 )
@@ -272,7 +272,7 @@ class BOFTModel(BaseTuner):
     ):
         if merge:
             self._check_merge_allowed()
-        
+
         key_list = [key for key, _ in self.model.named_modules() if self.prefix not in key]
         desc = "Unloading " + ("and merging " if merge else "") + "model"
         for key in tqdm(key_list, disable=not progressbar, desc=desc):
