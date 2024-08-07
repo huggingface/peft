@@ -510,9 +510,9 @@ class Linear(nn.Module, BOFTLayer):
                     # because of the copy operation.
                     orig_weight = base_layer.weight.data.clone()
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.transpose(orig_weight, 0, 1).contiguous()
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight).contiguous()
+                    orig_weight = torch.transpose(orig_weight, 0, 1).contiguous()
                     orig_weight = orig_weight * boft_s
 
                     if not torch.isfinite(orig_weight).all():
@@ -524,9 +524,9 @@ class Linear(nn.Module, BOFTLayer):
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = base_layer.weight.data.clone()
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.transpose(orig_weight, 0, 1).contiguous()
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight).contiguous()
+                    orig_weight = torch.transpose(orig_weight, 0, 1).contiguous()
                     orig_weight = orig_weight * boft_s
 
                     self.base_layer.weight.data = orig_weight
