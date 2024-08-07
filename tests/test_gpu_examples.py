@@ -57,6 +57,7 @@ from peft import (
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
 )
+from peft.tuners import boft
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
@@ -3080,3 +3081,26 @@ class TestFSDPWrap:
         init_process_group(world_size=1, rank=0)
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
+
+
+class TestBOFT:
+    """
+    Test that we can correctly use half-precision models with BOFT.
+    """
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_boft_half_linear(self):
+        # Check that we can use BoFT with model loaded in half precision
+        layer = torch.nn.Linear(160, 160).cuda()
+        layer = boft.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
+        layer(x)  # does not raise
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_boft_half_conv(self):
+        conv = torch.nn.Conv2d(1, 1, 4).cuda()
+        conv = boft.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
+        conv(x)  # does not raise
