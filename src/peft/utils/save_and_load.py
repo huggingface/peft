@@ -21,6 +21,7 @@ import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
 from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
 from .other import (
@@ -418,6 +419,18 @@ def set_peft_model_state_dict(
     return load_result
 
 
+def torch_load(*args, weights_only=True, **kwargs):
+    """Call torch.load and handle weights_only.
+
+    Defaults to weights_only=True to anticipate upcoming switch on the PyTorch side.
+
+    """
+    # TODO: weights_only was added in 1.13, remove if 1.12 no longer needs to be supported
+    if version.parse(torch.__version__) < version.parse("1.13"):
+        return torch.load(*args, **kwargs)
+    return torch.load(*args, weights_only=weights_only, **kwargs)
+
+
 def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_download_kwargs) -> dict:
     r"""
     A helper method to load the PEFT weights from the HuggingFace Hub or locally
@@ -502,6 +515,6 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         else:
             adapters_weights = safe_load_file(filename, device=device)
     else:
-        adapters_weights = torch.load(filename, map_location=torch.device(device))
+        adapters_weights = torch_load(filename, map_location=torch.device(device))
 
     return adapters_weights
