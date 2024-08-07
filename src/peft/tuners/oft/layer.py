@@ -18,9 +18,9 @@ from typing import Any, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-
 
 
 class MultiplicativeDropoutLayer(nn.Module):
@@ -43,19 +43,20 @@ class MultiplicativeDropoutLayer(nn.Module):
         Applies multiplicative dropout to the input tensor.
 
         Parameters:
-        x (Tensor): The input tensor of shape (N, D, H, H), where `N` is the batch size, `D` represents
-                    one additional dimension (In OFT, the number of OFT blocks), and `H` is the size of the square
-                    blocks along the last two dimensions (In OFT, the block size).
+        x (Tensor): The input tensor of shape (D, H, H), where `D` represents
+                    the number of OFT blocks, and `H` is the size of the square
+                    blocks along the last two dimensions, the block size in OFT.
         """
         if self.training:
             # Ensure the last two dimensions are the same
             if x.shape[-1] != x.shape[-2]:
                 raise ValueError("The last two dimensions of input should be the same!")
 
-            N, D, H, _ = x.shape
+            D, H, _ = x.shape
 
-            # Randomly select one from N
-            n_random = torch.randint(0, N, (1,)).item()
+            # If block share, skip the multiplicative dropout
+            if D == 1:
+                return x
 
             # Create a mask with 1s for matrices to be replaced with identity and 0s otherwise
             num_to_replace = int(self.p * D)
@@ -65,14 +66,11 @@ class MultiplicativeDropoutLayer(nn.Module):
             mask = torch.cat([torch.ones(num_to_replace, device=x.device), torch.zeros(num_zeros, device=x.device)])
 
             # Shuffle and reshape the mask
-            mask = mask[torch.randperm(D)].view(1, D, 1, 1)
-
-            full_mask = torch.zeros(N, D, 1, 1, device=x.device)
-            full_mask[n_random] = mask
+            mask = mask[torch.randperm(D)].view(D, 1, 1)
 
             # Use the mask to combine original matrices and identity matrices
-            eye_matrix = torch.eye(H, device=x.device).repeat(N, D, 1, 1)
-            x = (1 - full_mask) * x + full_mask * eye_matrix
+            eye_matrix = torch.eye(H, device=x.device).repeat(D, 1, 1)
+            x = (1 - mask) * x + mask * eye_matrix
         return x
 
 
@@ -84,7 +82,7 @@ class OFTLayer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("oft_r", "oft_s")
     # other_param_names is defined on parent class
-    other_param_names = ("r", "oft_block_size", "oft_dropout")
+    other_param_names = ("r", "oft_block_size", "module_dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         """
@@ -102,7 +100,7 @@ class OFTLayer(BaseTunerLayer):
         self.oft_s = nn.ParameterDict({})
         self.r = {}
         self.oft_block_size = {}
-        self.oft_dropout = nn.ModuleDict({})
+        self.module_dropout = nn.ModuleDict({})
         self.coft = {}
         self.eps = {}
         self.block_share = {}
@@ -127,43 +125,29 @@ class OFTLayer(BaseTunerLayer):
     def _available_adapters(self) -> Set[str]:
         return {*self.oft_r}
 
-    def create_adapter_parameters(self, adapter_name: str, r: int, shape: Tuple[int, ...], block_share: bool):
-        if block_share:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
-        else:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
-
-    def reset_oft_parameters(self, adapter_name, init_weights):
-        """
-        Reset the OFT parameters.
-        """
-        if init_weights is False:
-            nn.init.normal_(self.oft_r[adapter_name], mean=0.0, std=0.1)
-            nn.init.normal_(self.oft_s[adapter_name], mean=1.0, std=0.1)
+    def set_scale(self, adapter, scale):
+        if adapter not in self.scaling:
+            # Ignore the case where the adapter is not in the layer
             return
 
-        if adapter_name in self.oft_r.keys():
-            if init_weights is True:
-                # initialize R to zero
-                nn.init.zeros_(self.oft_r[adapter_name])
-                nn.init.ones_(self.oft_s[adapter_name])
-            else:
-                raise ValueError(f"Unknown initialization {init_weights=}")
+        warnings.warn("Scaling operation for OFT not supported! Automatically set scale to 1.")
 
+    def scale_layer(self, scale: float) -> None:
+        if scale == 1:
+            return
 
-    '''
-    def update_layer(
-        self,
-        adapter_name: str,
-        r: int,
-        module_dropout: float,
-        init_weights: bool,
-        coft: bool = False,
-        eps: float = 6e-5,
-        block_share: bool = False,
-        **kwargs,
-    ) -> None:
-    '''
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.oft_r.keys():
+                continue
+
+            warnings.warn("Scaling operation for OFT not supported! Automatically set scale to 1.")
+
+    def unscale_layer(self, scale=None) -> None:
+        for active_adapter in self.active_adapters:
+            if active_adapter not in self.oft_r.keys():
+                continue
+
+            warnings.warn("Unscaling operation for OFT not supported! Keeping scale to 1.")
 
     def update_layer(
         self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
@@ -186,10 +170,10 @@ class OFTLayer(BaseTunerLayer):
         """
         # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
         if module_dropout > 0.0:
-            oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
+            module_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
         else:
-            oft_dropout_layer = nn.Identity()
-        self.oft_dropout.update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
+            module_dropout_layer = nn.Identity()
+        self.module_dropout.update(nn.ModuleDict({adapter_name: module_dropout_layer}))
 
         if r == 0 and oft_block_size != 0:
             if self.in_features % oft_block_size != 0:
@@ -204,7 +188,6 @@ class OFTLayer(BaseTunerLayer):
         else:
             raise ValueError(f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {r} and oft_block_size = {oft_block_size}.")
                 
-        self.module_dropout[adapter_name] = module_dropout
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
 
@@ -221,9 +204,6 @@ class OFTLayer(BaseTunerLayer):
             raise TypeError(f"OFT is not implemented for base layers of type {type(base_layer).__name__}")
 
         self.eps[adapter_name] = eps * math.ceil(shape[0] / r) * math.ceil(shape[0] / r)
-
-        print(self.in_features, r)
-        exit()
 
         # Create weights with provided shape
         if block_share:
@@ -243,136 +223,37 @@ class OFTLayer(BaseTunerLayer):
         self._move_adapter_to_device_of_base_layer(adapter_name)
         self.set_adapter(self.active_adapters)
 
-    def unscale_layer(self, scale=None) -> None:
-        # scale is not used
-        pass
-
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
+    def reset_oft_parameters(self, adapter_name, init_weights):
         """
-        Merge the active adapter weights into the base weights
+        Reset the OFT parameters.
+        """
+        if init_weights is False:
+            nn.init.normal_(self.oft_r[adapter_name], mean=0.0, std=0.1)
+            nn.init.normal_(self.oft_s[adapter_name], mean=1.0, std=0.1)
+            return
+
+        if adapter_name in self.oft_r.keys():
+            if init_weights is True:
+                # initialize R to zero
+                nn.init.zeros_(self.oft_r[adapter_name])
+                nn.init.ones_(self.oft_s[adapter_name])
+            else:
+                raise ValueError(f"Unknown initialization {init_weights=}")
+
+    def _cayley_batch(self, data: torch.Tensor) -> torch.Tensor:
+        """
+        Perform the Cayley parametrization on a batch of skew-symmetric matrices.
 
         Args:
-            safe_merge (`bool`, *optional*):
-                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
-                before merging the weights. This is useful if you want to check if the merge operation will produce
-                NaNs. Defaults to `False`.
-            adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
-                Defaults to `None`.
+            data: A batch of skew-symmetric matrices of shape (b, r, c).
         """
-        adapter_names = check_adapters_to_merge(self, adapter_names)
-        if not adapter_names:
-            # no adapter to merge
-            return
-
-        for active_adapter in adapter_names:
-            if active_adapter in self._available_adapters:
-                base_layer = self.get_base_layer()
-
-                orig_weights = base_layer.weight.data
-                if isinstance(base_layer, nn.Linear):
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                elif isinstance(base_layer, nn.Conv2d):
-                    orig_weights = orig_weights.view(
-                        [
-                            base_layer.out_channels,
-                            base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
-                        ]
-                    )
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                delta_weight = self.get_delta_weight(active_adapter)
-                if orig_weights.shape[1] != delta_weight.shape[1]:
-                    # when in channels is not divisible by r
-                    delta_weight = delta_weight[: orig_weights.shape[1], : orig_weights.shape[1]]
-                new_weights = torch.mm(orig_weights, delta_weight)
-                if isinstance(base_layer, nn.Linear):
-                    new_weights = torch.transpose(new_weights, 0, 1)
-                elif isinstance(base_layer, nn.Conv2d):
-                    new_weights = torch.transpose(new_weights, 0, 1)
-                    new_weights = new_weights.view(
-                        [
-                            base_layer.out_channels,
-                            base_layer.in_channels,
-                            base_layer.kernel_size[0],
-                            base_layer.kernel_size[1],
-                        ]
-                    )
-
-                if safe_merge and not torch.isfinite(new_weights).all():
-                    raise ValueError(
-                        f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                    )
-
-                base_layer.weight.data = new_weights.contiguous()
-                self.merged_adapters.append(active_adapter)
-
-    def unmerge(self) -> None:
-        """
-        This method unmerges all merged adapter layers from the base weights.
-        """
-        if not self.merged:
-            warnings.warn("Already unmerged. Nothing to do.")
-            return
-        while len(self.merged_adapters) > 0:
-            active_adapter = self.merged_adapters.pop()
-            if active_adapter in self._available_adapters:
-                base_layer = self.get_base_layer()
-                new_weights = base_layer.weight.data
-                if isinstance(base_layer, nn.Linear):
-                    new_weights = torch.transpose(new_weights, 0, 1)
-                elif isinstance(base_layer, nn.Conv2d):
-                    new_weights = new_weights.view(
-                        [
-                            base_layer.out_channels,
-                            base_layer.in_channels * base_layer.kernel_size[0] * base_layer.kernel_size[1],
-                        ]
-                    )
-                    new_weights = torch.transpose(new_weights, 0, 1)
-                delta_weight = self.get_delta_weight(active_adapter)
-                if new_weights.shape[1] != delta_weight.shape[1]:
-                    # when in channels is not divisible by r
-                    delta_weight = delta_weight[: new_weights.shape[1], : new_weights.shape[1]]
-                delta_inv = torch.inverse(delta_weight)
-                orig_weights = torch.mm(new_weights, delta_inv)
-
-                if isinstance(base_layer, nn.Linear):
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                elif isinstance(base_layer, nn.Conv2d):
-                    orig_weights = torch.transpose(orig_weights, 0, 1)
-                    orig_weights = orig_weights.reshape(
-                        [
-                            base_layer.out_channels,
-                            base_layer.in_channels,
-                            base_layer.kernel_size[0],
-                            base_layer.kernel_size[1],
-                        ]
-                    )
-                base_layer.weight.data = orig_weights.contiguous()
-
-    def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
-        rank = self.r[adapter_name]
-        coft = self.coft[adapter_name]
-        eps = self.eps[adapter_name]
-        opt_r = self.oft_r[adapter_name]
-
-        if coft:
-            with torch.no_grad():
-                opt_r.copy_(self._project_batch(opt_r, eps=eps))
-
-        orth_rotate = self._cayley_batch(opt_r)
-        weight = self._block_diagonal(orth_rotate, rank)
-
-        return weight
-
-    # Copied from https://github.com/Zeju1997/oft/blob/84cebb965df69781e3d9c3c875f5980b421eaf24/oft-control/oft.py#L144
-    def _cayley_batch(self, data: torch.Tensor) -> torch.Tensor:
         b, r, c = data.shape
         # Ensure the input matrix is skew-symmetric
-        skew = 0.5 * (data - data.transpose(1, 2))
-        I = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)  # noqa: E741
+        skew_mat = 0.5 * (data - data.transpose(1, 2))
+        id_mat = torch.eye(r, device=data.device).unsqueeze(0).expand(b, r, c)  # noqa: E741
 
         # Perform the Cayley parametrization
-        Q = torch.bmm(I - skew, torch.inverse(I + skew))
+        Q = torch.linalg.solve(id_mat + skew_mat, id_mat - skew_mat, left=False)
 
         return Q
 
@@ -403,48 +284,9 @@ class OFTLayer(BaseTunerLayer):
         mask = (norm_diff <= eps).bool()
         out = torch.where(mask, oft_r, I + eps * (diff / norm_diff))
         return out
+        
 
-    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        previous_dtype = x.dtype
-
-        if self.disable_adapters:
-            if self.merged:
-                self.unmerge()
-            result = self.base_layer(x, *args, **kwargs)
-        elif self.merged:
-            result = self.base_layer(x, *args, **kwargs)
-        else:
-            result = self.base_layer(x, *args, **kwargs)
-            if len(result.shape) == 4:
-                result = result.permute(0, 2, 3, 1)
-
-            base_layer = self.get_base_layer()
-            base_bias = base_layer.bias
-            if base_bias is not None:
-                # Bias should be added after OFT forward
-                result = result - base_bias.data
-
-            # Execute all the adapters
-            for active_adapter in self.active_adapters:
-                if active_adapter not in self._available_adapters:
-                    continue
-
-                module_dropout = self.module_dropout[active_adapter]
-
-                # Modify current execution weights
-                if (not self.training) or (self.training and torch.rand(1) > module_dropout):
-                    result = self._get_delta_activations(active_adapter, result, *args, **kwargs)
-
-            if base_bias is not None:
-                result = result + base_bias.data
-            if len(result.shape) == 4:
-                result = result.permute(0, 3, 1, 2)
-
-        result = result.to(previous_dtype)
-        return result
-
-
-class Linear(OFTLayer):
+class Linear(nn.Module, OFTLayer):
     """OFT implemented in Linear layer"""
 
     def __init__(
@@ -453,11 +295,11 @@ class Linear(OFTLayer):
         adapter_name: str,
         r: int = 8,
         oft_block_size: int = 0,
-        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         module_dropout: float = 0.0,
         coft: bool = False,
         eps: float = 6e-5,
         block_share: bool = False,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         init_weights: Union[bool, str] = True,
         is_target_conv_1d_layer: bool = False,
         **kwargs,
@@ -473,18 +315,18 @@ class Linear(OFTLayer):
         )
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[List[str]] = None) -> None:
         """
         Merge the active adapter weights into the base weights
 
         Args:
             safe_merge (`bool`, *optional*):
-                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
                 before merging the weights. This is useful if you want to check if the merge operation will produce
                 NaNs. Defaults to `False`.
             adapter_names (`List[str]`, *optional*):
-                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
-                to `None`.
+                The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+                Defaults to `None`.
         """
         adapter_names = check_adapters_to_merge(self, adapter_names)
         if not adapter_names:
@@ -492,33 +334,33 @@ class Linear(OFTLayer):
             return
 
         for active_adapter in adapter_names:
-            if active_adapter in self.boft_R.keys():
+            if active_adapter in self._available_adapters:
                 base_layer = self.get_base_layer()
                 if safe_merge:
                     # Note that safe_merge will be slower than the normal merge
                     # because of the copy operation.
-                    orig_weight = base_layer.weight.data.clone()
-                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = orig_weight * boft_s
+                    orig_weights = base_layer.weight.data
+                    oft_mat, oft_s = self.get_delta_weight(active_adapter)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = orig_weights * oft_s
 
-                    if not torch.isfinite(orig_weight).all():
+                    if not torch.isfinite(orig_weights).all():
                         raise ValueError(
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight
+                    self.base_layer.weight.data = orig_weights.contiguous()
                 else:
-                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
-                    orig_weight = base_layer.weight.data.clone()
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
-                    orig_weight = torch.transpose(orig_weight, 0, 1)
-                    orig_weight = orig_weight * boft_s
+                    oft_mat, oft_s = self.get_delta_weight(active_adapter)
+                    orig_weights = base_layer.weight.data
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
+                    orig_weights = orig_weights * oft_s
 
-                    self.base_layer.weight.data = orig_weight
+                    self.base_layer.weight.data = orig_weights.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
@@ -531,17 +373,17 @@ class Linear(OFTLayer):
             return
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
-            if active_adapter in self.boft_R.keys():
-                butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+            if active_adapter in self.oft_r.keys():
+                oft_mat, oft_s = self.get_delta_weight(active_adapter)
 
-                orig_weight = self.get_base_layer().weight.data.clone()
-                orig_weight = torch.transpose(orig_weight, 0, 1)
-                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
-                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weights = self.get_base_layer().weight.data
+                orig_weights = torch.transpose(orig_weights, 0, 1)
+                orig_weights = torch.mm(oft_mat.t(), orig_weights)
+                orig_weights = torch.transpose(orig_weights, 0, 1)
 
-                self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
+                self.get_base_layer().weight.data = orig_weights * (1 / oft_s)
 
-    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_delta_weight(self, adapter_name) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the delta weight for the given adapter.
 
@@ -549,31 +391,23 @@ class Linear(OFTLayer):
             adapter (str):
                 The name of the adapter for which the delta weight should be computed.
         """
-        boft_R = self.boft_R[adapter]
-        boft_s = self.boft_s[adapter]
+        oft_r = self.oft_r[adapter_name]
+        oft_s = self.oft_s[adapter_name]
 
-        N, D, H, _ = boft_R.shape
-        boft_R = boft_R.view(N * D, H, H)
-        orth_rotate_butterfly = self.cayley_batch(boft_R)
-        orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
-        if self.fbd_cuda_available:
-            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-        else:
-            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
-            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
-            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+        rank = self.r[adapter_name]
+        coft = self.coft[adapter_name]
+        eps = self.eps[adapter_name]
 
-        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
-        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
-        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
-        butterfly_oft_mat = butterfly_oft_mat_batch[0]
+        if coft:
+            with torch.no_grad():
+                oft_r.copy_(self._project_batch(oft_r, eps=eps))
 
-        for i in range(1, butterfly_oft_mat_batch.shape[0]):
-            butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+        orth_rotate = self._cayley_batch(oft_r)
+        weight = self._block_diagonal(orth_rotate, rank)
 
-        return butterfly_oft_mat, boft_s
+        return weight, oft_s
 
-    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
 
         if self.disable_adapters:
@@ -583,71 +417,70 @@ class Linear(OFTLayer):
         elif self.merged:
             result = self.base_layer(x, *args, **kwargs)
         else:
-            boft_rotation = torch.eye(self.in_features, device=x.device)
-            boft_scale = torch.ones((int(self.out_features), 1), device=x.device)
+            oft_rotation = torch.eye(self.in_features, device=x.device, dtype=previous_dtype)
+            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
 
             for active_adapter in self.active_adapters:
-                if active_adapter not in self.boft_R.keys():
+                if active_adapter not in self.oft_r.keys():
                     continue
-                boft_R = self.boft_R[active_adapter]
-                boft_s = self.boft_s[active_adapter]
-                dropout = self.boft_dropout[active_adapter]
+                oft_r = self.oft_r[active_adapter]
+                oft_s = self.oft_s[active_adapter]
+                dropout = self.module_dropout[active_adapter]
 
-                N, D, H, _ = boft_R.shape
-                boft_R = boft_R.view(N * D, H, H)
-                orth_rotate_butterfly = self.cayley_batch(boft_R)
-                orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
-                orth_rotate_butterfly = dropout(orth_rotate_butterfly)
-                if self.fbd_cuda_available:
-                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
-                else:
-                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
-                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
-                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+                # print(dropout)
 
-                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
-                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
-                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
-                butterfly_oft_mat = butterfly_oft_mat_batch[0]
+                rank = self.r[active_adapter]
+                coft = self.coft[active_adapter]
+                eps = self.eps[active_adapter]
 
-                for i in range(1, butterfly_oft_mat_batch.shape[0]):
-                    butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+                if coft:
+                    with torch.no_grad():
+                        oft_r.copy_(self._project_batch(oft_r, eps=eps))
 
-                boft_rotation = butterfly_oft_mat @ boft_rotation
-                boft_scale = boft_s * boft_scale
+                orth_rotate = self._cayley_batch(oft_r)
+                orth_rotate = dropout(orth_rotate)
+                # print('orth rotate', orth_rotate.shape, self.in_features, self.out_features)
+                oft_mat = self._block_diagonal(orth_rotate, rank)
+
+
+                # print('oft_r', oft_r.shape, self.in_features, self.out_features)
+                # oft_s = self.oft_s[active_adapter]
+                # dropout = self.module_dropout[active_adapter]
+
+                # oft_mat, oft_s = self.get_delta_weight(active_adapter)
+
+                # print('oft_mat', oft_mat.shape, self.in_features, self.out_features)
+                # exit()
+                # oft_mat = dropout(oft_mat)
+
+                oft_rotation = oft_mat @ oft_rotation
+                oft_scale = oft_s * oft_scale
 
             x = x.to(self.get_base_layer().weight.data.dtype)
 
             orig_weight = self.get_base_layer().weight.data
             orig_weight = torch.transpose(orig_weight, 0, 1)
-            rotated_weight = torch.mm(boft_rotation, orig_weight)
+            oft_rotation = oft_rotation.to(previous_dtype)
+            orig_weight = orig_weight.to(previous_dtype)
+            rotated_weight = torch.mm(oft_rotation, orig_weight)
             rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
-            scaled_rotated_weight = rotated_weight * boft_scale
+            scaled_rotated_weight = rotated_weight * oft_scale
 
+            scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
+            if self.base_layer.bias is not None:
+                self.base_layer.bias = self.base_layer.bias.to(previous_dtype)
             result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.base_layer.bias)
 
         result = result.to(previous_dtype)
         return result
-
-    def _get_delta_activations(
-        self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
-    ) -> torch.Tensor:
-        delta_weight = self.get_delta_weight(adapter_name)
-
-        base_layer = self.get_base_layer()
-        base_weight = base_layer.weight.data
-        delta_weight = delta_weight[: base_weight.shape[0], : base_weight.shape[0]]
-
-        # don't add bias here, because the bias will be added after OFT forward
-        return torch.matmul(input, delta_weight)
 
     def __repr__(self) -> str:
         rep = super().__repr__()
         return "oft." + rep
 
 
-class Conv2d(OFTLayer):
+class Conv2d(nn.Module, OFTLayer):
     """OFT implemented in Conv2d layer"""
 
     def __init__(
@@ -674,91 +507,38 @@ class Conv2d(OFTLayer):
         )
 
     def update_layer(
-        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+        self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
     ):
         """
-        Update the conv2d layer with trainable BOFT weights.
+        Update the conv2d layer with trainable OFT weights.
         """
-        # to be consistent with the paper notation
-        boft_n_butterfly_factor = boft_n_butterfly_factor - 1
-        if boft_n_butterfly_factor < 0:
-            raise ValueError(
-                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor+1} to be a positive integer number."
-            )
-
-        # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
-        if boft_dropout > 0.0:
-            boft_dropout_layer = MultiplicativeDropoutLayer(p=boft_dropout)
+        # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
+        if module_dropout > 0.0:
+            module_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
         else:
-            boft_dropout_layer = nn.Identity()
-        self.boft_dropout.update(nn.ModuleDict({adapter_name: boft_dropout_layer}))
+            module_dropout_layer = nn.Identity()
+        self.module_dropout.update(nn.ModuleDict({adapter_name: module_dropout_layer}))
 
         # layer information from the base layer
         base_layer = self.get_base_layer()
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
-        # Initialize the BOFT parameters.
-        if boft_block_size == 0 and boft_block_num != 0:
-            if conv_filter_dim % boft_block_num != 0:
+        if r == 0 and oft_block_size != 0:
+            if conv_filter_dim % oft_block_size != 0:
                 raise ValueError(
-                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by boft_block_num ({boft_block_num})!"
+                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by conv_filter_dim ({conv_filter_dim})!"
                 )
-
-            if boft_n_butterfly_factor != 0:
-                if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
-                    raise ValueError(
-                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_num ({boft_block_num})!"
-                    )
-                if boft_block_num % (2**boft_n_butterfly_factor) != 0:
-                    raise ValueError(
-                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor+1})!"
-                    )
-
-            boft_block_size = int(conv_filter_dim // boft_block_num)
-
-        elif boft_block_size != 0 and boft_block_num == 0:
-            if conv_filter_dim % boft_block_size != 0:
+            r = int(conv_filter_dim // oft_block_size)
+        elif r != 0 and oft_block_size == 0:
+            if conv_filter_dim % r != 0:
                 raise ValueError(
-                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by boft_block_size ({boft_block_size})!"
+                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by r ({r})!"
                 )
-
-            if boft_n_butterfly_factor != 0:
-                if conv_filter_dim < (boft_block_size * (2**boft_n_butterfly_factor)):
-                    raise ValueError(
-                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
-                    )
-                if conv_filter_dim % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
-                    raise ValueError(
-                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
-                    )
-
-            boft_block_num = int(conv_filter_dim // boft_block_size)
-
-        elif boft_block_size != 0 and boft_block_num != 0:
-            raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
-        
+            oft_block_size = int(conv_filter_dim // r)
+        elif r != 0 and oft_block_size != 0:
+            raise ValueError(f"You can only specify either r ({r}) or oft_block_size ({oft_block_size}), but not both simultaneously.")
         else:
-            raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
-
-
-        # In OFT you can specify the number of blocks to be 1
-        if boft_n_butterfly_factor != 0:
-            if boft_block_num % 2 != 0:
-                raise ValueError(f"boft_block_num ({boft_block_num}) must be an even number!")
-
-            if boft_block_size % 2 != 0:
-                raise ValueError(f"boft_block_size ({boft_block_size}) must be an even number!")
-
-        # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
-        P = torch.empty((boft_n_butterfly_factor + 1, conv_filter_dim, conv_filter_dim))
-        for i in range(boft_n_butterfly_factor + 1):
-            perm = self.block_butterfly_perm(
-                conv_filter_dim, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2), boft_n_butterfly_factor
-            )
-            perm_mat = self.perm2mat(perm)
-            P[i] = perm_mat
-
-        self.register_buffer("boft_P", P)
+            raise ValueError(f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {r} and oft_block_size = {oft_block_size}.")
 
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
@@ -909,7 +689,7 @@ class Conv2d(OFTLayer):
                     continue
                 boft_R = self.boft_R[active_adapter]
                 boft_s = self.boft_s[active_adapter]
-                dropout = self.boft_dropout[active_adapter]
+                dropout = self.module_dropout[active_adapter]
 
                 N, D, H, _ = boft_R.shape
                 boft_R = boft_R.view(N * D, H, H)
