@@ -315,11 +315,11 @@ class BOFTLayer(BaseTunerLayer):
 
             boft_block_num = int(self.in_features // boft_block_size)
 
+        elif boft_block_size != 0 and boft_block_num != 0:
+            raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
+        
         else:
-            raise ValueError(
-                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously or setting both"
-                "to be 0, because boft_block_size x boft_block_num != in_features."
-            )
+            raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -704,11 +704,6 @@ class Conv2d(nn.Module, BOFTLayer):
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         # Initialize the BOFT parameters.
-        if not (boft_block_size != 0) ^ (boft_block_num != 0):
-            raise ValueError(
-                f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num != in_features."
-            )
-
         if boft_block_size == 0 and boft_block_num != 0:
             if conv_filter_dim % boft_block_num != 0:
                 raise ValueError(
@@ -745,8 +740,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
             boft_block_num = int(conv_filter_dim // boft_block_size)
 
+        elif boft_block_size != 0 and boft_block_num != 0:
+            raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
+        
         else:
-            raise ValueError("Unknown error!")
+            raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
+
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:

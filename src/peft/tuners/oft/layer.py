@@ -19,23 +19,109 @@ from typing import Any, List, Optional, Set, Tuple
 import torch
 import torch.nn as nn
 
-from peft.tuners.lycoris_utils import LycorisLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 
-class OFTLayer(nn.Module, LycorisLayer):
-    # All names of layers that may contain adapter weights
-    adapter_layer_names = ("oft_r",)
-    # other_param_names is defined on parent class
 
-    def __init__(self, base_layer: nn.Module):
+class MultiplicativeDropoutLayer(nn.Module):
+    """
+    Implements the multiplicative dropout layer for BOFT.
+    """
+
+    def __init__(self, p=0.0):
+        """
+        Initializes the multiplicative dropout layer.
+
+        Parameters:
+        p (float): The probability of dropping out a block. Defaults to 0.0.
+        """
         super().__init__()
-        LycorisLayer.__init__(self, base_layer)
+        self.p = p
 
+    def forward(self, x):
+        """
+        Applies multiplicative dropout to the input tensor.
+
+        Parameters:
+        x (Tensor): The input tensor of shape (N, D, H, H), where `N` is the batch size, `D` represents
+                    one additional dimension (In OFT, the number of OFT blocks), and `H` is the size of the square
+                    blocks along the last two dimensions (In OFT, the block size).
+        """
+        if self.training:
+            # Ensure the last two dimensions are the same
+            if x.shape[-1] != x.shape[-2]:
+                raise ValueError("The last two dimensions of input should be the same!")
+
+            N, D, H, _ = x.shape
+
+            # Randomly select one from N
+            n_random = torch.randint(0, N, (1,)).item()
+
+            # Create a mask with 1s for matrices to be replaced with identity and 0s otherwise
+            num_to_replace = int(self.p * D)
+            num_zeros = D - num_to_replace
+
+            # Generate a flat tensor with desired number of 1s and 0s
+            mask = torch.cat([torch.ones(num_to_replace, device=x.device), torch.zeros(num_zeros, device=x.device)])
+
+            # Shuffle and reshape the mask
+            mask = mask[torch.randperm(D)].view(1, D, 1, 1)
+
+            full_mask = torch.zeros(N, D, 1, 1, device=x.device)
+            full_mask[n_random] = mask
+
+            # Use the mask to combine original matrices and identity matrices
+            eye_matrix = torch.eye(H, device=x.device).repeat(N, D, 1, 1)
+            x = (1 - full_mask) * x + full_mask * eye_matrix
+        return x
+
+
+class OFTLayer(BaseTunerLayer):
+    """
+    Implements the OFT layer.
+    """
+
+    # All names of layers that may contain adapter weights
+    adapter_layer_names = ("oft_r", "oft_s")
+    # other_param_names is defined on parent class
+    other_param_names = ("r", "oft_block_size", "oft_dropout")
+
+    def __init__(self, base_layer: nn.Module, **kwargs) -> None:
+        """
+        Initializes the OFT layer.
+
+        Note, currently only support linear layer and convolutional layer, with further support for other layers to be
+        added soon.
+
+        Parameters:
+        base_layer: the pretrained model layer
+        """
+        self.base_layer = base_layer
         # OFT info
         self.oft_r = nn.ParameterDict({})
+        self.oft_s = nn.ParameterDict({})
+        self.r = {}
+        self.oft_block_size = {}
+        self.oft_dropout = nn.ModuleDict({})
         self.coft = {}
         self.eps = {}
         self.block_share = {}
+        # Mark the weight as unmerged
+        self._disable_adapters = False
+        self.merged_adapters = []
+        self.kwargs = kwargs
+
+        base_layer = self.get_base_layer()
+
+        if isinstance(base_layer, nn.Linear):
+            in_features, out_features = base_layer.in_features, base_layer.out_features
+        elif isinstance(base_layer, nn.Conv2d):
+            in_features, out_features = base_layer.in_channels, base_layer.out_channels
+        else:
+            raise ValueError(f"Unsupported layer type {type(base_layer)}")
+
+        self.in_features = in_features
+        self.out_features = out_features
 
     @property
     def _available_adapters(self) -> Set[str]:
@@ -53,6 +139,7 @@ class OFTLayer(nn.Module, LycorisLayer):
     def reset_adapter_parameters_random(self, adapter_name: str):
         nn.init.kaiming_uniform_(self.oft_r[adapter_name], a=math.sqrt(5))
 
+    '''
     def update_layer(
         self,
         adapter_name: str,
@@ -64,22 +151,47 @@ class OFTLayer(nn.Module, LycorisLayer):
         block_share: bool = False,
         **kwargs,
     ) -> None:
+    '''
+
+    def update_layer(
+        self, adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
+    ):
+        """
+        Update the linear layer with trainable OFT weights. Override for other layer types.
+        """ 
         """Internal function to create oft adapter
 
         Args:
             adapter_name (`str`): Name for the adapter to add.
             r (`int`): Rank for the added adapter.
-            module_dropout (`float`): The dropout probability for disabling adapter during training.
-            init_weights (`bool`): Whether to initialize weights.
+            oft_block_size (`int`): The block size for added adapter.
+            module_dropout (`float`): The multiplicative dropout probability for disabling adapter blocks during training.
             coft (`bool`): Whether to use the constrained variant of OFT or not.
             eps (`float`):
                 The control strength of COFT. The freedom of rotation. Only has an effect if `coft` is set to True.
             block_share (`bool`): Whether to share the OFT parameters between blocks or not.
+            init_weights (`bool`): Whether to initialize weights.
         """
-        if r <= 0:
-            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
+        if module_dropout > 0.0:
+            oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
+        else:
+            oft_dropout_layer = nn.Identity()
+        self.oft_dropout.update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
 
-        self.r[adapter_name] = r
+        if r == 0 and oft_block_size != 0:
+            if self.in_features % oft_block_size != 0:
+                raise ValueError(f"Input features ({self.in_features}) should be divisible by `oft_block_size` ({oft_block_size})")
+            r = int(self.in_features // oft_block_size)
+        elif r != 0 and oft_block_size == 0:
+            if self.in_features % r != 0:
+                raise ValueError(f"Input features ({self.in_features}) should be divisible by `r` ({r})!")
+            oft_block_size = int(self.in_features // r)
+        elif r != 0 and oft_block_size != 0:
+            raise ValueError(f"You can only specify either r ({r}) or oft_block_size ({oft_block_size}), but not both simultaneously.")
+        else:
+            raise ValueError(f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {r} and oft_block_size = {oft_block_size}.")
+                
         self.module_dropout[adapter_name] = module_dropout
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
@@ -98,14 +210,24 @@ class OFTLayer(nn.Module, LycorisLayer):
 
         self.eps[adapter_name] = eps * math.ceil(shape[0] / r) * math.ceil(shape[0] / r)
 
+        print(self.in_features, r)
+
         # Create weights with provided shape
-        self.create_adapter_parameters(adapter_name, r, shape, block_share)
+        if block_share:
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
+        else:
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
+        self.oft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
 
         # Initialize weights
         if init_weights:
             self.reset_adapter_parameters(adapter_name)
         else:
             self.reset_adapter_parameters_random(adapter_name)
+
+        # set oft r and block size
+        self.r[adapter_name] = r
+        self.oft_block_size[adapter_name] = oft_block_size
 
         # Move new weights to device
         self._move_adapter_to_device_of_base_layer(adapter_name)
