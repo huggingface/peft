@@ -520,7 +520,7 @@ class Linear(nn.Module, BOFTLayer):
                             f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                         )
 
-                    self.base_layer.weight.data = orig_weight
+                    self.base_layer.weight.data = orig_weight.contiguous()
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
                     orig_weight = base_layer.weight.data.clone()
@@ -529,7 +529,7 @@ class Linear(nn.Module, BOFTLayer):
                     orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
 
-                    self.base_layer.weight.data = orig_weight
+                    self.base_layer.weight.data = orig_weight.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
@@ -824,7 +824,7 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight
+                    self.base_layer.weight.data = orig_weight.contiguous()
                 else:
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
@@ -838,7 +838,7 @@ class Conv2d(nn.Module, BOFTLayer):
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
                     )
 
-                    self.base_layer.weight.data = orig_weight
+                    self.base_layer.weight.data = orig_weight.contiguous()
 
                 self.merged_adapters.append(active_adapter)
 
