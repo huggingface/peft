@@ -764,7 +764,7 @@ class PeftCommonTester:
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 
-         # Ensure that serializing with safetensors works, there was an error when weights were not contiguous
+        # Ensure that serializing with safetensors works, there was an error when weights were not contiguous
         with tempfile.TemporaryDirectory() as tmp_dirname:
             # serializing with torch.save works
             torch.save(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.bin"))
