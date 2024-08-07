@@ -52,6 +52,7 @@ from peft.tuners.lora import LoraLayer
 from peft.utils import _get_submodules, infer_device
 
 from .testing_utils import get_state_dict
+from safetensors.torch import save_file
 
 
 CONFIG_TESTING_KWARGS = (
@@ -763,8 +764,7 @@ class PeftCommonTester:
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
 
-        from safetensors.torch import save_file
-        # serializing works without errors
+         # Ensure that serializing with safetensors works, there was an error when weights were not contiguous
         with tempfile.TemporaryDirectory() as tmp_dirname:
             # serializing with torch.save works
             torch.save(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.bin"))
