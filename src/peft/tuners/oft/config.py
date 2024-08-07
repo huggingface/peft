@@ -36,6 +36,7 @@ class OFTConfig(PeftConfig):
             the output layer. If this is not specified, modules will be chosen according to the model architecture. If
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
+        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
         bias (`str`): Bias type for OFT. Can be 'none', 'all' or 'oft_only'. If 'all' or 'oft_only', the
             corresponding biases will be updated during training. Be aware that this means that, even when disabling
             the adapters, the model will not produce the same output as the base model would have without adaptation.
@@ -78,6 +79,10 @@ class OFTConfig(PeftConfig):
             "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$' "
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
+    )
+    fan_in_fan_out: bool = field(
+        default=False,
+        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
     bias: str = field(default="none", metadata={"help": "Bias type for OFT. Can be 'none', 'all' or 'oft_only'"})
     init_weights: bool = field(

@@ -14,7 +14,7 @@
 
 import math
 import warnings
-from typing import Any, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -133,11 +133,23 @@ class OFTLayer(BaseTunerLayer):
         else:
             self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
 
-    def reset_adapter_parameters(self, adapter_name: str):
-        nn.init.zeros_(self.oft_r[adapter_name])
+    def reset_oft_parameters(self, adapter_name, init_weights):
+        """
+        Reset the OFT parameters.
+        """
+        if init_weights is False:
+            nn.init.normal_(self.oft_r[adapter_name], mean=0.0, std=0.1)
+            nn.init.normal_(self.oft_s[adapter_name], mean=1.0, std=0.1)
+            return
 
-    def reset_adapter_parameters_random(self, adapter_name: str):
-        nn.init.kaiming_uniform_(self.oft_r[adapter_name], a=math.sqrt(5))
+        if adapter_name in self.oft_r.keys():
+            if init_weights is True:
+                # initialize R to zero
+                nn.init.zeros_(self.oft_r[adapter_name])
+                nn.init.ones_(self.oft_s[adapter_name])
+            else:
+                raise ValueError(f"Unknown initialization {init_weights=}")
+
 
     '''
     def update_layer(
@@ -211,19 +223,17 @@ class OFTLayer(BaseTunerLayer):
         self.eps[adapter_name] = eps * math.ceil(shape[0] / r) * math.ceil(shape[0] / r)
 
         print(self.in_features, r)
+        exit()
 
         # Create weights with provided shape
         if block_share:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(1, math.ceil(self.in_features / r), math.ceil(self.in_features / r)))
         else:
-            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(shape[0] / r), math.ceil(shape[0] / r)))
-        self.oft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
+            self.oft_r[adapter_name] = nn.Parameter(torch.empty(r, math.ceil(self.in_features / r), math.ceil(self.in_features / r)))
+        self.oft_s[adapter_name] = nn.Parameter(torch.empty(int(self.out_features), 1))
 
         # Initialize weights
-        if init_weights:
-            self.reset_adapter_parameters(adapter_name)
-        else:
-            self.reset_adapter_parameters_random(adapter_name)
+        self.reset_oft_parameters(adapter_name, init_weights)
 
         # set oft r and block size
         self.r[adapter_name] = r
@@ -439,18 +449,186 @@ class Linear(OFTLayer):
 
     def __init__(
         self,
-        base_layer: nn.Module,
-        adapter_name: str = "default",
-        r: int = 0,
+        base_layer,
+        adapter_name: str,
+        r: int = 8,
+        oft_block_size: int = 0,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         module_dropout: float = 0.0,
-        init_weights: bool = True,
+        coft: bool = False,
+        eps: float = 6e-5,
+        block_share: bool = False,
+        init_weights: Union[bool, str] = True,
+        is_target_conv_1d_layer: bool = False,
         **kwargs,
-    ):
-        super().__init__(base_layer)
+    ) -> None:
+        super().__init__()
+        OFTLayer.__init__(self, base_layer, **kwargs)
+        self.fan_in_fan_out = fan_in_fan_out
 
-        # Create adapter and set it active
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, module_dropout, init_weights, **kwargs)
+
+        self.update_layer(
+            adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
+        )
+        self.is_target_conv_1d_layer = is_target_conv_1d_layer
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
+
+        for active_adapter in adapter_names:
+            if active_adapter in self.boft_R.keys():
+                base_layer = self.get_base_layer()
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weight = base_layer.weight.data.clone()
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = orig_weight * boft_s
+
+                    if not torch.isfinite(orig_weight).all():
+                        raise ValueError(
+                            f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                        )
+
+                    self.base_layer.weight.data = orig_weight
+                else:
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+                    orig_weight = base_layer.weight.data.clone()
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
+                    orig_weight = orig_weight * boft_s
+
+                    self.base_layer.weight.data = orig_weight
+
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.boft_R.keys():
+                butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
+                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.transpose(orig_weight, 0, 1)
+
+                self.get_base_layer().weight.data = orig_weight * (1 / boft_s)
+
+    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+        boft_R = self.boft_R[adapter]
+        boft_s = self.boft_s[adapter]
+
+        N, D, H, _ = boft_R.shape
+        boft_R = boft_R.view(N * D, H, H)
+        orth_rotate_butterfly = self.cayley_batch(boft_R)
+        orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
+        if self.fbd_cuda_available:
+            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+        else:
+            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
+        butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+        for i in range(1, butterfly_oft_mat_batch.shape[0]):
+            butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+        return butterfly_oft_mat, boft_s
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = x.dtype
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            boft_rotation = torch.eye(self.in_features, device=x.device)
+            boft_scale = torch.ones((int(self.out_features), 1), device=x.device)
+
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.boft_R.keys():
+                    continue
+                boft_R = self.boft_R[active_adapter]
+                boft_s = self.boft_s[active_adapter]
+                dropout = self.boft_dropout[active_adapter]
+
+                N, D, H, _ = boft_R.shape
+                boft_R = boft_R.view(N * D, H, H)
+                orth_rotate_butterfly = self.cayley_batch(boft_R)
+                orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
+                orth_rotate_butterfly = dropout(orth_rotate_butterfly)
+                if self.fbd_cuda_available:
+                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+                else:
+                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+
+                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
+                butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+                for i in range(1, butterfly_oft_mat_batch.shape[0]):
+                    butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+                boft_rotation = butterfly_oft_mat @ boft_rotation
+                boft_scale = boft_s * boft_scale
+
+            x = x.to(self.get_base_layer().weight.data.dtype)
+
+            orig_weight = self.get_base_layer().weight.data
+            orig_weight = torch.transpose(orig_weight, 0, 1)
+            rotated_weight = torch.mm(boft_rotation, orig_weight)
+            rotated_weight = torch.transpose(rotated_weight, 0, 1)
+
+            scaled_rotated_weight = rotated_weight * boft_scale
+
+            result = F.linear(input=x, weight=scaled_rotated_weight, bias=self.base_layer.bias)
+
+        result = result.to(previous_dtype)
+        return result
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
@@ -474,18 +652,312 @@ class Conv2d(OFTLayer):
 
     def __init__(
         self,
-        base_layer: nn.Module,
-        adapter_name: str = "default",
-        r: int = 0,
+        base_layer,
+        adapter_name,
+        r: int = 8,
+        oft_block_size: int = 0,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         module_dropout: float = 0.0,
-        init_weights: bool = True,
+        coft: bool = False,
+        eps: float = 6e-5,
+        block_share: bool = False,
+        init_weights: Union[bool, str] = True,
         **kwargs,
-    ):
-        super().__init__(base_layer)
+    ) -> None:
+        super().__init__()
+        OFTLayer.__init__(self, base_layer)
+        self.fan_in_fan_out = fan_in_fan_out
 
         # Create adapter and set it active
-        self._active_adapter = adapter_name
-        self.update_layer(adapter_name, r, module_dropout, init_weights, **kwargs)
+        self.update_layer(
+            adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
+        )
+
+    def update_layer(
+        self, adapter_name, boft_block_size, boft_block_num, boft_n_butterfly_factor, boft_dropout, init_weights
+    ):
+        """
+        Update the conv2d layer with trainable BOFT weights.
+        """
+        # to be consistent with the paper notation
+        boft_n_butterfly_factor = boft_n_butterfly_factor - 1
+        if boft_n_butterfly_factor < 0:
+            raise ValueError(
+                f"You can only specify boft_n_butterfly_factor {boft_n_butterfly_factor+1} to be a positive integer number."
+            )
+
+        # Initialize the MultiplicativeDropoutLayer for boft_dropout > 0.0.
+        if boft_dropout > 0.0:
+            boft_dropout_layer = MultiplicativeDropoutLayer(p=boft_dropout)
+        else:
+            boft_dropout_layer = nn.Identity()
+        self.boft_dropout.update(nn.ModuleDict({adapter_name: boft_dropout_layer}))
+
+        # layer information from the base layer
+        base_layer = self.get_base_layer()
+        conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
+
+        # Initialize the BOFT parameters.
+        if boft_block_size == 0 and boft_block_num != 0:
+            if conv_filter_dim % boft_block_num != 0:
+                raise ValueError(
+                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by boft_block_num ({boft_block_num})!"
+                )
+
+            if boft_n_butterfly_factor != 0:
+                if boft_n_butterfly_factor > int(math.log2(boft_block_num)):
+                    raise ValueError(
+                        f"Invalid combination of boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_num ({boft_block_num})!"
+                    )
+                if boft_block_num % (2**boft_n_butterfly_factor) != 0:
+                    raise ValueError(
+                        f"boft_block_num ({boft_block_num}) must be a multiple of 2 raised to the power of boft_n_butterfly_factor ({boft_n_butterfly_factor+1})!"
+                    )
+
+            boft_block_size = int(conv_filter_dim // boft_block_num)
+
+        elif boft_block_size != 0 and boft_block_num == 0:
+            if conv_filter_dim % boft_block_size != 0:
+                raise ValueError(
+                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by boft_block_size ({boft_block_size})!"
+                )
+
+            if boft_n_butterfly_factor != 0:
+                if conv_filter_dim < (boft_block_size * (2**boft_n_butterfly_factor)):
+                    raise ValueError(
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
+                    )
+                if conv_filter_dim % (boft_block_size * (2**boft_n_butterfly_factor)) != 0:
+                    raise ValueError(
+                        f"Invalid combination of convolutional kernel dimension ({conv_filter_dim}), boft_n_butterfly_factor ({boft_n_butterfly_factor+1}) and boft_block_size ({boft_block_size})!"
+                    )
+
+            boft_block_num = int(conv_filter_dim // boft_block_size)
+
+        elif boft_block_size != 0 and boft_block_num != 0:
+            raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
+        
+        else:
+            raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
+
+
+        # In OFT you can specify the number of blocks to be 1
+        if boft_n_butterfly_factor != 0:
+            if boft_block_num % 2 != 0:
+                raise ValueError(f"boft_block_num ({boft_block_num}) must be an even number!")
+
+            if boft_block_size % 2 != 0:
+                raise ValueError(f"boft_block_size ({boft_block_size}) must be an even number!")
+
+        # If there is no butterfly factor, then permutation matrix P will be an identity matrix.
+        P = torch.empty((boft_n_butterfly_factor + 1, conv_filter_dim, conv_filter_dim))
+        for i in range(boft_n_butterfly_factor + 1):
+            perm = self.block_butterfly_perm(
+                conv_filter_dim, int(boft_block_num / (2 ** (i))), int(boft_block_size / 2), boft_n_butterfly_factor
+            )
+            perm_mat = self.perm2mat(perm)
+            P[i] = perm_mat
+
+        self.register_buffer("boft_P", P)
+
+        self.boft_R[adapter_name] = nn.Parameter(
+            torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
+        )
+        self.boft_s[adapter_name] = nn.Parameter(torch.ones(1, int(self.out_features)))
+
+        self.reset_boft_parameters(adapter_name, init_weights)
+
+        # set the boft block size and number
+        self.boft_block_size[adapter_name] = boft_block_size
+        self.boft_block_num[adapter_name] = boft_block_num
+
+        self._move_adapter_to_device_of_base_layer(adapter_name)
+        self.set_adapter(self.active_adapters)
+
+    def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
+        """
+        Merge the active adapter weights into the base weights
+
+        Args:
+            safe_merge (`bool`, *optional*):
+                If True, the merge operation will be performed in a copy of the original weights and check for NaNs
+                before merging the weights. This is useful if you want to check if the merge operation will produce
+                NaNs. Defaults to `False`.
+            adapter_names (`List[str]`, *optional*):
+                The list of adapter names that should be merged. If None, all active adapters will be merged. Defaults
+                to `None`.
+        """
+        adapter_names = check_adapters_to_merge(self, adapter_names)
+        if not adapter_names:
+            # no adapter to merge
+            return
+
+        for active_adapter in adapter_names:
+            if active_adapter in self.boft_R.keys():
+                base_layer = self.get_base_layer()
+                if safe_merge:
+                    # Note that safe_merge will be slower than the normal merge
+                    # because of the copy operation.
+                    orig_weight = base_layer.weight.data.clone()
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
+                    orig_weight = orig_weight.view(
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                    )
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = orig_weight * boft_s
+                    orig_weight = orig_weight.view(
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                    )
+
+                    self.base_layer.weight.data = orig_weight
+                else:
+                    butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
+                    orig_weight = base_layer.weight.data.clone()
+                    orig_weight = orig_weight.view(
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                    )
+                    orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = orig_weight * boft_s
+                    orig_weight = orig_weight.view(
+                        self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
+                    )
+
+                    self.base_layer.weight.data = orig_weight
+
+                self.merged_adapters.append(active_adapter)
+
+    def unmerge(self) -> None:
+        """
+        This method unmerges all merged adapter layers from the base weights.
+        """
+        if not self.merged:
+            warnings.warn("Already unmerged. Nothing to do.")
+            return
+        while len(self.merged_adapters) > 0:
+            active_adapter = self.merged_adapters.pop()
+            if active_adapter in self.boft_R.keys():
+                butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
+
+                orig_weight = self.get_base_layer().weight.data.clone()
+                orig_weight = orig_weight.view(
+                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
+                    self.out_features,
+                )
+                orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = orig_weight * (1 / boft_s)
+                orig_weight = orig_weight.view(
+                    self.out_features,
+                    self.in_features,
+                    self.get_base_layer().kernel_size[0],
+                    self.get_base_layer().kernel_size[0],
+                )
+
+                self.get_base_layer().weight.data = orig_weight
+
+    def get_delta_weight(self, adapter) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute the delta weight for the given adapter.
+
+        Args:
+            adapter (str):
+                The name of the adapter for which the delta weight should be computed.
+        """
+
+        boft_R = self.boft_R[adapter]
+        boft_s = self.boft_s[adapter]
+
+        N, D, H, _ = boft_R.shape
+        boft_R = boft_R.view(N * D, H, H)
+        orth_rotate_butterfly = self.cayley_batch(boft_R)
+        orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
+        if self.fbd_cuda_available:
+            block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+        else:
+            orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+            block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+            block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+
+        boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+        butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+        butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
+        butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+        for i in range(1, butterfly_oft_mat_batch.shape[0]):
+            butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+        return butterfly_oft_mat, boft_s
+
+    def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
+        previous_dtype = x.dtype
+
+        if self.disable_adapters:
+            if self.merged:
+                self.unmerge()
+            result = self.base_layer(x, *args, **kwargs)
+        elif self.merged:
+            result = self.base_layer(x, *args, **kwargs)
+        else:
+            boft_rotation = torch.eye(
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0], device=x.device
+            )
+            boft_scale = torch.ones((1, int(self.out_features)), device=x.device)
+
+            for active_adapter in self.active_adapters:
+                if active_adapter not in self.boft_R.keys():
+                    continue
+                boft_R = self.boft_R[active_adapter]
+                boft_s = self.boft_s[active_adapter]
+                dropout = self.boft_dropout[active_adapter]
+
+                N, D, H, _ = boft_R.shape
+                boft_R = boft_R.view(N * D, H, H)
+                orth_rotate_butterfly = self.cayley_batch(boft_R)
+                orth_rotate_butterfly = orth_rotate_butterfly.view(N, D, H, H)
+                orth_rotate_butterfly = dropout(orth_rotate_butterfly)
+                if self.fbd_cuda_available:
+                    block_diagonal_butterfly = FastBlockDiag.apply(orth_rotate_butterfly)
+                else:
+                    orth_rotate_butterfly = orth_rotate_butterfly.squeeze(0)
+                    block_diagonal_butterfly = torch.block_diag(*torch.unbind(orth_rotate_butterfly))
+                    block_diagonal_butterfly = block_diagonal_butterfly.unsqueeze(0)
+
+                boft_P = self.boft_P.to(block_diagonal_butterfly.device)
+                butterfly_oft_mat_batch = torch.bmm(block_diagonal_butterfly, boft_P.permute(0, 2, 1))
+                butterfly_oft_mat_batch = torch.bmm(boft_P, butterfly_oft_mat_batch)
+                butterfly_oft_mat = butterfly_oft_mat_batch[0]
+
+                for i in range(1, butterfly_oft_mat_batch.shape[0]):
+                    butterfly_oft_mat = butterfly_oft_mat_batch[i] @ butterfly_oft_mat
+
+                boft_rotation = butterfly_oft_mat @ boft_rotation
+                boft_scale = boft_s * boft_scale
+
+            x = x.to(self.base_layer.weight.data.dtype)
+
+            orig_weight = self.base_layer.weight.data
+            orig_weight = orig_weight.view(
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                self.out_features,
+            )
+            rotated_weight = torch.mm(boft_rotation, orig_weight)
+
+            scaled_rotated_weight = rotated_weight * boft_scale
+
+            scaled_rotated_weight = scaled_rotated_weight.view(
+                self.out_features, self.in_features, self.base_layer.kernel_size[0], self.base_layer.kernel_size[0]
+            )
+            result = F.conv2d(
+                input=x,
+                weight=scaled_rotated_weight,
+                bias=self.base_layer.bias,
+                padding=self.base_layer.padding[0],
+                stride=self.base_layer.stride[0],
+            )
+
+        result = result.to(previous_dtype)
+        return result
 
     def _get_delta_activations(
         self, adapter_name: str, input: torch.Tensor, *args: Any, **kwargs: Any
