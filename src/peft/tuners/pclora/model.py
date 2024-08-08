@@ -24,6 +24,7 @@ class PCLoraModel(LoraModel):
         
         self._task_loss_alpha = lora_config[adapter_name].task_loss_alpha
         self._q = lora_config[adapter_name].q
+        self._k = lora_config[adapter_name].k
         
     def _linear(self, step: int, q: int) -> float:
         return 1 - step / q if step < q else 0
@@ -43,7 +44,9 @@ class PCLoraModel(LoraModel):
     def update_lora(self, step: int, **kwargs) -> None:
         lambda_ft_distill = self._decay_schedule(step, self._q)
         for name, module in self._get_lora_modules():
-            module.update(lambda_ft_distill, **kwargs)
+            
+            if step % self._k == 0 or step == self._q:
+                module.update(lambda_ft_distill, **kwargs)
             
     def forward(self, *args, **kwargs):
         kwargs["output_hidden_states"] = False
