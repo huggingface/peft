@@ -126,6 +126,7 @@ class OFTModel(BaseTuner):
             "module_dropout": oft_config.module_dropout,
             "coft": oft_config.coft,
             "eps": oft_config.eps,
+            "block_share": oft_config.block_share,
             "fan_in_fan_out": oft_config.fan_in_fan_out,
             "init_weights": oft_config.init_weights,
         }
@@ -146,6 +147,7 @@ class OFTModel(BaseTuner):
                 module_dropout=oft_config.module_dropout,
                 coft=oft_config.coft,
                 eps=oft_config.eps,
+                block_share=oft_config.block_share,
                 init_weights=oft_config.init_weights,
             )
 

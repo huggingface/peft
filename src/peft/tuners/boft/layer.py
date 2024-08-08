@@ -776,7 +776,7 @@ class Conv2d(nn.Module, BOFTLayer):
         self.boft_R[adapter_name] = nn.Parameter(
             torch.zeros(boft_n_butterfly_factor + 1, boft_block_num, boft_block_size, boft_block_size)
         )
-        self.boft_s[adapter_name] = nn.Parameter(torch.ones(1, int(self.out_features)))
+        self.boft_s[adapter_name] = nn.Parameter(torch.ones(int(self.out_features), 1))
 
         self.reset_boft_parameters(adapter_name, init_weights)
 
@@ -815,9 +815,12 @@ class Conv2d(nn.Module, BOFTLayer):
                     butterfly_oft_mat, boft_s = self.get_delta_weight(active_adapter)
 
                     orig_weight = orig_weight.view(
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                        self.out_features,
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
@@ -829,9 +832,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
                     orig_weight = base_layer.weight.data.clone()
                     orig_weight = orig_weight.view(
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                        self.out_features,
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = torch.mm(butterfly_oft_mat, orig_weight)
+                    orig_weight = torch.transpose(orig_weight, 0, 1)
                     orig_weight = orig_weight * boft_s
                     orig_weight = orig_weight.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
@@ -855,10 +861,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
                 orig_weight = self.get_base_layer().weight.data.clone()
                 orig_weight = orig_weight.view(
-                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                     self.out_features,
+                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 )
+                orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = torch.mm(butterfly_oft_mat.t(), orig_weight)
+                orig_weight = torch.transpose(orig_weight, 0, 1)
                 orig_weight = orig_weight * (1 / boft_s)
                 orig_weight = orig_weight.view(
                     self.out_features,
@@ -917,7 +925,7 @@ class Conv2d(nn.Module, BOFTLayer):
                 device=x.device,
                 dtype=x.dtype,
             )
-            boft_scale = torch.ones((1, int(self.out_features)), device=x.device, dtype=x.dtype)
+            boft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=x.dtype)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.boft_R.keys():
@@ -954,10 +962,12 @@ class Conv2d(nn.Module, BOFTLayer):
 
             orig_weight = self.base_layer.weight.data
             orig_weight = orig_weight.view(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                 self.out_features,
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
             )
+            orig_weight = torch.transpose(orig_weight, 0, 1)
             rotated_weight = torch.mm(boft_rotation, orig_weight)
+            rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * boft_scale
 

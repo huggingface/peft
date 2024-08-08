@@ -82,7 +82,7 @@ class OFTLayer(BaseTunerLayer):
     # All names of layers that may contain adapter weights
     adapter_layer_names = ("oft_r", "oft_s")
     # other_param_names is defined on parent class
-    other_param_names = ("r", "oft_block_size", "module_dropout")
+    other_param_names = ("r", "oft_block_size", "oft_dropout")
 
     def __init__(self, base_layer: nn.Module, **kwargs) -> None:
         """
@@ -100,7 +100,7 @@ class OFTLayer(BaseTunerLayer):
         self.oft_s = nn.ParameterDict({})
         self.r = {}
         self.oft_block_size = {}
-        self.module_dropout = nn.ModuleDict({})
+        self.oft_dropout = nn.ModuleDict({})
         self.coft = {}
         self.eps = {}
         self.block_share = {}
@@ -170,10 +170,10 @@ class OFTLayer(BaseTunerLayer):
         """
         # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
         if module_dropout > 0.0:
-            module_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
+            oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
         else:
-            module_dropout_layer = nn.Identity()
-        self.module_dropout.update(nn.ModuleDict({adapter_name: module_dropout_layer}))
+            oft_dropout_layer = nn.Identity()
+        self.oft_dropout.update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
 
         if r == 0 and oft_block_size != 0:
             if self.in_features % oft_block_size != 0:
@@ -221,7 +221,7 @@ class OFTLayer(BaseTunerLayer):
 
         if adapter_name in self.oft_r.keys():
             if init_weights is True:
-                # initialize R to zero
+                # initialize oft_r to zero
                 nn.init.zeros_(self.oft_r[adapter_name])
                 nn.init.ones_(self.oft_s[adapter_name])
             else:
@@ -412,9 +412,7 @@ class Linear(nn.Module, OFTLayer):
                     continue
                 oft_r = self.oft_r[active_adapter]
                 oft_s = self.oft_s[active_adapter]
-                dropout = self.module_dropout[active_adapter]
-
-                # print(dropout)
+                dropout = self.oft_dropout[active_adapter]
 
                 rank = self.r[active_adapter]
                 coft = self.coft[active_adapter]
@@ -426,19 +424,7 @@ class Linear(nn.Module, OFTLayer):
 
                 orth_rotate = self._cayley_batch(oft_r)
                 orth_rotate = dropout(orth_rotate)
-                # print('orth rotate', orth_rotate.shape, self.in_features, self.out_features)
                 oft_mat = self._block_diagonal(orth_rotate, rank)
-
-
-                # print('oft_r', oft_r.shape, self.in_features, self.out_features)
-                # oft_s = self.oft_s[active_adapter]
-                # dropout = self.module_dropout[active_adapter]
-
-                # oft_mat, oft_s = self.get_delta_weight(active_adapter)
-
-                # print('oft_mat', oft_mat.shape, self.in_features, self.out_features)
-                # exit()
-                # oft_mat = dropout(oft_mat)
 
                 oft_rotation = oft_mat @ oft_rotation
                 oft_scale = oft_s * oft_scale
@@ -472,8 +458,8 @@ class Conv2d(nn.Module, OFTLayer):
 
     def __init__(
         self,
-        base_layer,
-        adapter_name,
+        base_layer: nn.Module,
+        adapter_name: str,
         r: int = 8,
         oft_block_size: int = 0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
@@ -488,6 +474,8 @@ class Conv2d(nn.Module, OFTLayer):
         OFTLayer.__init__(self, base_layer)
         self.fan_in_fan_out = fan_in_fan_out
 
+        self._active_adapter = adapter_name
+
         # Create adapter and set it active
         self.update_layer(
             adapter_name, r, oft_block_size, module_dropout, coft, eps, block_share, init_weights
@@ -501,10 +489,10 @@ class Conv2d(nn.Module, OFTLayer):
         """
         # Initialize the MultiplicativeDropoutLayer for module_dropout > 0.0.
         if module_dropout > 0.0:
-            module_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
+            oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
         else:
-            module_dropout_layer = nn.Identity()
-        self.module_dropout.update(nn.ModuleDict({adapter_name: module_dropout_layer}))
+            oft_dropout_layer = nn.Identity()
+        self.oft_dropout.update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
 
         # layer information from the base layer
         base_layer = self.get_base_layer()
@@ -577,9 +565,12 @@ class Conv2d(nn.Module, OFTLayer):
                     oft_mat, oft_s = self.get_delta_weight(active_adapter)
 
                     orig_weights = orig_weights.view(
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                        self.out_features,
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
                     orig_weights = orig_weights.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
@@ -591,9 +582,12 @@ class Conv2d(nn.Module, OFTLayer):
 
                     orig_weights = base_layer.weight.data.clone()
                     orig_weights = orig_weights.view(
-                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0], self.out_features
+                        self.out_features,
+                        self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
                     )
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = torch.mm(oft_mat, orig_weights)
+                    orig_weights = torch.transpose(orig_weights, 0, 1)
                     orig_weights = orig_weights * oft_s
                     orig_weights = orig_weights.view(
                         self.out_features, self.in_features, base_layer.kernel_size[0], base_layer.kernel_size[0]
@@ -617,10 +611,12 @@ class Conv2d(nn.Module, OFTLayer):
 
                 orig_weights = self.get_base_layer().weight.data.clone()
                 orig_weights = orig_weights.view(
-                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                     self.out_features,
+                    self.in_features * self.get_base_layer().kernel_size[0] * self.get_base_layer().kernel_size[0],
                 )
+                orig_weights = torch.transpose(orig_weights, 0, 1)
                 orig_weights = torch.mm(oft_mat.t(), orig_weights)
+                orig_weights = torch.transpose(orig_weights, 0, 1)
                 orig_weights = orig_weights * (1 / oft_s)
                 orig_weights = orig_weights.view(
                     self.out_features,
@@ -666,16 +662,18 @@ class Conv2d(nn.Module, OFTLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             oft_rotation = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0], device=x.device, dtype=previous_dtype
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0], 
+                device=x.device, 
+                dtype=previous_dtype
             )
-            oft_scale = torch.ones((1, int(self.out_features)), device=x.device, dtype=previous_dtype)
+            oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)
 
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.oft_r.keys():
                     continue
                 oft_r = self.oft_r[active_adapter]
                 oft_s = self.oft_s[active_adapter]
-                dropout = self.module_dropout[active_adapter]
+                dropout = self.oft_dropout[active_adapter]
 
                 rank = self.r[active_adapter]
                 coft = self.coft[active_adapter]
@@ -687,7 +685,6 @@ class Conv2d(nn.Module, OFTLayer):
 
                 orth_rotate = self._cayley_batch(oft_r)
                 orth_rotate = dropout(orth_rotate)
-                # print('orth rotate', orth_rotate.shape, self.in_features, self.out_features)
                 oft_mat = self._block_diagonal(orth_rotate, rank)
 
                 oft_rotation = oft_mat @ oft_rotation
@@ -697,10 +694,14 @@ class Conv2d(nn.Module, OFTLayer):
 
             orig_weights = self.base_layer.weight.data
             orig_weights = orig_weights.view(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
                 self.out_features,
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
             )
+            orig_weights = torch.transpose(orig_weights, 0, 1)
+            oft_rotation = oft_rotation.to(previous_dtype)
+            orig_weights = orig_weights.to(previous_dtype)
             rotated_weight = torch.mm(oft_rotation, orig_weights)
+            rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
             scaled_rotated_weight = rotated_weight * oft_scale
 
