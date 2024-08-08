@@ -3093,7 +3093,7 @@ class TestBOFT:
     def test_boft_half_linear(self):
         # Check that we can use BoFT with model loaded in half precision
         layer = torch.nn.Linear(160, 160).cuda()
-        layer = boft.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        layer = boft.layer.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
         x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
         layer(x)  # does not raise
 
@@ -3101,6 +3101,6 @@ class TestBOFT:
     @pytest.mark.single_gpu_tests
     def test_boft_half_conv(self):
         conv = torch.nn.Conv2d(1, 1, 4).cuda()
-        conv = boft.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
         x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
         conv(x)  # does not raise
