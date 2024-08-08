@@ -489,8 +489,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin1"], init_lora_weights=False),
             ),
             (
-                OFTConfig(target_modules=["lin1"], init_weights=False),
-                OFTConfig(target_modules=["lin1"], init_weights=False),
+                OFTConfig(r=2, target_modules=["lin1"], init_weights=False),
+                OFTConfig(r=2, target_modules=["lin1"], init_weights=False),
             ),
         ],
         name_func=_param_name_func,
@@ -524,8 +524,8 @@ class TestMixedAdapterTypes(unittest.TestCase):
                 AdaLoraConfig(target_modules=["lin0"], init_lora_weights=False),
             ),
             (
-                OFTConfig(target_modules=["lin0"], init_weights=False),
-                OFTConfig(target_modules=["lin0"], init_weights=False),
+                OFTConfig(r=2, target_modules=["lin0"], init_weights=False),
+                OFTConfig(r=2, target_modules=["lin0"], init_weights=False),
             ),
         ],
         name_func=_param_name_func,
@@ -560,7 +560,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         config3 = LoKrConfig(r=4, alpha=4, target_modules=["lin0", "lin1"], init_weights=False)
         peft_model.add_adapter("adapter3", config3)
 
-        config4 = OFTConfig(r=8, target_modules=["lin0", "lin1"], init_weights=False)
+        config4 = OFTConfig(r=2, target_modules=["lin0", "lin1"], init_weights=False)
         peft_model.add_adapter("adapter4", config4)
 
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
@@ -763,7 +763,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         assert not torch.allclose(output2, output3)
 
         torch.manual_seed(4)
-        config4 = OFTConfig(task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
+        config4 = OFTConfig(r=2, task_type="CAUSAL_LM", target_modules=["q_proj", "v_proj"], init_weights=False)
         peft_model.add_adapter("adapter4", config4)
         peft_model.set_adapter(["adapter0", "adapter1", "adapter2", "adapter3", "adapter4"])
         output4 = peft_model.generate(**input_dict)
