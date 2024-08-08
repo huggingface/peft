@@ -29,7 +29,7 @@ from peft.utils import (
 )
 
 from .config import OFTConfig
-from .layer import OFTLayer, Conv2d, Linear
+from .layer import Conv2d, Linear, OFTLayer
 
 
 class OFTModel(BaseTuner):
@@ -368,7 +368,7 @@ class OFTModel(BaseTuner):
 
 
 
-    '''
+    r'''
     layers_mapping: Dict[Type[torch.nn.Module], Type[OFTLayer]] = {
         torch.nn.Conv2d: Conv2d,
         torch.nn.Linear: Linear,

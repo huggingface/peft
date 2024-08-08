@@ -236,7 +236,7 @@ TEST_CASES = [
         "MLP",
         OFTConfig,
         {
-            "r": 2, 
+            "r": 2,
             "target_modules": ["lin0"],
             "module_dropout": 0.1,
         },

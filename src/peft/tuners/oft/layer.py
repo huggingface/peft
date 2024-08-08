@@ -14,7 +14,7 @@
 
 import math
 import warnings
-from typing import Any, List, Optional, Set, Tuple, Union
+from typing import Any, List, Optional, Set, Union
 
 import torch
 import torch.nn as nn
@@ -154,7 +154,7 @@ class OFTLayer(BaseTunerLayer):
     ):
         """
         Update the linear layer with trainable OFT weights. Override for other layer types.
-        """ 
+        """
         """Internal function to create oft adapter
 
         Args:
@@ -187,7 +187,7 @@ class OFTLayer(BaseTunerLayer):
             raise ValueError(f"You can only specify either r ({r}) or oft_block_size ({oft_block_size}), but not both simultaneously.")
         else:
             raise ValueError(f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {r} and oft_block_size = {oft_block_size}.")
-                
+
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
         self.eps[adapter_name] = eps * math.ceil(self.out_features / r) * math.ceil(self.out_features / r)
@@ -271,7 +271,7 @@ class OFTLayer(BaseTunerLayer):
         mask = (norm_diff <= eps).bool()
         out = torch.where(mask, oft_r, I + eps * (diff / norm_diff))
         return out
-        
+
 
 class Linear(nn.Module, OFTLayer):
     """OFT implemented in Linear layer"""
@@ -662,8 +662,8 @@ class Conv2d(nn.Module, OFTLayer):
             result = self.base_layer(x, *args, **kwargs)
         else:
             oft_rotation = torch.eye(
-                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0], 
-                device=x.device, 
+                self.in_features * self.base_layer.kernel_size[0] * self.base_layer.kernel_size[0],
+                device=x.device,
                 dtype=previous_dtype
             )
             oft_scale = torch.ones((int(self.out_features), 1), device=x.device, dtype=previous_dtype)

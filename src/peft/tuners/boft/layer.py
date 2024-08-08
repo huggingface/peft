@@ -317,7 +317,7 @@ class BOFTLayer(BaseTunerLayer):
 
         elif boft_block_size != 0 and boft_block_num != 0:
             raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
-        
+
         else:
             raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
 
@@ -749,7 +749,7 @@ class Conv2d(nn.Module, BOFTLayer):
 
         elif boft_block_size != 0 and boft_block_num != 0:
             raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
-        
+
         else:
             raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
 
