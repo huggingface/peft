@@ -46,6 +46,7 @@ from peft.utils import (
 )
 from peft.utils.merge_utils import dare_linear, dare_ties, magnitude_prune, task_arithmetic, ties
 
+from ...utils.other import ModulesToSaveWrapper
 from .aqlm import dispatch_aqlm
 from .awq import dispatch_awq
 from .config import LoraConfig
@@ -432,7 +433,7 @@ class LoraModel(BaseTuner):
 
         hook_handles = []
         for module in self.modules():
-            if isinstance(module, LoraLayer):
+            if isinstance(module, LoraLayer) or isinstance(module, ModulesToSaveWrapper):
                 pre_forward = partial(_adapter_names_pre_forward_hook, adapter_names=adapter_names)
                 handle = module.register_forward_pre_hook(pre_forward, with_kwargs=True)
                 hook_handles.append(handle)

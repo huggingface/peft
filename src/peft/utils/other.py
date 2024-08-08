@@ -261,7 +261,27 @@ class ModulesToSaveWrapper(torch.nn.Module):
     def forward(self, *args, **kwargs):
         if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
             return self.original_module(*args, **kwargs)
-        return self.modules_to_save[self.active_adapter](*args, **kwargs)
+        if "adapter_names" not in kwargs.keys():
+            return self.modules_to_save[self.active_adapter](*args, **kwargs)
+        # Batches requests with similar LoRAs into microbatches
+        adapter_names = kwargs["adapter_names"]
+        kwargs = {}
+        batch = args[0] # Get the batch dimension
+        unique_adapters = set(adapter_names)
+        sub_batch_indices_list = []
+        for adapter in unique_adapters:
+            sub_batch_indices_list.append(
+                [index for index, item in enumerate(adapter_names) if item == adapter]
+            )
+
+        results = [0 for i in range(len(batch))]
+        for i, active_adapter in enumerate(unique_adapters):
+            sub_batch = batch[sub_batch_indices_list[i]]
+            output = self.modules_to_save[active_adapter](*(sub_batch,), **kwargs)
+            for index, j in enumerate(sub_batch_indices_list[i]):
+                results[j] = output[index]
+        return torch.stack(results)
+
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
