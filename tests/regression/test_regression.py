@@ -584,6 +584,9 @@ class TestOpt8bitBnb(RegressionTester):
         )
         return model
 
+    @pytest.mark.skipif(
+        torch.cuda.get_device_properties(0).major < 8, reason="8bit bnb results vary with compute capability"
+    )
     def test_lora_8bit(self):
         base_model = self.load_base_model()
         config = LoraConfig(
