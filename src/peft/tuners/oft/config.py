@@ -15,18 +15,19 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
-from peft.tuners.lycoris_utils import LycorisConfig
+from peft.config import PeftConfig
 from peft.utils import PeftType
 
 
 @dataclass
-class OFTConfig(LycorisConfig):
+class OFTConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`OFTModel`].
 
     Args:
-        r (`int`): OFT rank.
-        module_dropout (`int`): The dropout probability for disabling OFT modules during training.
+        r (`int`): OFT rank, number of OFT blocks per injected layer.
+        oft_block_size (`int`): OFT block size across different layers.
+        module_dropout (`float`): The multiplicative dropout probability, by setting OFT blocks to identity during training, similar to the dropout layer in LoRA.
         target_modules (`Optional[Union[List[str], str]]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -35,6 +36,10 @@ class OFTConfig(LycorisConfig):
             the output layer. If this is not specified, modules will be chosen according to the model architecture. If
             the architecture is not known, an error will be raised -- in this case, you should specify the target
             modules manually.
+        fan_in_fan_out (`bool`): Set this to True if the layer to replace stores weight like (fan_in, fan_out).
+        bias (`str`): Bias type for OFT. Can be 'none', 'all' or 'oft_only'. If 'all' or 'oft_only', the
+            corresponding biases will be updated during training. Be aware that this means that, even when disabling
+            the adapters, the model will not produce the same output as the base model would have without adaptation.
         init_weights (`bool`):
             Whether to perform initialization of OFT weights.
         layers_to_transform (`Union[List[int], int]`):
@@ -56,9 +61,16 @@ class OFTConfig(LycorisConfig):
             Whether to share the OFT parameters between blocks or not. This is `False` by default.
     """
 
-    r: int = field(default=8, metadata={"help": "OFT rank"})
+    r: int = field(default=8, metadata={"help": "OFT rank, number of OFT blocks per injected layer."})
+    oft_block_size: int = field(
+        default=0,
+        metadata={
+            "help": "OFT block size across different layers.",
+            "note": "You can only specify either r or oft_block_size, but not both simultaneously, because r x oft_block_size = layer dimension.",
+        },
+    )
     module_dropout: float = field(
-        default=0.0, metadata={"help": "The dropout probability for disabling OFT modules during training"}
+        default=0.0, metadata={"help": "OFT multiplicative dropout, randomly setting blocks of OFT to be identity matrix, similar to the dropout layer in LoRA."}
     )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
@@ -68,6 +80,11 @@ class OFTConfig(LycorisConfig):
             "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
         },
     )
+    fan_in_fan_out: bool = field(
+        default=False,
+        metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
+    )
+    bias: str = field(default="none", metadata={"help": "Bias type for OFT. Can be 'none', 'all' or 'oft_only'"})
     init_weights: bool = field(
         default=True,
         metadata={
@@ -111,9 +128,37 @@ class OFTConfig(LycorisConfig):
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
+    rank_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "Important: the rank pattern won't be applied to the layers after 0.12.1.dev0!"
+            )
+        },
+    )
+    alpha_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "Important: the alpha pattern won't be applied to the layers after 0.12.1.dev0!"
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.OFT
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.r == 0 and self.oft_block_size == 0:
+            raise ValueError(
+                f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {self.r} and oft_block_size = {self.oft_block_size}."
+            )
+        if not (self.r != 0) ^ (self.oft_block_size != 0):
+            raise ValueError(
+                f"You can only specify either r ({self.r}) or oft_block_size ({self.oft_block_size}), but not both simultaneously, because r x oft_block_size == in_features."
+            )
