@@ -88,6 +88,8 @@ from .tuners import (
     XLoraModel,
     HRAConfig,
     HRAModel,
+    PCLoraModel,
+    PCLoraConfig
 )
 from .utils import (
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
