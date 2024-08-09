@@ -53,6 +53,7 @@ from .eetq import dispatch_eetq
 from .gptq import dispatch_gptq
 from .hqq import dispatch_hqq
 from .layer import Conv2d, LoraLayer, dispatch_default
+from .quanto import dispatch_quanto
 from .tp_layer import dispatch_megatron
 
 
@@ -330,6 +331,7 @@ class LoraModel(BaseTuner):
                 dispatch_awq,
                 dispatch_gptq,
                 dispatch_hqq,
+                dispatch_quanto,
                 dispatch_megatron,
                 dispatch_default,
             ]
