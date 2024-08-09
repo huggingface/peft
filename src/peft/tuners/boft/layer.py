@@ -315,11 +315,8 @@ class BOFTLayer(BaseTunerLayer):
 
             boft_block_num = int(self.in_features // boft_block_size)
 
-        elif boft_block_size != 0 and boft_block_num != 0:
-            raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
-
         else:
-            raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
+            raise ValueError("Unknown error!")
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -747,11 +744,8 @@ class Conv2d(nn.Module, BOFTLayer):
 
             boft_block_num = int(conv_filter_dim // boft_block_size)
 
-        elif boft_block_size != 0 and boft_block_num != 0:
-            raise ValueError(f"You can only specify either boft_block_size ({boft_block_size}) or boft_block_num ({boft_block_num}), but not both simultaneously.")
-
         else:
-            raise ValueError(f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {boft_block_size} and boft_block_num = {boft_block_num}.")
+            raise ValueError("Unknown error!")
 
 
         # In OFT you can specify the number of blocks to be 1

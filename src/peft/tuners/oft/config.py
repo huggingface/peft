@@ -134,3 +134,11 @@ class OFTConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
+        if self.r == 0 and self.oft_block_size == 0:
+            raise ValueError(
+                f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {self.r} and oft_block_size = {self.oft_block_size}."
+            )
+        if not (self.r != 0) ^ (self.oft_block_size != 0):
+            raise ValueError(
+                f"You can only specify either r ({self.r}) or oft_block_size ({self.oft_block_size}), but not both simultaneously, because r x oft_block_size == in_features."
+            )

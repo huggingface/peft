@@ -125,9 +125,10 @@ class BOFTConfig(PeftConfig):
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
         if self.boft_block_size == 0 and self.boft_block_num == 0:
-            raise ValueError("You must specify either boft_block_size or boft_block_num.")
+            raise ValueError(
+                f"Either `boft_block_size` or `boft_block_num` must be non-zero. Currently, boft_block_size = {self.boft_block_size} and boft_block_num = {self.boft_block_num}."
+            )
         if not (self.boft_block_size != 0) ^ (self.boft_block_num != 0):
             raise ValueError(
-                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), "
-                "but not both simultaneously, because boft_block_size x boft_block_num != in_features."
+                f"You can only specify either boft_block_size ({self.boft_block_size}) or boft_block_num ({self.boft_block_num}), but not both simultaneously, because boft_block_size x boft_block_num == in_features."
             )

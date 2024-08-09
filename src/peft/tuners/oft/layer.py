@@ -25,7 +25,7 @@ from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
 class MultiplicativeDropoutLayer(nn.Module):
     """
-    Implements the multiplicative dropout layer for BOFT.
+    Implements the multiplicative dropout layer for OFT.
     """
 
     def __init__(self, p=0.0):
@@ -58,17 +58,10 @@ class MultiplicativeDropoutLayer(nn.Module):
             if D == 1:
                 return x
 
-            # Create a mask with 1s for matrices to be replaced with identity and 0s otherwise
             num_to_replace = int(self.p * D)
             num_zeros = D - num_to_replace
-
-            # Generate a flat tensor with desired number of 1s and 0s
             mask = torch.cat([torch.ones(num_to_replace, device=x.device), torch.zeros(num_zeros, device=x.device)])
-
-            # Shuffle and reshape the mask
             mask = mask[torch.randperm(D)].view(D, 1, 1)
-
-            # Use the mask to combine original matrices and identity matrices
             eye_matrix = torch.eye(H, device=x.device).repeat(D, 1, 1)
             x = (1 - mask) * x + mask * eye_matrix
         return x
