@@ -128,6 +128,26 @@ class OFTConfig(PeftConfig):
         default=False,
         metadata={"help": "Whether to share the OFT parameters between blocks or not."},
     )
+    rank_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to ranks which are different from the default rank specified by `r`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 8`}"
+                "Important: the rank pattern won't be applied to the layers after 0.12.1.dev0!"
+            )
+        },
+    )
+    alpha_pattern: Optional[dict] = field(
+        default_factory=dict,
+        metadata={
+            "help": (
+                "The mapping from layer names or regexp expression to alphas which are different from the default alpha specified by `alpha`. "
+                "For example, `{model.decoder.layers.0.encoder_attn.k_proj: 32`}"
+                "Important: the alpha pattern won't be applied to the layers after 0.12.1.dev0!"
+            )
+        },
+    )
 
     def __post_init__(self):
         self.peft_type = PeftType.OFT
