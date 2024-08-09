@@ -506,8 +506,6 @@ class BaseTunerLayer(ABC):
             The name of the active adapter.
     """
 
-    active_adapter = None
-
     # All names of layers that may contain adapter (trainable) weights
     adapter_layer_names: tuple[str, ...] = ()
     # All names of other parameters that may contain adapter-related parameters

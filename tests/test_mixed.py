@@ -122,7 +122,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # check the number of tuner layer types
         tuner_layers = [mod for mod in peft_model_01.modules() if isinstance(mod, BaseTunerLayer)]
         tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
-        if type(config0) == type(config1):
+        if type(config0) is type(config1):
             assert len(tuner_types) == 1
         else:
             assert len(tuner_types) == 2
@@ -147,7 +147,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # check the number of tuner layer types
         tuner_layers = [mod for mod in peft_model_10.modules() if isinstance(mod, BaseTunerLayer)]
         tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
-        if type(config0) == type(config1):
+        if type(config0) is type(config1):
             assert len(tuner_types) == 1
         else:
             assert len(tuner_types) == 2
@@ -166,7 +166,7 @@ class TestMixedAdapterTypes(unittest.TestCase):
         # check the number of tuner layer types
         tuner_layers = [mod for mod in peft_model_10.modules() if isinstance(mod, BaseTunerLayer)]
         tuner_types = {type(tuner_layer) for tuner_layer in tuner_layers}
-        if type(config0) == type(config1):
+        if type(config0) is type(config1):
             assert len(tuner_types) == 1
         else:
             assert len(tuner_types) == 2

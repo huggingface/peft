@@ -291,7 +291,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # compare the two models and assert that all layers are of the same type
         for name, actual_module in actual_model.named_modules():
             expected_module = expected_model_module_dict[name]
-            assert type(actual_module) == type(expected_module)
+            assert type(actual_module) is type(expected_module)
 
     def test_maybe_include_all_linear_layers_ia3_loha(self):
         model_id, initial_target_modules, expected_target_modules = (
