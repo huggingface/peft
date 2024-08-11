@@ -126,13 +126,7 @@ def _load_adapter_into_lora_model(
     new_adapter_weights = {}
     # Rework the keys to contain the adapter numbers
     for old_key in adapter_weights.keys():
-        pos = old_key.find(".lora")
-        label = f".{i}"
-        key = list(old_key)
-        offset = len(".lora_A")
-        key.insert(pos + offset, label)
-        key = "".join(key)
-        key = key.replace("base_model.model.", "")
+        key = old_key.replace("base_model.model.", "model.model.")
         new_adapter_weights[key] = adapter_weights[old_key]
 
     # load the weights into the model
@@ -258,10 +252,10 @@ class XLoraModel(BaseTuner):
             adapters_items = peft_config.adapters.items()
 
         if hasattr(self.xlora_config, "_subfolders"):
-            for (adapter_name, model_id), subfolder in adapters_items:
+            for i, (_adapter_name, model_id), subfolder in enumerate(adapters_items):
                 _load_adapter_into_lora_model(
                     lora_model=self.lora_model,
-                    adapter_name=adapter_name,
+                    adapter_name=str(i),
                     model_id=model_id,
                     i=i,
                     torch_device=torch_device,
@@ -271,10 +265,10 @@ class XLoraModel(BaseTuner):
                     **kwargs,
                 )
         else:
-            for i, (adapter_name, model_id) in enumerate(adapters_items):
+            for i, (_adapter_name, model_id) in enumerate(adapters_items):
                 _load_adapter_into_lora_model(
                     lora_model=self.lora_model,
-                    adapter_name=adapter_name,
+                    adapter_name=str(i),
                     model_id=model_id,
                     i=i,
                     torch_device=torch_device,
