@@ -129,7 +129,7 @@ def _load_adapter_into_lora_model(
         key: str = old_key
         # Remove all the prefixes until we have model.<...>
         while not (key.startswith("model.") and not key.startswith("model.model.")):
-            key = key[key.find(".")+1:]
+            key = key[key.find(".") + 1 :]
         # We always want model.model
         key = "model." + key
         new_adapter_weights[key] = adapter_weights[old_key]
@@ -143,7 +143,9 @@ def _load_adapter_into_lora_model(
         ignore_mismatched_sizes=ignore_mismatched_sizes,
     )
     if len(_load_result.unexpected_keys) > 0:
-        raise ValueError(f"Got unexpected keys! Please raise an issue and tag @EricLBuehler.\n\nunexpected_keys={_load_result.unexpected_keys}")
+        raise ValueError(
+            f"Got unexpected keys! Please raise an issue and tag @EricLBuehler.\n\nunexpected_keys={_load_result.unexpected_keys}"
+        )
 
     if hasattr(lora_model, "_cast_adapter_dtype"):
         lora_model._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
