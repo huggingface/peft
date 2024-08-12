@@ -305,3 +305,4 @@ class TestXlora:
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+

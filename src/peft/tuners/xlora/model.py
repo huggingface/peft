@@ -126,7 +126,12 @@ def _load_adapter_into_lora_model(
     new_adapter_weights = {}
     # Rework the keys to contain the adapter numbers
     for old_key in adapter_weights.keys():
-        key = old_key.replace("base_model.model.", "model.model.")
+        key: str = old_key
+        # Remove all the prefixes until we have model.<...>
+        while not (key.startswith("model.") and not key.startswith("model.model.")):
+            key = key[key.find(".")+1:]
+        # We always want model.model
+        key = "model." + key
         new_adapter_weights[key] = adapter_weights[old_key]
 
     # load the weights into the model
@@ -137,6 +142,8 @@ def _load_adapter_into_lora_model(
         adapter_name=adapter_name,
         ignore_mismatched_sizes=ignore_mismatched_sizes,
     )
+    if len(_load_result.unexpected_keys) > 0:
+        raise ValueError(f"Got unexpected keys! Please raise an issue and tag @EricLBuehler.\n\nunexpected_keys={_load_result.unexpected_keys}")
 
     if hasattr(lora_model, "_cast_adapter_dtype"):
         lora_model._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
@@ -341,7 +348,7 @@ class XLoraModel(BaseTuner):
                     hook_handles.append(handle)
 
             with torch.no_grad():
-                self.lora_model.disable_adapters()
+                self.lora_model.disable_adapter_layers()
 
                 try:
                     scaling_pass_kwargs = kwargs_real.copy()
@@ -354,7 +361,7 @@ class XLoraModel(BaseTuner):
                         for handle in hook_handles:
                             handle.remove()
                 finally:
-                    self.lora_model.enable_adapters()
+                    self.lora_model.enable_adapter_layers()
 
             xlora_scalings = self.internal_xlora_classifier(result=base_output, *args_real, **kwargs_real)
 
