@@ -47,7 +47,7 @@ def convert_layers_to_xlora(
     device = None
     for module in base.modules():
         # Check the exact type because classes like OPTLearnedPositionalEmbedding inherit from nn.Embedding
-        if type(module) == lora.Linear:
+        if isinstance(module, lora.Linear):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoraLinearLayer(
                 model=xloramodel,
@@ -59,7 +59,7 @@ def convert_layers_to_xlora(
             all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
-        elif type(module) == lora.Embedding:
+        elif isinstance(module, lora.Embedding):
             device = module.lora_embedding_A[next(iter(module.lora_embedding_A))].device
             new_layer = XLoraEmbeddingLayer(
                 model=xloramodel,
@@ -71,7 +71,7 @@ def convert_layers_to_xlora(
             all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
-        elif type(module) == lora.Conv2d:
+        elif isinstance(module, lora.Conv2d):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoraConv2dLayer(
                 model=xloramodel,
