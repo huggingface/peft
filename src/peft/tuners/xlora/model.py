@@ -207,19 +207,22 @@ class XLoraModel(BaseTuner):
             adapter_name: (`str`):
                 Adapter name for the X-LoRA adapter.
             torch_device (`str`, *optional*, defaults to None):
-                (For loading the LoRA adapters) The device to load the adapter on. If `None`, the device will be inferred.
+                (For loading the LoRA adapters) The device to load the adapter on. If `None`, the device will be
+                inferred.
             autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
-                (For loading the LoRA adapters) Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
-                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
-                only affect select PEFT tuners.
+                (For loading the LoRA adapters) Whether to autocast the adapter dtype. Defaults to `True`. Right now,
+                this will only cast adapter weights using float16 and bfloat16 to float32, as this is typically
+                required for stable training, and only affect select PEFT tuners.
             ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
-                (For loading the LoRA adapters) Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
+                (For loading the LoRA adapters) Whether to use ephemeral GPU offloading for partially loaded modules.
+                Defaults to `False`.
             autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
-                (For loading the LoRA adapters) Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter
-                weights using float16 and bfloat16 to float32, as this is typically required for stable training, and
-                only affect select PEFT tuners.
+                (For loading the LoRA adapters) Whether to autocast the adapter dtype. Defaults to `True`. Right now,
+                this will only cast adapter weights using float16 and bfloat16 to float32, as this is typically
+                required for stable training, and only affect select PEFT tuners.
             kwargs: (`optional`):
-                (For loading the LoRA adapters) Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
+                (For loading the LoRA adapters) Additional arguments to modify the way the adapter is loaded, e.g. the
+                token for Hugging Face Hub.
         """
 
         nn.Module.__init__(self)
