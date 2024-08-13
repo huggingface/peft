@@ -91,7 +91,6 @@ def _load_adapter_into_lora_model(
     lora_model: LoraModel,
     adapter_name: str,
     model_id: str,
-    i: int,
     torch_device: Optional[str] = None,
     ephemeral_gpu_offload: bool = False,
     autocast_adapter_dtype: bool = True,
@@ -99,7 +98,9 @@ def _load_adapter_into_lora_model(
     **kwargs,
 ):
     """
-    All params pertain to the adapter (adapter name, model id, `i` is the adapter number in 0 indexing)
+    This method emulates the behavior of `PeftModel.from_pretrained`. Updates to `PeftModel.from_pretrained` may need to be reflected here.
+
+    All params pertain to the adapter (adapter name, model id, `i` is the adapter number in 0 indexing).
     """
     from peft.peft_model import PeftModel
     from peft.tuners.lora.config import LoraConfig
@@ -136,15 +137,15 @@ def _load_adapter_into_lora_model(
 
     # load the weights into the model
     ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
-    _load_result = set_peft_model_state_dict(
+    load_result = set_peft_model_state_dict(
         lora_model,
         new_adapter_weights,
         adapter_name=adapter_name,
         ignore_mismatched_sizes=ignore_mismatched_sizes,
     )
-    if len(_load_result.unexpected_keys) > 0:
+    if len(load_result.unexpected_keys) > 0:
         raise ValueError(
-            f"Got unexpected keys! Please raise an issue and tag @EricLBuehler.\n\nunexpected_keys={_load_result.unexpected_keys}"
+            f"Got unexpected keys! Please raise an issue and tag @EricLBuehler.\n\nunexpected_keys={load_result.unexpected_keys}"
         )
 
     if hasattr(lora_model, "_cast_adapter_dtype"):
@@ -218,10 +219,6 @@ class XLoraModel(BaseTuner):
             torch_device (`str`, *optional*, defaults to None):
                 (For loading the LoRA adapters) The device to load the adapter on. If `None`, the device will be
                 inferred.
-            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
-                (For loading the LoRA adapters) Whether to autocast the adapter dtype. Defaults to `True`. Right now,
-                this will only cast adapter weights using float16 and bfloat16 to float32, as this is typically
-                required for stable training, and only affect select PEFT tuners.
             ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
                 (For loading the LoRA adapters) Whether to use ephemeral GPU offloading for partially loaded modules.
                 Defaults to `False`.
@@ -269,7 +266,6 @@ class XLoraModel(BaseTuner):
                     lora_model=self.lora_model,
                     adapter_name=str(i),
                     model_id=model_id,
-                    i=i,
                     torch_device=torch_device,
                     ephemeral_gpu_offload=ephemeral_gpu_offload,
                     autocast_adapter_dtype=autocast_adapter_dtype,
@@ -282,7 +278,6 @@ class XLoraModel(BaseTuner):
                     lora_model=self.lora_model,
                     adapter_name=str(i),
                     model_id=model_id,
-                    i=i,
                     torch_device=torch_device,
                     ephemeral_gpu_offload=ephemeral_gpu_offload,
                     autocast_adapter_dtype=autocast_adapter_dtype,

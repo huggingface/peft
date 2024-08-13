@@ -119,14 +119,10 @@ class XLoraClassifier(nn.Module):
             device = inputs_embeds.device
             seq_len = inputs_embeds.shape[1]
 
-        return (
-            torch.full(  # type: ignore
-                (batch_size, seq_len, self.n_layers, self.n_classes),
-                self.override_scaling_pass_value,
-            )
-            .to(device)
-            .to(self.dtype)
-        )
+        return torch.full(  # type: ignore
+            (batch_size, seq_len, self.n_layers, self.n_classes),
+            self.override_scaling_pass_value,
+        ).to(device=device, dtype=self.dtype)
 
     def forward(
         self,
