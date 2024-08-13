@@ -1,4 +1,6 @@
-# Efficient X-LoRA inference
+# X-LoRA examples
+
+## `xlora_inference_mistralrs.py`
 
 Perform inference of an X-LoRA model using the inference engine mistral.rs.
 

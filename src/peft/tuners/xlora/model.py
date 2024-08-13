@@ -98,7 +98,8 @@ def _load_adapter_into_lora_model(
     **kwargs,
 ):
     """
-    This method emulates the behavior of `PeftModel.from_pretrained`. Updates to `PeftModel.from_pretrained` may need to be reflected here.
+    This method emulates the behavior of `PeftModel.from_pretrained`. Updates to `PeftModel.from_pretrained` may need
+    to be reflected here.
 
     All params pertain to the adapter (adapter name, model id, `i` is the adapter number in 0 indexing).
     """
