@@ -229,7 +229,7 @@ TEST_CASES = [
     # OFT #
     ########
     ("Vanilla MLP 1 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": "lin0"}),
-    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "r": 2}),
+    ("Vanilla MLP 2 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"]}),
     ("Vanilla MLP 5 OFT", "MLP", OFTConfig, {"r": 2, "target_modules": ["lin0"], "modules_to_save": ["lin1"]}),
     (
         "Vanilla MLP 6 OFT",

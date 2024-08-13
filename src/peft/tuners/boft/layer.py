@@ -316,7 +316,7 @@ class BOFTLayer(BaseTunerLayer):
             boft_block_num = int(self.in_features // boft_block_size)
 
         else:
-            raise ValueError("Unknown error!")
+            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
 
         # In OFT you can specify the number of blocks to be 1
         if boft_n_butterfly_factor != 0:
@@ -745,7 +745,7 @@ class Conv2d(nn.Module, BOFTLayer):
             boft_block_num = int(conv_filter_dim // boft_block_size)
 
         else:
-            raise ValueError("Unknown error!")
+            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
 
 
         # In OFT you can specify the number of blocks to be 1

@@ -176,10 +176,8 @@ class OFTLayer(BaseTunerLayer):
             if self.in_features % r != 0:
                 raise ValueError(f"Input features ({self.in_features}) should be divisible by `r` ({r})!")
             oft_block_size = int(self.in_features // r)
-        elif r != 0 and oft_block_size != 0:
-            raise ValueError(f"You can only specify either r ({r}) or oft_block_size ({oft_block_size}), but not both simultaneously.")
         else:
-            raise ValueError(f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {r} and oft_block_size = {oft_block_size}.")
+            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
 
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
@@ -503,10 +501,8 @@ class Conv2d(nn.Module, OFTLayer):
                     f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by r ({r})!"
                 )
             oft_block_size = int(conv_filter_dim // r)
-        elif r != 0 and oft_block_size != 0:
-            raise ValueError(f"You can only specify either r ({r}) or oft_block_size ({oft_block_size}), but not both simultaneously.")
         else:
-            raise ValueError(f"Either `r` or `oft_block_size` must be non-zero. Currently, r = {r} and oft_block_size = {oft_block_size}.")
+            raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
 
         self.coft[adapter_name] = coft
         self.block_share[adapter_name] = block_share
