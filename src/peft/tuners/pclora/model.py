@@ -16,15 +16,14 @@ class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
 class PCLoraModel(LoraModel):
     def __init__(self, model, lora_config: Union[LoraConfig, Dict]  , adapter_name: str) -> None:        
         super().__init__(model, lora_config, adapter_name)
-        
         try:
-            self._decay_schedule = getattr(self, f"_{lora_config[adapter_name].decay_schedule}") 
+            self._decay_schedule = getattr(self, f"_{self.peft_config[adapter_name].decay_schedule}") 
         except AttributeError:
-            raise AttributeError(f"Invalid decay schedule: {lora_config[adapter_name].decay_schedule}")
+            raise AttributeError(f"Invalid decay schedule: {self.peft_config[adapter_name].decay_schedule}")
         
-        self._task_loss_alpha = lora_config[adapter_name].task_loss_alpha
-        self._q = lora_config[adapter_name].q
-        self._k = lora_config[adapter_name].k
+        self._task_loss_alpha = self.peft_config[adapter_name].task_loss_alpha
+        self._q = self.peft_config[adapter_name].q
+        self._k = self.peft_config[adapter_name].k
         
     def _linear(self, step: int, q: int) -> float:
         return 1 - step / q if step < q else 0
