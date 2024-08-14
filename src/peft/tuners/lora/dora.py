@@ -107,6 +107,40 @@ class DoraLinearLayer(nn.Module):
         return "lora.dora." + rep
 
 
+class DoraEmbeddingLayer(DoraLinearLayer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
+        """
+        For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
+        output.
+        """
+        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
+        # calculate the same but using forward.
+        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
+        lora_weight = lora_B(lora_A(x_eye)).T
+
+        magnitude = self.weight
+        weight = dequantize_module_weight(base_layer)
+        weight = weight.to(x.dtype)
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
+        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # "[...] we suggest treating ||V +∆V ||_c in
+        # Eq. (5) as a constant, thereby detaching it from the gradient
+        # graph. This means that while ||V + ∆V ||_c dynamically
+        # reflects the updates of ∆V , it won’t receive any gradient
+        # during backpropagation"
+        weight_norm = weight_norm.detach()
+        mag_norm_scale = magnitude / weight_norm
+        result_dora = (mag_norm_scale - 1) * (
+            F.embedding(x, transpose(weight, self.fan_in_fan_out))
+        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
+
+        return result_dora
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora.dora." + rep
+
+
 class DoraConv2dLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
