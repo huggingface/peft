@@ -63,7 +63,7 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
-          status: ${{ steps.examples_tests.outcome }}
+          status: ${{ steps.import.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       # TODO: uncomment this block if error is solved or bnb multi backend branch is merged
