@@ -163,7 +163,14 @@ def get_peft_model(
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
 
-    peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+    old_name = peft_config.base_model_name_or_path
+    new_name = model.__dict__.get("name_or_path", None)
+    peft_config.base_model_name_or_path = new_name
+    if (old_name is not None) and (old_name != new_name):
+        warnings.warn(
+            f"The PEFT config's `base_model_name_or_path` was renamed from '{old_name}' to '{new_name}'. "
+            "Please ensure that the correct base model is loaded when loading this checkpoint."
+        )
 
     if revision is not None:
         if peft_config.revision is not None and peft_config.revision != revision:
