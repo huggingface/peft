@@ -318,6 +318,7 @@ class TestXlora:
 
         adapters = [
             "peft-internal-testing/opt-125m-dummy-lora",
+            "peft-internal-testing/opt-125m-dummy-lora",
         ]
         adapters = {str(i): file_name for i, file_name in enumerate(adapters)}
 
