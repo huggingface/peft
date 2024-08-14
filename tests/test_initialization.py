@@ -1264,7 +1264,7 @@ class TestCustomModelConfigWarning:
 
     def test_no_warning_by_default_transformers_model(self, recwarn):
         # first a sanity test that there is no warning by default when using a model from transformers
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
         get_peft_model(model, LoraConfig())
         for warning in recwarn.list:
             assert "renamed" not in str(warning.message)
@@ -1277,18 +1277,21 @@ class TestCustomModelConfigWarning:
 
     def test_warning_name_transformers_model(self, recwarn):
         # The base_model_name_or_path provided by the user is overridden.
-        model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
-        get_peft_model(model, LoraConfig(base_model_name_or_path="custom_name"))
-        msg = "was renamed from 'custom_name' to 'facebook/opt-125m'"
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        custom_name = "custom_name"
+        get_peft_model(model, LoraConfig(base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'hf-internal-testing/tiny-random-OPTForCausalLM'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
 
     def test_warning_name_custom_model(self, custom_module, recwarn):
-        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path="custom_name"))
-        msg = "was renamed from 'custom_name' to 'None'"
+        custom_name = "custom_name"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'None'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
 
     def test_warning_name_custom_model_with_custom_name(self, custom_module, recwarn):
+        custom_name = "custom_name"
         custom_module.name_or_path = "foobar"
-        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path="custom_name"))
-        msg = "was renamed from 'custom_name' to 'foobar'"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'foobar'"
         assert any(msg in str(warning.message) for warning in recwarn.list)
