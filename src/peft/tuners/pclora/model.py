@@ -11,8 +11,16 @@ from transformers.modeling_outputs import CausalLMOutput, CausalLMOutputWithPast
 @dataclass
 class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
     feature_distillation_loss: to.FloatTensor = None
+    kld_loss: to.FloatTensor = None
     task_loss: to.FloatTensor = None
-    
+    all_disitllation_losses: Dict[str, to.FloatTensor] = None
+
+def kld_loss(teacher_logits: to.Tensor, student_logits: to.Tensor) -> to.Tensor:
+    """ Compute the Kullback-Leibler divergence between two distributions => Knowledge distillation loss"""
+    teacher_probs = to.nn.functional.log_softmax(teacher_logits, dim=-1)
+    student_probs = to.nn.functional.log_softmax(student_logits, dim=-1)
+    return to.nn.functional.kl_div(student_probs, teacher_probs, reduction="batchmean", log_target=True)
+
 class PCLoraModel(LoraModel):
     def __init__(self, model, lora_config: Union[LoraConfig, Dict]  , adapter_name: str) -> None:        
         super().__init__(model, lora_config, adapter_name)
@@ -62,7 +70,7 @@ class PCLoraModel(LoraModel):
             return student_out
         else:
 
-            ft_dist_loss = 0
+            ft_dist_losses = {}
             for name, module in self._get_lora_modules():
                 teacher_activations: to.Tensor = module.teacher_activations
                 student_activations: to.Tensor = module.student_activations
@@ -70,14 +78,20 @@ class PCLoraModel(LoraModel):
                 if teacher_activations.requires_grad:
                     my_logger.warning(f"Teacher activations for {name} require grad. Disabling grad for teacher activations.")
                     teacher_activations.requires_grad = False
-                    
-                ft_dist_loss += to.nn.functional.mse_loss(student_activations, teacher_activations)
-                
+                ft_dist_losses[name] = to.nn.functional.mse_loss(student_activations, teacher_activations)    
+            
+            ft_dist_loss = to.mean(ft_dist_losses.values())    
             task_loss = student_out.loss 
+            kld_loss_v = kld_loss(teacher_out.logits, student_out.logits)
+            
+            ft_dist_losses = {k: v.detach() for k, v in ft_dist_losses.items()}
+            
             total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
             student_out = PCLoRACausalLLMOutput(**student_out,
                                                 feature_distillation_loss=ft_dist_loss.detach(),
-                                                task_loss=task_loss.detach()
+                                                task_loss=task_loss.detach(),
+                                                kld_loss=kld_loss_v.detach(),
+                                                all_disitllation_losses=ft_dist_losses
                                                 )
             student_out.loss = total_loss
             return student_out 
