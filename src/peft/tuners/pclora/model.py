@@ -21,17 +21,11 @@ def kld_loss(teacher_logits: to.Tensor, student_logits: to.Tensor) -> to.Tensor:
     student_probs = to.nn.functional.log_softmax(student_logits, dim=-1)
     return to.nn.functional.kl_div(student_probs, teacher_probs, reduction="batchmean", log_target=True)
 
-class PCLoraModel(LoraModel):
-    def __init__(self, model, lora_config: Union[LoraConfig, Dict]  , adapter_name: str) -> None:        
-        super().__init__(model, lora_config, adapter_name)
-        try:
-            self._decay_schedule = getattr(self, f"_{self.peft_config[adapter_name].decay_schedule}") 
-        except AttributeError:
-            raise AttributeError(f"Invalid decay schedule: {self.peft_config[adapter_name].decay_schedule}")
-        
-        self._task_loss_alpha = self.peft_config[adapter_name].task_loss_alpha
-        self._q = self.peft_config[adapter_name].q
-        self._k = self.peft_config[adapter_name].k
+class DecaySchedule:
+    def __init__(self, decay_schedule: str, keep_constant_for_k_steps: int = 10) -> None:
+        self._decay_schedule = getattr(self, f"_{decay_schedule}") 
+        self._keep_constant_for_k_steps = keep_constant_for_k_steps
+        self._last_value = 0
         
     def _linear(self, step: int, q: int) -> float:
         return 1 - step / q if step < q else 0
@@ -48,8 +42,29 @@ class PCLoraModel(LoraModel):
     def _linear_cutoff(self, step: int, q: int) -> float:
         return max(1 - step / q, 0.9) 
     
+        
+    def step(self, step: int, q: int) -> float:
+        """ Compute the decay schedule value for the current step """
+        if step % self._keep_constant_for_k_steps == 0 or step == q:
+            self._last_value = self._decay_schedule(step, q)
+            return self._last_value
+        else:
+            return self._last_value
+
+class PCLoraModel(LoraModel):
+    def __init__(self, model, lora_config: Union[LoraConfig, Dict], adapter_name: str) -> None:        
+        super().__init__(model, lora_config, adapter_name)
+        try:
+            self._decay_schedule = DecaySchedule(self.peft_config[adapter_name].decay_schedule)
+        except AttributeError:
+            raise AttributeError(f"Invalid decay schedule: {self.peft_config[adapter_name].decay_schedule}")
+        
+        self._task_loss_alpha = self.peft_config[adapter_name].task_loss_alpha
+        self._q = self.peft_config[adapter_name].q
+        self._k = self.peft_config[adapter_name].k
+        
     def update_lora(self, step: int, **kwargs) -> None:
-        lambda_ft_distill = self._decay_schedule(step, self._q)
+        lambda_ft_distill = self._decay_schedule.step(step, self._q)
         for name, module in self._get_lora_modules():
             
             if step % self._k == 0 or step == self._q:
