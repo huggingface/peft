@@ -184,9 +184,7 @@ class XLoraModel(BaseTuner):
         ...         "adapter_n": "./path/to/the/checkpoint/",
         ...     },
         ... )
-        >>> int8_config = BitsAndBytesConfig(
-        ...     load_in_8bit=True
-        ... )
+        >>> int8_config = BitsAndBytesConfig(load_in_8bit=True)
         >>> model = AutoModelForCausalLM.from_pretrained(
         ...     "mistralai/Mistral-7B-Instruct-v0.1",
         ...     trust_remote_code=True,
