@@ -24,7 +24,7 @@ from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
+from peft.utils.integrations import dequantize_module_weight, gather_params_ctx, is_bnb_param
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -166,11 +166,16 @@ class LoraLayer(BaseTunerLayer):
             nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def olora_init(self, adapter_name):
-        dtype = self.get_base_layer().weight.dtype
-        if dtype in [torch.int8, torch.uint8]:
-            weight_tensor = dequantize_module_weight(self.get_base_layer())
+        base_layer = self.get_base_layer()
+        orig_weight = base_layer.weight
+        orig_weight_is_bnb = is_bnb_param(orig_weight)
+        dtype = orig_weight.dtype
+
+        if orig_weight_is_bnb:
+            # check without importing bitsandbytes and robust to bnb_4bit_quant_storage=float*
+            weight_tensor = dequantize_module_weight(base_layer)
         elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
-            weight_tensor = self.get_base_layer().weight
+            weight_tensor = orig_weight
         else:
             raise TypeError(f"Unsupported data type for the base layer. Got {dtype}.")
 
@@ -185,8 +190,14 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
-        weight_tensor = weight_tensor.to(dtype)
-        self.get_base_layer().weight.data = weight_tensor
+        if orig_weight_is_bnb:
+            import bitsandbytes as bnb
+
+            weight_tensor = bnb.nn.Params4bit(weight_tensor, quant_type=orig_weight.quant_type).to(orig_weight.device)
+            base_layer.weight = weight_tensor
+        else:
+            weight_tensor = weight_tensor.to(dtype)
+            base_layer.weight.data = weight_tensor
 
     def pissa_init(self, adapter_name, init_lora_weights):
         weight = self.get_base_layer().weight

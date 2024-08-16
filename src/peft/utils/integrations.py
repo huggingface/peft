@@ -104,3 +104,7 @@ def dequantize_bnb_weight(weight: torch.nn.Parameter, state=None):
     if is_cpu:
         dequantized = dequantized.to(device)
     return dequantized
+
+
+def is_bnb_param(param):
+    return param.__class__.__name__ in ("Params4bit", "Int8Params")
