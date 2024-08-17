@@ -17,9 +17,11 @@ import os
 import warnings
 from typing import Optional
 
+import huggingface_hub
 import torch
 from huggingface_hub import file_exists, hf_hub_download
-from huggingface_hub.utils import EntryNotFoundError
+from huggingface_hub.utils import EntryNotFoundError, LocalEntryNotFoundError
+from packaging import version
 from safetensors.torch import load_file as safe_load_file
 
 from .other import (
@@ -176,7 +178,12 @@ def get_peft_model_state_dict(
                 )
             to_return["base_model.vera_A." + adapter_name] = state_dict["base_model.vera_A." + adapter_name]
             to_return["base_model.vera_B." + adapter_name] = state_dict["base_model.vera_B." + adapter_name]
-
+    elif config.peft_type == PeftType.FOURIERFT:
+        to_return = {k: state_dict[k] for k in state_dict if "fourierft_" in k}
+    elif config.peft_type == PeftType.XLORA:
+        to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
+    elif config.peft_type == PeftType.HRA:
+        to_return = {k: state_dict[k] for k in state_dict if "hra_" in k}
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -314,6 +321,8 @@ def set_peft_model_state_dict(
         PeftType.LN_TUNING,
         PeftType.BOFT,
         PeftType.VERA,
+        PeftType.FOURIERFT,
+        PeftType.HRA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -327,6 +336,8 @@ def set_peft_model_state_dict(
             PeftType.BOFT: "boft_",
             PeftType.LN_TUNING: "ln_tuning_",
             PeftType.VERA: "vera_lambda_",
+            PeftType.FOURIERFT: "fourierft_",
+            PeftType.HRA: "hra_",
         }[config.peft_type]
         for k, v in state_dict.items():
             if parameter_prefix in k:
@@ -375,6 +386,8 @@ def set_peft_model_state_dict(
 
     elif config.is_prompt_learning or config.peft_type == PeftType.ADAPTION_PROMPT:
         peft_model_state_dict = state_dict
+    elif config.peft_type == PeftType.XLORA:
+        peft_model_state_dict = state_dict
     else:
         raise NotImplementedError
 
@@ -406,6 +419,18 @@ def set_peft_model_state_dict(
     return load_result
 
 
+def torch_load(*args, weights_only=True, **kwargs):
+    """Call torch.load and handle weights_only.
+
+    Defaults to weights_only=True to anticipate upcoming switch on the PyTorch side.
+
+    """
+    # TODO: weights_only was added in 1.13, remove if 1.12 no longer needs to be supported
+    if version.parse(torch.__version__) < version.parse("1.13"):
+        return torch.load(*args, **kwargs)
+    return torch.load(*args, weights_only=weights_only, **kwargs)
+
+
 def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_download_kwargs) -> dict:
     r"""
     A helper method to load the PEFT weights from the HuggingFace Hub or locally
@@ -427,22 +452,38 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
     if device is None:
         device = infer_device()
 
+    def get_hub_filename(use_safetensors=True):
+        weights_name = SAFETENSORS_WEIGHTS_NAME if use_safetensors else WEIGHTS_NAME
+        return (
+            os.path.join(hf_hub_download_kwargs["subfolder"], weights_name)
+            if hf_hub_download_kwargs.get("subfolder", None) is not None
+            else weights_name
+        )
+
     if os.path.exists(os.path.join(path, SAFETENSORS_WEIGHTS_NAME)):
         filename = os.path.join(path, SAFETENSORS_WEIGHTS_NAME)
         use_safetensors = True
     elif os.path.exists(os.path.join(path, WEIGHTS_NAME)):
         filename = os.path.join(path, WEIGHTS_NAME)
         use_safetensors = False
+    elif huggingface_hub.constants.HF_HUB_OFFLINE:
+        # if in offline mode, check if we can find the adapter file locally
+        hub_filename = get_hub_filename(use_safetensors=True)
+        try:
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
+            use_safetensors = True
+        except LocalEntryNotFoundError:
+            # Could not find safetensors, try pickle. If this also fails, it's fine to let the error be raised here, as
+            # it means that the user tried to load a non-cached model in offline mode.
+            hub_filename = get_hub_filename(use_safetensors=False)
+            filename = hf_hub_download(model_id, hub_filename, local_files_only=True)
+            use_safetensors = False
     else:
         token = hf_hub_download_kwargs.get("token", None)
         if token is None:
             token = hf_hub_download_kwargs.get("use_auth_token", None)
 
-        hub_filename = (
-            os.path.join(hf_hub_download_kwargs["subfolder"], SAFETENSORS_WEIGHTS_NAME)
-            if hf_hub_download_kwargs.get("subfolder", None) is not None
-            else SAFETENSORS_WEIGHTS_NAME
-        )
+        hub_filename = get_hub_filename(use_safetensors=True)
         has_remote_safetensors_file = file_exists(
             repo_id=model_id,
             filename=hub_filename,
@@ -474,6 +515,6 @@ def load_peft_weights(model_id: str, device: Optional[str] = None, **hf_hub_down
         else:
             adapters_weights = safe_load_file(filename, device=device)
     else:
-        adapters_weights = torch.load(filename, map_location=torch.device(device))
+        adapters_weights = torch_load(filename, map_location=torch.device(device))
 
     return adapters_weights

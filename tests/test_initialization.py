@@ -13,14 +13,32 @@
 # limitations under the License.
 
 import re
+from contextlib import contextmanager
 from copy import deepcopy
+from unittest.mock import patch
 
 import pytest
 import torch
+from huggingface_hub.utils import reset_sessions
 from scipy import stats
 from torch import nn
+from transformers import AutoModelForCausalLM
 
-from peft import AdaLoraConfig, LoraConfig, PeftModel, PromptTuningConfig, VeraConfig, get_peft_model
+from peft import (
+    AdaLoraConfig,
+    LoraConfig,
+    PeftMixedModel,
+    PeftModel,
+    PeftModelForCausalLM,
+    PeftModelForFeatureExtraction,
+    PeftModelForQuestionAnswering,
+    PeftModelForSeq2SeqLM,
+    PeftModelForSequenceClassification,
+    PeftModelForTokenClassification,
+    PromptTuningConfig,
+    VeraConfig,
+    get_peft_model,
+)
 from peft.utils import infer_device
 
 
@@ -309,9 +327,13 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
         peft_model.save_pretrained(
             tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        assert peft_config_keys_before == peft_config_keys_after
+
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -323,6 +345,195 @@ class TestLoraInitialization:
         assert torch.allclose(
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
         )
+
+    def test_lora_pissa_conversion_same_output_after_loading_with_rank_pattern(self, data, tmp_path):
+        # same as above, but using rank_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8, rank_pattern={"linear": 32})
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "pissa"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_pissa = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "pissa-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_pissa, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 32
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_pissa, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 64
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_pissa_conversion_same_output_after_loading_with_alpha_pattern(self, data, tmp_path):
+        # same as above, but using alpha_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
+        # overridden
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], alpha_pattern={"linear": 5})
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "pissa"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_pissa = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "pissa-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_pissa, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        assert model_loaded.base_model.model.linear.scaling["default"] == 5 / 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_pissa, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        assert model_converted.base_model.model.linear.scaling["default"] == 10 / 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_lora_pissa_conversion_same_output_after_loading_with_rslora(self, data, tmp_path):
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="pissa", target_modules=["linear"], r=8, use_rslora=True)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.peft_config["default"].init_lora_weights = True
+        peft_model.save_pretrained(tmp_path / "init-model")
+        peft_model.peft_config["default"].init_lora_weights = "pissa"
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_pissa = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_pissa, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "pissa-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_pissa, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8**0.5)
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_pissa, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # same scale as before with a little bit of floating point imprecision
+        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8**0.5))
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_pissa_rank_pattern_and_rslora_raises(self, tmp_path):
+        # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
+        # scale is not stored in the state_dict
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="pissa", target_modules=["linear"], r=8, rank_pattern={"linear": 2}, use_rslora=True
+        )
+        peft_model = get_peft_model(model, config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        msg = re.escape("Passing `path_initial_model_for_weight_conversion` to `save_pretrained`")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.save_pretrained(
+                tmp_path / "pissa-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+            )
+
+    def test_pissa_alpha_pattern_and_rslora_raises(self, tmp_path):
+        # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
+        # scale is not stored in the state_dict
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="pissa", target_modules=["linear"], r=8, alpha_pattern={"linear": 2}, use_rslora=True
+        )
+        peft_model = get_peft_model(model, config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        msg = re.escape("Passing `path_initial_model_for_weight_conversion` to `save_pretrained`")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.save_pretrained(
+                tmp_path / "pissa-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+            )
 
     # TODO: remove test for deprecated arg in PEFT v0.14.0
     def test_lora_pissa_conversion_same_output_after_loading_with_deprecated_arg(self, data, tmp_path):
@@ -394,9 +605,13 @@ class TestLoraInitialization:
         )
 
         # save the model with conversion
+        peft_config_keys_before = list(peft_model.peft_config.keys())
         peft_model.save_pretrained(
             tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
         )
+        peft_config_keys_after = list(peft_model.peft_config.keys())
+        assert peft_config_keys_before == peft_config_keys_after
+
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -408,6 +623,314 @@ class TestLoraInitialization:
         assert torch.allclose(
             model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
         )
+
+    def test_olora_conversion_same_output_after_loading_with_rank_pattern(self, data, tmp_path):
+        # same as above, but using rank_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        # use rank_pattern here; note that since there is only a single linear layer, r is completely overridden
+        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8, rank_pattern={"linear": 32})
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_olora = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "olora-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_olora, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 32
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_olora, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 64
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_olora_conversion_same_output_after_loading_with_alpha_pattern(self, data, tmp_path):
+        # same as above, but using alpha_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        # use alpha_pattern here; note that since there is only a single linear layer, lora_alpha is completely
+        # overridden
+        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], alpha_pattern={"linear": 5})
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_olora = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "olora-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_olora, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        assert model_loaded.base_model.model.linear.scaling["default"] == 5 / 8
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_olora, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        assert model_converted.base_model.model.linear.scaling["default"] == 10 / 16
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_olora_conversion_same_output_after_loading_with_rslora(self, data, tmp_path):
+        # same as above, but using alpha_pattern
+        model = self.get_model()
+        output_base = model(data)[0]
+
+        config = LoraConfig(init_lora_weights="olora", target_modules=["linear"], r=8, use_rslora=True)
+        peft_model = get_peft_model(deepcopy(model), config)
+        # save the initial model
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        # modify the weights, or else the adapter performs an identity transformation
+        peft_model.base_model.linear.lora_B["default"].weight.data *= 2.0
+        output_olora = peft_model(data)[0]
+
+        # sanity check
+        tol = 1e-06
+        assert not torch.allclose(output_base, output_olora, atol=tol, rtol=tol)
+
+        # save the model normally
+        peft_model.save_pretrained(tmp_path / "olora-model")
+        model_loaded = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model")
+        output_loaded = model_loaded(data)[0]
+
+        assert torch.allclose(output_olora, output_loaded, atol=tol, rtol=tol)
+        # sanity check: ranks should still be 8 as initially
+        assert model_loaded.peft_config["default"].r == 8
+        assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
+        assert model_loaded.base_model.model.linear.scaling["default"] == 8 / (8**0.5)
+        # sanity check: the base model weights were indeed changed
+        assert not torch.allclose(
+            model.linear.weight, model_loaded.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+        # save the model with conversion
+        peft_model.save_pretrained(
+            tmp_path / "olora-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
+        model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "olora-model-converted")
+        output_converted = model_converted(data)[0]
+
+        assert torch.allclose(output_olora, output_converted, atol=tol, rtol=tol)
+        # rank should be double of what it was initially
+        assert model_converted.peft_config["default"].r == 16
+        assert model_converted.base_model.model.linear.lora_A["default"].weight.shape[0] == 16
+        # same scale as before with a little bit of floating point imprecision
+        assert model_converted.base_model.model.linear.scaling["default"] == pytest.approx(8 / (8**0.5))
+        # base model weights should be the same as the initial model
+        assert torch.allclose(
+            model.linear.weight, model_converted.base_model.model.linear.base_layer.weight, atol=tol, rtol=tol
+        )
+
+    def test_olora_rank_pattern_and_rslora_raises(self, tmp_path):
+        # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
+        # scale is not stored in the state_dict
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="olora", target_modules=["linear"], r=8, rank_pattern={"linear": 2}, use_rslora=True
+        )
+        peft_model = get_peft_model(model, config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        msg = re.escape("Passing `path_initial_model_for_weight_conversion` to `save_pretrained`")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.save_pretrained(
+                tmp_path / "olora-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+            )
+
+    def test_olora_alpha_pattern_and_rslora_raises(self, tmp_path):
+        # it's not possible to determine the correct scale when using rslora with rank or alpha pattern, because the
+        # scale is not stored in the state_dict
+        model = self.get_model()
+        config = LoraConfig(
+            init_lora_weights="olora", target_modules=["linear"], r=8, alpha_pattern={"linear": 2}, use_rslora=True
+        )
+        peft_model = get_peft_model(model, config)
+        peft_model.save_pretrained(tmp_path / "init-model")
+
+        msg = re.escape("Passing `path_initial_model_for_weight_conversion` to `save_pretrained`")
+        with pytest.raises(ValueError, match=msg):
+            peft_model.save_pretrained(
+                tmp_path / "olora-model", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+            )
+
+    @pytest.mark.parametrize(
+        "config_kwargs, should_warn",
+        [
+            # no warning
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"]}, False),
+            ({"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"]}, False),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"]}, False),
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"], "use_rslora": True}, False),
+            ({"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"], "use_rslora": True}, False),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"], "use_rslora": True}, False),
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"], "rank_pattern": {"linear": 8}}, False),
+            (
+                {"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"], "rank_pattern": {"linear": 8}},
+                False,
+            ),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"], "rank_pattern": {"linear": 8}}, False),
+            ({"init_lora_weights": "pissa", "target_modules": ["linear"], "alpha_pattern": {"linear": 8}}, False),
+            (
+                {"init_lora_weights": "pissa_niter_3", "target_modules": ["linear"], "alpha_pattern": {"linear": 8}},
+                False,
+            ),
+            ({"init_lora_weights": "olora", "target_modules": ["linear"], "alpha_pattern": {"linear": 8}}, False),
+            # warning
+            (
+                {
+                    "init_lora_weights": "pissa",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa_niter_3",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "olora",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa_niter_3",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "olora",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "pissa_niter_3",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+            (
+                {
+                    "init_lora_weights": "olora",
+                    "target_modules": ["linear"],
+                    "use_rslora": True,
+                    "rank_pattern": {"linear": 8},
+                    "alpha_pattern": {"linear": 8},
+                },
+                True,
+            ),
+        ],
+    )
+    def test_lora_config_pissa_olora_warns(self, config_kwargs, should_warn, recwarn):
+        # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
+        # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
+        # this when they'll eventually call save_pretrained (i.e. if they'll pass
+        # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
+        msg = re.escape("Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion")
+        if should_warn:
+            LoraConfig(**config_kwargs)
+            assert len(recwarn.list) == 1
+            with pytest.warns(UserWarning, match=msg):
+                LoraConfig(**config_kwargs)
+        else:
+            LoraConfig(**config_kwargs)
+            assert not recwarn.list
 
     def test_lora_rslora_scaling(self):
         # default is True
@@ -625,17 +1148,188 @@ class TestPromptTuningInitialization:
         with pytest.raises(ValueError, match="When prompt_tuning_init='TEXT', prompt_tuning_init_text can't be None"):
             PromptTuningConfig(prompt_tuning_init="TEXT", tokenizer_name_or_path="t5-base")
 
+
+class TestVeraInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 20, bias=bias)
+                self.lin1 = nn.Linear(20, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
     def test_vera_mixing_save_projection_raises(self):
         # it is unclear what the right thing to do would be if some adapters save the projection weights and some don't
         # so we better raise an error
 
-        config0 = VeraConfig(target_modules="linear", init_weights=False, save_projection=True)
+        config0 = VeraConfig(target_modules=["lin0"], init_weights=False, save_projection=True)
         model = self.get_model()
         model = get_peft_model(model, config0)
-        config1 = VeraConfig(target_modules="linear", init_weights=False, save_projection=False)
+        config1 = VeraConfig(target_modules=["lin0"], init_weights=False, save_projection=False)
         msg = re.escape(
             "VeRA projection weights must be saved for all adapters or none, but got multiple different values: "
             "[False, True]"
         )
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
+
+    def test_vera_add_second_adapter_with_incompatible_input_shape(self):
+        config0 = VeraConfig(target_modules=["lin0"], r=8)
+        config1 = VeraConfig(target_modules=["lin1"])
+
+        base_model = self.get_model()
+        lin0_in_feat = base_model.lin0.in_features
+        lin1_in_feat = base_model.lin1.in_features
+        model = get_peft_model(base_model, config0)
+        # not full message but enough to identify the error
+        msg = f"vera_A has a size of {lin0_in_feat} but {lin1_in_feat} or greater is required"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+    def test_vera_add_second_adapter_with_higher_rank(self):
+        rank0 = 123
+        rank1 = 456
+        config0 = VeraConfig(target_modules=["lin0"], r=rank0)
+        # second adapter has higher rank
+        config1 = VeraConfig(target_modules=["lin0"], r=rank1)
+
+        model = get_peft_model(self.get_model(), config0)
+        # not full message but enough to identify the error
+        msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
+        with pytest.raises(ValueError, match=msg):
+            model.add_adapter("other", config1)
+
+
+class TestNoInfiniteRecursionDeepspeed:
+    # see #1892 for details
+    classes = [
+        PeftModel,
+        PeftMixedModel,
+        PeftModelForSequenceClassification,
+        PeftModelForQuestionAnswering,
+        PeftModelForTokenClassification,
+        PeftModelForCausalLM,
+        PeftModelForSeq2SeqLM,
+        PeftModelForFeatureExtraction,
+    ]
+
+    @pytest.fixture
+    def wrap_init(self):
+        # emulates the wrapper from DeepSpeed
+        import functools
+
+        def decorator(f):
+            @functools.wraps(f)
+            def wrapper(self, *args, **kwargs):
+                hasattr(self, "abc")  # any hasattr will do
+                f(self, *args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
+    @pytest.fixture
+    def model(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10)
+                # to emulate LMs:
+                self.prepare_inputs_for_generation = None
+                self._prepare_encoder_decoder_kwargs_for_generation = None
+
+        return MyModule()
+
+    @pytest.mark.parametrize("cls", classes)
+    def test_no_infinite_recursion(self, cls, model, wrap_init):
+        original_init = cls.__init__
+        try:
+            cls.__init__ = wrap_init(cls.__init__)
+            # this would trigger an infinite loop before the fix in 1892
+            cls(model, LoraConfig(target_modules=["linear"]))
+        finally:
+            # ensure there are no side effects of this test
+            cls.__init__ = original_init
+
+
+class TestLoadAdapterOfflineMode:
+    # make sure that PEFT honors offline mode
+
+    @contextmanager
+    def hub_offline_ctx(self):
+        # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
+        # because the value is checked only once at the start of the session
+        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+            reset_sessions()
+            yield
+        reset_sessions()
+
+    def test_load_from_hub_then_offline_model(self):
+        # this uses LoRA but it's the same mechanism for other methods
+        peft_model_id = "peft-internal-testing/gpt2-lora-random"
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+        # first ensure that the adapter model has been downloaded
+        PeftModel.from_pretrained(base_model, peft_model_id)
+
+        del base_model
+
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with self.hub_offline_ctx():
+            # does not raise
+            PeftModel.from_pretrained(base_model, peft_model_id)
+
+
+class TestCustomModelConfigWarning:
+    # Check potential warnings when the user provided base_model_name_or_path is overridden by PEFT. See #2001 for
+    # context. We use LoRA for this test but the same applies to other methods
+    @pytest.fixture
+    def custom_module(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(10, 10)
+
+        return MyModule()
+
+    def test_no_warning_by_default_transformers_model(self, recwarn):
+        # first a sanity test that there is no warning by default when using a model from transformers
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        get_peft_model(model, LoraConfig())
+        for warning in recwarn.list:
+            assert "renamed" not in str(warning.message)
+
+    def test_no_warning_by_default_custom_model(self, custom_module, recwarn):
+        # same as above but with a custom model
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"]))
+        for warning in recwarn.list:
+            assert "renamed" not in str(warning.message)
+
+    def test_warning_name_transformers_model(self, recwarn):
+        # The base_model_name_or_path provided by the user is overridden.
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        custom_name = "custom_name"
+        get_peft_model(model, LoraConfig(base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'hf-internal-testing/tiny-random-OPTForCausalLM'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+    def test_warning_name_custom_model(self, custom_module, recwarn):
+        custom_name = "custom_name"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'None'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+    def test_warning_name_custom_model_with_custom_name(self, custom_module, recwarn):
+        custom_name = "custom_name"
+        custom_module.name_or_path = "foobar"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'foobar'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)

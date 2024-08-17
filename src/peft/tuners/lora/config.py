@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Union
 
@@ -106,14 +107,14 @@ class LoraConfig(PeftConfig):
             initialization from the reference implementation from Microsoft. Passing 'gaussian' results in Gaussian
             initialization scaled by the LoRA rank for linear and layers. Setting the initialization to False leads to
             completely random initialization and is discouraged. Pass `'loftq'` to use LoftQ initialization. Pass
-            `'olora'` to use OLoRA initialization. Passing 'pissa' results in the initialization of PiSSA, which
-            converge more rapidly than LoRA and ultimately achieve superior performance. Moreover, PiSSA reduces the
-            quantization error compared to QLoRA, leading to further enhancements. Passing 'pissa_niter_[number of
-            iters]' initiates Fast-SVD-based PiSSA initialization, where [number of iters] indicates the number of
-            subspace iterations to perform FSVD, and must be a nonnegative integer. When the [number of iters] is set
-            to 16, it can complete the initialization of a 7b model within seconds, and the training effect is
-            approximately equivalent to using SVD. For more information, see <a
-            href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation</a>.
+            `'olora'` to use OLoRA initialization. Passing `'pissa'` results in the initialization of <a
+            href='https://arxiv.org/abs/2404.02948'>Principal Singular values and Singular vectors Adaptation
+            (PiSSA)</a>, which converges more rapidly than LoRA and ultimately achieves superior performance. Moreover,
+            PiSSA reduces the quantization error compared to QLoRA, leading to further enhancements. Passing
+            `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, where `[number of iters]`
+            indicates the number of subspace iterations to perform FSVD, and must be a nonnegative integer. When
+            `[number of iters]` is set to 16, it can complete the initialization of a 7B model within seconds, and the
+            training effect is approximately equivalent to using SVD.
         layers_to_transform (`Union[List[int], int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -182,7 +183,7 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "When set to True, uses Rank-Stabilized LoRA doi.org/10.48550/arXiv.2312.03732"
+                "When set to True, uses <a href='https://doi.org/10.48550/arXiv.2312.03732'>Rank-Stabilized LoRA</a>"
                 " which sets the adapter scaling factor to `lora_alpha/math.sqrt(r)`, since it"
                 " was proven to work better. Otherwise, it will use the original default"
                 " value of `lora_alpha/r`."
@@ -201,13 +202,13 @@ class LoraConfig(PeftConfig):
         default=True,
         metadata={
             "help": (
-                "How to initialize the weights of the LoRA layers. Passing True (default) results in the default "
-                "initialization from the reference implementation from Microsoft. Passing 'gaussian' results "
+                "How to initialize the weights of the LoRA layers. Passing `'True'` (default) results in the default "
+                "initialization from the reference implementation from Microsoft. Passing `'gaussian'` results "
                 "in Gaussian initialization scaled by the LoRA rank for linear and layers. Setting the initialization "
-                "to False leads to completely random initialization and is discouraged."
-                "Passing 'olora' results in OLoRA initialization."
-                "Passing 'pissa' results in PiSSA initialization."
-                "Passing 'pissa_niter_[number of iters]' initiates Fast-SVD-based PiSSA initialization, "
+                "to `'False'` leads to completely random initialization and *is discouraged.*"
+                "Passing `'olora'` results in OLoRA initialization."
+                "Passing `'pissa'` results in PiSSA initialization."
+                "Passing `'pissa_niter_[number of iters]'` initiates Fast-SVD-based PiSSA initialization, "
                 "where [number of iters] indicates the number of subspace iterations to perform fsvd, and must be a nonnegative integer."
                 "Pass `'loftq'` to use LoftQ initialization"
             ),
@@ -285,12 +286,11 @@ class LoraConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Enable 'Weight-Decomposed Low-Rank Adaptation' (DoRA). This technique decomposes the updates of the "
+                "Enable <a href='https://arxiv.org/abs/2402.09353'>'Weight-Decomposed Low-Rank Adaptation' (DoRA)</a>. This technique decomposes the updates of the "
                 "weights into two parts, magnitude and direction. Direction is handled by normal LoRA, whereas the "
                 "magnitude is handled by a separate learnable parameter. This can improve the performance of LoRA, "
                 "especially at low ranks. Right now, DoRA only supports linear and Conv2D layers. DoRA introduces a bigger"
-                "overhead than pure LoRA, so it is recommended to merge weights for inference. For more information, "
-                "see  https://arxiv.org/abs/2402.09353."
+                "overhead than pure LoRA, so it is recommended to merge weights for inference."
             )
         },
     )
@@ -360,6 +360,26 @@ class LoraConfig(PeftConfig):
                 raise ImportError("The required package 'scipy' is not installed. Please install it to continue.")
             if self.loftq_config is None:
                 raise ValueError("`loftq_config` must be specified when `init_lora_weights` is 'loftq'.")
+
+        # Using post training conversion of modified base weights to restore their initial values (PiSSA, OLoRA) cannot
+        # be correctly done when using rslora + rank_pattern/alpha_pattern. We can't really know if the user intends
+        # this when they'll eventually call save_pretrained (i.e. if they'll pass
+        # path_initial_model_for_weight_conversionl). Therefore, we only warn but don't raise an error here.
+        if (
+            self.use_rslora
+            and (self.rank_pattern or self.alpha_pattern)
+            and (
+                (isinstance(self.init_lora_weights, str) and (self.init_lora_weights.startswith("pissa")))
+                or (self.init_lora_weights == "olora")
+            )
+        ):
+            msg = (
+                "Using Rank-Stabilized LoRA with rank_pattern/alpha_pattern and post-training conversion of modified "
+                "base weights (PiSSA, OLoRA) means that you won't be able to pass "
+                "`path_initial_model_for_weight_conversion` to `save_pretrained` to restore the initial values of the "
+                "base weights; if you intend to do this, please ensure not to use rslora or rank_pattern/alpha_pattern."
+            )
+            warnings.warn(msg)
 
         # convert loftq_config to dict
         if self.loftq_config and not isinstance(self.loftq_config, dict):

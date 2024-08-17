@@ -57,6 +57,7 @@ from peft import (
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
 )
+from peft.tuners import boft
 from peft.utils import SAFETENSORS_WEIGHTS_NAME
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
@@ -1781,6 +1782,7 @@ class OffloadSaveTests(unittest.TestCase):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
 class TestPiSSA:
     r"""
     Tests for PiSSA to ensure that it reduces the quantization error compared to normal LoRA quantization.
@@ -1967,7 +1969,9 @@ class TestPiSSA:
         assert model_loaded.base_model.model.linear.lora_A["default"].weight.shape[0] == 8
 
         # save the model with conversion
-        peft_model.save_pretrained(tmp_path / "pissa-model-converted", convert_mutated_to_lora=tmp_path / "init-model")
+        peft_model.save_pretrained(
+            tmp_path / "pissa-model-converted", path_initial_model_for_weight_conversion=tmp_path / "init-model"
+        )
         model_converted = PeftModel.from_pretrained(deepcopy(model), tmp_path / "pissa-model-converted")
         output_converted = model_converted(data)[0]
 
@@ -1983,6 +1987,7 @@ class TestPiSSA:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
+@pytest.mark.single_gpu_tests
 class TestOLoRA:
     r"""
     Tests for OLoRA to ensure that it reduces the quantization error compared to normal LoRA quantization.
@@ -3426,3 +3431,26 @@ class TestFSDPWrap:
         init_process_group(world_size=1, rank=0)
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
+
+
+class TestBOFT:
+    """
+    Test that we can correctly use half-precision models with BOFT.
+    """
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_boft_half_linear(self):
+        # Check that we can use BoFT with model loaded in half precision
+        layer = torch.nn.Linear(160, 160).cuda()
+        layer = boft.layer.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
+        layer(x)  # does not raise
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_boft_half_conv(self):
+        conv = torch.nn.Conv2d(1, 1, 4).cuda()
+        conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
+        conv(x)  # does not raise

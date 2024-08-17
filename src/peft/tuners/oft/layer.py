@@ -171,7 +171,7 @@ class OFTLayer(nn.Module, LycorisLayer):
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
 
-                base_layer.weight.data = new_weights
+                base_layer.weight.data = new_weights.contiguous()
                 self.merged_adapters.append(active_adapter)
 
     def unmerge(self) -> None:
@@ -215,7 +215,7 @@ class OFTLayer(nn.Module, LycorisLayer):
                             base_layer.kernel_size[1],
                         ]
                     )
-                base_layer.weight.data = orig_weights
+                base_layer.weight.data = orig_weights.contiguous()
 
     def get_delta_weight(self, adapter_name: str) -> torch.Tensor:
         rank = self.r[adapter_name]

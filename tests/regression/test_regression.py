@@ -596,6 +596,9 @@ class TestOpt8bitBnb(RegressionTester):
         return model
 
     def test_lora_8bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = LoraConfig(
             r=8,
@@ -609,6 +612,9 @@ class TestOpt8bitBnb(RegressionTester):
         self.skipTest(
             "Skipping AdaLora for now, getting TypeError: unsupported operand type(s) for +=: 'dict' and 'Tensor'"
         )
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             init_r=6,
@@ -652,6 +658,9 @@ class TestOpt4bitBnb(RegressionTester):
         return model
 
     def test_lora_4bit(self):
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = LoraConfig(
             r=8,
@@ -663,6 +672,9 @@ class TestOpt4bitBnb(RegressionTester):
     def test_adalora(self):
         # TODO
         self.skipTest("Skipping AdaLora for now because of a bug, see #1113")
+        # Warning: bnb results can vary significantly depending on the GPU. Therefore, if there is a change in GPU used
+        # in the CI, the test can fail without any code change. In that case, delete the regression artifact and create
+        # a new one using the new GPU.
         base_model = self.load_base_model()
         config = AdaLoraConfig(
             init_r=6,

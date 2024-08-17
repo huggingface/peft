@@ -20,7 +20,8 @@ jobs:
       fail-fast: false
       matrix:
           docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest", "huggingface/peft-gpu-bnb-multi-source:latest"]
-    runs-on: [self-hosted, single-gpu, nvidia-gpu, t4, ci]
+    runs-on:
+      group: aws-g6-4xlarge-plus
     env:
       CUDA_VISIBLE_DEVICES: "0"
       TEST_TYPE: "single_gpu_${{ matrix.docker-image-name }}"
@@ -45,7 +46,7 @@ jobs:
             echo "Checking out tag for Transformers version: v$transformers_version"
             git fetch --tags
             git checkout tags/v$transformers_version
-            cd .. 
+            cd ..
           fi
 
       - name: Test bnb import
@@ -62,25 +63,24 @@ jobs:
         with:
           slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
           title: 🤗 Results of bitsandbytes import
-          status: ${{ steps.examples_tests.outcome }}
+          status: ${{ steps.import.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
-      # TODO: uncomment this block if error is solved or bnb multi backend branch is merged
-      # - name: Run examples on single GPU
-      #   id: examples_tests
-      #   if: always()
-      #   run: |
-      #     source activate peft
-      #     make tests_examples_single_gpu_bnb
+      - name: Run examples on single GPU
+        id: examples_tests
+        if: always()
+        run: |
+          source activate peft
+          make tests_examples_single_gpu_bnb
 
-      # - name: Post to Slack
-      #   if: always()
-      #   uses: huggingface/hf-workflows/.github/actions/post-slack@main
-      #   with:
-      #     slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
-      #     title: 🤗 Results of bitsandbytes examples tests - single GPU
-      #     status: ${{ steps.examples_tests.outcome }}
-      #     slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+      - name: Post to Slack
+        if: always()
+        uses: huggingface/hf-workflows/.github/actions/post-slack@main
+        with:
+          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
+          title: 🤗 Results of bitsandbytes examples tests - single GPU
+          status: ${{ steps.examples_tests.outcome }}
+          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run core tests on single GPU
         id: core_tests
@@ -129,7 +129,7 @@ jobs:
           title: 🤗 Results of bitsandbytes transformers tests - single GPU
           status: ${{ steps.transformers_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
-          
+
       - name: Generate Report
         if: always()
         run: |
@@ -142,7 +142,8 @@ jobs:
       fail-fast: false
       matrix:
         docker-image-name: ["huggingface/peft-gpu-bnb-source:latest", "huggingface/peft-gpu-bnb-latest:latest", "huggingface/peft-gpu-bnb-multi-source:latest"]
-    runs-on: [self-hosted, multi-gpu, nvidia-gpu, t4, ci]
+    runs-on:
+      group: aws-g6-12xlarge-plus
     env:
       CUDA_VISIBLE_DEVICES: "0,1"
       TEST_TYPE: "multi_gpu_${{ matrix.docker-image-name }}"
@@ -168,7 +169,7 @@ jobs:
             git fetch --tags
             git checkout tags/v$transformers_version
             cd ..
-          fi 
+          fi
 
       - name: Test bnb import
         id: import
@@ -191,7 +192,7 @@ jobs:
         if: always()
         run: |
           source activate peft
-        
+
       - name: Run examples on multi GPU
         id: examples_tests
         if: always()
@@ -207,7 +208,7 @@ jobs:
           title: 🤗 Results of bitsandbytes examples tests - multi GPU
           status: ${{ steps.examples_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
-      
+
       - name: Run core tests on multi GPU
         id: core_tests
         if: always()
@@ -239,7 +240,7 @@ jobs:
           title: 🤗 Results of bitsandbytes transformers tests - multi GPU
           status: ${{ steps.transformers_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
-          
+
       - name: Generate Report
         if: always()
         run: |

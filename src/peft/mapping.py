@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
+from peft.tuners.xlora.model import XLoraModel
+
 from .config import PeftConfig
 from .mixed_model import PeftMixedModel
 from .peft_model import (
@@ -36,6 +38,10 @@ from .tuners import (
     AdaptionPromptConfig,
     BOFTConfig,
     BOFTModel,
+    FourierFTConfig,
+    FourierFTModel,
+    HRAConfig,
+    HRAModel,
     IA3Config,
     IA3Model,
     LNTuningConfig,
@@ -56,6 +62,7 @@ from .tuners import (
     PromptTuningConfig,
     VeraConfig,
     VeraModel,
+    XLoraConfig,
 )
 from .tuners.tuners_utils import BaseTuner as _BaseTuner
 from .utils import _prepare_prompt_learning_config
@@ -81,6 +88,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "P_TUNING": PromptEncoderConfig,
     "LORA": LoraConfig,
     "LOHA": LoHaConfig,
+    "LORAPLUS": LoraConfig,
     "LOKR": LoKrConfig,
     "ADALORA": AdaLoraConfig,
     "BOFT": BOFTConfig,
@@ -90,6 +98,9 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "POLY": PolyConfig,
     "LN_TUNING": LNTuningConfig,
     "VERA": VeraConfig,
+    "FOURIERFT": FourierFTConfig,
+    "XLORA": XLoraConfig,
+    "HRA": HRAConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
@@ -103,6 +114,9 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[_BaseTuner]] = {
     "POLY": PolyModel,
     "LN_TUNING": LNTuningModel,
     "VERA": VeraModel,
+    "FOURIERFT": FourierFTModel,
+    "XLORA": XLoraModel,
+    "HRA": HRAModel,
 }
 
 
@@ -149,7 +163,14 @@ def get_peft_model(
     if hasattr(model_config, "to_dict"):
         model_config = model_config.to_dict()
 
-    peft_config.base_model_name_or_path = model.__dict__.get("name_or_path", None)
+    old_name = peft_config.base_model_name_or_path
+    new_name = model.__dict__.get("name_or_path", None)
+    peft_config.base_model_name_or_path = new_name
+    if (old_name is not None) and (old_name != new_name):
+        warnings.warn(
+            f"The PEFT config's `base_model_name_or_path` was renamed from '{old_name}' to '{new_name}'. "
+            "Please ensure that the correct base model is loaded when loading this checkpoint."
+        )
 
     if revision is not None:
         if peft_config.revision is not None and peft_config.revision != revision:

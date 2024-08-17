@@ -26,8 +26,12 @@ from peft import (
     AdaLoraConfig,
     AdaptionPromptConfig,
     BOFTConfig,
+    FourierFTConfig,
+    HRAConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
     OFTConfig,
@@ -45,18 +49,22 @@ from peft import (
 PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
 ALL_CONFIG_CLASSES = (
-    AdaptionPromptConfig,
     AdaLoraConfig,
+    AdaptionPromptConfig,
+    BOFTConfig,
+    FourierFTConfig,
+    HRAConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
+    OFTConfig,
+    PolyConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    OFTConfig,
-    PolyConfig,
-    BOFTConfig,
     VeraConfig,
 )
 
@@ -232,7 +240,7 @@ class PeftConfigTester(unittest.TestCase):
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
 
-    @parameterized.expand([LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig])
+    @parameterized.expand([LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig])
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045
         config = config_class(target_modules=["a", "list"])
@@ -287,3 +295,18 @@ class PeftConfigTester(unittest.TestCase):
         # should run without errors
         IA3Config(**valid_config_regex_exp)
         IA3Config(**valid_config_list)
+
+    def test_adalora_config_r_warning(self):
+        # This test checks that a warning is raised when r is set other than default in AdaLoraConfig
+        # No warning should be raised when initializing AdaLoraConfig with default values.
+        kwargs = {"peft_type": "ADALORA", "task_type": "SEQ_2_SEQ_LM", "init_r": 12, "lora_alpha": 32}
+        # Test that no warning is raised with default initialization
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            try:
+                AdaLoraConfig(**kwargs)
+            except Warning:
+                pytest.fail("AdaLoraConfig raised a warning with default initialization.")
+        # Test that a warning is raised when r != 8 in AdaLoraConfig
+        with pytest.warns(UserWarning, match="Note that `r` is not used in AdaLora and will be ignored."):
+            AdaLoraConfig(r=10)
