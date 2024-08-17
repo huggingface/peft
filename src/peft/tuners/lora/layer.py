@@ -127,6 +127,10 @@ class LoraLayer(BaseTunerLayer):
         if use_moslora:
             self.lora_mixer[adapter_name] = nn.Linear(r, r, bias=False) # moslora init
             self.use_moslora[adapter_name] = True
+            # for test only
+            # self.lora_A[adapter_name].weight.data = (self.lora_A[adapter_name].weight.data.T @ self.lora_mixer[adapter_name].weight.data.T).T
+            # self.lora_mixer[adapter_name].weight.data = torch.eye(r)
+            # self.lora_mixer.requires_grad_(False)
         else:
             self.use_moslora[adapter_name] = False
 
