@@ -188,7 +188,7 @@ class XLoraModel(BaseTuner):
         >>> model = AutoModelForCausalLM.from_pretrained(
         ...     "mistralai/Mistral-7B-Instruct-v0.1",
         ...     trust_remote_code=True,
-        ...     _attn_implementation="flash_attention_2",
+        ...     attn_implementation="flash_attention_2",
         ...     device_map="cuda:0",
         ...     torch_dtype=torch.bfloat16,
         ...     quantization_config=int8_config,
