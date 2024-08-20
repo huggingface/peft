@@ -14,8 +14,10 @@
 
 import os
 
+import huggingface_hub
 import pytest
 import torch
+from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
@@ -305,3 +307,36 @@ class TestXlora:
             max_new_tokens=32,
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
+
+    def test_xlora_loading_valid(self):
+        # This test also simulatenously tests the loading-from-hub functionality!
+        torch.manual_seed(123)
+
+        model_id = "facebook/opt-125m"
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        model.config.use_cache = False
+
+        adapters = [
+            "peft-internal-testing/opt-125m-dummy-lora",
+            "peft-internal-testing/opt-125m-dummy-lora",
+        ]
+        adapters = {str(i): file_name for i, file_name in enumerate(adapters)}
+
+        peft_config = XLoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            peft_type=PeftType.XLORA,
+            hidden_size=model.config.hidden_size,
+            adapters=adapters,
+            xlora_depth=8,
+            xlora_size=2048,
+            layerwise_scalings=True,
+            xlora_dropout_p=0.2,
+        )
+        model = get_peft_model(model, peft_config)
+
+        downloaded = huggingface_hub.hf_hub_download(repo_id=adapters["0"], filename="adapter_model.safetensors")
+        sd = load_file(downloaded)
+        w0 = model.base_model.model.model.decoder.layers[0].self_attn.q_proj.lora_A["0"].weight
+        w1 = sd["base_model.model.model.decoder.layers.0.self_attn.q_proj.lora_A.weight"]
+
+        assert torch.allclose(w0, w1)
