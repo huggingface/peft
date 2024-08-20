@@ -65,7 +65,7 @@ from .tuners import (
     XLoraConfig,
 )
 from .tuners.tuners_utils import BaseTuner as _BaseTuner
-from .utils import _prepare_prompt_learning_config
+from .utils import _prepare_prompt_learning_config, EMBEDDING_LAYER_NAMES
 
 
 if TYPE_CHECKING:
@@ -131,13 +131,10 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
 
 def warn_if_tied_embeddings_in_target_modules(model_config, peft_config):
-    common_output_target_module = [
-        "lm_head", "embed_tokens",
-    ]
     
     if model_config.get("tie_word_embeddings"):
         for target_module in peft_config.target_modules:
-            if target_module in common_output_target_module:
+            if target_module in EMBEDDING_LAYER_NAMES:
                 warnings.warn(
                     f"{model_config['tie_word_embeddings']=} and a tied {target_module=} is passed to peft config. This can lead to complications, for example when merging the adapter. Are you sure you want to infect and adapter to {target_module}?"
                 )
