@@ -136,7 +136,7 @@ def warn_if_tied_embeddings_in_target_modules(model_config, peft_config):
         for target_module in peft_config.target_modules:
             if target_module in EMBEDDING_LAYER_NAMES:
                 warnings.warn(
-                    f"{model_config['tie_word_embeddings']=} and a tied {target_module=} is passed to peft config. This can lead to complications, for example when merging the adapter. Are you sure you want to infect and adapter to {target_module}?"
+                    f"{model_config['tie_word_embeddings']=} and a tied {target_module=} is passed to peft config. This can lead to complications, for example when merging the adapter. Are you sure you want to use the  target module {target_module}?"
                 )
 
 def get_peft_model(
