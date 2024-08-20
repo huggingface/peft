@@ -132,7 +132,7 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
 
 def warn_if_tied_embeddings_in_target_modules(model_config, peft_config):
     common_output_target_module = [
-        "lm_head",
+        "lm_head", "embed_tokens",
     ]
     
     if model_config.get("tie_word_embeddings"):
