@@ -24,7 +24,7 @@ from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
-from peft.utils.integrations import dequantize_module_weight, gather_params_ctx, is_bnb_param
+from peft.utils.integrations import dequantize_module_weight, gather_params_ctx, get_bnb_param_type
 from peft.utils.other import transpose
 
 from .config import LoraConfig
@@ -168,10 +168,10 @@ class LoraLayer(BaseTunerLayer):
     def olora_init(self, adapter_name):
         base_layer = self.get_base_layer()
         orig_weight = base_layer.weight
-        orig_weight_is_bnb = is_bnb_param(orig_weight)
+        bnb_param_type = get_bnb_param_type(orig_weight)
         dtype = orig_weight.dtype
 
-        if orig_weight_is_bnb:
+        if bnb_param_type:
             # check without importing bitsandbytes and robust to bnb_4bit_quant_storage=float*
             weight_tensor = dequantize_module_weight(base_layer)
         elif dtype in [torch.float32, torch.float16, torch.bfloat16]:
@@ -190,10 +190,15 @@ class LoraLayer(BaseTunerLayer):
         self.lora_B[adapter_name].weight.data = Qr.contiguous()
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
-        if orig_weight_is_bnb:
+        if bnb_param_type == "4bit":
             import bitsandbytes as bnb
 
             weight_tensor = bnb.nn.Params4bit(weight_tensor, quant_type=orig_weight.quant_type).to(orig_weight.device)
+            base_layer.weight = weight_tensor
+        elif bnb_param_type == "8bit":
+            import bitsandbytes as bnb
+
+            weight_tensor = bnb.nn.Int8Params(weight_tensor, requires_grad=False).to(orig_weight.device)
             base_layer.weight = weight_tensor
         else:
             weight_tensor = weight_tensor.to(dtype)
