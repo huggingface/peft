@@ -275,7 +275,7 @@ class _SafetensorLoader:
             except (AttributeError, HFValidationError) as exc:
                 raise ValueError(
                     "The provided model does not appear to be a transformers model or is a local model. In this case, "
-                    "you must pass the model_path to the safetensors file."
+                    "you must pass the model_path argument that points to the safetensors file."
                 ) from exc
             except LocalEntryNotFoundError as exc:
                 raise ValueError(
