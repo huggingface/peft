@@ -170,8 +170,8 @@ class XLoraModel(BaseTuner):
 
     Example:
         ```py
-        >>> from transformers import AutoModelForCausalLM, AutoConfig
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
+        >>> from transformers import AutoModelForCausalLM, AutoConfig, BitsAndBytesConfig
+        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
         >>> model_config = AutoConfig.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
         >>> config = XLoraConfig(
@@ -184,15 +184,16 @@ class XLoraModel(BaseTuner):
         ...         "adapter_n": "./path/to/the/checkpoint/",
         ...     },
         ... )
-
+        >>> int8_config = BitsAndBytesConfig(load_in_8bit=True)
         >>> model = AutoModelForCausalLM.from_pretrained(
         ...     "mistralai/Mistral-7B-Instruct-v0.1",
         ...     trust_remote_code=True,
-        ...     use_flash_attention_2=False,
+        ...     attn_implementation="flash_attention_2",
         ...     device_map="cuda:0",
         ...     torch_dtype=torch.bfloat16,
+        ...     quantization_config=int8_config,
         ... )
-        >>> model = prepare_model_for_int8_training(model)
+        >>> model = prepare_model_for_kbit_training(4)
         >>> xlora_model = get_peft_model(model, config)
         ```
     """
