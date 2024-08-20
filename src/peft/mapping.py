@@ -130,6 +130,17 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
 
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
 
+def warn_if_tied_embeddings_in_target_modules(model_config, peft_config):
+    common_output_target_module = [
+        "lm_head",
+    ]
+    
+    if model_config.get("tie_word_embeddings"):
+        for target_module in peft_config.target_modules:
+            if target_module in common_output_target_module:
+                warnings.warn(
+                    f"{model_config['tie_word_embeddings']=} and a tied {target_module=} is passed to peft config. This can lead to complications, for example when merging the adapter. Are you sure you want to infect and adapter to {target_module}?"
+                )
 
 def get_peft_model(
     model: PreTrainedModel,
@@ -166,6 +177,9 @@ def get_peft_model(
     old_name = peft_config.base_model_name_or_path
     new_name = model.__dict__.get("name_or_path", None)
     peft_config.base_model_name_or_path = new_name
+
+    warn_if_tied_embeddings_in_target_modules(model_config, peft_config)
+
     if (old_name is not None) and (old_name != new_name):
         warnings.warn(
             f"The PEFT config's `base_model_name_or_path` was renamed from '{old_name}' to '{new_name}'. "
