@@ -131,7 +131,6 @@ def get_peft_config(config_dict: dict[str, Any]) -> PeftConfig:
     return PEFT_TYPE_TO_CONFIG_MAPPING[config_dict["peft_type"]](**config_dict)
 
 def warn_if_tied_embeddings_in_target_modules(model_config, peft_config):
-    
     if model_config.get("tie_word_embeddings"):
         for target_module in peft_config.target_modules:
             if target_module in EMBEDDING_LAYER_NAMES:
