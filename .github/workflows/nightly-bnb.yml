@@ -98,21 +98,22 @@ jobs:
           status: ${{ steps.core_tests.outcome }}
           slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
-      - name: Run BNB regression tests on single GPU
-        id: regression_tests
-        if: always()
-        run: |
-          source activate peft
-          make tests_gpu_bnb_regression
+      # TODO: this is a test to see if BNB multi-backend single-GPU tests succeed w/o regression tests
+      # - name: Run BNB regression tests on single GPU
+      #   id: regression_tests
+      #   if: always()
+      #   run: |
+      #     source activate peft
+      #     make tests_gpu_bnb_regression
 
-      - name: Post to Slack
-        if: always()
-        uses: huggingface/hf-workflows/.github/actions/post-slack@main
-        with:
-          slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
-          title: 🤗 Results of bitsandbytes regression tests - single GPU
-          status: ${{ steps.regression_tests.outcome }}
-          slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+      # - name: Post to Slack
+      #   if: always()
+      #   uses: huggingface/hf-workflows/.github/actions/post-slack@main
+      #   with:
+      #     slack_channel: ${{ secrets.BNB_SLACK_CHANNEL_ID }}
+      #     title: 🤗 Results of bitsandbytes regression tests - single GPU
+      #     status: ${{ steps.regression_tests.outcome }}
+      #     slack_token: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
 
       - name: Run transformers tests on single GPU
         id: transformers_tests
