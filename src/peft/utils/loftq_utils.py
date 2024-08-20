@@ -23,6 +23,7 @@ from typing import Callable, Optional, Union
 
 import torch
 from huggingface_hub import snapshot_download
+from huggingface_hub.errors import HFValidationError
 from huggingface_hub.utils import LocalEntryNotFoundError
 from safetensors import SafetensorError, safe_open
 from transformers.utils import cached_file
@@ -271,10 +272,10 @@ class _SafetensorLoader:
         if model_path is None:
             try:
                 model_path = snapshot_download(peft_model.base_model.config._name_or_path, local_files_only=True)
-            except AttributeError as exc:
+            except (AttributeError, HFValidationError) as exc:
                 raise ValueError(
-                    "The provided model does not appear to be a transformers model. In this case, you must pass the "
-                    "model_path to the safetensors file."
+                    "The provided model does not appear to be a transformers model or is a local model. In this case, "
+                    "you must pass the model_path to the safetensors file."
                 ) from exc
             except LocalEntryNotFoundError as exc:
                 raise ValueError(
