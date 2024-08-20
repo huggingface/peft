@@ -3276,7 +3276,6 @@ class TestMixedAdapterBatches:
         with pytest.raises(ValueError, match=msg):
             peft_model.forward(**inputs)
 
-    @require_torch_gpu
     def test_mixed_adapter_batches_lora_opt_timing(self):
         # Use a more realistic model (opt-125m) and do a simple runtime check to ensure that mixed adapter batches
         # don't add too much overhead. These types of tests are inherently flaky, so we try to add in some robustness.
