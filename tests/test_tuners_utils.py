@@ -594,7 +594,7 @@ class TestModelAndLayerStatus:
         assert result == expected
 
     @require_non_cpu
-    def test_devices_all_cuda_large(self, large_model):
+    def test_devices_all_gpu_large(self, large_model):
         large_model.to(self.torch_device)
         layer_status = large_model.get_layer_status()
         result = [status.devices for status in layer_status]
@@ -607,8 +607,8 @@ class TestModelAndLayerStatus:
         assert result == expected
 
     @require_non_cpu
-    def test_devices_cpu_and_cuda_large(self, large_model):
-        # move the embedding layer to CUDA
+    def test_devices_cpu_and_gpu_large(self, large_model):
+        # move the embedding layer to GPU
         large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to(self.torch_device)
         layer_status = large_model.get_layer_status()
         result = [status.devices for status in layer_status]
@@ -809,14 +809,14 @@ class TestModelAndLayerStatus:
         assert model_status.devices == {"default": ["cpu"], "other": ["cpu"]}
 
     @require_non_cpu
-    def test_model_devices_all_cuda_large(self, large_model):
+    def test_model_devices_all_gpu_large(self, large_model):
         large_model.to(self.torch_device)
         model_status = large_model.get_model_status()
         assert model_status.devices == {"default": [self.torch_device], "other": [self.torch_device]}
 
     @require_non_cpu
-    def test_model_devices_cpu_and_cuda_large(self, large_model):
-        # move the embedding layer to CUDA
+    def test_model_devices_cpu_and_gpu_large(self, large_model):
+        # move the embedding layer to GPU
         large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to(self.torch_device)
         model_status = large_model.get_model_status()
         assert model_status.devices == {"default": ["cpu", self.torch_device], "other": ["cpu"]}
@@ -873,7 +873,7 @@ class TestModelAndLayerStatus:
         config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False)
         model = get_peft_model(base_model, config)
 
-        # move the buffer dict to CUDA
+        # move the buffer dict to GPU
         model.lin0.vera_A["default"] = model.lin0.vera_A["default"].to(self.torch_device)
 
         model_status = model.get_model_status()
