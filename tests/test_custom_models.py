@@ -49,7 +49,7 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import ModulesToSaveWrapper, infer_device
+from peft.utils import infer_device
 
 from .testing_common import PeftCommonTester
 from .testing_utils import get_state_dict, require_torch_gpu
