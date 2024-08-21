@@ -25,6 +25,7 @@ from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.lora.model import LoraModel
 from peft.tuners.tuners_utils import BaseTuner
 from peft.utils.constants import DUMMY_TARGET_MODULES
+from peft.utils.save_and_load import set_peft_model_state_dict
 
 from .. import lora
 from .classifier import XLoraClassifier
@@ -46,7 +47,7 @@ def convert_layers_to_xlora(
     device = None
     for module in base.modules():
         # Check the exact type because classes like OPTLearnedPositionalEmbedding inherit from nn.Embedding
-        if type(module) is lora.Linear:
+        if isinstance(module, lora.Linear):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoraLinearLayer(
                 model=xloramodel,
@@ -58,7 +59,7 @@ def convert_layers_to_xlora(
             all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
-        elif type(module) is lora.Embedding:
+        elif isinstance(module, lora.Embedding):
             device = module.lora_embedding_A[next(iter(module.lora_embedding_A))].device
             new_layer = XLoraEmbeddingLayer(
                 model=xloramodel,
@@ -70,7 +71,7 @@ def convert_layers_to_xlora(
             all_layers.append(new_layer)
             module.forward = new_layer.forward  # type: ignore[method-assign]
             total_swapped += 1
-        elif type(module) is lora.Conv2d:
+        elif isinstance(module, lora.Conv2d):
             device = module.lora_A[next(iter(module.lora_A))].weight.device
             new_layer = XLoraConv2dLayer(
                 model=xloramodel,
@@ -84,6 +85,72 @@ def convert_layers_to_xlora(
             total_swapped += 1
 
     return (total_swapped, device)
+
+
+def _load_adapter_into_lora_model(
+    lora_model: LoraModel,
+    adapter_name: str,
+    model_id: str,
+    torch_device: Optional[str] = None,
+    ephemeral_gpu_offload: bool = False,
+    autocast_adapter_dtype: bool = True,
+    subfolder: Optional[str] = None,
+    **kwargs,
+):
+    """
+    This method emulates the behavior of `PeftModel.from_pretrained`. Updates to `PeftModel.from_pretrained` may need
+    to be reflected here.
+
+    All params pertain to the adapter (adapter name, model id, `i` is the adapter number in 0 indexing).
+    """
+    from peft.peft_model import PeftModel
+    from peft.tuners.lora.config import LoraConfig
+    from peft.utils.other import infer_device
+    from peft.utils.save_and_load import load_peft_weights
+
+    hf_hub_download_kwargs, kwargs = PeftModel._split_kwargs(kwargs)
+    if torch_device is None:
+        torch_device = infer_device()
+
+    if adapter_name not in lora_model.peft_config:
+        # load the config
+        lora_peft_config = LoraConfig.from_pretrained(
+            model_id,
+            ephemeral_gpu_offload=ephemeral_gpu_offload,
+            subfolder=subfolder,
+            **hf_hub_download_kwargs,
+        )
+        lora_peft_config.inference_mode = False
+        lora_model.peft_config[adapter_name] = lora_peft_config
+        lora_model.inject_adapter(lora_model.model, adapter_name)
+
+    adapter_weights = load_peft_weights(model_id, device=torch_device, subfolder=subfolder, **hf_hub_download_kwargs)
+    new_adapter_weights = {}
+    # Rework the keys to contain the adapter numbers
+    for old_key in adapter_weights.keys():
+        key: str = old_key
+        # Remove all the prefixes until we have model.<...>
+        while not (key.startswith("model.") and not key.startswith("model.model.")):
+            key = key[key.find(".") + 1 :]
+        # We always want model.model
+        key = "model." + key
+        new_adapter_weights[key] = adapter_weights[old_key]
+
+    # load the weights into the model
+    ignore_mismatched_sizes = kwargs.get("ignore_mismatched_sizes", False)
+    load_result = set_peft_model_state_dict(
+        lora_model,
+        new_adapter_weights,
+        adapter_name=adapter_name,
+        ignore_mismatched_sizes=ignore_mismatched_sizes,
+    )
+    if len(load_result.unexpected_keys) > 0:
+        raise ValueError(
+            f"Got unexpected keys! Please raise an issue and tag @EricLBuehler.\n\nunexpected_keys={load_result.unexpected_keys}"
+        )
+
+    if hasattr(lora_model, "_cast_adapter_dtype"):
+        lora_model._cast_adapter_dtype(adapter_name=adapter_name, autocast_adapter_dtype=autocast_adapter_dtype)
 
 
 class XLoraModel(BaseTuner):
@@ -103,8 +170,8 @@ class XLoraModel(BaseTuner):
 
     Example:
         ```py
-        >>> from transformers import AutoModelForCausalLM, AutoConfig
-        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
+        >>> from transformers import AutoModelForCausalLM, AutoConfig, BitsAndBytesConfig
+        >>> from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 
         >>> model_config = AutoConfig.from_pretrained("mistralai/Mistral-7B-Instruct-v0.1")
         >>> config = XLoraConfig(
@@ -117,15 +184,16 @@ class XLoraModel(BaseTuner):
         ...         "adapter_n": "./path/to/the/checkpoint/",
         ...     },
         ... )
-
+        >>> int8_config = BitsAndBytesConfig(load_in_8bit=True)
         >>> model = AutoModelForCausalLM.from_pretrained(
         ...     "mistralai/Mistral-7B-Instruct-v0.1",
         ...     trust_remote_code=True,
-        ...     use_flash_attention_2=False,
+        ...     attn_implementation="flash_attention_2",
         ...     device_map="cuda:0",
         ...     torch_dtype=torch.bfloat16,
+        ...     quantization_config=int8_config,
         ... )
-        >>> model = prepare_model_for_int8_training(model)
+        >>> model = prepare_model_for_kbit_training(4)
         >>> xlora_model = get_peft_model(model, config)
         ```
     """
@@ -135,7 +203,36 @@ class XLoraModel(BaseTuner):
         model: nn.Module,
         config: Union[dict[str, XLoraConfig], XLoraConfig],
         adapter_name: str,
+        torch_device: Optional[str] = None,
+        ephemeral_gpu_offload: bool = False,
+        autocast_adapter_dtype: bool = True,
+        **kwargs,
     ) -> None:
+        """
+        Create a new X-LoRA model
+
+        Args:
+            model (`nn.Module`):
+                Base model to apply X-LoRA to.
+            config: ([`XLoraConfig`]):
+                X-LoRA configuration object.
+            adapter_name: (`str`):
+                Adapter name for the X-LoRA adapter.
+            torch_device (`str`, *optional*, defaults to None):
+                (For loading the LoRA adapters) The device to load the adapter on. If `None`, the device will be
+                inferred.
+            ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
+                (For loading the LoRA adapters) Whether to use ephemeral GPU offloading for partially loaded modules.
+                Defaults to `False`.
+            autocast_adapter_dtype (`bool`, *optional*, defaults to `True`):
+                (For loading the LoRA adapters) Whether to autocast the adapter dtype. Defaults to `True`. Right now,
+                this will only cast adapter weights using float16 and bfloat16 to float32, as this is typically
+                required for stable training, and only affect select PEFT tuners.
+            kwargs: (`optional`):
+                (For loading the LoRA adapters) Additional arguments to modify the way the adapter is loaded, e.g. the
+                token for Hugging Face Hub.
+        """
+
         nn.Module.__init__(self)
 
         if isinstance(config, dict):
@@ -166,11 +263,29 @@ class XLoraModel(BaseTuner):
             adapters_items = peft_config.adapters.items()
 
         if hasattr(self.xlora_config, "_subfolders"):
-            for (adapter_name, model_id), subfolder in adapters_items:
-                self.lora_model.load_adapter(model_id, adapter_name, subfolder=subfolder)
+            for i, (_adapter_name, model_id), subfolder in enumerate(adapters_items):
+                _load_adapter_into_lora_model(
+                    lora_model=self.lora_model,
+                    adapter_name=str(i),
+                    model_id=model_id,
+                    torch_device=torch_device,
+                    ephemeral_gpu_offload=ephemeral_gpu_offload,
+                    autocast_adapter_dtype=autocast_adapter_dtype,
+                    subfolder=subfolder,
+                    **kwargs,
+                )
         else:
-            for adapter_name, model_id in adapters_items:
-                self.lora_model.load_adapter(model_id, adapter_name)
+            for i, (_adapter_name, model_id) in enumerate(adapters_items):
+                _load_adapter_into_lora_model(
+                    lora_model=self.lora_model,
+                    adapter_name=str(i),
+                    model_id=model_id,
+                    torch_device=torch_device,
+                    ephemeral_gpu_offload=ephemeral_gpu_offload,
+                    autocast_adapter_dtype=autocast_adapter_dtype,
+                    subfolder=None,
+                    **kwargs,
+                )
 
         self.lora_model.set_adapter(list(peft_config.adapters.keys()))
 
@@ -232,7 +347,7 @@ class XLoraModel(BaseTuner):
                     hook_handles.append(handle)
 
             with torch.no_grad():
-                self.lora_model.disable_adapters()
+                self.lora_model.disable_adapter_layers()
 
                 try:
                     scaling_pass_kwargs = kwargs_real.copy()
@@ -245,7 +360,7 @@ class XLoraModel(BaseTuner):
                         for handle in hook_handles:
                             handle.remove()
                 finally:
-                    self.lora_model.enable_adapters()
+                    self.lora_model.enable_adapter_layers()
 
             xlora_scalings = self.internal_xlora_classifier(result=base_output, *args_real, **kwargs_real)
 

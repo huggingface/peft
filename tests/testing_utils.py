@@ -17,6 +17,7 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 import torch
+from accelerate.test_utils.testing import get_backend
 
 from peft.import_utils import (
     is_aqlm_available,
@@ -26,6 +27,17 @@ from peft.import_utils import (
     is_hqq_available,
     is_optimum_available,
 )
+
+
+torch_device, device_count, memory_allocated_func = get_backend()
+
+
+def require_non_cpu(test_case):
+    """
+    Decorator marking a test that requires a hardware accelerator backend. These tests are skipped when there are no
+    hardware accelerator available.
+    """
+    return unittest.skipUnless(torch_device != "cpu", "test requires a hardware accelerator")(test_case)
 
 
 def require_torch_gpu(test_case):
