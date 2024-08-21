@@ -500,7 +500,6 @@ class BaseTuner(nn.Module, ABC):
             model_config = model_config.to_dict()
         return model_config
 
-    
     def _warn_if_tied_embeddings_in_target_modules(self, model):
             model_config = self.get_model_config(model)
             if model_config.get("tie_word_embeddings"):
