@@ -887,7 +887,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        lr = 100.0 if config_kwargs.get("use_dora") else 0.5
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -1059,7 +1060,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
             atol, rtol = 1e-3, 1e-3
 
-        if "use_dora" in config_kwargs.keys():
+        if config_kwargs.get("use_dora"):
             atol, rtol = 1e-3, 1e-3
 
         # check that there is a difference in results after training
