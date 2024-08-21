@@ -506,9 +506,9 @@ class BaseTuner(nn.Module, ABC):
                 for target_module in self.targeted_module_names:
                     if target_module in EMBEDDING_LAYER_NAMES:
                         warnings.warn(
-                            f"{model_config.get('tie_word_embeddings')=} and a tied {target_module=} is passed to peft config.\n"
+                            f"{model_config.get('tie_word_embeddings')=} and the tied {target_module=} is part of the adapter.\n"
                             "This can lead to complications, for example when merging the adapter.\n"
-                            f"Are you sure you want to use the target module {target_module}?"
+                            f"See for example https://github.com/huggingface/peft/issues/2018."
                         )
 
 
