@@ -108,6 +108,7 @@ def onload_layer(layer):
             offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
         layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
+
 class BaseTuner(nn.Module, ABC):
     r"""
     A base tuner model that provides the common methods and attributes for all tuners that are injectable into a
@@ -492,7 +493,7 @@ class BaseTuner(nn.Module, ABC):
         )
         if is_modules_to_save_available and len(adapters_to_consider) > 1:
             raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
-    
+
     @staticmethod
     def get_model_config(model, default={"model_type": "custom"}):
         model_config = getattr(model, "config", default)
@@ -501,15 +502,15 @@ class BaseTuner(nn.Module, ABC):
         return model_config
 
     def _warn_if_tied_embeddings_in_target_modules(self, model):
-            model_config = self.get_model_config(model)
-            if model_config.get("tie_word_embeddings"):
-                for target_module in self.targeted_module_names:
-                    if target_module in EMBEDDING_LAYER_NAMES:
-                        warnings.warn(
-                            f"{model_config.get('tie_word_embeddings')=} and the tied {target_module=} is part of the adapter. "
-                            "This can lead to complications, for example when merging the adapter. "
-                            f"See for example https://github.com/huggingface/peft/issues/2018."
-                        )
+        model_config = self.get_model_config(model)
+        if model_config.get("tie_word_embeddings"):
+            for target_module in self.targeted_module_names:
+                if target_module in EMBEDDING_LAYER_NAMES:
+                    warnings.warn(
+                        f"{model_config.get('tie_word_embeddings')=} and the tied {target_module=} is part of the adapter. "
+                        "This can lead to complications, for example when merging the adapter. "
+                        f"See for example https://github.com/huggingface/peft/issues/2018."
+                    )
 
 
 class BaseTunerLayer(ABC):
