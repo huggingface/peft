@@ -27,6 +27,18 @@ from peft.import_utils import (
     is_optimum_available,
 )
 
+from accelerate.test_utils.testing import get_backend
+
+torch_device, device_count, memory_allocated_func = get_backend()
+
+
+def require_non_cpu(test_case):
+    """
+    Decorator marking a test that requires a hardware accelerator backend. These tests are skipped when there are no
+    hardware accelerator available.
+    """
+    return unittest.skipUnless(torch_device != "cpu", "test requires a hardware accelerator")(test_case)
+
 
 def require_torch_gpu(test_case):
     """
