@@ -108,19 +108,14 @@ class DoraLinearLayer(nn.Module):
 
 
 class DoraEmbeddingLayer(DoraLinearLayer):
-    def forward(self, x, *, lora_A, lora_B, scaling, base_layer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, embed_fn):
         """
         For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
         output.
         """
-        # Don't use `lora_weight = lora_B.weight @ lora_A.weight` because this causes errors with FSDP. Instead,
-        # calculate the same but using forward.
-        x_eye = torch.eye(lora_A.weight.shape[1], device=lora_A.weight.device, dtype=x.dtype)
-        lora_weight = lora_B(lora_A(x_eye)).T
-
+        lora_weight = (lora_A @ lora_B).T
         magnitude = self.weight
-        weight = dequantize_module_weight(base_layer)
-        weight = weight.to(x.dtype)
+        weight = base_layer.weight
         weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
         # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
         # "[...] we suggest treating ||V +∆V ||_c in
@@ -130,10 +125,9 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
-        result_dora = (mag_norm_scale - 1) * (
-            F.embedding(x, transpose(weight, self.fan_in_fan_out))
-        ) + mag_norm_scale * lora_B(lora_A(x)) * scaling
-
+        result_dora = (mag_norm_scale - 1) * embed_fn(x, weight) + mag_norm_scale * (
+            embed_fn(x, lora_A) @ lora_B
+        ) * scaling
         return result_dora
 
     def __repr__(self) -> str:

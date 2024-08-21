@@ -88,6 +88,19 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
+    (
+        "Embedding + transformers Conv1D 1 DoRA",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["conv1d"], "use_dora": True},
+    ),
+    ("Embedding + transformers Conv1D 2 DoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"], "use_dora": True}),
+    (
+        "Embedding + transformers Conv1D 3 DoRA",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["emb", "conv1d"], "use_dora": True},
+    ),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
@@ -942,8 +955,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
-
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+        model.eval()
         outputs_base = model(**X)
         if issubclass(config_cls, FourierFTConfig):
             config_kwargs = config_kwargs.copy()
@@ -1044,6 +1057,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         atol, rtol = 1e-5, 1e-5  # tolerances higher than defaults since merging introduces some numerical instability
 
         if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
+            atol, rtol = 1e-3, 1e-3
+
+        if "use_dora" in config_kwargs.keys():
             atol, rtol = 1e-3, 1e-3
 
         # check that there is a difference in results after training

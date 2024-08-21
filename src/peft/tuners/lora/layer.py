@@ -800,8 +800,19 @@ class Embedding(nn.Module, LoraLayer):
                 embedding_A = self.lora_embedding_A[active_adapter].T
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
-                after_A = self._embed(x, embedding_A)
-                result = result + (after_A @ embedding_B) * scaling
+
+                if not self.use_dora[active_adapter]:
+                    after_A = self._embed(x, embedding_A)
+                    result = result + (after_A @ embedding_B) * scaling
+                else:
+                    result = result + self.lora_magnitude_vector[active_adapter](
+                        x,
+                        lora_A=embedding_A,
+                        lora_B=embedding_B,
+                        scaling=scaling,
+                        base_layer=self.get_base_layer(),
+                        embed_fn=self._embed,
+                    )
             result = result.to(torch_result_dtype)
 
         return result
