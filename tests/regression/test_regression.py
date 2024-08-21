@@ -187,7 +187,7 @@ def save_model(model, name, force=False):
 
 def load_output(name):
     filename = os.path.join(REGRESSION_DIR, name, "output.pt")
-    return torch.load(filename)
+    return torch.load(filename, map_location=infer_device())
 
 
 @pytest.mark.regression
