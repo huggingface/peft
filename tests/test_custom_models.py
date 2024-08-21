@@ -956,8 +956,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     @parameterized.expand(TEST_CASES)
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
-        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
-        model.eval()
+        model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
         outputs_base = model(**X)
         if issubclass(config_cls, FourierFTConfig):
             config_kwargs = config_kwargs.copy()
@@ -1060,8 +1059,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
             atol, rtol = 1e-3, 1e-3
 
-        if config_kwargs.get("use_dora"):
-            atol, rtol = 1e-3, 1e-3
+        if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
+            atol, rtol = 1e-4, 1e-4
 
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
