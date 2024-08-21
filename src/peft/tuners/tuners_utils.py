@@ -108,7 +108,6 @@ def onload_layer(layer):
             offload_state_dict(safetensors_filename, layer.base_layer._hf_hook.weights_map)
         layer.base_layer._hf_hook.post_forward(layer.base_layer, torch.tensor([]))
 
-
 class BaseTuner(nn.Module, ABC):
     r"""
     A base tuner model that provides the common methods and attributes for all tuners that are injectable into a
@@ -387,9 +386,7 @@ class BaseTuner(nn.Module, ABC):
         _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
         _has_modules_to_save = False
 
-        model_config = getattr(model, "config", {"model_type": "custom"})
-        if hasattr(model_config, "to_dict"):
-            model_config = model_config.to_dict()
+        model_config = self.get_model_config(model)
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
@@ -429,6 +426,8 @@ class BaseTuner(nn.Module, ABC):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+
+        self._warn_if_tied_embeddings_in_target_modules(model=model)
 
         # Handle X-LoRA case.
         if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
@@ -493,6 +492,25 @@ class BaseTuner(nn.Module, ABC):
         )
         if is_modules_to_save_available and len(adapters_to_consider) > 1:
             raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
+    
+    @staticmethod
+    def get_model_config(model, default={"model_type": "custom"}):
+        model_config = getattr(model, "config", default)
+        if hasattr(model_config, "to_dict"):
+            model_config = model_config.to_dict()
+        return model_config
+
+    
+    def _warn_if_tied_embeddings_in_target_modules(self, model):
+            model_config = self.get_model_config(model)
+            if model_config.get("tie_word_embeddings"):
+                for target_module in self.targeted_module_names:
+                    if target_module in EMBEDDING_LAYER_NAMES:
+                        warnings.warn(
+                            f"{model_config.get('tie_word_embeddings')=} and a tied {target_module=} is passed to peft config.\n"
+                            "This can lead to complications, for example when merging the adapter.\n"
+                            f"Are you sure you want to use the target module {target_module}?"
+                        )
 
 
 class BaseTunerLayer(ABC):

@@ -1231,9 +1231,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         card.data["library_name"] = "peft"
 
-        model_config = getattr(self, "config", None)
-        if hasattr(model_config, "to_dict"):
-            model_config = model_config.to_dict()
+        model_config = BaseTuner.get_model_config(self, default=None)
         if model_config is not None and "_name_or_path" in model_config:
             card.data["base_model"] = model_config["_name_or_path"]
 
