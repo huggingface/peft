@@ -2108,6 +2108,45 @@ class TestLoftQ:
             torch.cuda.empty_cache()
         gc.collect()
 
+    def test_replace_lora_weights_with_local_model(self):
+        # see issue 2020
+        torch.manual_seed(0)
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        device = "cuda"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # save base model locally
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
+            model.save_pretrained(tmp_dir)
+            del model
+
+            # load in 4bit
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+            )
+
+            # load the base model from local directory
+            model = AutoModelForCausalLM.from_pretrained(tmp_dir, quantization_config=bnb_config)
+            model = get_peft_model(model, LoraConfig())
+
+            # passing the local path directly works
+            replace_lora_weights_loftq(model, model_path=tmp_dir)
+            del model
+
+            # load the base model from local directory
+            model = AutoModelForCausalLM.from_pretrained(tmp_dir, quantization_config=bnb_config)
+            model = get_peft_model(model, LoraConfig())
+
+            # when not passing, ensure that users are made aware of the `model_path` argument
+            with pytest.raises(ValueError, match="model_path"):
+                replace_lora_weights_loftq(model)
+
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
 
 @require_bitsandbytes
 @require_torch_gpu
