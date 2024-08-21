@@ -17,6 +17,7 @@ from contextlib import contextmanager
 import numpy as np
 import pytest
 import torch
+from accelerate.test_utils.testing import get_backend
 
 from peft.import_utils import (
     is_aqlm_available,
@@ -27,7 +28,6 @@ from peft.import_utils import (
     is_optimum_available,
 )
 
-from accelerate.test_utils.testing import get_backend
 
 torch_device, device_count, memory_allocated_func = get_backend()
 

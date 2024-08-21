@@ -42,9 +42,9 @@ from peft.tuners.tuners_utils import (
     check_target_module_exists,
     inspect_matched_modules,
 )
-from peft.utils import infer_device, INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, infer_device
 
-from .testing_utils import require_bitsandbytes, require_torch_gpu, require_non_cpu
+from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
 
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
@@ -394,6 +394,7 @@ class TestModelAndLayerStatus:
     corresponding features like merging).
 
     """
+
     torch_device = infer_device()
 
     @pytest.fixture
