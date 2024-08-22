@@ -1,0 +1,1668 @@
+[
+    {
+        "id": 926,
+        "original_text": "Nicole found an orange caterpillar and a green caterpillar in her backyard . The green caterpillar was 3 inches long and the orange caterpillar was 1.1666666666666667 inches long . How much longer was the green caterpillar than the orange caterpillar ?",
+        "segmented_text": "Nicole found an orange caterpillar and a green caterpillar in her backyard . The green caterpillar was 3 inches long and the orange caterpillar was 1.1666666666666667 inches long . How much longer was the green caterpillar than the orange caterpillar ?",
+        "equation": "x=3-1.1666666666666667",
+        "ans": 1.8333333333333335
+    },
+    {
+        "id": 1921,
+        "original_text": "If 6 is added to a number and then subtracted from the same number , the product of the sum and the difference is 189 . What is the number ?",
+        "segmented_text": "If 6 is added to a number and then subtracted from the same number , the product of the sum and the difference is 189 . What is the number ?",
+        "equation": "(6.0+x)*(x-6.0)=189.0",
+        "ans": -15.0
+    },
+    {
+        "id": 628,
+        "original_text": "Each bottle cap costs $ 2.00 . How much do 6 bottle caps cost ?",
+        "segmented_text": "Each bottle cap costs $ 2.00 . How much do 6 bottle caps cost ?",
+        "equation": "X=(2.0*6.0)",
+        "ans": 12.0
+    },
+    {
+        "id": 1486,
+        "original_text": "Zach wants to ride the Ferris wheel , the roller coaster , and the log ride . The Ferris wheel costs 2 tickets , the roller coaster costs 7 tickets and the log ride costs 1 ticket . Zach has 1 ticket . How many more tickets should Zach buy ?",
+        "segmented_text": "Zach wants to ride the Ferris wheel , the roller coaster , and the log ride . The Ferris wheel costs 2 tickets , the roller coaster costs 7 tickets and the log ride costs 1 ticket . Zach has 1 ticket . How many more tickets should Zach buy ?",
+        "equation": "x=2+7+1-1",
+        "ans": 9.0
+    },
+    {
+        "id": 1473,
+        "original_text": "Joan found 70 seashells on the beach . she gave Sam some of her seashells . She has 27 seashell . How many seashells did she give to Sam ?",
+        "segmented_text": "Joan found 70 seashells on the beach . she gave Sam some of her seashells . She has 27 seashell . How many seashells did she give to Sam ?",
+        "equation": "X=70-27",
+        "ans": "43"
+    },
+    {
+        "id": 832,
+        "original_text": "Kendra made punch for her friend 's birthday party . She used 0.25 gallon of grape juice , 0.375 gallon of cranberry juice , and 0.125 gallon of club soda . How many gallons of punch did Kendra make ?",
+        "segmented_text": "Kendra made punch for her friend 's birthday party . She used 0.25 gallon of grape juice , 0.375 gallon of cranberry juice , and 0.125 gallon of club soda . How many gallons of punch did Kendra make ?",
+        "equation": "X=0.25+0.375+0.125",
+        "ans": "0.75"
+    },
+    {
+        "id": 2208,
+        "original_text": "You are reading a book with 120 pages . If you want to read the same number of pages each night , how many would you have to read each   night to finish in 10 days ?",
+        "segmented_text": "You are reading a book with 120 pages . If you want to read the same number of pages each night , how many would you have to read each   night to finish in 10 days ?",
+        "equation": "X=(120.0/10.0)",
+        "ans": 12.0
+    },
+    {
+        "id": 517,
+        "original_text": "A study reported that in a random sampling of 100 women over the age of 35 , 8 of the women were married 2 or more times . Based on the study results , how many woman in a group of 5000 women over the age of 35 would likely be married 2 or more times ?",
+        "segmented_text": "A study reported that in a random sampling of 100 women over the age of 35 , 8 of the women were married 2 or more times . Based on the study results , how many woman in a group of 5000 women over the age of 35 would likely be married 2 or more times ?",
+        "equation": "x=(8.0/100.0)*5000.0",
+        "ans": 400.0
+    },
+    {
+        "id": 187,
+        "original_text": "Rachel bought 7 new chairs and 3 new tables for her house . If she spent 4 minutes on each piece furniture putting it together , how many minutes did it take her to finish ?",
+        "segmented_text": "Rachel bought 7 new chairs and 3 new tables for her house . If she spent 4 minutes on each piece furniture putting it together , how many minutes did it take her to finish ?",
+        "equation": "X=(4.0*(7.0+3.0))",
+        "ans": 40.0
+    },
+    {
+        "id": 2326,
+        "original_text": "Benny bought a soft drink for 2 dollars and 5 candy bars . He spent a total of 27 dollars . How much did each candy bar cost ?",
+        "segmented_text": "Benny bought a soft drink for 2 dollars and 5 candy bars . He spent a total of 27 dollars . How much did each candy bar cost ?",
+        "equation": "x=(27-2)/5",
+        "ans": 5.0
+    },
+    {
+        "id": 1415,
+        "original_text": "Mary got fast food for lunch . Mary spent $ 1.08 on soup and $ 4.80 on a salad . Mary paid with a 20 dollar bill . What was the total of the lunch bill ?",
+        "segmented_text": "Mary got fast food for lunch . Mary spent $ 1.08 on soup and $ 4.80 on a salad . Mary paid with a 20 dollar bill . What was the total of the lunch bill ?",
+        "equation": "X=1.08+4.80",
+        "ans": "5.88"
+    },
+    {
+        "id": 1887,
+        "original_text": "In Shannon 's apartment complex , 0.16666666666666666 of the apartments are one - bedroom apartments and 0.3333333333333333 are two - bedroom apartments . What fraction of the apartments are either one- or two - bedroom apartments ?",
+        "segmented_text": "In Shannon 's apartment complex , 0.16666666666666666 of the apartments are one - bedroom apartments and 0.3333333333333333 are two - bedroom apartments . What fraction of the apartments are either one- or two - bedroom apartments ?",
+        "equation": "x=0.16666666666666666+0.3333333333333333",
+        "ans": 0.5
+    },
+    {
+        "id": 868,
+        "original_text": "Last year , egg producers in Douglas County produced 1416 eggs . This year , those same farms produced 4636 eggs . How many more eggs did the farms produce this year ?",
+        "segmented_text": "Last year , egg producers in Douglas County produced 1416 eggs . This year , those same farms produced 4636 eggs . How many more eggs did the farms produce this year ?",
+        "equation": "X=4636.0-1416.0",
+        "ans": "3220.0"
+    },
+    {
+        "id": 714,
+        "original_text": "Joan had 695 Pokemon cards , and 6 were torn . Sara bought 133 of Joan 's Pokemon cards . How many Pokemon cards does Joan have now ?",
+        "segmented_text": "Joan had 695 Pokemon cards , and 6 were torn . Sara bought 133 of Joan 's Pokemon cards . How many Pokemon cards does Joan have now ?",
+        "equation": "X=695-133",
+        "ans": "562"
+    },
+    {
+        "id": 1345,
+        "original_text": "0.4 of Joe 's income each month goes to taxes . If she pays 848 dollars in taxes each month , what is her monthly income in dollars ?",
+        "segmented_text": "0.4 of Joe 's income each month goes to taxes . If she pays 848 dollars in taxes each month , what is her monthly income in dollars ?",
+        "equation": "x=848.0/0.4",
+        "ans": 2120.0
+    },
+    {
+        "id": 1352,
+        "original_text": "Mrs. Hilt uses 2 ounces of detergent to wash a pound of clothes . How many ounces of soap will Mrs. Hilt use to wash 9 pounds of clothes ?",
+        "segmented_text": "Mrs. Hilt uses 2 ounces of detergent to wash a pound of clothes . How many ounces of soap will Mrs. Hilt use to wash 9 pounds of clothes ?",
+        "equation": "x=2*9",
+        "ans": 18.0
+    },
+    {
+        "id": 695,
+        "original_text": "A chef needs to cook 9 potatoes . He has already cooked 7 . If each potato takes 3 minutes to cook , how long will it take him to cook the rest ?",
+        "segmented_text": "A chef needs to cook 9 potatoes . He has already cooked 7 . If each potato takes 3 minutes to cook , how long will it take him to cook the rest ?",
+        "equation": "X=(3.0*(9.0-7.0))",
+        "ans": 6.0
+    },
+    {
+        "id": 552,
+        "original_text": "Mr. Guzman bought 48 doughnuts packed equally into 4 boxes . How many doughnuts were in each box ?",
+        "segmented_text": "Mr. Guzman bought 48 doughnuts packed equally into 4 boxes . How many doughnuts were in each box ?",
+        "equation": "x=48/4",
+        "ans": 12.0
+    },
+    {
+        "id": 602,
+        "original_text": "Mrs. Hilt impressed 2436 fans at the basketball game on Friday . If the fans were seated in equal groups on 3 sets of bleachers , how many   fans were on each set ?",
+        "segmented_text": "Mrs. Hilt impressed 2436 fans at the basketball game on Friday . If the fans were seated in equal groups on 3 sets of bleachers , how many   fans were on each set ?",
+        "equation": "X=(2436.0/3.0)",
+        "ans": 812.0
+    },
+    {
+        "id": 2054,
+        "original_text": "The distance measured on a map varies directly with the actual distance . If 1 cm represents 25 kilometers , how many kilometers are represented by 7 cm ?",
+        "segmented_text": "The distance measured on a map varies directly with the actual distance . If 1 cm represents 25 kilometers , how many kilometers are represented by 7 cm ?",
+        "equation": "x=25.0*7.0",
+        "ans": 175.0
+    },
+    {
+        "id": 453,
+        "original_text": "The town of Milburg has 5256 grown - ups and 2987 children . How many people live in Milburg ?",
+        "segmented_text": "The town of Milburg has 5256 grown - ups and 2987 children . How many people live in Milburg ?",
+        "equation": "X=(5256.0+2987.0)",
+        "ans": 8243.0
+    },
+    {
+        "id": 1976,
+        "original_text": "There are 1110 students at a school . If each classroom holds 30 students , how many classrooms are needed at the school ?",
+        "segmented_text": "There are 1110 students at a school . If each classroom holds 30 students , how many classrooms are needed at the school ?",
+        "equation": "x=1110/30",
+        "ans": 37.0
+    },
+    {
+        "id": 1677,
+        "original_text": "At the fair there were 31 people in line for the bumper cars . If 25 of them got tired of waiting and left and 25 more got in line , how many people would be in line ?",
+        "segmented_text": "At the fair there were 31 people in line for the bumper cars . If 25 of them got tired of waiting and left and 25 more got in line , how many people would be in line ?",
+        "equation": "X=((31.0+25.0)-25.0)",
+        "ans": 31.0
+    },
+    {
+        "id": 2316,
+        "original_text": "Tyler had 15 dogs . Each dog had 5 puppies . How many puppies does Tyler now have ?",
+        "segmented_text": "Tyler had 15 dogs . Each dog had 5 puppies . How many puppies does Tyler now have ?",
+        "equation": "X=(15.0*5.0)",
+        "ans": 75.0
+    },
+    {
+        "id": 1945,
+        "original_text": "Cindy ’s mom baked 1215 cookies . Paul ’s dad baked 1112 cookies . They both brought them to school for a party . How many cookies did   they have altogether ?",
+        "segmented_text": "Cindy ’s mom baked 1215 cookies . Paul ’s dad baked 1112 cookies . They both brought them to school for a party . How many cookies did   they have altogether ?",
+        "equation": "X=(1215.0+1112.0)",
+        "ans": 2327.0
+    },
+    {
+        "id": 1112,
+        "original_text": "Albert has two snakes . The garden snake is 10 inches long . The boa constrictor is 7 times longer than the garden snake . How long is the boa   constrictor ?",
+        "segmented_text": "Albert has two snakes . The garden snake is 10 inches long . The boa constrictor is 7 times longer than the garden snake . How long is the boa   constrictor ?",
+        "equation": "X=(10.0*7.0)",
+        "ans": 70.0
+    },
+    {
+        "id": 2168,
+        "original_text": "A store had 5 oranges in a bin . If they threw away 2 of the old ones and put 28 new ones in the bin how many would be in the bin ?",
+        "segmented_text": "A store had 5 oranges in a bin . If they threw away 2 of the old ones and put 28 new ones in the bin how many would be in the bin ?",
+        "equation": "X=((5.0+28.0)-2.0)",
+        "ans": 31.0
+    },
+    {
+        "id": 518,
+        "original_text": "On her vacation last summer , Trisha walked all over New York City to buy souvenirs . First , she walked 0.1111111111111111 of a mile from her hotel to a postcard shop . Then she walked 0.1111111111111111 of a mile from the postcard shop to a T - shirt shop and 0.6666666666666666 of a mile from the T - shirt shop back to the hotel . How many miles did Trisha walk in all ?",
+        "segmented_text": "On her vacation last summer , Trisha walked all over New York City to buy souvenirs . First , she walked 0.1111111111111111 of a mile from her hotel to a postcard shop . Then she walked 0.1111111111111111 of a mile from the postcard shop to a T - shirt shop and 0.6666666666666666 of a mile from the T - shirt shop back to the hotel . How many miles did Trisha walk in all ?",
+        "equation": "x=0.1111111111111111+0.1111111111111111+0.6666666666666666",
+        "ans": 0.8888888888888888
+    },
+    {
+        "id": 348,
+        "original_text": "Paul got a box of 479 crayons for his birthday . At the end of the school   year , he only had 134 left . How many crayons had been lost or given   away ?",
+        "segmented_text": "Paul got a box of 479 crayons for his birthday . At the end of the school   year , he only had 134 left . How many crayons had been lost or given   away ?",
+        "equation": "X=(479.0-134.0)",
+        "ans": 345.0
+    },
+    {
+        "id": 948,
+        "original_text": "Mary found 18 seashells and Jessica found 41 seashells on the beach . How many seashells did they find together ?",
+        "segmented_text": "Mary found 18 seashells and Jessica found 41 seashells on the beach . How many seashells did they find together ?",
+        "equation": "X=18+41",
+        "ans": "59"
+    },
+    {
+        "id": 1853,
+        "original_text": "Sally had 27 Pokemon cards . Dan gave her 41 new Pokemon cards . Sally bought 20 Pokemon cards . How many Pokemon cards does Sally have now ?",
+        "segmented_text": "Sally had 27 Pokemon cards . Dan gave her 41 new Pokemon cards . Sally bought 20 Pokemon cards . How many Pokemon cards does Sally have now ?",
+        "equation": "X=27+41+20",
+        "ans": "88"
+    },
+    {
+        "id": 650,
+        "original_text": "Gwen had 18 math problems and 11 science problems for homework . If she finished 24 of the problems at school , how many problems did she have to do for homework ?",
+        "segmented_text": "Gwen had 18 math problems and 11 science problems for homework . If she finished 24 of the problems at school , how many problems did she have to do for homework ?",
+        "equation": "X=((18.0+11.0)-24.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1141,
+        "original_text": "A carpenter bought a piece of wood that was 0.41 meters long . Then she sawed 0.33 meters off the end . How long is the piece of wood now ?",
+        "segmented_text": "A carpenter bought a piece of wood that was 0.41 meters long . Then she sawed 0.33 meters off the end . How long is the piece of wood now ?",
+        "equation": "X=0.41-0.33",
+        "ans": "0.08"
+    },
+    {
+        "id": 2215,
+        "original_text": "Latoya purchased a prepaid phone card for 30 dollars . Long distance calls cost 16 cents a minute using this card . Latoya used her card only once to make a long distance call . If the remaining credit on her card is 26.48 dollars , how many minutes did her call last ?",
+        "segmented_text": "Latoya purchased a prepaid phone card for 30 dollars . Long distance calls cost 16 cents a minute using this card . Latoya used her card only once to make a long distance call . If the remaining credit on her card is 26.48 dollars , how many minutes did her call last ?",
+        "equation": "x=(30.0-26.48)/(16*0.01)",
+        "ans": 22.0
+    },
+    {
+        "id": 1650,
+        "original_text": "A store had 40 oranges in a bin . If they threw away 37 of the old ones and put 7 new ones in the bin how many would be in the bin ?",
+        "segmented_text": "A store had 40 oranges in a bin . If they threw away 37 of the old ones and put 7 new ones in the bin how many would be in the bin ?",
+        "equation": "X=((40.0+7.0)-37.0)",
+        "ans": 10.0
+    },
+    {
+        "id": 982,
+        "original_text": "Sean has 223 whistles . He has 95 more whistles that Charles . How many whistles does Charles have ?",
+        "segmented_text": "Sean has 223 whistles . He has 95 more whistles that Charles . How many whistles does Charles have ?",
+        "equation": "X=(223.0-95.0)",
+        "ans": 128.0
+    },
+    {
+        "id": 94,
+        "original_text": "The junior ranger asked Christian to help him place 420 seedlings in packets . If every packet needs to contain 7 seeds , how many packets do they need ?",
+        "segmented_text": "The junior ranger asked Christian to help him place 420 seedlings in packets . If every packet needs to contain 7 seeds , how many packets do they need ?",
+        "equation": "x=420/7",
+        "ans": 60.0
+    },
+    {
+        "id": 414,
+        "original_text": "Mrs. Hilt needs to share $ 3.75 equally among 3 total people . How much money will each person get ?",
+        "segmented_text": "Mrs. Hilt needs to share $ 3.75 equally among 3 total people . How much money will each person get ?",
+        "equation": "X=(3.75/3.0)",
+        "ans": 1.25
+    },
+    {
+        "id": 435,
+        "original_text": "Nancy uploaded 41 pictures to Facebook . She put 37 pics into one album and put the rest into 2 different albums . How many pictures were in each album ?",
+        "segmented_text": "Nancy uploaded 41 pictures to Facebook . She put 37 pics into one album and put the rest into 2 different albums . How many pictures were in each album ?",
+        "equation": "X=((41.0-37.0)/2.0)",
+        "ans": 2.0
+    },
+    {
+        "id": 1543,
+        "original_text": "If Steven can mix 20 drinks in 5 minutes , Sue can mix 20 drinks in 10 minutes , and Jake can mix 20 drinks in 15 minutes , how much time , in minutes , will it take all 3 of them to mix 20 drinks if they work together ?",
+        "segmented_text": "If Steven can mix 20 drinks in 5 minutes , Sue can mix 20 drinks in 10 minutes , and Jake can mix 20 drinks in 15 minutes , how much time , in minutes , will it take all 3 of them to mix 20 drinks if they work together ?",
+        "equation": "x=1.0/((1.0/5.0)+(1.0/10.0)+(1.0/15.0))",
+        "ans": 6.0
+    },
+    {
+        "id": 1028,
+        "original_text": "179 birds were sitting in a tree . 38 more birds flew up to the tree . How many birds were there altogether in the tree ?",
+        "segmented_text": "179 birds were sitting in a tree . 38 more birds flew up to the tree . How many birds were there altogether in the tree ?",
+        "equation": "X=(179.0+38.0)",
+        "ans": 217.0
+    },
+    {
+        "id": 2363,
+        "original_text": "A waiter had 9 tables he was waiting on , with 2 women and 6 men at each table . How many customers total did the waiter have ?",
+        "segmented_text": "A waiter had 9 tables he was waiting on , with 2 women and 6 men at each table . How many customers total did the waiter have ?",
+        "equation": "X=(9.0*(2.0+6.0))",
+        "ans": 72.0
+    },
+    {
+        "id": 243,
+        "original_text": "Mary had 7 nickels in her bank . Her dad gave her 5 nickels . How many nickels does Mary have now ?",
+        "segmented_text": "Mary had 7 nickels in her bank . Her dad gave her 5 nickels . How many nickels does Mary have now ?",
+        "equation": "X=7+5",
+        "ans": "12"
+    },
+    {
+        "id": 934,
+        "original_text": "There are 22 oranges in a box . Paula takes 7 oranges . How many are left ?",
+        "segmented_text": "There are 22 oranges in a box . Paula takes 7 oranges . How many are left ?",
+        "equation": "X=(22.0-7.0)",
+        "ans": 15.0
+    },
+    {
+        "id": 1109,
+        "original_text": "April 's discount flowers was having a sale where each rose was 9 dollars . If April started with 11 roses and had 8 roses left , how much money did she earn ?",
+        "segmented_text": "April 's discount flowers was having a sale where each rose was 9 dollars . If April started with 11 roses and had 8 roses left , how much money did she earn ?",
+        "equation": "X=(9.0*(11.0-8.0))",
+        "ans": 27.0
+    },
+    {
+        "id": 1029,
+        "original_text": "For the school bake sale Katie made 26 cupcakes . If she sold 20 of them and then made 20 more , how many cupcakes would she have ?",
+        "segmented_text": "For the school bake sale Katie made 26 cupcakes . If she sold 20 of them and then made 20 more , how many cupcakes would she have ?",
+        "equation": "X=((26.0+20.0)-20.0)",
+        "ans": 26.0
+    },
+    {
+        "id": 1504,
+        "original_text": "A store had 40 oranges in a bin . If they threw away 25 of the old ones and put 21 new ones in the bin how many would be in the bin ?",
+        "segmented_text": "A store had 40 oranges in a bin . If they threw away 25 of the old ones and put 21 new ones in the bin how many would be in the bin ?",
+        "equation": "X=((40.0+21.0)-25.0)",
+        "ans": 36.0
+    },
+    {
+        "id": 1217,
+        "original_text": "Mrs. Hilt read 4 books . Each book had 17 chapters in it . How many chapters did Mrs. Hilt read ?",
+        "segmented_text": "Mrs. Hilt read 4 books . Each book had 17 chapters in it . How many chapters did Mrs. Hilt read ?",
+        "equation": "x=4*17",
+        "ans": 68.0
+    },
+    {
+        "id": 1045,
+        "original_text": "Sally had 39 baseball cards , and 9 were torn . Sara bought 24 of Sally 's baseball cards . How many baseball cards does Sally have now ?",
+        "segmented_text": "Sally had 39 baseball cards , and 9 were torn . Sara bought 24 of Sally 's baseball cards . How many baseball cards does Sally have now ?",
+        "equation": "X=39-24",
+        "ans": "15"
+    },
+    {
+        "id": 1663,
+        "original_text": "There are 3 calories in a candy bar . How many calories are there in 5 candy bars ?",
+        "segmented_text": "There are 3 calories in a candy bar . How many calories are there in 5 candy bars ?",
+        "equation": "x=3*5",
+        "ans": 15.0
+    },
+    {
+        "id": 549,
+        "original_text": "Nancy was organizing her book case making sure each of the shelves had exactly 6 books on it . If she had 2 shelves of mystery books and 6 shelves of picture books , how many books did she have total ?",
+        "segmented_text": "Nancy was organizing her book case making sure each of the shelves had exactly 6 books on it . If she had 2 shelves of mystery books and 6 shelves of picture books , how many books did she have total ?",
+        "equation": "X=(6.0*(6.0+2.0))",
+        "ans": 48.0
+    },
+    {
+        "id": 58,
+        "original_text": "Brandy made trail mix for a backpacking trip . She used 0.16666666666666666 pound of peanuts , 0.16666666666666666 pound of chocolate chips , and 0.08333333333333333 pound of raisins . How many pounds of trail mix did Brandy make ?",
+        "segmented_text": "Brandy made trail mix for a backpacking trip . She used 0.16666666666666666 pound of peanuts , 0.16666666666666666 pound of chocolate chips , and 0.08333333333333333 pound of raisins . How many pounds of trail mix did Brandy make ?",
+        "equation": "X=0.16666666666666666+0.16666666666666666+0.08333333333333333",
+        "ans": "0.4166666666666667"
+    },
+    {
+        "id": 1596,
+        "original_text": "A truck carrying 4.1 pounds of sand travels to a construction yard and loses 2.4 pounds of sand along the way . How much sand does the truck have when it arrives at the yard ?",
+        "segmented_text": "A truck carrying 4.1 pounds of sand travels to a construction yard and loses 2.4 pounds of sand along the way . How much sand does the truck have when it arrives at the yard ?",
+        "equation": "X=4.1-2.4",
+        "ans": "1.7"
+    },
+    {
+        "id": 2189,
+        "original_text": "Roger has 95 candies . He gives 3 to Stephanie . How many candies will Roger have ?",
+        "segmented_text": "Roger has 95 candies . He gives 3 to Stephanie . How many candies will Roger have ?",
+        "equation": "X=(95.0-3.0)",
+        "ans": 92.0
+    },
+    {
+        "id": 2162,
+        "original_text": "An airplane flew 4 hours against a wind of 40 kilometers per hour on return he was flowing with the wind and flight was 3 hours . What s speed of airplane in still air ?",
+        "segmented_text": "An airplane flew 4 hours against a wind of 40 kilometers per hour on return he was flowing with the wind and flight was 3 hours . What s speed of airplane in still air ?",
+        "equation": "x=(3.0*40.0+4.0*40.0)/(4.0-3.0)",
+        "ans": 280.0
+    },
+    {
+        "id": 1761,
+        "original_text": "Billy has 62 crayons . 52 are eaten by a hippopotamus . How many crayons will Billy have ?",
+        "segmented_text": "Billy has 62 crayons . 52 are eaten by a hippopotamus . How many crayons will Billy have ?",
+        "equation": "X=(62.0-52.0)",
+        "ans": 10.0
+    },
+    {
+        "id": 1195,
+        "original_text": "Tyler had 15 dogs . Each dog had 5 puppies . How many puppies does Tyler now have ?",
+        "segmented_text": "Tyler had 15 dogs . Each dog had 5 puppies . How many puppies does Tyler now have ?",
+        "equation": "x=15*5",
+        "ans": 75.0
+    },
+    {
+        "id": 1889,
+        "original_text": "Faye and her mom were picking carrots from their garden . Faye picked 23 and her mother picked 5 . If only 12 of the carrots were good , how many bad carrots did they have ?",
+        "segmented_text": "Faye and her mom were picking carrots from their garden . Faye picked 23 and her mother picked 5 . If only 12 of the carrots were good , how many bad carrots did they have ?",
+        "equation": "X=((23.0+5.0)-12.0)",
+        "ans": 16.0
+    },
+    {
+        "id": 2321,
+        "original_text": "It rained 0.9 inches on Monday . On Tuesday , it rained 0.7 inches less than on Monday . How much did it rain on Tuesday ?",
+        "segmented_text": "It rained 0.9 inches on Monday . On Tuesday , it rained 0.7 inches less than on Monday . How much did it rain on Tuesday ?",
+        "equation": "X=0.9-0.7",
+        "ans": "0.2"
+    },
+    {
+        "id": 1843,
+        "original_text": "While shopping for music online , Isabel bought 6 country albums and 2 pop albums . Each album came with a lyric sheet and had 9 songs . How many songs did Isabel buy total ?",
+        "segmented_text": "While shopping for music online , Isabel bought 6 country albums and 2 pop albums . Each album came with a lyric sheet and had 9 songs . How many songs did Isabel buy total ?",
+        "equation": "X=(9.0*(6.0+2.0))",
+        "ans": 72.0
+    },
+    {
+        "id": 1154,
+        "original_text": "Isabel had 72 homework problems . She finished 32 of them but still had 5 pages of problems to do . If each page has the same number of problems on it , how many problems are on each page ?",
+        "segmented_text": "Isabel had 72 homework problems . She finished 32 of them but still had 5 pages of problems to do . If each page has the same number of problems on it , how many problems are on each page ?",
+        "equation": "X=((72.0-32.0)/5.0)",
+        "ans": 8.0
+    },
+    {
+        "id": 2027,
+        "original_text": "Vince 's bus ride to school is 0.625 mile and Zachary 's bus ride is 0.5 mile . How much longer is Vince 's bus ride than Zachary 's ?",
+        "segmented_text": "Vince 's bus ride to school is 0.625 mile and Zachary 's bus ride is 0.5 mile . How much longer is Vince 's bus ride than Zachary 's ?",
+        "equation": "X=0.625-0.5",
+        "ans": "0.125"
+    },
+    {
+        "id": 1916,
+        "original_text": "Henry had 11 dollars . For his birthday he got 18 more dollars but spent 10 on a new game . How much money does he have now ?",
+        "segmented_text": "Henry had 11 dollars . For his birthday he got 18 more dollars but spent 10 on a new game . How much money does he have now ?",
+        "equation": "X=((11.0+18.0)-10.0)",
+        "ans": 19.0
+    },
+    {
+        "id": 1224,
+        "original_text": "The sum of three consecutive even numbers is 162 . What is the smallest of the three numbers ?",
+        "segmented_text": "The sum of three consecutive even numbers is 162 . What is the smallest of the three numbers ?",
+        "equation": "x=(162-6)/3",
+        "ans": 52.0
+    },
+    {
+        "id": 173,
+        "original_text": "For Halloween Katie and her sister combined the candy they received . Katie had 8 pieces of candy while her sister had 23 . If they ate 8 pieces the first night , how many pieces do they have left ?",
+        "segmented_text": "For Halloween Katie and her sister combined the candy they received . Katie had 8 pieces of candy while her sister had 23 . If they ate 8 pieces the first night , how many pieces do they have left ?",
+        "equation": "X=((8.0+23.0)-8.0)",
+        "ans": 23.0
+    },
+    {
+        "id": 2175,
+        "original_text": "A farmer started the day with 8.75 buckets of seeds . After spending the morning sowing seeds , she now has 6 buckets . How many buckets of seeds did the farmer sow ?",
+        "segmented_text": "A farmer started the day with 8.75 buckets of seeds . After spending the morning sowing seeds , she now has 6 buckets . How many buckets of seeds did the farmer sow ?",
+        "equation": "X=8.75-6.0",
+        "ans": "2.75"
+    },
+    {
+        "id": 925,
+        "original_text": "At the beach , Miki and her sister both built sandcastles and then measured their heights . Miki 's sandcastle was 0.8333333333333334 foot tall and her sister 's was 0.5 foot tall . How much taller was Miki 's sandcastle than her sister 's ?",
+        "segmented_text": "At the beach , Miki and her sister both built sandcastles and then measured their heights . Miki 's sandcastle was 0.8333333333333334 foot tall and her sister 's was 0.5 foot tall . How much taller was Miki 's sandcastle than her sister 's ?",
+        "equation": "X=0.8333333333333334-0.5",
+        "ans": "0.3333333333333333"
+    },
+    {
+        "id": 1091,
+        "original_text": "Sam went to 14 football games this year . He went to 29 games last year . How many football games did Sam go to in all ?",
+        "segmented_text": "Sam went to 14 football games this year . He went to 29 games last year . How many football games did Sam go to in all ?",
+        "equation": "X=14+29",
+        "ans": "43"
+    },
+    {
+        "id": 1672,
+        "original_text": "Anna collects 6 blocks . Anna 's father gives Anna 8 more . How many blocks does Anna have ?",
+        "segmented_text": "Anna collects 6 blocks . Anna 's father gives Anna 8 more . How many blocks does Anna have ?",
+        "equation": "X=(6.0+8.0)",
+        "ans": 14.0
+    },
+    {
+        "id": 472,
+        "original_text": "Bruce has 75 eggs . Kimberly has 17 eggs . He loses 70 . How many eggs will Bruce have ?",
+        "segmented_text": "Bruce has 75 eggs . Kimberly has 17 eggs . He loses 70 . How many eggs will Bruce have ?",
+        "equation": "X=(75.0-70.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1358,
+        "original_text": "The school is planning a field trip . There are 45 students and 9 seats on each school bus . How many buses are needed to take the trip ?",
+        "segmented_text": "The school is planning a field trip . There are 45 students and 9 seats on each school bus . How many buses are needed to take the trip ?",
+        "equation": "X=(45.0/9.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1096,
+        "original_text": "There are 6 marbles in each box . How many marbles are in 3 boxes ?",
+        "segmented_text": "There are 6 marbles in each box . How many marbles are in 3 boxes ?",
+        "equation": "X=(6.0*3.0)",
+        "ans": 18.0
+    },
+    {
+        "id": 630,
+        "original_text": "Jennifer has 72 cards . 61 are eaten by a hippopotamus . How many cards will Jennifer have ?",
+        "segmented_text": "Jennifer has 72 cards . 61 are eaten by a hippopotamus . How many cards will Jennifer have ?",
+        "equation": "X=(72.0-61.0)",
+        "ans": 11.0
+    },
+    {
+        "id": 2237,
+        "original_text": "Last Saturday , Spencer walked all over town running errands . First , he walked 0.3 of a mile from his house to the library and 0.1 of a mile from the library to the post office . Then he walked 0.4 of a mile from the post office back home . How many miles did Spencer walk in all ?",
+        "segmented_text": "Last Saturday , Spencer walked all over town running errands . First , he walked 0.3 of a mile from his house to the library and 0.1 of a mile from the library to the post office . Then he walked 0.4 of a mile from the post office back home . How many miles did Spencer walk in all ?",
+        "equation": "x=0.3+0.1+0.4",
+        "ans": 0.8
+    },
+    {
+        "id": 467,
+        "original_text": "If you purchase a membership for 175.00 dollars to receive 10 % off purchases , how much would you need to spend to pay off the membership ?",
+        "segmented_text": "If you purchase a membership for 175.00 dollars to receive 10 % off purchases , how much would you need to spend to pay off the membership ?",
+        "equation": "x=175.0/0.01/10",
+        "ans": 1750.0
+    },
+    {
+        "id": 1300,
+        "original_text": "Joan joined her school 's band . She bought a trumpet for $ 149.16 , a music tool for $ 9.98 , and a song book which was $ 4.14 . Joan found $ 8.65 in her pocket . How much did Joan spend at the music store ?",
+        "segmented_text": "Joan joined her school 's band . She bought a trumpet for $ 149.16 , a music tool for $ 9.98 , and a song book which was $ 4.14 . Joan found $ 8.65 in her pocket . How much did Joan spend at the music store ?",
+        "equation": "X=149.16+9.98+4.14",
+        "ans": "163.28"
+    },
+    {
+        "id": 915,
+        "original_text": "A restaurant made 9 hamburgers and 4 hot dogs to serve during lunch . Only 3 hamburgers were actually served . How many hamburgers were over ?",
+        "segmented_text": "A restaurant made 9 hamburgers and 4 hot dogs to serve during lunch . Only 3 hamburgers were actually served . How many hamburgers were over ?",
+        "equation": "X=9-3",
+        "ans": "6"
+    },
+    {
+        "id": 245,
+        "original_text": "Alec and his roommates ate 3.25 pints of ice cream on Friday night and 0.25 pint of ice cream on Saturday night . How many pints did they eat in all ?",
+        "segmented_text": "Alec and his roommates ate 3.25 pints of ice cream on Friday night and 0.25 pint of ice cream on Saturday night . How many pints did they eat in all ?",
+        "equation": "X=3.25+0.25",
+        "ans": "3.5"
+    },
+    {
+        "id": 1972,
+        "original_text": "Mary loves eating fruits . Mary paid $ 11.08 for berries , $ 14.33 for apples , and $ 9.31 for peaches . In total , how much money did she spend ?",
+        "segmented_text": "Mary loves eating fruits . Mary paid $ 11.08 for berries , $ 14.33 for apples , and $ 9.31 for peaches . In total , how much money did she spend ?",
+        "equation": "x=11.08+14.33+9.31",
+        "ans": 34.72
+    },
+    {
+        "id": 2108,
+        "original_text": "Leah makes 24 dollars per hour for a 40 hour work week and time - and - 1.5 for every hour over 40 hours . If she made 1140 dollars last week , how many overtime hours did she work ?",
+        "segmented_text": "Leah makes 24 dollars per hour for a 40 hour work week and time - and - 1.5 for every hour over 40 hours . If she made 1140 dollars last week , how many overtime hours did she work ?",
+        "equation": "x=(1140.0-24.0*40.0)/(1.5*24.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1681,
+        "original_text": "Robin has 27 packages of gum . There are 18 pieces in each package . How many pieces of gum does Robin have ?",
+        "segmented_text": "Robin has 27 packages of gum . There are 18 pieces in each package . How many pieces of gum does Robin have ?",
+        "equation": "X=(27.0*18.0)",
+        "ans": 486.0
+    },
+    {
+        "id": 687,
+        "original_text": "Melissa has 70 oranges . John takes 19 away . How many oranges will Melissa have ?",
+        "segmented_text": "Melissa has 70 oranges . John takes 19 away . How many oranges will Melissa have ?",
+        "equation": "X=(70.0-19.0)",
+        "ans": 51.0
+    },
+    {
+        "id": 1241,
+        "original_text": "Sally has 9 orange balloons and 4 blue balloons . She lost 2 of the orange balloons . How many orange balloons does Sally have now ?",
+        "segmented_text": "Sally has 9 orange balloons and 4 blue balloons . She lost 2 of the orange balloons . How many orange balloons does Sally have now ?",
+        "equation": "X=9-2",
+        "ans": "7"
+    },
+    {
+        "id": 321,
+        "original_text": "Heather went to the county fair last weekend . When she got there , she had to walk 0.3333333333333333 of a mile from the car to the entrance . Then she walked 0.3333333333333333 of a mile to the carnival rides and 0.08333333333333333 of a mile from the carnival rides back to the car . How many miles did Heather walk in all ?",
+        "segmented_text": "Heather went to the county fair last weekend . When she got there , she had to walk 0.3333333333333333 of a mile from the car to the entrance . Then she walked 0.3333333333333333 of a mile to the carnival rides and 0.08333333333333333 of a mile from the carnival rides back to the car . How many miles did Heather walk in all ?",
+        "equation": "x=0.3333333333333333+0.3333333333333333+0.08333333333333333",
+        "ans": 0.75
+    },
+    {
+        "id": 1674,
+        "original_text": "Tori is a school janitor . Last week , she picked up a total of 1576 pieces of trash . If she picked up 344 pieces of trash in the classrooms , how many pieces of trash did Tori pick up outside the classrooms ?",
+        "segmented_text": "Tori is a school janitor . Last week , she picked up a total of 1576 pieces of trash . If she picked up 344 pieces of trash in the classrooms , how many pieces of trash did Tori pick up outside the classrooms ?",
+        "equation": "X=1576.0-344.0",
+        "ans": "1232.0"
+    },
+    {
+        "id": 821,
+        "original_text": "William has 2 bottle caps . He buys 41 more . How many bottle caps does William have in all ?",
+        "segmented_text": "William has 2 bottle caps . He buys 41 more . How many bottle caps does William have in all ?",
+        "equation": "X=(2.0+41.0)",
+        "ans": 43.0
+    },
+    {
+        "id": 252,
+        "original_text": "There are 79 pencils in a box . Eric takes 4 pencils . How many are left ?",
+        "segmented_text": "There are 79 pencils in a box . Eric takes 4 pencils . How many are left ?",
+        "equation": "X=(79.0-4.0)",
+        "ans": 75.0
+    },
+    {
+        "id": 1135,
+        "original_text": "Martha has 2 peanuts . Joyce has 26 peanuts . If Joyce gives all of her peanuts to Martha , how many peanuts will Martha have ?",
+        "segmented_text": "Martha has 2 peanuts . Joyce has 26 peanuts . If Joyce gives all of her peanuts to Martha , how many peanuts will Martha have ?",
+        "equation": "X=(2.0+26.0)",
+        "ans": 28.0
+    },
+    {
+        "id": 1515,
+        "original_text": "If 0.6667 of a pound is worth 8.00 dollars , how much is 0.75 pounds worth ?",
+        "segmented_text": "If 0.6667 of a pound is worth 8.00 dollars , how much is 0.75 pounds worth ?",
+        "equation": "x=(8.0/0.6667)*0.75",
+        "ans": 9.0
+    },
+    {
+        "id": 59,
+        "original_text": "Bridget weighs 39 pounds . Martha weighs 2 pounds . How much heavier is Bridget than Martha ?",
+        "segmented_text": "Bridget weighs 39 pounds . Martha weighs 2 pounds . How much heavier is Bridget than Martha ?",
+        "equation": "X=(39.0-2.0)",
+        "ans": 37.0
+    },
+    {
+        "id": 848,
+        "original_text": "1 cell phone plan costs 49.95 dollars per month . The first 2500 minutes of use are free . Each minute thereafter costs 0.25 dollars . For a bill of 112.45 dollars , how many minutes over 2500 was the cell phone in use ?",
+        "segmented_text": "1 cell phone plan costs 49.95 dollars per month . The first 2500 minutes of use are free . Each minute thereafter costs 0.25 dollars . For a bill of 112.45 dollars , how many minutes over 2500 was the cell phone in use ?",
+        "equation": "x=(112.45-49.95)/0.25",
+        "ans": 250.0
+    },
+    {
+        "id": 2259,
+        "original_text": "Melanie grew 139 turnips . Benny grew 113 turnips . How many turnips did they grow in all ?",
+        "segmented_text": "Melanie grew 139 turnips . Benny grew 113 turnips . How many turnips did they grow in all ?",
+        "equation": "X=139+113",
+        "ans": "252"
+    },
+    {
+        "id": 759,
+        "original_text": "For Halloween Emily received 54 pieces of candy . She ate 33 pieces then placed the rest into piles with 7 in each pile . How many piles could she make ?",
+        "segmented_text": "For Halloween Emily received 54 pieces of candy . She ate 33 pieces then placed the rest into piles with 7 in each pile . How many piles could she make ?",
+        "equation": "X=((54.0-33.0)/7.0)",
+        "ans": 3.0
+    },
+    {
+        "id": 1157,
+        "original_text": "Sam found 35 seashells on the beach , he gave Joan 18 of the seashells . How many seashells does he now have ?",
+        "segmented_text": "Sam found 35 seashells on the beach , he gave Joan 18 of the seashells . How many seashells does he now have ?",
+        "equation": "x=35-18",
+        "ans": 17.0
+    },
+    {
+        "id": 766,
+        "original_text": "A pet supply store has 600 bags of dog food and 327 bags of cat food . How many more bags of dog food are there than cat food ?",
+        "segmented_text": "A pet supply store has 600 bags of dog food and 327 bags of cat food . How many more bags of dog food are there than cat food ?",
+        "equation": "X=(600.0-327.0)",
+        "ans": 273.0
+    },
+    {
+        "id": 2082,
+        "original_text": "Sara has 3 green and 5 red marbles . Tom has 4 green marbles . How many green marbles do they have in total ?",
+        "segmented_text": "Sara has 3 green and 5 red marbles . Tom has 4 green marbles . How many green marbles do they have in total ?",
+        "equation": "X=3+4",
+        "ans": "7"
+    },
+    {
+        "id": 1397,
+        "original_text": "Isabel baked 39 cupcakes for her school 's bake sale . If her brother , Todd , ate 21 of them how many packages could she make if she put 3 cupcake in each package ?",
+        "segmented_text": "Isabel baked 39 cupcakes for her school 's bake sale . If her brother , Todd , ate 21 of them how many packages could she make if she put 3 cupcake in each package ?",
+        "equation": "X=((39.0-21.0)/3.0)",
+        "ans": 6.0
+    },
+    {
+        "id": 204,
+        "original_text": "2 teams of scientists leave a university at the same time in special vans to search for tornadoes . the 1st team travel east at 20 miles per hour and the 2nd team travels west at 30 miles per hour . their radios have a range of 125 miles . How much time will pass before the scientists lose radio contact ?",
+        "segmented_text": "2 teams of scientists leave a university at the same time in special vans to search for tornadoes . the 1st team travel east at 20 miles per hour and the 2nd team travels west at 30 miles per hour . their radios have a range of 125 miles . How much time will pass before the scientists lose radio contact ?",
+        "equation": "x=125.0/(20.0+30.0)",
+        "ans": 2.5
+    },
+    {
+        "id": 665,
+        "original_text": "In fourth grade there were 10 students at the start of the year . During the year 4 students left and 42 new students came to school . How many students were in fourth grade at the end ?",
+        "segmented_text": "In fourth grade there were 10 students at the start of the year . During the year 4 students left and 42 new students came to school . How many students were in fourth grade at the end ?",
+        "equation": "X=((10.0+42.0)-4.0)",
+        "ans": 48.0
+    },
+    {
+        "id": 1380,
+        "original_text": "Luke had 48 dollars in January . By March he had spent 11 dollars . If he got another 21 dollars from his mom , how much money would he have ?",
+        "segmented_text": "Luke had 48 dollars in January . By March he had spent 11 dollars . If he got another 21 dollars from his mom , how much money would he have ?",
+        "equation": "X=((48.0+21.0)-11.0)",
+        "ans": 58.0
+    },
+    {
+        "id": 919,
+        "original_text": "Joan has saved 6 quarters from washing cars .   How many cents does Joan have ?",
+        "segmented_text": "Joan has saved 6 quarters from washing cars .   How many cents does Joan have ?",
+        "equation": "x=6*25",
+        "ans": 150.0
+    },
+    {
+        "id": 1886,
+        "original_text": "There are 84 leaves . There are 139 ladybugs on each leaf . How many ladybugs are there in all ?",
+        "segmented_text": "There are 84 leaves . There are 139 ladybugs on each leaf . How many ladybugs are there in all ?",
+        "equation": "X=(84.0*139.0)",
+        "ans": 11676.0
+    },
+    {
+        "id": 612,
+        "original_text": "Tom Quig travelled 270 miles east of St Louis . For most of the trip he travelled 70 miles per hour , but for one period of time he was slowed to 20 miles per hour due to a major accident . If the total time of travel was 6 hours , how many miles did he drive at the reduced speed ?",
+        "segmented_text": "Tom Quig travelled 270 miles east of St Louis . For most of the trip he travelled 70 miles per hour , but for one period of time he was slowed to 20 miles per hour due to a major accident . If the total time of travel was 6 hours , how many miles did he drive at the reduced speed ?",
+        "equation": "x=(6.0*20.0*70.0-20.0*270.0)/(70.0-20.0)",
+        "ans": 60.0
+    },
+    {
+        "id": 2065,
+        "original_text": "Connie has 2315 red markers and 1028 blue markers . How many markers does Connie have altogether ?",
+        "segmented_text": "Connie has 2315 red markers and 1028 blue markers . How many markers does Connie have altogether ?",
+        "equation": "x=2315+1028",
+        "ans": 3343.0
+    },
+    {
+        "id": 2013,
+        "original_text": "The school cafeteria had 17 apples . If they used 2 to make lunch for the students and then bought 23 more , how many apples would they have ?",
+        "segmented_text": "The school cafeteria had 17 apples . If they used 2 to make lunch for the students and then bought 23 more , how many apples would they have ?",
+        "equation": "X=((17.0+23.0)-2.0)",
+        "ans": 38.0
+    },
+    {
+        "id": 116,
+        "original_text": "A worksheet had 4 problems on it . If a teacher had 9 worksheets to grade and had already graded 5 of them , how many more problems does she have to grade ?",
+        "segmented_text": "A worksheet had 4 problems on it . If a teacher had 9 worksheets to grade and had already graded 5 of them , how many more problems does she have to grade ?",
+        "equation": "X=(4.0*(9.0-5.0))",
+        "ans": 16.0
+    },
+    {
+        "id": 939,
+        "original_text": "9 of Hayley ’s closest friends like stickers . If she plans to give all of them an equal number of stickers , how many will each receive if she has 72 stickers ?",
+        "segmented_text": "9 of Hayley ’s closest friends like stickers . If she plans to give all of them an equal number of stickers , how many will each receive if she has 72 stickers ?",
+        "equation": "x=72/9",
+        "ans": 8.0
+    },
+    {
+        "id": 688,
+        "original_text": "For homework Amy had 18 math problems and 6 spelling problems . If she can finish 4 problems in an hour how long will it take her to finish all the problems ?",
+        "segmented_text": "For homework Amy had 18 math problems and 6 spelling problems . If she can finish 4 problems in an hour how long will it take her to finish all the problems ?",
+        "equation": "X=((18.0+6.0)/4.0)",
+        "ans": 6.0
+    },
+    {
+        "id": 272,
+        "original_text": "George has 5 boxes of eggs . Each box holds 3 eggs and there are 9 boxes in a case . How many eggs does George have ?",
+        "segmented_text": "George has 5 boxes of eggs . Each box holds 3 eggs and there are 9 boxes in a case . How many eggs does George have ?",
+        "equation": "X=(5.0*3.0)",
+        "ans": 15.0
+    },
+    {
+        "id": 1316,
+        "original_text": "Jessica had 8 quarters in her bank . Her sister borrowed 3 of her quarters . How many quarters does Jessica have now ?",
+        "segmented_text": "Jessica had 8 quarters in her bank . Her sister borrowed 3 of her quarters . How many quarters does Jessica have now ?",
+        "equation": "x=8-3",
+        "ans": 5.0
+    },
+    {
+        "id": 2194,
+        "original_text": "Sally bought 4 dozen eggs from the grocery store to bake some cakes .   How many eggs did Sally buy ?",
+        "segmented_text": "Sally bought 4 dozen eggs from the grocery store to bake some cakes .   How many eggs did Sally buy ?",
+        "equation": "x=4*12",
+        "ans": 48.0
+    },
+    {
+        "id": 691,
+        "original_text": "Jason had Pokemon cards . He gave 9 Pokemon cards to his friends . He now has 4 Pokemon cards left . How many Pokemon cards did he have to start with ?",
+        "segmented_text": "Jason had Pokemon cards . He gave 9 Pokemon cards to his friends . He now has 4 Pokemon cards left . How many Pokemon cards did he have to start with ?",
+        "equation": "x=9+4",
+        "ans": 13.0
+    },
+    {
+        "id": 1540,
+        "original_text": "Michael has some fish in his fish tank . Ben gave him 18 more fish . Now he has 49 . How many fish did he have to begin with ?",
+        "segmented_text": "Michael has some fish in his fish tank . Ben gave him 18 more fish . Now he has 49 . How many fish did he have to begin with ?",
+        "equation": "X=(49.0-18.0)",
+        "ans": 31.0
+    },
+    {
+        "id": 2172,
+        "original_text": "There are 35 bottle caps in Beverly 's bottle cap collection . If the bottle caps are organized into 7 groups , how big is each group ?",
+        "segmented_text": "There are 35 bottle caps in Beverly 's bottle cap collection . If the bottle caps are organized into 7 groups , how big is each group ?",
+        "equation": "X=(35.0/7.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1434,
+        "original_text": "Dan had 7 potatoes and 4 cantelopes in the garden . The rabbits ate 4 of the potatoes . How many potatoes does Dan now have ?",
+        "segmented_text": "Dan had 7 potatoes and 4 cantelopes in the garden . The rabbits ate 4 of the potatoes . How many potatoes does Dan now have ?",
+        "equation": "X=7-4",
+        "ans": "3"
+    },
+    {
+        "id": 1771,
+        "original_text": "A restaurant served 9 hot dogs during lunch and 2 during dinner today . It served 5 of them yesterday . How many hot dogs were served today ?",
+        "segmented_text": "A restaurant served 9 hot dogs during lunch and 2 during dinner today . It served 5 of them yesterday . How many hot dogs were served today ?",
+        "equation": "X=9+2",
+        "ans": "11"
+    },
+    {
+        "id": 739,
+        "original_text": "Bobby has 142 books . Kristi has 78 books . How many more books does Bobby have than Kristi ?",
+        "segmented_text": "Bobby has 142 books . Kristi has 78 books . How many more books does Bobby have than Kristi ?",
+        "equation": "X=(142.0-78.0)",
+        "ans": 64.0
+    },
+    {
+        "id": 1365,
+        "original_text": "How many pounds of hamburger that costs 1.60 dollars per pound must be mixed with 70 pounds of hamburger that costs 2.10 dollars per pound to make a mixture that costs 1.70 dollars per pound ?",
+        "segmented_text": "How many pounds of hamburger that costs 1.60 dollars per pound must be mixed with 70 pounds of hamburger that costs 2.10 dollars per pound to make a mixture that costs 1.70 dollars per pound ?",
+        "equation": "x=(70.0*2.1-70.0*1.7)/(1.7-1.6)",
+        "ans": 280.0
+    },
+    {
+        "id": 1110,
+        "original_text": "Emily was planting vegetables in her garden . She started with 41 seeds and planted 29 of them in the big garden and in each of her small gardens put 4 seeds each . How many small gardens did Emily have ?",
+        "segmented_text": "Emily was planting vegetables in her garden . She started with 41 seeds and planted 29 of them in the big garden and in each of her small gardens put 4 seeds each . How many small gardens did Emily have ?",
+        "equation": "X=((41.0-29.0)/4.0)",
+        "ans": 3.0
+    },
+    {
+        "id": 2106,
+        "original_text": "The town of Milburg has 5256 grown - ups and 2987 children . How many people live in Milburg ?",
+        "segmented_text": "The town of Milburg has 5256 grown - ups and 2987 children . How many people live in Milburg ?",
+        "equation": "x=5256+2987",
+        "ans": 8243.0
+    },
+    {
+        "id": 1038,
+        "original_text": "Barbara has 9 candies . She buys 18 more . How many candies does Barbara have in all ?",
+        "segmented_text": "Barbara has 9 candies . She buys 18 more . How many candies does Barbara have in all ?",
+        "equation": "X=(9.0+18.0)",
+        "ans": 27.0
+    },
+    {
+        "id": 977,
+        "original_text": "Lana 's favorite band was holding a concert where tickets were 6 dollars each . Lana bought 8 tickets for herself and her friends and 2 extra tickets in case anyone else wanted to go . How much did she spend ?",
+        "segmented_text": "Lana 's favorite band was holding a concert where tickets were 6 dollars each . Lana bought 8 tickets for herself and her friends and 2 extra tickets in case anyone else wanted to go . How much did she spend ?",
+        "equation": "X=(6.0*(8.0+2.0))",
+        "ans": 60.0
+    },
+    {
+        "id": 2233,
+        "original_text": "Craig walked 0.2 mile from school to David 's house and 0.7 mile from David 's house to his own house . How many miles did Craig walk in all ?",
+        "segmented_text": "Craig walked 0.2 mile from school to David 's house and 0.7 mile from David 's house to his own house . How many miles did Craig walk in all ?",
+        "equation": "X=0.2+0.7",
+        "ans": "0.9"
+    },
+    {
+        "id": 1458,
+        "original_text": "Helen starts with 82 cards . Gary takes 9 away . How many cards does Helen end with ?",
+        "segmented_text": "Helen starts with 82 cards . Gary takes 9 away . How many cards does Helen end with ?",
+        "equation": "X=(82.0-9.0)",
+        "ans": 73.0
+    },
+    {
+        "id": 1962,
+        "original_text": "Melanie had 7 dimes in her bank . Her dad gave her 8 dimes and her mother gave her 4 dimes . How many dimes does Melanie have now ?",
+        "segmented_text": "Melanie had 7 dimes in her bank . Her dad gave her 8 dimes and her mother gave her 4 dimes . How many dimes does Melanie have now ?",
+        "equation": "x=7+8+4",
+        "ans": 19.0
+    },
+    {
+        "id": 2087,
+        "original_text": "Tim has saved 2000 cents from selling lemonade .   How many dollars does Tim have ?",
+        "segmented_text": "Tim has saved 2000 cents from selling lemonade .   How many dollars does Tim have ?",
+        "equation": "x=2000/100",
+        "ans": 20.0
+    },
+    {
+        "id": 1636,
+        "original_text": "A cake recipe requires 0.6 cup of sugar for the frosting and 0.2 cup of sugar for the cake . How much sugar is that altogether ?",
+        "segmented_text": "A cake recipe requires 0.6 cup of sugar for the frosting and 0.2 cup of sugar for the cake . How much sugar is that altogether ?",
+        "equation": "X=(0.6+0.2)",
+        "ans": 0.8
+    },
+    {
+        "id": 145,
+        "original_text": "Each ticket costs $ 9.00 . How much do 4 tickets cost ?",
+        "segmented_text": "Each ticket costs $ 9.00 . How much do 4 tickets cost ?",
+        "equation": "X=(9.0*4.0)",
+        "ans": 36.0
+    },
+    {
+        "id": 1389,
+        "original_text": "Joe had 50 toy cars . If he gets 12 more cars , how many cars will he have then ?",
+        "segmented_text": "Joe had 50 toy cars . If he gets 12 more cars , how many cars will he have then ?",
+        "equation": "X=(50.0+12.0)",
+        "ans": 62.0
+    },
+    {
+        "id": 1711,
+        "original_text": "There are 54 scissors in the drawer . Keith placed 22 scissors in the drawer . How many scissors are now there in all ?",
+        "segmented_text": "There are 54 scissors in the drawer . Keith placed 22 scissors in the drawer . How many scissors are now there in all ?",
+        "equation": "X=54+22",
+        "ans": "76"
+    },
+    {
+        "id": 31,
+        "original_text": "Sara has saved 11 quarters from washing cars .   How many cents does Sara have ?",
+        "segmented_text": "Sara has saved 11 quarters from washing cars .   How many cents does Sara have ?",
+        "equation": "x=11*25",
+        "ans": 275.0
+    },
+    {
+        "id": 159,
+        "original_text": "At a restaurant each adult meal costs $ 2 and kids eat free . If a group of 15 people came in and 9 were kids , how much would it cost for the group to eat ?",
+        "segmented_text": "At a restaurant each adult meal costs $ 2 and kids eat free . If a group of 15 people came in and 9 were kids , how much would it cost for the group to eat ?",
+        "equation": "X=(2.0*(15.0-9.0))",
+        "ans": 12.0
+    },
+    {
+        "id": 454,
+        "original_text": "During a canned food drive , items were sorted into bins . The drive resulted in 0.125 of a bin of soup , 0.125 of a bin of vegetables , and 0.5 of a bin of pasta . Altogether , how many bins would the canned food take up ?",
+        "segmented_text": "During a canned food drive , items were sorted into bins . The drive resulted in 0.125 of a bin of soup , 0.125 of a bin of vegetables , and 0.5 of a bin of pasta . Altogether , how many bins would the canned food take up ?",
+        "equation": "x=0.125+0.125+0.5",
+        "ans": 0.75
+    },
+    {
+        "id": 731,
+        "original_text": "Connie has 323 marbles . Juan has 175 more marbles than Connie . How many marbles does Juan have ?",
+        "segmented_text": "Connie has 323 marbles . Juan has 175 more marbles than Connie . How many marbles does Juan have ?",
+        "equation": "x=323+175",
+        "ans": 498.0
+    },
+    {
+        "id": 1703,
+        "original_text": "A pet supply store has 600 bags of dog food and 327 bags of cat food . How many more bags of dog food are there than cat food ?",
+        "segmented_text": "A pet supply store has 600 bags of dog food and 327 bags of cat food . How many more bags of dog food are there than cat food ?",
+        "equation": "x=600-327",
+        "ans": 273.0
+    },
+    {
+        "id": 2242,
+        "original_text": "Each child has 3 oranges . If there are 4 children , how many oranges are there in total ?",
+        "segmented_text": "Each child has 3 oranges . If there are 4 children , how many oranges are there in total ?",
+        "equation": "X=(3.0*4.0)",
+        "ans": 12.0
+    },
+    {
+        "id": 107,
+        "original_text": "A textbook costs a bookstore 44 dollars , and the store sells it for 55 dollars . Find the amount of profit based on the selling price .",
+        "segmented_text": "A textbook costs a bookstore 44 dollars , and the store sells it for 55 dollars . Find the amount of profit based on the selling price .",
+        "equation": "x=55.0-44.0",
+        "ans": 11.0
+    },
+    {
+        "id": 1126,
+        "original_text": "Jennifer starts with 7 apples . She finds another 74 . How many apples does Jennifer end with ?",
+        "segmented_text": "Jennifer starts with 7 apples . She finds another 74 . How many apples does Jennifer end with ?",
+        "equation": "X=(7.0+74.0)",
+        "ans": 81.0
+    },
+    {
+        "id": 189,
+        "original_text": "Dan found 56 seashells on the beach , he gave Jessica some of his seashells . He has 22 seashell . How many seashells did he give to Jessica ?",
+        "segmented_text": "Dan found 56 seashells on the beach , he gave Jessica some of his seashells . He has 22 seashell . How many seashells did he give to Jessica ?",
+        "equation": "X=56-22",
+        "ans": "34"
+    },
+    {
+        "id": 2220,
+        "original_text": "Our class got 54 books from the library . Then we got 23 more books from the library . How many books did our class get from the library ?",
+        "segmented_text": "Our class got 54 books from the library . Then we got 23 more books from the library . How many books did our class get from the library ?",
+        "equation": "X=(54.0+23.0)",
+        "ans": 77.0
+    },
+    {
+        "id": 1391,
+        "original_text": "On a recent trip to CA , we averaged 50 miles per hour . On the return trip we averaged 60 miles per hour . Determine the average speed of the trip to CA and back .",
+        "segmented_text": "On a recent trip to CA , we averaged 50 miles per hour . On the return trip we averaged 60 miles per hour . Determine the average speed of the trip to CA and back .",
+        "equation": "x=(50.0+60.0)/2.0",
+        "ans": 54.545
+    },
+    {
+        "id": 1401,
+        "original_text": "There were 27 boys and 35 girls on the playground at recess . How many children were on the playground at recess ?",
+        "segmented_text": "There were 27 boys and 35 girls on the playground at recess . How many children were on the playground at recess ?",
+        "equation": "X=(27.0+35.0)",
+        "ans": 62.0
+    },
+    {
+        "id": 128,
+        "original_text": "Kaleen filled a bucket with 0.75 of a gallon of water . A few minutes later , she realized only 0.5 of a gallon of water remained . How much water had leaked out of the bucket ?",
+        "segmented_text": "Kaleen filled a bucket with 0.75 of a gallon of water . A few minutes later , she realized only 0.5 of a gallon of water remained . How much water had leaked out of the bucket ?",
+        "equation": "x=0.75-0.5",
+        "ans": 0.25
+    },
+    {
+        "id": 2336,
+        "original_text": "Cody is 14 years old . His grandmother is 6 times as old as he is . How old is Cody ’s grandmother ?",
+        "segmented_text": "Cody is 14 years old . His grandmother is 6 times as old as he is . How old is Cody ’s grandmother ?",
+        "equation": "X=(14.0*6.0)",
+        "ans": 84.0
+    },
+    {
+        "id": 328,
+        "original_text": "An airplane flew for 5 hours with a tail wind of 25 kilometers per hour . The return flight against the same wind took 5.5 hours . Find the speed of the airplane in still air .",
+        "segmented_text": "An airplane flew for 5 hours with a tail wind of 25 kilometers per hour . The return flight against the same wind took 5.5 hours . Find the speed of the airplane in still air .",
+        "equation": "x=(25.0*5.0+25.0*5.5)/(5.5-5.0)",
+        "ans": 525.0
+    },
+    {
+        "id": 561,
+        "original_text": "Michael has 16 blocks stored in boxes . If there are 8 boxes , how many blocks must go in each box ?",
+        "segmented_text": "Michael has 16 blocks stored in boxes . If there are 8 boxes , how many blocks must go in each box ?",
+        "equation": "X=(16.0/8.0)",
+        "ans": 2.0
+    },
+    {
+        "id": 844,
+        "original_text": "John and Jim needed to meet to discuss changes in a construction project . They were 880 miles apart . If they met after 8 hours and both traveled at the same speed , how fast did each go in miles per hour ?",
+        "segmented_text": "John and Jim needed to meet to discuss changes in a construction project . They were 880 miles apart . If they met after 8 hours and both traveled at the same speed , how fast did each go in miles per hour ?",
+        "equation": "x=880.0/2.0/8.0",
+        "ans": 55.0
+    },
+    {
+        "id": 1495,
+        "original_text": "Willie starts with 36 stickers . He gives 7 to Emily . How many stickers does Willie end with ?",
+        "segmented_text": "Willie starts with 36 stickers . He gives 7 to Emily . How many stickers does Willie end with ?",
+        "equation": "X=(36.0-7.0)",
+        "ans": 29.0
+    },
+    {
+        "id": 649,
+        "original_text": "Will had 83 dollars . If he spent 47 bucks on a new game , how many 4 dollar toys could he buy with the money he had left ?",
+        "segmented_text": "Will had 83 dollars . If he spent 47 bucks on a new game , how many 4 dollar toys could he buy with the money he had left ?",
+        "equation": "X=((83.0-47.0)/4.0)",
+        "ans": 9.0
+    },
+    {
+        "id": 1624,
+        "original_text": "2 twice a number increased by 5 is 17 . Find the number .",
+        "segmented_text": "2 twice a number increased by 5 is 17 . Find the number .",
+        "equation": "x=(17.0-5.0)/2.0",
+        "ans": 6.0
+    },
+    {
+        "id": 662,
+        "original_text": "A worksheet had 2 problems on it . If a teacher had 14 worksheets to grade and had already graded 7 of them , how many more problems does she have to grade ?",
+        "segmented_text": "A worksheet had 2 problems on it . If a teacher had 14 worksheets to grade and had already graded 7 of them , how many more problems does she have to grade ?",
+        "equation": "X=(2.0*(14.0-7.0))",
+        "ans": 14.0
+    },
+    {
+        "id": 413,
+        "original_text": "A restaurant served 6 cakes during lunch and 9 during dinner today . How many cakes were served today ?",
+        "segmented_text": "A restaurant served 6 cakes during lunch and 9 during dinner today . How many cakes were served today ?",
+        "equation": "x=6+9",
+        "ans": 15.0
+    },
+    {
+        "id": 393,
+        "original_text": "A waiter at ' The Greasy Spoon ' restaurant had 39 customers to wait on . During the lunch rush he added another 12 customers . If 49 of the customers did n't leave him a tip , how many customers did leave a tip ?",
+        "segmented_text": "A waiter at ' The Greasy Spoon ' restaurant had 39 customers to wait on . During the lunch rush he added another 12 customers . If 49 of the customers did n't leave him a tip , how many customers did leave a tip ?",
+        "equation": "X=((39.0+12.0)-49.0)",
+        "ans": 2.0
+    },
+    {
+        "id": 1344,
+        "original_text": "Manuel opened a savings account with an initial deposit of 177 dollars . If he wants to save 500 dollars during the next 19 weeks , how much must he save each week , in dollars ?",
+        "segmented_text": "Manuel opened a savings account with an initial deposit of 177 dollars . If he wants to save 500 dollars during the next 19 weeks , how much must he save each week , in dollars ?",
+        "equation": "x=(500.0-177.0)/19.0",
+        "ans": 17.0
+    },
+    {
+        "id": 1774,
+        "original_text": "A pet shelter had 3 puppies when another 3 were brought in . If 3 puppies a day are adopted , how long would it take for all of them to be adopted ?",
+        "segmented_text": "A pet shelter had 3 puppies when another 3 were brought in . If 3 puppies a day are adopted , how long would it take for all of them to be adopted ?",
+        "equation": "X=((3.0+3.0)/3.0)",
+        "ans": 2.0
+    },
+    {
+        "id": 383,
+        "original_text": "A trivia team had 15 members total , but during a game 6 members did n't show up . If each member that did show up scored 3 points , how many points were scored total ?",
+        "segmented_text": "A trivia team had 15 members total , but during a game 6 members did n't show up . If each member that did show up scored 3 points , how many points were scored total ?",
+        "equation": "X=(3.0*(15.0-6.0))",
+        "ans": 27.0
+    },
+    {
+        "id": 2073,
+        "original_text": "Bonnie 's science class recorded the rainfall each day . They recorded 0.16666666666666666 of a centimeter of rain on Monday , 0.4166666666666667 of a centimeter of rain on Tuesday , and 0.08333333333333333 of a centimeter of rain on Wednesday . How many centimeters of rain did the class record in all ?",
+        "segmented_text": "Bonnie 's science class recorded the rainfall each day . They recorded 0.16666666666666666 of a centimeter of rain on Monday , 0.4166666666666667 of a centimeter of rain on Tuesday , and 0.08333333333333333 of a centimeter of rain on Wednesday . How many centimeters of rain did the class record in all ?",
+        "equation": "x=0.16666666666666666+0.4166666666666667+0.08333333333333333",
+        "ans": 0.6666666666666666
+    },
+    {
+        "id": 307,
+        "original_text": "Edward was trying to expand his game collection . He bought 41 games from a friend and bought 14 more at a garage sale . If 31 of the games did n't work , how many good games did he end up with ?",
+        "segmented_text": "Edward was trying to expand his game collection . He bought 41 games from a friend and bought 14 more at a garage sale . If 31 of the games did n't work , how many good games did he end up with ?",
+        "equation": "X=((41.0+14.0)-31.0)",
+        "ans": 24.0
+    },
+    {
+        "id": 459,
+        "original_text": "Jesse starts with 78 pencils . He gives 44 to Joshua . How many pencils does Jesse end with ?",
+        "segmented_text": "Jesse starts with 78 pencils . He gives 44 to Joshua . How many pencils does Jesse end with ?",
+        "equation": "X=(78.0-44.0)",
+        "ans": 34.0
+    },
+    {
+        "id": 1447,
+        "original_text": "Stanley ran 0.4 mile and walked 0.2 mile . How much farther did Stanley run than walk ?",
+        "segmented_text": "Stanley ran 0.4 mile and walked 0.2 mile . How much farther did Stanley run than walk ?",
+        "equation": "X=0.4-0.2",
+        "ans": "0.2"
+    },
+    {
+        "id": 1206,
+        "original_text": "A dog is 0.75 its w8 plus 0.75 pounds . How many pounds does the dog weigh ?",
+        "segmented_text": "A dog is 0.75 its w8 plus 0.75 pounds . How many pounds does the dog weigh ?",
+        "equation": "x=0.75/(1-0.75)",
+        "ans": 3.0
+    },
+    {
+        "id": 1849,
+        "original_text": "Pamela bought 9.8 ounces of sugar , and she spilled 5.2 ounces of it on the floor . How much is left ?",
+        "segmented_text": "Pamela bought 9.8 ounces of sugar , and she spilled 5.2 ounces of it on the floor . How much is left ?",
+        "equation": "x=9.8-5.2",
+        "ans": 4.6
+    },
+    {
+        "id": 45,
+        "original_text": "There are 7.75 gallons of water in Becky 's fish tank . If Becky adds 7 gallons more , how many gallons will there be in all ?",
+        "segmented_text": "There are 7.75 gallons of water in Becky 's fish tank . If Becky adds 7 gallons more , how many gallons will there be in all ?",
+        "equation": "X=7.75+7.0",
+        "ans": "14.75"
+    },
+    {
+        "id": 1417,
+        "original_text": "There are 43 pencils in the drawer and 19 pencils on the desk . Dan placed 16 pencils on the desk . How many pencils are now there in total ?",
+        "segmented_text": "There are 43 pencils in the drawer and 19 pencils on the desk . Dan placed 16 pencils on the desk . How many pencils are now there in total ?",
+        "equation": "X=43+19+16",
+        "ans": "78"
+    },
+    {
+        "id": 443,
+        "original_text": "For the school bake sale Bianca made 14 cupcakes . If she sold 6 of them and then made 17 more , how many cupcakes would she have ?",
+        "segmented_text": "For the school bake sale Bianca made 14 cupcakes . If she sold 6 of them and then made 17 more , how many cupcakes would she have ?",
+        "equation": "X=((14.0+17.0)-6.0)",
+        "ans": 25.0
+    },
+    {
+        "id": 1165,
+        "original_text": "If Sally can paint a house in 4 hours , and John can paint the same house in 6 hours , how long will it take for both of them to paint together ?",
+        "segmented_text": "If Sally can paint a house in 4 hours , and John can paint the same house in 6 hours , how long will it take for both of them to paint together ?",
+        "equation": "x=1.0/((1.0/4.0)+(1.0/6.0))",
+        "ans": 2.4
+    },
+    {
+        "id": 1949,
+        "original_text": "Mildred collects 77 oranges . Mildred 's father gives Mildred 2 more . How many oranges does Mildred have ?",
+        "segmented_text": "Mildred collects 77 oranges . Mildred 's father gives Mildred 2 more . How many oranges does Mildred have ?",
+        "equation": "X=(77.0+2.0)",
+        "ans": 79.0
+    },
+    {
+        "id": 553,
+        "original_text": "A group of 4 friends went into a restaurant . The chef already had 9 chicken wings cooked but cooked 7 more for the group . If they each got the same amount how many would each person get ?",
+        "segmented_text": "A group of 4 friends went into a restaurant . The chef already had 9 chicken wings cooked but cooked 7 more for the group . If they each got the same amount how many would each person get ?",
+        "equation": "X=((9.0+7.0)/4.0)",
+        "ans": 4.0
+    },
+    {
+        "id": 1749,
+        "original_text": "They entered the circus tent and saw that there are 4 sections for the audience . If each section can accommodate 246 people , how many people can the tent accommodate in total ?",
+        "segmented_text": "They entered the circus tent and saw that there are 4 sections for the audience . If each section can accommodate 246 people , how many people can the tent accommodate in total ?",
+        "equation": "x=4*246",
+        "ans": 984.0
+    },
+    {
+        "id": 727,
+        "original_text": "Joan purchased a basketball game for $ 5.20 , and a racing game for $ 4.23 . How much did Joan spend on video games ?",
+        "segmented_text": "Joan purchased a basketball game for $ 5.20 , and a racing game for $ 4.23 . How much did Joan spend on video games ?",
+        "equation": "X=5.20+4.23",
+        "ans": "9.43"
+    },
+    {
+        "id": 1786,
+        "original_text": "There were 16 friends playing a video game online when 7 players quit . If each player left had 8 lives , how many lives did they have total ?",
+        "segmented_text": "There were 16 friends playing a video game online when 7 players quit . If each player left had 8 lives , how many lives did they have total ?",
+        "equation": "X=(8.0*(16.0-7.0))",
+        "ans": 72.0
+    },
+    {
+        "id": 1103,
+        "original_text": "Vanessa and her mom were picking carrots from their garden . Vanessa picked 17 and her mother picked 14 . If only 24 of the carrots were good , how many bad carrots did they have ?",
+        "segmented_text": "Vanessa and her mom were picking carrots from their garden . Vanessa picked 17 and her mother picked 14 . If only 24 of the carrots were good , how many bad carrots did they have ?",
+        "equation": "X=((17.0+14.0)-24.0)",
+        "ans": 7.0
+    },
+    {
+        "id": 1627,
+        "original_text": "A chef needs to cook 12 potatoes . He has already cooked 6 . If each potato takes 6 minutes to cook , how long will it take him to cook the rest ?",
+        "segmented_text": "A chef needs to cook 12 potatoes . He has already cooked 6 . If each potato takes 6 minutes to cook , how long will it take him to cook the rest ?",
+        "equation": "X=(6.0*(12.0-6.0))",
+        "ans": 36.0
+    },
+    {
+        "id": 1758,
+        "original_text": "There are 3 eggs in each box . How many eggs are in 2 boxes ?",
+        "segmented_text": "There are 3 eggs in each box . How many eggs are in 2 boxes ?",
+        "equation": "X=(3.0*2.0)",
+        "ans": 6.0
+    },
+    {
+        "id": 564,
+        "original_text": "A pet shelter had 8 puppies when another 19 were brought in . If 3 puppies a day are adopted , how long would it take for all of them to be adopted ?",
+        "segmented_text": "A pet shelter had 8 puppies when another 19 were brought in . If 3 puppies a day are adopted , how long would it take for all of them to be adopted ?",
+        "equation": "X=((8.0+19.0)/3.0)",
+        "ans": 9.0
+    },
+    {
+        "id": 902,
+        "original_text": "Sam had saved up 8 dollars . If he received another 7 dollars for his allowance , how many 3 dollar toys could he buy ?",
+        "segmented_text": "Sam had saved up 8 dollars . If he received another 7 dollars for his allowance , how many 3 dollar toys could he buy ?",
+        "equation": "X=((8.0+7.0)/3.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1848,
+        "original_text": "The clown blew up 47 balloons . Then he blew up 13 more balloons . How many balloons does the clown have now ?",
+        "segmented_text": "The clown blew up 47 balloons . Then he blew up 13 more balloons . How many balloons does the clown have now ?",
+        "equation": "X=(47.0+13.0)",
+        "ans": 60.0
+    },
+    {
+        "id": 717,
+        "original_text": "Keith bought 72 eggs from the store to bake some cakes .   How many dozen eggs did Keith buy ?",
+        "segmented_text": "Keith bought 72 eggs from the store to bake some cakes .   How many dozen eggs did Keith buy ?",
+        "equation": "x=72/12",
+        "ans": 6.0
+    },
+    {
+        "id": 351,
+        "original_text": "Kelly 's chemistry textbook weighs 7.125 pounds and her geometry textbook weighs 0.625 pound . How much more does the chemistry textbook weigh than the geometry textbook ?",
+        "segmented_text": "Kelly 's chemistry textbook weighs 7.125 pounds and her geometry textbook weighs 0.625 pound . How much more does the chemistry textbook weigh than the geometry textbook ?",
+        "equation": "X=7.125-0.625",
+        "ans": "6.5"
+    },
+    {
+        "id": 314,
+        "original_text": "Mike picked 123 oranges and Melanie picked 104 oranges . Fred picked 130 apples . How many oranges were picked in total ?",
+        "segmented_text": "Mike picked 123 oranges and Melanie picked 104 oranges . Fred picked 130 apples . How many oranges were picked in total ?",
+        "equation": "X=123+104",
+        "ans": "227"
+    },
+    {
+        "id": 1125,
+        "original_text": "Sara 's high school played 12 basketball games this year . The team won most of their games . They were defeated during 4 games . How many games did they win ?",
+        "segmented_text": "Sara 's high school played 12 basketball games this year . The team won most of their games . They were defeated during 4 games . How many games did they win ?",
+        "equation": "x=12-4",
+        "ans": 8.0
+    },
+    {
+        "id": 220,
+        "original_text": "Lillian collects 88 candies . Lillian 's father gives Lillian 5 more . How many candies does Lillian have ?",
+        "segmented_text": "Lillian collects 88 candies . Lillian 's father gives Lillian 5 more . How many candies does Lillian have ?",
+        "equation": "X=(88.0+5.0)",
+        "ans": 93.0
+    },
+    {
+        "id": 1067,
+        "original_text": "Craig has 20 apples . Judy has 11 apples . He shares 7 with Eugene . How many apples will Craig have ?",
+        "segmented_text": "Craig has 20 apples . Judy has 11 apples . He shares 7 with Eugene . How many apples will Craig have ?",
+        "equation": "X=(20.0-7.0)",
+        "ans": 13.0
+    },
+    {
+        "id": 1508,
+        "original_text": "There were a total of 10 soccer games in the season . The season is played for 5 months . How many soccer games were played each month , if each month has the same number of games ?",
+        "segmented_text": "There were a total of 10 soccer games in the season . The season is played for 5 months . How many soccer games were played each month , if each month has the same number of games ?",
+        "equation": "x=10/5",
+        "ans": 2.0
+    },
+    {
+        "id": 1748,
+        "original_text": "There were 73 bales of hay in the barn . Jason stacked bales in the barn today . There are now 96 bales of hay in the barn . How many bales did he store in the barn ?",
+        "segmented_text": "There were 73 bales of hay in the barn . Jason stacked bales in the barn today . There are now 96 bales of hay in the barn . How many bales did he store in the barn ?",
+        "equation": "X=96-73",
+        "ans": "23"
+    },
+    {
+        "id": 1644,
+        "original_text": "An artist has 30 kilograms of an alloy that is 45 % copper . How many kilograms of a second alloy that is 70 % copper should be mixed with the first alloy to get a new alloy that is 60 % copper",
+        "segmented_text": "An artist has 30 kilograms of an alloy that is 45 % copper . How many kilograms of a second alloy that is 70 % copper should be mixed with the first alloy to get a new alloy that is 60 % copper",
+        "equation": "x=(((30.0*60.0)*0.01)-((30.0*45.0)*0.01))/(70.0*0.01-60.0*0.01)",
+        "ans": 45.0
+    },
+    {
+        "id": 1012,
+        "original_text": "Ron weighed 2 colored metal balls during a science class . The blue ball weighed 6 pounds and the brown ball weighed 3.12 pounds . If Ron places both balls on the scale at the same time , what will the scale read ?",
+        "segmented_text": "Ron weighed 2 colored metal balls during a science class . The blue ball weighed 6 pounds and the brown ball weighed 3.12 pounds . If Ron places both balls on the scale at the same time , what will the scale read ?",
+        "equation": "X=6.0+3.12",
+        "ans": "9.12"
+    },
+    {
+        "id": 698,
+        "original_text": "A construction company is repaving a damaged road . So far , they have repaved a total of 4938 inches of the road . Today , they repaved 805 inches of the road . How many inches of the road had they repaved before today ?",
+        "segmented_text": "A construction company is repaving a damaged road . So far , they have repaved a total of 4938 inches of the road . Today , they repaved 805 inches of the road . How many inches of the road had they repaved before today ?",
+        "equation": "X=4938.0-805.0",
+        "ans": "4133.0"
+    },
+    {
+        "id": 799,
+        "original_text": "A teacher had 38 worksheets to grade . If she graded 4 , but then another 15 were turned in , how many worksheets would she have to grade ?",
+        "segmented_text": "A teacher had 38 worksheets to grade . If she graded 4 , but then another 15 were turned in , how many worksheets would she have to grade ?",
+        "equation": "X=((38.0+15.0)-4.0)",
+        "ans": 49.0
+    },
+    {
+        "id": 938,
+        "original_text": "Kristi jogged for 0.6 of an hour , swam for 0.5 of an hour , and rode her bicycle for 0.75 of an hour . How long did she exercise ?",
+        "segmented_text": "Kristi jogged for 0.6 of an hour , swam for 0.5 of an hour , and rode her bicycle for 0.75 of an hour . How long did she exercise ?",
+        "equation": "x=(0.6+0.5)+0.75",
+        "ans": 1.85
+    },
+    {
+        "id": 2198,
+        "original_text": "For his long distance phone service Milan pays a 2 dollars monthly fee plus 12 cents per minute . Last month , Milan 's long distance bill was 23.36 dollars . For how many minutes was Milan billed for ?",
+        "segmented_text": "For his long distance phone service Milan pays a 2 dollars monthly fee plus 12 cents per minute . Last month , Milan 's long distance bill was 23.36 dollars . For how many minutes was Milan billed for ?",
+        "equation": "x=(23.36-2)/(12*0.01)",
+        "ans": 178.0
+    },
+    {
+        "id": 84,
+        "original_text": "Recently , the value of Kate 's retirement fund decreased by $ 12 . If her fund was worth $ 1472 before , how much is it worth now ?",
+        "segmented_text": "Recently , the value of Kate 's retirement fund decreased by $ 12 . If her fund was worth $ 1472 before , how much is it worth now ?",
+        "equation": "X=1472.0-12.0",
+        "ans": "1460.0"
+    },
+    {
+        "id": 21,
+        "original_text": "Amy starts with 7 peanuts . Gerald gives Amy 55 more . How many peanuts does Amy end with ?",
+        "segmented_text": "Amy starts with 7 peanuts . Gerald gives Amy 55 more . How many peanuts does Amy end with ?",
+        "equation": "X=(7.0+55.0)",
+        "ans": 62.0
+    },
+    {
+        "id": 2347,
+        "original_text": "A waiter had 14 customers to wait on . If 3 customers left and he got another 39 customers , how many customers would he have ?",
+        "segmented_text": "A waiter had 14 customers to wait on . If 3 customers left and he got another 39 customers , how many customers would he have ?",
+        "equation": "X=((14.0+39.0)-3.0)",
+        "ans": 50.0
+    },
+    {
+        "id": 559,
+        "original_text": "There are 6 pencils and 7 rulers in the drawer . Benny placed 3 pencils in the drawer . How many pencils are now there in total ?",
+        "segmented_text": "There are 6 pencils and 7 rulers in the drawer . Benny placed 3 pencils in the drawer . How many pencils are now there in total ?",
+        "equation": "X=6+3",
+        "ans": "9"
+    },
+    {
+        "id": 1159,
+        "original_text": "Bridget has 4 Skittles . Henry has 4 Skittles . If Henry gives all of his Skittles to Bridget , how many Skittles will Bridget have ?",
+        "segmented_text": "Bridget has 4 Skittles . Henry has 4 Skittles . If Henry gives all of his Skittles to Bridget , how many Skittles will Bridget have ?",
+        "equation": "X=(4.0+4.0)",
+        "ans": 8.0
+    },
+    {
+        "id": 1938,
+        "original_text": "Lucy has 212 fish . How many more fish does Lucy need to buy to have 280 fish ?",
+        "segmented_text": "Lucy has 212 fish . How many more fish does Lucy need to buy to have 280 fish ?",
+        "equation": "x=280-212",
+        "ans": 68.0
+    },
+    {
+        "id": 1899,
+        "original_text": "April 's discount flowers was having a sale where each flower was 3 dollars . If Zoe bought 8 roses and 2 daisies , how much did she spend ?",
+        "segmented_text": "April 's discount flowers was having a sale where each flower was 3 dollars . If Zoe bought 8 roses and 2 daisies , how much did she spend ?",
+        "equation": "X=(3.0*(8.0+2.0))",
+        "ans": 30.0
+    },
+    {
+        "id": 908,
+        "original_text": "For the school bake sale Chloe made 28 cupcakes . If she sold 25 of them and then made 8 more , how many cupcakes would she have ?",
+        "segmented_text": "For the school bake sale Chloe made 28 cupcakes . If she sold 25 of them and then made 8 more , how many cupcakes would she have ?",
+        "equation": "X=((28.0+8.0)-25.0)",
+        "ans": 11.0
+    },
+    {
+        "id": 2222,
+        "original_text": "Marilyn starts with 51 bottle caps . She shares 36 with Nancy . How many bottle caps does Marilyn end with ?",
+        "segmented_text": "Marilyn starts with 51 bottle caps . She shares 36 with Nancy . How many bottle caps does Marilyn end with ?",
+        "equation": "X=(51.0-36.0)",
+        "ans": 15.0
+    },
+    {
+        "id": 475,
+        "original_text": "Rachel was unboxing some of her old winter clothes . She found 7 boxes of clothing and inside each box there were 3 scarves and 4 mittens . How many pieces of winter clothing did Rachel have total ?",
+        "segmented_text": "Rachel was unboxing some of her old winter clothes . She found 7 boxes of clothing and inside each box there were 3 scarves and 4 mittens . How many pieces of winter clothing did Rachel have total ?",
+        "equation": "X=(7.0*(3.0+4.0))",
+        "ans": 49.0
+    },
+    {
+        "id": 1928,
+        "original_text": "Sarah had 55 homework problems . She finished 6 of them but still had 7 pages of problems to do . If each page has the same number of problems on it , how many problems are on each page ?",
+        "segmented_text": "Sarah had 55 homework problems . She finished 6 of them but still had 7 pages of problems to do . If each page has the same number of problems on it , how many problems are on each page ?",
+        "equation": "X=((55.0-6.0)/7.0)",
+        "ans": 7.0
+    },
+    {
+        "id": 1813,
+        "original_text": "There were a total of 8 football games this year , 4 are played at night . Keith missed 4 of the games . How many football games did Keith go to in total ?",
+        "segmented_text": "There were a total of 8 football games this year , 4 are played at night . Keith missed 4 of the games . How many football games did Keith go to in total ?",
+        "equation": "X=8-4",
+        "ans": "4"
+    },
+    {
+        "id": 1901,
+        "original_text": "As part of a lesson on earthquakes , a science class is researching the movement of a nearby fault line . The fault line moved 1.25 inches during the past year and 5.25 inches the year before . How far did the fault line move in all ?",
+        "segmented_text": "As part of a lesson on earthquakes , a science class is researching the movement of a nearby fault line . The fault line moved 1.25 inches during the past year and 5.25 inches the year before . How far did the fault line move in all ?",
+        "equation": "X=1.25+5.25",
+        "ans": "6.5"
+    },
+    {
+        "id": 996,
+        "original_text": "A company invited 45 people to a luncheon , but 35 of them did n't show up . If the tables they had held 2 people each , how many tables do they need ?",
+        "segmented_text": "A company invited 45 people to a luncheon , but 35 of them did n't show up . If the tables they had held 2 people each , how many tables do they need ?",
+        "equation": "X=((45.0-35.0)/2.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 901,
+        "original_text": "Robin uploaded 35 pictures from her phone and 5 from her camera to facebook . If she sorted the pics into 5 different albums with the same amount of pics in each album , how many pictures were in each of the albums ?",
+        "segmented_text": "Robin uploaded 35 pictures from her phone and 5 from her camera to facebook . If she sorted the pics into 5 different albums with the same amount of pics in each album , how many pictures were in each of the albums ?",
+        "equation": "X=((35.0+5.0)/5.0)",
+        "ans": 8.0
+    },
+    {
+        "id": 462,
+        "original_text": "Keith loves trading cards . She bought 4 packs of Digimon cards for $ 4.45 each , and a deck of baseball cards for $ 6.06 . How much did Keith spend on cards ?",
+        "segmented_text": "Keith loves trading cards . She bought 4 packs of Digimon cards for $ 4.45 each , and a deck of baseball cards for $ 6.06 . How much did Keith spend on cards ?",
+        "equation": "x=(4*4.45)+6.06",
+        "ans": 23.86
+    },
+    {
+        "id": 1620,
+        "original_text": "Jason has 18 books and he has read 9 of them . Mary has 42 books . How many books do they have together ?",
+        "segmented_text": "Jason has 18 books and he has read 9 of them . Mary has 42 books . How many books do they have together ?",
+        "equation": "X=18+42",
+        "ans": "60"
+    },
+    {
+        "id": 1528,
+        "original_text": "Mildred weighs 59 pounds . Carol weighs 9 pounds . How much heavier is Mildred than Carol ?",
+        "segmented_text": "Mildred weighs 59 pounds . Carol weighs 9 pounds . How much heavier is Mildred than Carol ?",
+        "equation": "X=(59.0-9.0)",
+        "ans": 50.0
+    },
+    {
+        "id": 1381,
+        "original_text": "0.20 of a number decreased by 4 is equal to 6 . Find the number .",
+        "segmented_text": "0.20 of a number decreased by 4 is equal to 6 . Find the number .",
+        "equation": "x=(6.0+4.0)/0.2",
+        "ans": 50.0
+    },
+    {
+        "id": 2158,
+        "original_text": "Jane has 28 old , brown sheets of drawing paper and 27 old , yellow sheets of drawing paper . How many pieces of drawing paper does she   have ?",
+        "segmented_text": "Jane has 28 old , brown sheets of drawing paper and 27 old , yellow sheets of drawing paper . How many pieces of drawing paper does she   have ?",
+        "equation": "X=(28.0+27.0)",
+        "ans": 55.0
+    },
+    {
+        "id": 1148,
+        "original_text": "A cell phone company has a total of 7422 customers across the world . If 723 of its customers live in the United States , how many of its customers live in other countries ?",
+        "segmented_text": "A cell phone company has a total of 7422 customers across the world . If 723 of its customers live in the United States , how many of its customers live in other countries ?",
+        "equation": "X=7422.0-723.0",
+        "ans": "6699.0"
+    },
+    {
+        "id": 1806,
+        "original_text": "Hannah 's Vegetarian Restaurant bought 0.3333333333333333 pound of green peppers and 0.3333333333333333 pound of red peppers . How many pounds of peppers did Hannah 's Vegetarian Restaurant buy in all ?",
+        "segmented_text": "Hannah 's Vegetarian Restaurant bought 0.3333333333333333 pound of green peppers and 0.3333333333333333 pound of red peppers . How many pounds of peppers did Hannah 's Vegetarian Restaurant buy in all ?",
+        "equation": "X=0.3333333333333333+0.3333333333333333",
+        "ans": "0.6666666666666666"
+    },
+    {
+        "id": 818,
+        "original_text": "256 students are going to the zoo . They have to be divided into groups so that each teacher has one group . There are 8 teachers . How many   students will be in each group ?",
+        "segmented_text": "256 students are going to the zoo . They have to be divided into groups so that each teacher has one group . There are 8 teachers . How many   students will be in each group ?",
+        "equation": "X=(256.0/8.0)",
+        "ans": 32.0
+    },
+    {
+        "id": 468,
+        "original_text": "Oliver was organizing his baseball cards in a binder with 3 on each page . If he had 2 new cards and 10 old cards to put in the binder , how many pages would he use ?",
+        "segmented_text": "Oliver was organizing his baseball cards in a binder with 3 on each page . If he had 2 new cards and 10 old cards to put in the binder , how many pages would he use ?",
+        "equation": "X=((2.0+10.0)/3.0)",
+        "ans": 4.0
+    },
+    {
+        "id": 1914,
+        "original_text": "Vanessa had 13 music files and 30 video files on her flash drive . If she deleted 10 of the files , how many files were still on her flash drive ?",
+        "segmented_text": "Vanessa had 13 music files and 30 video files on her flash drive . If she deleted 10 of the files , how many files were still on her flash drive ?",
+        "equation": "X=((13.0+30.0)-10.0)",
+        "ans": 33.0
+    },
+    {
+        "id": 2190,
+        "original_text": "For the school bake sale Wendy made pastries . She baked 41 cupcakes and 31 cookies . After the sale she had 32 to take back home . How many pastries did she sell ?",
+        "segmented_text": "For the school bake sale Wendy made pastries . She baked 41 cupcakes and 31 cookies . After the sale she had 32 to take back home . How many pastries did she sell ?",
+        "equation": "X=((41.0+31.0)-32.0)",
+        "ans": 40.0
+    },
+    {
+        "id": 209,
+        "original_text": "Fred has 5 baseball cards . Melanie bought 3 of Fred 's   baseball cards . How many baseball cards does Fred have now ?",
+        "segmented_text": "Fred has 5 baseball cards . Melanie bought 3 of Fred 's   baseball cards . How many baseball cards does Fred have now ?",
+        "equation": "x=5-3",
+        "ans": 2.0
+    },
+    {
+        "id": 1205,
+        "original_text": "Charles has 4 apples . Jessica gives Charles 39 more . How many apples does Charles have in all ?",
+        "segmented_text": "Charles has 4 apples . Jessica gives Charles 39 more . How many apples does Charles have in all ?",
+        "equation": "X=(4.0+39.0)",
+        "ans": 43.0
+    },
+    {
+        "id": 2244,
+        "original_text": "A physician 's assistant measures a child and finds that his h8 is 41.5 inches . At his last visit to the doctor 's office , the child was 38.5 inches tall . How much did the child grow , in inches ?",
+        "segmented_text": "A physician 's assistant measures a child and finds that his h8 is 41.5 inches . At his last visit to the doctor 's office , the child was 38.5 inches tall . How much did the child grow , in inches ?",
+        "equation": "x=41.5-38.5",
+        "ans": 3.0
+    },
+    {
+        "id": 426,
+        "original_text": "Carson ’s teacher gives out gold stars for great math work . Yesterday , Carson earned 6 gold stars . Today , he earned 9 more . How many gold   stars did Carson earn in all ?",
+        "segmented_text": "Carson ’s teacher gives out gold stars for great math work . Yesterday , Carson earned 6 gold stars . Today , he earned 9 more . How many gold   stars did Carson earn in all ?",
+        "equation": "X=(6.0+9.0)",
+        "ans": 15.0
+    },
+    {
+        "id": 218,
+        "original_text": "Your class is having a pizza party . You buy 5 pizzas . Each pizza has 4 slices . How many slices is that altogether ?",
+        "segmented_text": "Your class is having a pizza party . You buy 5 pizzas . Each pizza has 4 slices . How many slices is that altogether ?",
+        "equation": "X=(5.0*4.0)",
+        "ans": 20.0
+    },
+    {
+        "id": 675,
+        "original_text": "Sam had 98 pennies in his bank . He spent 93 of his pennies . How many pennies does he have now ?",
+        "segmented_text": "Sam had 98 pennies in his bank . He spent 93 of his pennies . How many pennies does he have now ?",
+        "equation": "X=98-93",
+        "ans": "5"
+    },
+    {
+        "id": 661,
+        "original_text": "Bob will rent a car for the weekend . He can choose one of 2 payment plans . The first plan costs 57.98 for 2 days plus 13 cents per mile . The second plan costs 45.98 for 2 days plus 18 cents per mile . How many miles does Bob need to drive for the 2 plans to cost the same ?",
+        "segmented_text": "Bob will rent a car for the weekend . He can choose one of 2 payment plans . The first plan costs 57.98 for 2 days plus 13 cents per mile . The second plan costs 45.98 for 2 days plus 18 cents per mile . How many miles does Bob need to drive for the 2 plans to cost the same ?",
+        "equation": "x=(57.98-45.98)/(18*0.01-13*0.01)",
+        "ans": 240.0
+    },
+    {
+        "id": 315,
+        "original_text": "Joan had 5 dimes in her bank . She spent 2 of her dimes . How many dimes does she have now ?",
+        "segmented_text": "Joan had 5 dimes in her bank . She spent 2 of her dimes . How many dimes does she have now ?",
+        "equation": "X=5-2",
+        "ans": "3"
+    },
+    {
+        "id": 1946,
+        "original_text": "Roger earned 9 dollars for each lawn he mowed . If he had 14 lawns to mow , but forgot to mow 8 of them , how much money did he actually earn ?",
+        "segmented_text": "Roger earned 9 dollars for each lawn he mowed . If he had 14 lawns to mow , but forgot to mow 8 of them , how much money did he actually earn ?",
+        "equation": "X=(9.0*(14.0-8.0))",
+        "ans": 54.0
+    },
+    {
+        "id": 1213,
+        "original_text": "Will was working as a sacker at a grocery store where he made 8 dollars an hour . On Monday he worked 8 hours and on Tuesday he worked 2 hours . How much money did Will make in those two days ?",
+        "segmented_text": "Will was working as a sacker at a grocery store where he made 8 dollars an hour . On Monday he worked 8 hours and on Tuesday he worked 2 hours . How much money did Will make in those two days ?",
+        "equation": "X=(8.0*(8.0+2.0))",
+        "ans": 80.0
+    },
+    {
+        "id": 1106,
+        "original_text": "There are 544 pots . Each pot has 32 flowers in it . How many flowers are there in all ?",
+        "segmented_text": "There are 544 pots . Each pot has 32 flowers in it . How many flowers are there in all ?",
+        "equation": "X=(544.0*32.0)",
+        "ans": 17408.0
+    },
+    {
+        "id": 1282,
+        "original_text": "William has 2 bottle caps . He buys 41 more . How many bottle caps does William have in all ?",
+        "segmented_text": "William has 2 bottle caps . He buys 41 more . How many bottle caps does William have in all ?",
+        "equation": "X=(2.0+41.0)",
+        "ans": 43.0
+    },
+    {
+        "id": 262,
+        "original_text": "Jason grew 37 watermelons and 30 pumpkins . Sandy grew 11 watermelons . How many watermelons did they grow in total ?",
+        "segmented_text": "Jason grew 37 watermelons and 30 pumpkins . Sandy grew 11 watermelons . How many watermelons did they grow in total ?",
+        "equation": "X=37+11",
+        "ans": "48"
+    },
+    {
+        "id": 2353,
+        "original_text": "3 owls were sitting on the fence . 2 more owls joined them . How many owls are on the fence now ?",
+        "segmented_text": "3 owls were sitting on the fence . 2 more owls joined them . How many owls are on the fence now ?",
+        "equation": "X=(3.0+2.0)",
+        "ans": 5.0
+    },
+    {
+        "id": 1941,
+        "original_text": "Harry Hound had a terrible earache yesterday . When I peered into his ears yesterday , I found 36 frisky fleas having a party in his right ear and   85 baby fleas sleeping peacefully in his left ear . I cleaned out Harry   Hound 's ears . How many fleas perished ?",
+        "segmented_text": "Harry Hound had a terrible earache yesterday . When I peered into his ears yesterday , I found 36 frisky fleas having a party in his right ear and   85 baby fleas sleeping peacefully in his left ear . I cleaned out Harry   Hound 's ears . How many fleas perished ?",
+        "equation": "X=(36.0+85.0)",
+        "ans": 121.0
+    },
+    {
+        "id": 1817,
+        "original_text": "There were 44 boys and 53 girls on the playground at recess . How many children were on the playground in all ?",
+        "segmented_text": "There were 44 boys and 53 girls on the playground at recess . How many children were on the playground in all ?",
+        "equation": "X=(44.0+53.0)",
+        "ans": 97.0
+    },
+    {
+        "id": 142,
+        "original_text": "Larry starts with 91 cards . 17 are eaten by a hippopotamus . How many cards does Larry end with ?",
+        "segmented_text": "Larry starts with 91 cards . 17 are eaten by a hippopotamus . How many cards does Larry end with ?",
+        "equation": "X=(91.0-17.0)",
+        "ans": 74.0
+    },
+    {
+        "id": 1014,
+        "original_text": "Paco 's Countertop Company purchased pieces of marble from a quarry . The weights of the pieces they purchased were 0.3333333333333333 ton , 0.3333333333333333 ton , and 0.08333333333333333 ton . How many tons of marble did Paco 's Countertop Company purchase in all ?",
+        "segmented_text": "Paco 's Countertop Company purchased pieces of marble from a quarry . The weights of the pieces they purchased were 0.3333333333333333 ton , 0.3333333333333333 ton , and 0.08333333333333333 ton . How many tons of marble did Paco 's Countertop Company purchase in all ?",
+        "equation": "X=0.3333333333333333+0.3333333333333333+0.08333333333333333",
+        "ans": "0.75"
+    },
+    {
+        "id": 1134,
+        "original_text": "There were 3409 pieces of candy in a jar . If 145 pieces were red and the rest were blue , how many were blue ?",
+        "segmented_text": "There were 3409 pieces of candy in a jar . If 145 pieces were red and the rest were blue , how many were blue ?",
+        "equation": "X=(3409.0-145.0)",
+        "ans": 3264.0
+    },
+    {
+        "id": 2229,
+        "original_text": "Mike has 87 baseball cards . Sam bought 13 of Mike 's   baseball cards . How many baseball cards does Mike have now ?",
+        "segmented_text": "Mike has 87 baseball cards . Sam bought 13 of Mike 's   baseball cards . How many baseball cards does Mike have now ?",
+        "equation": "x=87-13",
+        "ans": 74.0
+    },
+    {
+        "id": 1656,
+        "original_text": "0.5 of the students in the band are in the trumpet section . 0.125 of the students in the band are in the trombone section . What fraction of the students in the band are in either the trumpet section or the trombone section ?",
+        "segmented_text": "0.5 of the students in the band are in the trumpet section . 0.125 of the students in the band are in the trombone section . What fraction of the students in the band are in either the trumpet section or the trombone section ?",
+        "equation": "x=0.5+0.125",
+        "ans": 0.625
+    }
+]

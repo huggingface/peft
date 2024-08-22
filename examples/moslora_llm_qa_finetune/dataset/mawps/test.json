@@ -1,0 +1,1430 @@
+[
+    {
+        "instruction": "Nicole found an orange caterpillar and a green caterpillar in her backyard . The green caterpillar was 3 inches long and the orange caterpillar was 1.1666666666666667 inches long . How much longer was the green caterpillar than the orange caterpillar ?",
+        "input": "",
+        "output": "",
+        "answer": "1.8333333333333335"
+    },
+    {
+        "instruction": "If 6 is added to a number and then subtracted from the same number , the product of the sum and the difference is 189 . What is the number ?",
+        "input": "",
+        "output": "",
+        "answer": "-15.0"
+    },
+    {
+        "instruction": "Each bottle cap costs $ 2.00 . How much do 6 bottle caps cost ?",
+        "input": "",
+        "output": "",
+        "answer": "12.0"
+    },
+    {
+        "instruction": "Zach wants to ride the Ferris wheel , the roller coaster , and the log ride . The Ferris wheel costs 2 tickets , the roller coaster costs 7 tickets and the log ride costs 1 ticket . Zach has 1 ticket . How many more tickets should Zach buy ?",
+        "input": "",
+        "output": "",
+        "answer": "9.0"
+    },
+    {
+        "instruction": "Joan found 70 seashells on the beach . she gave Sam some of her seashells . She has 27 seashell . How many seashells did she give to Sam ?",
+        "input": "",
+        "output": "",
+        "answer": "43"
+    },
+    {
+        "instruction": "Kendra made punch for her friend 's birthday party . She used 0.25 gallon of grape juice , 0.375 gallon of cranberry juice , and 0.125 gallon of club soda . How many gallons of punch did Kendra make ?",
+        "input": "",
+        "output": "",
+        "answer": "0.75"
+    },
+    {
+        "instruction": "You are reading a book with 120 pages . If you want to read the same number of pages each night , how many would you have to read each   night to finish in 10 days ?",
+        "input": "",
+        "output": "",
+        "answer": "12.0"
+    },
+    {
+        "instruction": "A study reported that in a random sampling of 100 women over the age of 35 , 8 of the women were married 2 or more times . Based on the study results , how many woman in a group of 5000 women over the age of 35 would likely be married 2 or more times ?",
+        "input": "",
+        "output": "",
+        "answer": "400.0"
+    },
+    {
+        "instruction": "Rachel bought 7 new chairs and 3 new tables for her house . If she spent 4 minutes on each piece furniture putting it together , how many minutes did it take her to finish ?",
+        "input": "",
+        "output": "",
+        "answer": "40.0"
+    },
+    {
+        "instruction": "Benny bought a soft drink for 2 dollars and 5 candy bars . He spent a total of 27 dollars . How much did each candy bar cost ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "Mary got fast food for lunch . Mary spent $ 1.08 on soup and $ 4.80 on a salad . Mary paid with a 20 dollar bill . What was the total of the lunch bill ?",
+        "input": "",
+        "output": "",
+        "answer": "5.88"
+    },
+    {
+        "instruction": "In Shannon 's apartment complex , 0.16666666666666666 of the apartments are one - bedroom apartments and 0.3333333333333333 are two - bedroom apartments . What fraction of the apartments are either one- or two - bedroom apartments ?",
+        "input": "",
+        "output": "",
+        "answer": "0.5"
+    },
+    {
+        "instruction": "Last year , egg producers in Douglas County produced 1416 eggs . This year , those same farms produced 4636 eggs . How many more eggs did the farms produce this year ?",
+        "input": "",
+        "output": "",
+        "answer": "3220.0"
+    },
+    {
+        "instruction": "Joan had 695 Pokemon cards , and 6 were torn . Sara bought 133 of Joan 's Pokemon cards . How many Pokemon cards does Joan have now ?",
+        "input": "",
+        "output": "",
+        "answer": "562"
+    },
+    {
+        "instruction": "0.4 of Joe 's income each month goes to taxes . If she pays 848 dollars in taxes each month , what is her monthly income in dollars ?",
+        "input": "",
+        "output": "",
+        "answer": "2120.0"
+    },
+    {
+        "instruction": "Mrs. Hilt uses 2 ounces of detergent to wash a pound of clothes . How many ounces of soap will Mrs. Hilt use to wash 9 pounds of clothes ?",
+        "input": "",
+        "output": "",
+        "answer": "18.0"
+    },
+    {
+        "instruction": "A chef needs to cook 9 potatoes . He has already cooked 7 . If each potato takes 3 minutes to cook , how long will it take him to cook the rest ?",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "Mr. Guzman bought 48 doughnuts packed equally into 4 boxes . How many doughnuts were in each box ?",
+        "input": "",
+        "output": "",
+        "answer": "12.0"
+    },
+    {
+        "instruction": "Mrs. Hilt impressed 2436 fans at the basketball game on Friday . If the fans were seated in equal groups on 3 sets of bleachers , how many   fans were on each set ?",
+        "input": "",
+        "output": "",
+        "answer": "812.0"
+    },
+    {
+        "instruction": "The distance measured on a map varies directly with the actual distance . If 1 cm represents 25 kilometers , how many kilometers are represented by 7 cm ?",
+        "input": "",
+        "output": "",
+        "answer": "175.0"
+    },
+    {
+        "instruction": "The town of Milburg has 5256 grown - ups and 2987 children . How many people live in Milburg ?",
+        "input": "",
+        "output": "",
+        "answer": "8243.0"
+    },
+    {
+        "instruction": "There are 1110 students at a school . If each classroom holds 30 students , how many classrooms are needed at the school ?",
+        "input": "",
+        "output": "",
+        "answer": "37.0"
+    },
+    {
+        "instruction": "At the fair there were 31 people in line for the bumper cars . If 25 of them got tired of waiting and left and 25 more got in line , how many people would be in line ?",
+        "input": "",
+        "output": "",
+        "answer": "31.0"
+    },
+    {
+        "instruction": "Tyler had 15 dogs . Each dog had 5 puppies . How many puppies does Tyler now have ?",
+        "input": "",
+        "output": "",
+        "answer": "75.0"
+    },
+    {
+        "instruction": "Cindy \u2019s mom baked 1215 cookies . Paul \u2019s dad baked 1112 cookies . They both brought them to school for a party . How many cookies did   they have altogether ?",
+        "input": "",
+        "output": "",
+        "answer": "2327.0"
+    },
+    {
+        "instruction": "Albert has two snakes . The garden snake is 10 inches long . The boa constrictor is 7 times longer than the garden snake . How long is the boa   constrictor ?",
+        "input": "",
+        "output": "",
+        "answer": "70.0"
+    },
+    {
+        "instruction": "A store had 5 oranges in a bin . If they threw away 2 of the old ones and put 28 new ones in the bin how many would be in the bin ?",
+        "input": "",
+        "output": "",
+        "answer": "31.0"
+    },
+    {
+        "instruction": "On her vacation last summer , Trisha walked all over New York City to buy souvenirs . First , she walked 0.1111111111111111 of a mile from her hotel to a postcard shop . Then she walked 0.1111111111111111 of a mile from the postcard shop to a T - shirt shop and 0.6666666666666666 of a mile from the T - shirt shop back to the hotel . How many miles did Trisha walk in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.8888888888888888"
+    },
+    {
+        "instruction": "Paul got a box of 479 crayons for his birthday . At the end of the school   year , he only had 134 left . How many crayons had been lost or given   away ?",
+        "input": "",
+        "output": "",
+        "answer": "345.0"
+    },
+    {
+        "instruction": "Mary found 18 seashells and Jessica found 41 seashells on the beach . How many seashells did they find together ?",
+        "input": "",
+        "output": "",
+        "answer": "59"
+    },
+    {
+        "instruction": "Sally had 27 Pokemon cards . Dan gave her 41 new Pokemon cards . Sally bought 20 Pokemon cards . How many Pokemon cards does Sally have now ?",
+        "input": "",
+        "output": "",
+        "answer": "88"
+    },
+    {
+        "instruction": "Gwen had 18 math problems and 11 science problems for homework . If she finished 24 of the problems at school , how many problems did she have to do for homework ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "A carpenter bought a piece of wood that was 0.41 meters long . Then she sawed 0.33 meters off the end . How long is the piece of wood now ?",
+        "input": "",
+        "output": "",
+        "answer": "0.08"
+    },
+    {
+        "instruction": "Latoya purchased a prepaid phone card for 30 dollars . Long distance calls cost 16 cents a minute using this card . Latoya used her card only once to make a long distance call . If the remaining credit on her card is 26.48 dollars , how many minutes did her call last ?",
+        "input": "",
+        "output": "",
+        "answer": "22.0"
+    },
+    {
+        "instruction": "A store had 40 oranges in a bin . If they threw away 37 of the old ones and put 7 new ones in the bin how many would be in the bin ?",
+        "input": "",
+        "output": "",
+        "answer": "10.0"
+    },
+    {
+        "instruction": "Sean has 223 whistles . He has 95 more whistles that Charles . How many whistles does Charles have ?",
+        "input": "",
+        "output": "",
+        "answer": "128.0"
+    },
+    {
+        "instruction": "The junior ranger asked Christian to help him place 420 seedlings in packets . If every packet needs to contain 7 seeds , how many packets do they need ?",
+        "input": "",
+        "output": "",
+        "answer": "60.0"
+    },
+    {
+        "instruction": "Mrs. Hilt needs to share $ 3.75 equally among 3 total people . How much money will each person get ?",
+        "input": "",
+        "output": "",
+        "answer": "1.25"
+    },
+    {
+        "instruction": "Nancy uploaded 41 pictures to Facebook . She put 37 pics into one album and put the rest into 2 different albums . How many pictures were in each album ?",
+        "input": "",
+        "output": "",
+        "answer": "2.0"
+    },
+    {
+        "instruction": "If Steven can mix 20 drinks in 5 minutes , Sue can mix 20 drinks in 10 minutes , and Jake can mix 20 drinks in 15 minutes , how much time , in minutes , will it take all 3 of them to mix 20 drinks if they work together ?",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "179 birds were sitting in a tree . 38 more birds flew up to the tree . How many birds were there altogether in the tree ?",
+        "input": "",
+        "output": "",
+        "answer": "217.0"
+    },
+    {
+        "instruction": "A waiter had 9 tables he was waiting on , with 2 women and 6 men at each table . How many customers total did the waiter have ?",
+        "input": "",
+        "output": "",
+        "answer": "72.0"
+    },
+    {
+        "instruction": "Mary had 7 nickels in her bank . Her dad gave her 5 nickels . How many nickels does Mary have now ?",
+        "input": "",
+        "output": "",
+        "answer": "12"
+    },
+    {
+        "instruction": "There are 22 oranges in a box . Paula takes 7 oranges . How many are left ?",
+        "input": "",
+        "output": "",
+        "answer": "15.0"
+    },
+    {
+        "instruction": "April 's discount flowers was having a sale where each rose was 9 dollars . If April started with 11 roses and had 8 roses left , how much money did she earn ?",
+        "input": "",
+        "output": "",
+        "answer": "27.0"
+    },
+    {
+        "instruction": "For the school bake sale Katie made 26 cupcakes . If she sold 20 of them and then made 20 more , how many cupcakes would she have ?",
+        "input": "",
+        "output": "",
+        "answer": "26.0"
+    },
+    {
+        "instruction": "A store had 40 oranges in a bin . If they threw away 25 of the old ones and put 21 new ones in the bin how many would be in the bin ?",
+        "input": "",
+        "output": "",
+        "answer": "36.0"
+    },
+    {
+        "instruction": "Mrs. Hilt read 4 books . Each book had 17 chapters in it . How many chapters did Mrs. Hilt read ?",
+        "input": "",
+        "output": "",
+        "answer": "68.0"
+    },
+    {
+        "instruction": "Sally had 39 baseball cards , and 9 were torn . Sara bought 24 of Sally 's baseball cards . How many baseball cards does Sally have now ?",
+        "input": "",
+        "output": "",
+        "answer": "15"
+    },
+    {
+        "instruction": "There are 3 calories in a candy bar . How many calories are there in 5 candy bars ?",
+        "input": "",
+        "output": "",
+        "answer": "15.0"
+    },
+    {
+        "instruction": "Nancy was organizing her book case making sure each of the shelves had exactly 6 books on it . If she had 2 shelves of mystery books and 6 shelves of picture books , how many books did she have total ?",
+        "input": "",
+        "output": "",
+        "answer": "48.0"
+    },
+    {
+        "instruction": "Brandy made trail mix for a backpacking trip . She used 0.16666666666666666 pound of peanuts , 0.16666666666666666 pound of chocolate chips , and 0.08333333333333333 pound of raisins . How many pounds of trail mix did Brandy make ?",
+        "input": "",
+        "output": "",
+        "answer": "0.4166666666666667"
+    },
+    {
+        "instruction": "A truck carrying 4.1 pounds of sand travels to a construction yard and loses 2.4 pounds of sand along the way . How much sand does the truck have when it arrives at the yard ?",
+        "input": "",
+        "output": "",
+        "answer": "1.7"
+    },
+    {
+        "instruction": "Roger has 95 candies . He gives 3 to Stephanie . How many candies will Roger have ?",
+        "input": "",
+        "output": "",
+        "answer": "92.0"
+    },
+    {
+        "instruction": "An airplane flew 4 hours against a wind of 40 kilometers per hour on return he was flowing with the wind and flight was 3 hours . What s speed of airplane in still air ?",
+        "input": "",
+        "output": "",
+        "answer": "280.0"
+    },
+    {
+        "instruction": "Billy has 62 crayons . 52 are eaten by a hippopotamus . How many crayons will Billy have ?",
+        "input": "",
+        "output": "",
+        "answer": "10.0"
+    },
+    {
+        "instruction": "Tyler had 15 dogs . Each dog had 5 puppies . How many puppies does Tyler now have ?",
+        "input": "",
+        "output": "",
+        "answer": "75.0"
+    },
+    {
+        "instruction": "Faye and her mom were picking carrots from their garden . Faye picked 23 and her mother picked 5 . If only 12 of the carrots were good , how many bad carrots did they have ?",
+        "input": "",
+        "output": "",
+        "answer": "16.0"
+    },
+    {
+        "instruction": "It rained 0.9 inches on Monday . On Tuesday , it rained 0.7 inches less than on Monday . How much did it rain on Tuesday ?",
+        "input": "",
+        "output": "",
+        "answer": "0.2"
+    },
+    {
+        "instruction": "While shopping for music online , Isabel bought 6 country albums and 2 pop albums . Each album came with a lyric sheet and had 9 songs . How many songs did Isabel buy total ?",
+        "input": "",
+        "output": "",
+        "answer": "72.0"
+    },
+    {
+        "instruction": "Isabel had 72 homework problems . She finished 32 of them but still had 5 pages of problems to do . If each page has the same number of problems on it , how many problems are on each page ?",
+        "input": "",
+        "output": "",
+        "answer": "8.0"
+    },
+    {
+        "instruction": "Vince 's bus ride to school is 0.625 mile and Zachary 's bus ride is 0.5 mile . How much longer is Vince 's bus ride than Zachary 's ?",
+        "input": "",
+        "output": "",
+        "answer": "0.125"
+    },
+    {
+        "instruction": "Henry had 11 dollars . For his birthday he got 18 more dollars but spent 10 on a new game . How much money does he have now ?",
+        "input": "",
+        "output": "",
+        "answer": "19.0"
+    },
+    {
+        "instruction": "The sum of three consecutive even numbers is 162 . What is the smallest of the three numbers ?",
+        "input": "",
+        "output": "",
+        "answer": "52.0"
+    },
+    {
+        "instruction": "For Halloween Katie and her sister combined the candy they received . Katie had 8 pieces of candy while her sister had 23 . If they ate 8 pieces the first night , how many pieces do they have left ?",
+        "input": "",
+        "output": "",
+        "answer": "23.0"
+    },
+    {
+        "instruction": "A farmer started the day with 8.75 buckets of seeds . After spending the morning sowing seeds , she now has 6 buckets . How many buckets of seeds did the farmer sow ?",
+        "input": "",
+        "output": "",
+        "answer": "2.75"
+    },
+    {
+        "instruction": "At the beach , Miki and her sister both built sandcastles and then measured their heights . Miki 's sandcastle was 0.8333333333333334 foot tall and her sister 's was 0.5 foot tall . How much taller was Miki 's sandcastle than her sister 's ?",
+        "input": "",
+        "output": "",
+        "answer": "0.3333333333333333"
+    },
+    {
+        "instruction": "Sam went to 14 football games this year . He went to 29 games last year . How many football games did Sam go to in all ?",
+        "input": "",
+        "output": "",
+        "answer": "43"
+    },
+    {
+        "instruction": "Anna collects 6 blocks . Anna 's father gives Anna 8 more . How many blocks does Anna have ?",
+        "input": "",
+        "output": "",
+        "answer": "14.0"
+    },
+    {
+        "instruction": "Bruce has 75 eggs . Kimberly has 17 eggs . He loses 70 . How many eggs will Bruce have ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "The school is planning a field trip . There are 45 students and 9 seats on each school bus . How many buses are needed to take the trip ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "There are 6 marbles in each box . How many marbles are in 3 boxes ?",
+        "input": "",
+        "output": "",
+        "answer": "18.0"
+    },
+    {
+        "instruction": "Jennifer has 72 cards . 61 are eaten by a hippopotamus . How many cards will Jennifer have ?",
+        "input": "",
+        "output": "",
+        "answer": "11.0"
+    },
+    {
+        "instruction": "Last Saturday , Spencer walked all over town running errands . First , he walked 0.3 of a mile from his house to the library and 0.1 of a mile from the library to the post office . Then he walked 0.4 of a mile from the post office back home . How many miles did Spencer walk in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.8"
+    },
+    {
+        "instruction": "If you purchase a membership for 175.00 dollars to receive 10 % off purchases , how much would you need to spend to pay off the membership ?",
+        "input": "",
+        "output": "",
+        "answer": "1750.0"
+    },
+    {
+        "instruction": "Joan joined her school 's band . She bought a trumpet for $ 149.16 , a music tool for $ 9.98 , and a song book which was $ 4.14 . Joan found $ 8.65 in her pocket . How much did Joan spend at the music store ?",
+        "input": "",
+        "output": "",
+        "answer": "163.28"
+    },
+    {
+        "instruction": "A restaurant made 9 hamburgers and 4 hot dogs to serve during lunch . Only 3 hamburgers were actually served . How many hamburgers were over ?",
+        "input": "",
+        "output": "",
+        "answer": "6"
+    },
+    {
+        "instruction": "Alec and his roommates ate 3.25 pints of ice cream on Friday night and 0.25 pint of ice cream on Saturday night . How many pints did they eat in all ?",
+        "input": "",
+        "output": "",
+        "answer": "3.5"
+    },
+    {
+        "instruction": "Mary loves eating fruits . Mary paid $ 11.08 for berries , $ 14.33 for apples , and $ 9.31 for peaches . In total , how much money did she spend ?",
+        "input": "",
+        "output": "",
+        "answer": "34.72"
+    },
+    {
+        "instruction": "Leah makes 24 dollars per hour for a 40 hour work week and time - and - 1.5 for every hour over 40 hours . If she made 1140 dollars last week , how many overtime hours did she work ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "Robin has 27 packages of gum . There are 18 pieces in each package . How many pieces of gum does Robin have ?",
+        "input": "",
+        "output": "",
+        "answer": "486.0"
+    },
+    {
+        "instruction": "Melissa has 70 oranges . John takes 19 away . How many oranges will Melissa have ?",
+        "input": "",
+        "output": "",
+        "answer": "51.0"
+    },
+    {
+        "instruction": "Sally has 9 orange balloons and 4 blue balloons . She lost 2 of the orange balloons . How many orange balloons does Sally have now ?",
+        "input": "",
+        "output": "",
+        "answer": "7"
+    },
+    {
+        "instruction": "Heather went to the county fair last weekend . When she got there , she had to walk 0.3333333333333333 of a mile from the car to the entrance . Then she walked 0.3333333333333333 of a mile to the carnival rides and 0.08333333333333333 of a mile from the carnival rides back to the car . How many miles did Heather walk in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.75"
+    },
+    {
+        "instruction": "Tori is a school janitor . Last week , she picked up a total of 1576 pieces of trash . If she picked up 344 pieces of trash in the classrooms , how many pieces of trash did Tori pick up outside the classrooms ?",
+        "input": "",
+        "output": "",
+        "answer": "1232.0"
+    },
+    {
+        "instruction": "William has 2 bottle caps . He buys 41 more . How many bottle caps does William have in all ?",
+        "input": "",
+        "output": "",
+        "answer": "43.0"
+    },
+    {
+        "instruction": "There are 79 pencils in a box . Eric takes 4 pencils . How many are left ?",
+        "input": "",
+        "output": "",
+        "answer": "75.0"
+    },
+    {
+        "instruction": "Martha has 2 peanuts . Joyce has 26 peanuts . If Joyce gives all of her peanuts to Martha , how many peanuts will Martha have ?",
+        "input": "",
+        "output": "",
+        "answer": "28.0"
+    },
+    {
+        "instruction": "If 0.6667 of a pound is worth 8.00 dollars , how much is 0.75 pounds worth ?",
+        "input": "",
+        "output": "",
+        "answer": "9.0"
+    },
+    {
+        "instruction": "Bridget weighs 39 pounds . Martha weighs 2 pounds . How much heavier is Bridget than Martha ?",
+        "input": "",
+        "output": "",
+        "answer": "37.0"
+    },
+    {
+        "instruction": "1 cell phone plan costs 49.95 dollars per month . The first 2500 minutes of use are free . Each minute thereafter costs 0.25 dollars . For a bill of 112.45 dollars , how many minutes over 2500 was the cell phone in use ?",
+        "input": "",
+        "output": "",
+        "answer": "250.0"
+    },
+    {
+        "instruction": "Melanie grew 139 turnips . Benny grew 113 turnips . How many turnips did they grow in all ?",
+        "input": "",
+        "output": "",
+        "answer": "252"
+    },
+    {
+        "instruction": "For Halloween Emily received 54 pieces of candy . She ate 33 pieces then placed the rest into piles with 7 in each pile . How many piles could she make ?",
+        "input": "",
+        "output": "",
+        "answer": "3.0"
+    },
+    {
+        "instruction": "Sam found 35 seashells on the beach , he gave Joan 18 of the seashells . How many seashells does he now have ?",
+        "input": "",
+        "output": "",
+        "answer": "17.0"
+    },
+    {
+        "instruction": "A pet supply store has 600 bags of dog food and 327 bags of cat food . How many more bags of dog food are there than cat food ?",
+        "input": "",
+        "output": "",
+        "answer": "273.0"
+    },
+    {
+        "instruction": "Sara has 3 green and 5 red marbles . Tom has 4 green marbles . How many green marbles do they have in total ?",
+        "input": "",
+        "output": "",
+        "answer": "7"
+    },
+    {
+        "instruction": "Isabel baked 39 cupcakes for her school 's bake sale . If her brother , Todd , ate 21 of them how many packages could she make if she put 3 cupcake in each package ?",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "2 teams of scientists leave a university at the same time in special vans to search for tornadoes . the 1st team travel east at 20 miles per hour and the 2nd team travels west at 30 miles per hour . their radios have a range of 125 miles . How much time will pass before the scientists lose radio contact ?",
+        "input": "",
+        "output": "",
+        "answer": "2.5"
+    },
+    {
+        "instruction": "In fourth grade there were 10 students at the start of the year . During the year 4 students left and 42 new students came to school . How many students were in fourth grade at the end ?",
+        "input": "",
+        "output": "",
+        "answer": "48.0"
+    },
+    {
+        "instruction": "Luke had 48 dollars in January . By March he had spent 11 dollars . If he got another 21 dollars from his mom , how much money would he have ?",
+        "input": "",
+        "output": "",
+        "answer": "58.0"
+    },
+    {
+        "instruction": "Joan has saved 6 quarters from washing cars .   How many cents does Joan have ?",
+        "input": "",
+        "output": "",
+        "answer": "150.0"
+    },
+    {
+        "instruction": "There are 84 leaves . There are 139 ladybugs on each leaf . How many ladybugs are there in all ?",
+        "input": "",
+        "output": "",
+        "answer": "11676.0"
+    },
+    {
+        "instruction": "Tom Quig travelled 270 miles east of St Louis . For most of the trip he travelled 70 miles per hour , but for one period of time he was slowed to 20 miles per hour due to a major accident . If the total time of travel was 6 hours , how many miles did he drive at the reduced speed ?",
+        "input": "",
+        "output": "",
+        "answer": "60.0"
+    },
+    {
+        "instruction": "Connie has 2315 red markers and 1028 blue markers . How many markers does Connie have altogether ?",
+        "input": "",
+        "output": "",
+        "answer": "3343.0"
+    },
+    {
+        "instruction": "The school cafeteria had 17 apples . If they used 2 to make lunch for the students and then bought 23 more , how many apples would they have ?",
+        "input": "",
+        "output": "",
+        "answer": "38.0"
+    },
+    {
+        "instruction": "A worksheet had 4 problems on it . If a teacher had 9 worksheets to grade and had already graded 5 of them , how many more problems does she have to grade ?",
+        "input": "",
+        "output": "",
+        "answer": "16.0"
+    },
+    {
+        "instruction": "9 of Hayley \u2019s closest friends like stickers . If she plans to give all of them an equal number of stickers , how many will each receive if she has 72 stickers ?",
+        "input": "",
+        "output": "",
+        "answer": "8.0"
+    },
+    {
+        "instruction": "For homework Amy had 18 math problems and 6 spelling problems . If she can finish 4 problems in an hour how long will it take her to finish all the problems ?",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "George has 5 boxes of eggs . Each box holds 3 eggs and there are 9 boxes in a case . How many eggs does George have ?",
+        "input": "",
+        "output": "",
+        "answer": "15.0"
+    },
+    {
+        "instruction": "Jessica had 8 quarters in her bank . Her sister borrowed 3 of her quarters . How many quarters does Jessica have now ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "Sally bought 4 dozen eggs from the grocery store to bake some cakes .   How many eggs did Sally buy ?",
+        "input": "",
+        "output": "",
+        "answer": "48.0"
+    },
+    {
+        "instruction": "Jason had Pokemon cards . He gave 9 Pokemon cards to his friends . He now has 4 Pokemon cards left . How many Pokemon cards did he have to start with ?",
+        "input": "",
+        "output": "",
+        "answer": "13.0"
+    },
+    {
+        "instruction": "Michael has some fish in his fish tank . Ben gave him 18 more fish . Now he has 49 . How many fish did he have to begin with ?",
+        "input": "",
+        "output": "",
+        "answer": "31.0"
+    },
+    {
+        "instruction": "There are 35 bottle caps in Beverly 's bottle cap collection . If the bottle caps are organized into 7 groups , how big is each group ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "Dan had 7 potatoes and 4 cantelopes in the garden . The rabbits ate 4 of the potatoes . How many potatoes does Dan now have ?",
+        "input": "",
+        "output": "",
+        "answer": "3"
+    },
+    {
+        "instruction": "A restaurant served 9 hot dogs during lunch and 2 during dinner today . It served 5 of them yesterday . How many hot dogs were served today ?",
+        "input": "",
+        "output": "",
+        "answer": "11"
+    },
+    {
+        "instruction": "Bobby has 142 books . Kristi has 78 books . How many more books does Bobby have than Kristi ?",
+        "input": "",
+        "output": "",
+        "answer": "64.0"
+    },
+    {
+        "instruction": "How many pounds of hamburger that costs 1.60 dollars per pound must be mixed with 70 pounds of hamburger that costs 2.10 dollars per pound to make a mixture that costs 1.70 dollars per pound ?",
+        "input": "",
+        "output": "",
+        "answer": "280.0"
+    },
+    {
+        "instruction": "Emily was planting vegetables in her garden . She started with 41 seeds and planted 29 of them in the big garden and in each of her small gardens put 4 seeds each . How many small gardens did Emily have ?",
+        "input": "",
+        "output": "",
+        "answer": "3.0"
+    },
+    {
+        "instruction": "The town of Milburg has 5256 grown - ups and 2987 children . How many people live in Milburg ?",
+        "input": "",
+        "output": "",
+        "answer": "8243.0"
+    },
+    {
+        "instruction": "Barbara has 9 candies . She buys 18 more . How many candies does Barbara have in all ?",
+        "input": "",
+        "output": "",
+        "answer": "27.0"
+    },
+    {
+        "instruction": "Lana 's favorite band was holding a concert where tickets were 6 dollars each . Lana bought 8 tickets for herself and her friends and 2 extra tickets in case anyone else wanted to go . How much did she spend ?",
+        "input": "",
+        "output": "",
+        "answer": "60.0"
+    },
+    {
+        "instruction": "Craig walked 0.2 mile from school to David 's house and 0.7 mile from David 's house to his own house . How many miles did Craig walk in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.9"
+    },
+    {
+        "instruction": "Helen starts with 82 cards . Gary takes 9 away . How many cards does Helen end with ?",
+        "input": "",
+        "output": "",
+        "answer": "73.0"
+    },
+    {
+        "instruction": "Melanie had 7 dimes in her bank . Her dad gave her 8 dimes and her mother gave her 4 dimes . How many dimes does Melanie have now ?",
+        "input": "",
+        "output": "",
+        "answer": "19.0"
+    },
+    {
+        "instruction": "Tim has saved 2000 cents from selling lemonade .   How many dollars does Tim have ?",
+        "input": "",
+        "output": "",
+        "answer": "20.0"
+    },
+    {
+        "instruction": "A cake recipe requires 0.6 cup of sugar for the frosting and 0.2 cup of sugar for the cake . How much sugar is that altogether ?",
+        "input": "",
+        "output": "",
+        "answer": "0.8"
+    },
+    {
+        "instruction": "Each ticket costs $ 9.00 . How much do 4 tickets cost ?",
+        "input": "",
+        "output": "",
+        "answer": "36.0"
+    },
+    {
+        "instruction": "Joe had 50 toy cars . If he gets 12 more cars , how many cars will he have then ?",
+        "input": "",
+        "output": "",
+        "answer": "62.0"
+    },
+    {
+        "instruction": "There are 54 scissors in the drawer . Keith placed 22 scissors in the drawer . How many scissors are now there in all ?",
+        "input": "",
+        "output": "",
+        "answer": "76"
+    },
+    {
+        "instruction": "Sara has saved 11 quarters from washing cars .   How many cents does Sara have ?",
+        "input": "",
+        "output": "",
+        "answer": "275.0"
+    },
+    {
+        "instruction": "At a restaurant each adult meal costs $ 2 and kids eat free . If a group of 15 people came in and 9 were kids , how much would it cost for the group to eat ?",
+        "input": "",
+        "output": "",
+        "answer": "12.0"
+    },
+    {
+        "instruction": "During a canned food drive , items were sorted into bins . The drive resulted in 0.125 of a bin of soup , 0.125 of a bin of vegetables , and 0.5 of a bin of pasta . Altogether , how many bins would the canned food take up ?",
+        "input": "",
+        "output": "",
+        "answer": "0.75"
+    },
+    {
+        "instruction": "Connie has 323 marbles . Juan has 175 more marbles than Connie . How many marbles does Juan have ?",
+        "input": "",
+        "output": "",
+        "answer": "498.0"
+    },
+    {
+        "instruction": "A pet supply store has 600 bags of dog food and 327 bags of cat food . How many more bags of dog food are there than cat food ?",
+        "input": "",
+        "output": "",
+        "answer": "273.0"
+    },
+    {
+        "instruction": "Each child has 3 oranges . If there are 4 children , how many oranges are there in total ?",
+        "input": "",
+        "output": "",
+        "answer": "12.0"
+    },
+    {
+        "instruction": "A textbook costs a bookstore 44 dollars , and the store sells it for 55 dollars . Find the amount of profit based on the selling price .",
+        "input": "",
+        "output": "",
+        "answer": "11.0"
+    },
+    {
+        "instruction": "Jennifer starts with 7 apples . She finds another 74 . How many apples does Jennifer end with ?",
+        "input": "",
+        "output": "",
+        "answer": "81.0"
+    },
+    {
+        "instruction": "Dan found 56 seashells on the beach , he gave Jessica some of his seashells . He has 22 seashell . How many seashells did he give to Jessica ?",
+        "input": "",
+        "output": "",
+        "answer": "34"
+    },
+    {
+        "instruction": "Our class got 54 books from the library . Then we got 23 more books from the library . How many books did our class get from the library ?",
+        "input": "",
+        "output": "",
+        "answer": "77.0"
+    },
+    {
+        "instruction": "On a recent trip to CA , we averaged 50 miles per hour . On the return trip we averaged 60 miles per hour . Determine the average speed of the trip to CA and back .",
+        "input": "",
+        "output": "",
+        "answer": "54.545"
+    },
+    {
+        "instruction": "There were 27 boys and 35 girls on the playground at recess . How many children were on the playground at recess ?",
+        "input": "",
+        "output": "",
+        "answer": "62.0"
+    },
+    {
+        "instruction": "Kaleen filled a bucket with 0.75 of a gallon of water . A few minutes later , she realized only 0.5 of a gallon of water remained . How much water had leaked out of the bucket ?",
+        "input": "",
+        "output": "",
+        "answer": "0.25"
+    },
+    {
+        "instruction": "Cody is 14 years old . His grandmother is 6 times as old as he is . How old is Cody \u2019s grandmother ?",
+        "input": "",
+        "output": "",
+        "answer": "84.0"
+    },
+    {
+        "instruction": "An airplane flew for 5 hours with a tail wind of 25 kilometers per hour . The return flight against the same wind took 5.5 hours . Find the speed of the airplane in still air .",
+        "input": "",
+        "output": "",
+        "answer": "525.0"
+    },
+    {
+        "instruction": "Michael has 16 blocks stored in boxes . If there are 8 boxes , how many blocks must go in each box ?",
+        "input": "",
+        "output": "",
+        "answer": "2.0"
+    },
+    {
+        "instruction": "John and Jim needed to meet to discuss changes in a construction project . They were 880 miles apart . If they met after 8 hours and both traveled at the same speed , how fast did each go in miles per hour ?",
+        "input": "",
+        "output": "",
+        "answer": "55.0"
+    },
+    {
+        "instruction": "Willie starts with 36 stickers . He gives 7 to Emily . How many stickers does Willie end with ?",
+        "input": "",
+        "output": "",
+        "answer": "29.0"
+    },
+    {
+        "instruction": "Will had 83 dollars . If he spent 47 bucks on a new game , how many 4 dollar toys could he buy with the money he had left ?",
+        "input": "",
+        "output": "",
+        "answer": "9.0"
+    },
+    {
+        "instruction": "2 twice a number increased by 5 is 17 . Find the number .",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "A worksheet had 2 problems on it . If a teacher had 14 worksheets to grade and had already graded 7 of them , how many more problems does she have to grade ?",
+        "input": "",
+        "output": "",
+        "answer": "14.0"
+    },
+    {
+        "instruction": "A restaurant served 6 cakes during lunch and 9 during dinner today . How many cakes were served today ?",
+        "input": "",
+        "output": "",
+        "answer": "15.0"
+    },
+    {
+        "instruction": "A waiter at ' The Greasy Spoon ' restaurant had 39 customers to wait on . During the lunch rush he added another 12 customers . If 49 of the customers did n't leave him a tip , how many customers did leave a tip ?",
+        "input": "",
+        "output": "",
+        "answer": "2.0"
+    },
+    {
+        "instruction": "Manuel opened a savings account with an initial deposit of 177 dollars . If he wants to save 500 dollars during the next 19 weeks , how much must he save each week , in dollars ?",
+        "input": "",
+        "output": "",
+        "answer": "17.0"
+    },
+    {
+        "instruction": "A pet shelter had 3 puppies when another 3 were brought in . If 3 puppies a day are adopted , how long would it take for all of them to be adopted ?",
+        "input": "",
+        "output": "",
+        "answer": "2.0"
+    },
+    {
+        "instruction": "A trivia team had 15 members total , but during a game 6 members did n't show up . If each member that did show up scored 3 points , how many points were scored total ?",
+        "input": "",
+        "output": "",
+        "answer": "27.0"
+    },
+    {
+        "instruction": "Bonnie 's science class recorded the rainfall each day . They recorded 0.16666666666666666 of a centimeter of rain on Monday , 0.4166666666666667 of a centimeter of rain on Tuesday , and 0.08333333333333333 of a centimeter of rain on Wednesday . How many centimeters of rain did the class record in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.6666666666666666"
+    },
+    {
+        "instruction": "Edward was trying to expand his game collection . He bought 41 games from a friend and bought 14 more at a garage sale . If 31 of the games did n't work , how many good games did he end up with ?",
+        "input": "",
+        "output": "",
+        "answer": "24.0"
+    },
+    {
+        "instruction": "Jesse starts with 78 pencils . He gives 44 to Joshua . How many pencils does Jesse end with ?",
+        "input": "",
+        "output": "",
+        "answer": "34.0"
+    },
+    {
+        "instruction": "Stanley ran 0.4 mile and walked 0.2 mile . How much farther did Stanley run than walk ?",
+        "input": "",
+        "output": "",
+        "answer": "0.2"
+    },
+    {
+        "instruction": "A dog is 0.75 its w8 plus 0.75 pounds . How many pounds does the dog weigh ?",
+        "input": "",
+        "output": "",
+        "answer": "3.0"
+    },
+    {
+        "instruction": "Pamela bought 9.8 ounces of sugar , and she spilled 5.2 ounces of it on the floor . How much is left ?",
+        "input": "",
+        "output": "",
+        "answer": "4.6"
+    },
+    {
+        "instruction": "There are 7.75 gallons of water in Becky 's fish tank . If Becky adds 7 gallons more , how many gallons will there be in all ?",
+        "input": "",
+        "output": "",
+        "answer": "14.75"
+    },
+    {
+        "instruction": "There are 43 pencils in the drawer and 19 pencils on the desk . Dan placed 16 pencils on the desk . How many pencils are now there in total ?",
+        "input": "",
+        "output": "",
+        "answer": "78"
+    },
+    {
+        "instruction": "For the school bake sale Bianca made 14 cupcakes . If she sold 6 of them and then made 17 more , how many cupcakes would she have ?",
+        "input": "",
+        "output": "",
+        "answer": "25.0"
+    },
+    {
+        "instruction": "If Sally can paint a house in 4 hours , and John can paint the same house in 6 hours , how long will it take for both of them to paint together ?",
+        "input": "",
+        "output": "",
+        "answer": "2.4"
+    },
+    {
+        "instruction": "Mildred collects 77 oranges . Mildred 's father gives Mildred 2 more . How many oranges does Mildred have ?",
+        "input": "",
+        "output": "",
+        "answer": "79.0"
+    },
+    {
+        "instruction": "A group of 4 friends went into a restaurant . The chef already had 9 chicken wings cooked but cooked 7 more for the group . If they each got the same amount how many would each person get ?",
+        "input": "",
+        "output": "",
+        "answer": "4.0"
+    },
+    {
+        "instruction": "They entered the circus tent and saw that there are 4 sections for the audience . If each section can accommodate 246 people , how many people can the tent accommodate in total ?",
+        "input": "",
+        "output": "",
+        "answer": "984.0"
+    },
+    {
+        "instruction": "Joan purchased a basketball game for $ 5.20 , and a racing game for $ 4.23 . How much did Joan spend on video games ?",
+        "input": "",
+        "output": "",
+        "answer": "9.43"
+    },
+    {
+        "instruction": "There were 16 friends playing a video game online when 7 players quit . If each player left had 8 lives , how many lives did they have total ?",
+        "input": "",
+        "output": "",
+        "answer": "72.0"
+    },
+    {
+        "instruction": "Vanessa and her mom were picking carrots from their garden . Vanessa picked 17 and her mother picked 14 . If only 24 of the carrots were good , how many bad carrots did they have ?",
+        "input": "",
+        "output": "",
+        "answer": "7.0"
+    },
+    {
+        "instruction": "A chef needs to cook 12 potatoes . He has already cooked 6 . If each potato takes 6 minutes to cook , how long will it take him to cook the rest ?",
+        "input": "",
+        "output": "",
+        "answer": "36.0"
+    },
+    {
+        "instruction": "There are 3 eggs in each box . How many eggs are in 2 boxes ?",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "A pet shelter had 8 puppies when another 19 were brought in . If 3 puppies a day are adopted , how long would it take for all of them to be adopted ?",
+        "input": "",
+        "output": "",
+        "answer": "9.0"
+    },
+    {
+        "instruction": "Sam had saved up 8 dollars . If he received another 7 dollars for his allowance , how many 3 dollar toys could he buy ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "The clown blew up 47 balloons . Then he blew up 13 more balloons . How many balloons does the clown have now ?",
+        "input": "",
+        "output": "",
+        "answer": "60.0"
+    },
+    {
+        "instruction": "Keith bought 72 eggs from the store to bake some cakes .   How many dozen eggs did Keith buy ?",
+        "input": "",
+        "output": "",
+        "answer": "6.0"
+    },
+    {
+        "instruction": "Kelly 's chemistry textbook weighs 7.125 pounds and her geometry textbook weighs 0.625 pound . How much more does the chemistry textbook weigh than the geometry textbook ?",
+        "input": "",
+        "output": "",
+        "answer": "6.5"
+    },
+    {
+        "instruction": "Mike picked 123 oranges and Melanie picked 104 oranges . Fred picked 130 apples . How many oranges were picked in total ?",
+        "input": "",
+        "output": "",
+        "answer": "227"
+    },
+    {
+        "instruction": "Sara 's high school played 12 basketball games this year . The team won most of their games . They were defeated during 4 games . How many games did they win ?",
+        "input": "",
+        "output": "",
+        "answer": "8.0"
+    },
+    {
+        "instruction": "Lillian collects 88 candies . Lillian 's father gives Lillian 5 more . How many candies does Lillian have ?",
+        "input": "",
+        "output": "",
+        "answer": "93.0"
+    },
+    {
+        "instruction": "Craig has 20 apples . Judy has 11 apples . He shares 7 with Eugene . How many apples will Craig have ?",
+        "input": "",
+        "output": "",
+        "answer": "13.0"
+    },
+    {
+        "instruction": "There were a total of 10 soccer games in the season . The season is played for 5 months . How many soccer games were played each month , if each month has the same number of games ?",
+        "input": "",
+        "output": "",
+        "answer": "2.0"
+    },
+    {
+        "instruction": "There were 73 bales of hay in the barn . Jason stacked bales in the barn today . There are now 96 bales of hay in the barn . How many bales did he store in the barn ?",
+        "input": "",
+        "output": "",
+        "answer": "23"
+    },
+    {
+        "instruction": "An artist has 30 kilograms of an alloy that is 45 % copper . How many kilograms of a second alloy that is 70 % copper should be mixed with the first alloy to get a new alloy that is 60 % copper",
+        "input": "",
+        "output": "",
+        "answer": "45.0"
+    },
+    {
+        "instruction": "Ron weighed 2 colored metal balls during a science class . The blue ball weighed 6 pounds and the brown ball weighed 3.12 pounds . If Ron places both balls on the scale at the same time , what will the scale read ?",
+        "input": "",
+        "output": "",
+        "answer": "9.12"
+    },
+    {
+        "instruction": "A construction company is repaving a damaged road . So far , they have repaved a total of 4938 inches of the road . Today , they repaved 805 inches of the road . How many inches of the road had they repaved before today ?",
+        "input": "",
+        "output": "",
+        "answer": "4133.0"
+    },
+    {
+        "instruction": "A teacher had 38 worksheets to grade . If she graded 4 , but then another 15 were turned in , how many worksheets would she have to grade ?",
+        "input": "",
+        "output": "",
+        "answer": "49.0"
+    },
+    {
+        "instruction": "Kristi jogged for 0.6 of an hour , swam for 0.5 of an hour , and rode her bicycle for 0.75 of an hour . How long did she exercise ?",
+        "input": "",
+        "output": "",
+        "answer": "1.85"
+    },
+    {
+        "instruction": "For his long distance phone service Milan pays a 2 dollars monthly fee plus 12 cents per minute . Last month , Milan 's long distance bill was 23.36 dollars . For how many minutes was Milan billed for ?",
+        "input": "",
+        "output": "",
+        "answer": "178.0"
+    },
+    {
+        "instruction": "Recently , the value of Kate 's retirement fund decreased by $ 12 . If her fund was worth $ 1472 before , how much is it worth now ?",
+        "input": "",
+        "output": "",
+        "answer": "1460.0"
+    },
+    {
+        "instruction": "Amy starts with 7 peanuts . Gerald gives Amy 55 more . How many peanuts does Amy end with ?",
+        "input": "",
+        "output": "",
+        "answer": "62.0"
+    },
+    {
+        "instruction": "A waiter had 14 customers to wait on . If 3 customers left and he got another 39 customers , how many customers would he have ?",
+        "input": "",
+        "output": "",
+        "answer": "50.0"
+    },
+    {
+        "instruction": "There are 6 pencils and 7 rulers in the drawer . Benny placed 3 pencils in the drawer . How many pencils are now there in total ?",
+        "input": "",
+        "output": "",
+        "answer": "9"
+    },
+    {
+        "instruction": "Bridget has 4 Skittles . Henry has 4 Skittles . If Henry gives all of his Skittles to Bridget , how many Skittles will Bridget have ?",
+        "input": "",
+        "output": "",
+        "answer": "8.0"
+    },
+    {
+        "instruction": "Lucy has 212 fish . How many more fish does Lucy need to buy to have 280 fish ?",
+        "input": "",
+        "output": "",
+        "answer": "68.0"
+    },
+    {
+        "instruction": "April 's discount flowers was having a sale where each flower was 3 dollars . If Zoe bought 8 roses and 2 daisies , how much did she spend ?",
+        "input": "",
+        "output": "",
+        "answer": "30.0"
+    },
+    {
+        "instruction": "For the school bake sale Chloe made 28 cupcakes . If she sold 25 of them and then made 8 more , how many cupcakes would she have ?",
+        "input": "",
+        "output": "",
+        "answer": "11.0"
+    },
+    {
+        "instruction": "Marilyn starts with 51 bottle caps . She shares 36 with Nancy . How many bottle caps does Marilyn end with ?",
+        "input": "",
+        "output": "",
+        "answer": "15.0"
+    },
+    {
+        "instruction": "Rachel was unboxing some of her old winter clothes . She found 7 boxes of clothing and inside each box there were 3 scarves and 4 mittens . How many pieces of winter clothing did Rachel have total ?",
+        "input": "",
+        "output": "",
+        "answer": "49.0"
+    },
+    {
+        "instruction": "Sarah had 55 homework problems . She finished 6 of them but still had 7 pages of problems to do . If each page has the same number of problems on it , how many problems are on each page ?",
+        "input": "",
+        "output": "",
+        "answer": "7.0"
+    },
+    {
+        "instruction": "There were a total of 8 football games this year , 4 are played at night . Keith missed 4 of the games . How many football games did Keith go to in total ?",
+        "input": "",
+        "output": "",
+        "answer": "4"
+    },
+    {
+        "instruction": "As part of a lesson on earthquakes , a science class is researching the movement of a nearby fault line . The fault line moved 1.25 inches during the past year and 5.25 inches the year before . How far did the fault line move in all ?",
+        "input": "",
+        "output": "",
+        "answer": "6.5"
+    },
+    {
+        "instruction": "A company invited 45 people to a luncheon , but 35 of them did n't show up . If the tables they had held 2 people each , how many tables do they need ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "Robin uploaded 35 pictures from her phone and 5 from her camera to facebook . If she sorted the pics into 5 different albums with the same amount of pics in each album , how many pictures were in each of the albums ?",
+        "input": "",
+        "output": "",
+        "answer": "8.0"
+    },
+    {
+        "instruction": "Keith loves trading cards . She bought 4 packs of Digimon cards for $ 4.45 each , and a deck of baseball cards for $ 6.06 . How much did Keith spend on cards ?",
+        "input": "",
+        "output": "",
+        "answer": "23.86"
+    },
+    {
+        "instruction": "Jason has 18 books and he has read 9 of them . Mary has 42 books . How many books do they have together ?",
+        "input": "",
+        "output": "",
+        "answer": "60"
+    },
+    {
+        "instruction": "Mildred weighs 59 pounds . Carol weighs 9 pounds . How much heavier is Mildred than Carol ?",
+        "input": "",
+        "output": "",
+        "answer": "50.0"
+    },
+    {
+        "instruction": "0.20 of a number decreased by 4 is equal to 6 . Find the number .",
+        "input": "",
+        "output": "",
+        "answer": "50.0"
+    },
+    {
+        "instruction": "Jane has 28 old , brown sheets of drawing paper and 27 old , yellow sheets of drawing paper . How many pieces of drawing paper does she   have ?",
+        "input": "",
+        "output": "",
+        "answer": "55.0"
+    },
+    {
+        "instruction": "A cell phone company has a total of 7422 customers across the world . If 723 of its customers live in the United States , how many of its customers live in other countries ?",
+        "input": "",
+        "output": "",
+        "answer": "6699.0"
+    },
+    {
+        "instruction": "Hannah 's Vegetarian Restaurant bought 0.3333333333333333 pound of green peppers and 0.3333333333333333 pound of red peppers . How many pounds of peppers did Hannah 's Vegetarian Restaurant buy in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.6666666666666666"
+    },
+    {
+        "instruction": "256 students are going to the zoo . They have to be divided into groups so that each teacher has one group . There are 8 teachers . How many   students will be in each group ?",
+        "input": "",
+        "output": "",
+        "answer": "32.0"
+    },
+    {
+        "instruction": "Oliver was organizing his baseball cards in a binder with 3 on each page . If he had 2 new cards and 10 old cards to put in the binder , how many pages would he use ?",
+        "input": "",
+        "output": "",
+        "answer": "4.0"
+    },
+    {
+        "instruction": "Vanessa had 13 music files and 30 video files on her flash drive . If she deleted 10 of the files , how many files were still on her flash drive ?",
+        "input": "",
+        "output": "",
+        "answer": "33.0"
+    },
+    {
+        "instruction": "For the school bake sale Wendy made pastries . She baked 41 cupcakes and 31 cookies . After the sale she had 32 to take back home . How many pastries did she sell ?",
+        "input": "",
+        "output": "",
+        "answer": "40.0"
+    },
+    {
+        "instruction": "Fred has 5 baseball cards . Melanie bought 3 of Fred 's   baseball cards . How many baseball cards does Fred have now ?",
+        "input": "",
+        "output": "",
+        "answer": "2.0"
+    },
+    {
+        "instruction": "Charles has 4 apples . Jessica gives Charles 39 more . How many apples does Charles have in all ?",
+        "input": "",
+        "output": "",
+        "answer": "43.0"
+    },
+    {
+        "instruction": "A physician 's assistant measures a child and finds that his h8 is 41.5 inches . At his last visit to the doctor 's office , the child was 38.5 inches tall . How much did the child grow , in inches ?",
+        "input": "",
+        "output": "",
+        "answer": "3.0"
+    },
+    {
+        "instruction": "Carson \u2019s teacher gives out gold stars for great math work . Yesterday , Carson earned 6 gold stars . Today , he earned 9 more . How many gold   stars did Carson earn in all ?",
+        "input": "",
+        "output": "",
+        "answer": "15.0"
+    },
+    {
+        "instruction": "Your class is having a pizza party . You buy 5 pizzas . Each pizza has 4 slices . How many slices is that altogether ?",
+        "input": "",
+        "output": "",
+        "answer": "20.0"
+    },
+    {
+        "instruction": "Sam had 98 pennies in his bank . He spent 93 of his pennies . How many pennies does he have now ?",
+        "input": "",
+        "output": "",
+        "answer": "5"
+    },
+    {
+        "instruction": "Bob will rent a car for the weekend . He can choose one of 2 payment plans . The first plan costs 57.98 for 2 days plus 13 cents per mile . The second plan costs 45.98 for 2 days plus 18 cents per mile . How many miles does Bob need to drive for the 2 plans to cost the same ?",
+        "input": "",
+        "output": "",
+        "answer": "240.0"
+    },
+    {
+        "instruction": "Joan had 5 dimes in her bank . She spent 2 of her dimes . How many dimes does she have now ?",
+        "input": "",
+        "output": "",
+        "answer": "3"
+    },
+    {
+        "instruction": "Roger earned 9 dollars for each lawn he mowed . If he had 14 lawns to mow , but forgot to mow 8 of them , how much money did he actually earn ?",
+        "input": "",
+        "output": "",
+        "answer": "54.0"
+    },
+    {
+        "instruction": "Will was working as a sacker at a grocery store where he made 8 dollars an hour . On Monday he worked 8 hours and on Tuesday he worked 2 hours . How much money did Will make in those two days ?",
+        "input": "",
+        "output": "",
+        "answer": "80.0"
+    },
+    {
+        "instruction": "There are 544 pots . Each pot has 32 flowers in it . How many flowers are there in all ?",
+        "input": "",
+        "output": "",
+        "answer": "17408.0"
+    },
+    {
+        "instruction": "William has 2 bottle caps . He buys 41 more . How many bottle caps does William have in all ?",
+        "input": "",
+        "output": "",
+        "answer": "43.0"
+    },
+    {
+        "instruction": "Jason grew 37 watermelons and 30 pumpkins . Sandy grew 11 watermelons . How many watermelons did they grow in total ?",
+        "input": "",
+        "output": "",
+        "answer": "48"
+    },
+    {
+        "instruction": "3 owls were sitting on the fence . 2 more owls joined them . How many owls are on the fence now ?",
+        "input": "",
+        "output": "",
+        "answer": "5.0"
+    },
+    {
+        "instruction": "Harry Hound had a terrible earache yesterday . When I peered into his ears yesterday , I found 36 frisky fleas having a party in his right ear and   85 baby fleas sleeping peacefully in his left ear . I cleaned out Harry   Hound 's ears . How many fleas perished ?",
+        "input": "",
+        "output": "",
+        "answer": "121.0"
+    },
+    {
+        "instruction": "There were 44 boys and 53 girls on the playground at recess . How many children were on the playground in all ?",
+        "input": "",
+        "output": "",
+        "answer": "97.0"
+    },
+    {
+        "instruction": "Larry starts with 91 cards . 17 are eaten by a hippopotamus . How many cards does Larry end with ?",
+        "input": "",
+        "output": "",
+        "answer": "74.0"
+    },
+    {
+        "instruction": "Paco 's Countertop Company purchased pieces of marble from a quarry . The weights of the pieces they purchased were 0.3333333333333333 ton , 0.3333333333333333 ton , and 0.08333333333333333 ton . How many tons of marble did Paco 's Countertop Company purchase in all ?",
+        "input": "",
+        "output": "",
+        "answer": "0.75"
+    },
+    {
+        "instruction": "There were 3409 pieces of candy in a jar . If 145 pieces were red and the rest were blue , how many were blue ?",
+        "input": "",
+        "output": "",
+        "answer": "3264.0"
+    },
+    {
+        "instruction": "Mike has 87 baseball cards . Sam bought 13 of Mike 's   baseball cards . How many baseball cards does Mike have now ?",
+        "input": "",
+        "output": "",
+        "answer": "74.0"
+    },
+    {
+        "instruction": "0.5 of the students in the band are in the trumpet section . 0.125 of the students in the band are in the trombone section . What fraction of the students in the band are in either the trumpet section or the trombone section ?",
+        "input": "",
+        "output": "",
+        "answer": "0.625"
+    }
+]

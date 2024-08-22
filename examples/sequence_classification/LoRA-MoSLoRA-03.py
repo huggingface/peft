@@ -21,23 +21,34 @@ import evaluate
 from datasets import load_dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed
 from tqdm import tqdm
+from transformers import RobertaConfig
 
 import fire
 
-def run(seed):
+def run(seed=0):
+
     torch.manual_seed(seed)
 
     print("using seed:", seed)
-
-    batch_size = 32
+    
     model_name_or_path = "roberta-large"
-    task = "mrpc"
+    task = "qnli"
     peft_type = PeftType.LORA
-    device = "cuda"
-    num_epochs = 20
+    device = "cuda:1"
+    num_epochs = 10
 
-    peft_config = LoraConfig(task_type="SEQ_CLS", inference_mode=False, r=8, lora_alpha=16, lora_dropout=0.1, use_moslora=True)
-    lr = 3e-4
+    key1, key2 = "sentence1", "sentence2"
+    val_key = "validation"
+    if task == "mrpc": #3668/408/1725
+        batch_size = 32
+    elif task == "qnli": # 104743/5463/5463
+        key1, key2 = "question", "sentence"
+        batch_size = 8
+    else:
+        raise NotImplementedError
+
+    peft_config = LoraConfig(task_type="SEQ_CLS", inference_mode=False, r=8, lora_alpha=16, lora_dropout=0.1, use_moslora=2)
+    lr = 1e-4
 
     if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
         padding_side = "left"
@@ -54,14 +65,14 @@ def run(seed):
 
     def tokenize_function(examples):
         # max_length=None => use the model max length (it's actually the default)
-        outputs = tokenizer(examples["sentence1"], examples["sentence2"], truncation=True, max_length=None)
+        outputs = tokenizer(examples[key1], examples[key2], truncation=True, max_length=None)
         return outputs
 
 
     tokenized_datasets = datasets.map(
         tokenize_function,
         batched=True,
-        remove_columns=["idx", "sentence1", "sentence2"],
+        remove_columns=["idx", key1, key2],
     )
 
     # We also rename the 'label' column to 'labels' which is the expected name for labels by the models of the
@@ -70,16 +81,18 @@ def run(seed):
 
 
     def collate_fn(examples):
-        return tokenizer.pad(examples, padding="longest", return_tensors="pt")
-
+        return tokenizer.pad(examples, padding=True, max_length=512, return_tensors="pt")
 
     # Instantiate dataloaders.
     train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size)
     eval_dataloader = DataLoader(
-        tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
+        tokenized_datasets[val_key], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
     )
 
-    model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
+    config = RobertaConfig.from_pretrained(model_name_or_path)
+    config.return_dict=True
+    model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, config=config)
+
     model = get_peft_model(model, peft_config)
 
     #! you need to modifiy the layer.py in lora first
