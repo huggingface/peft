@@ -15,7 +15,7 @@
 import pytest
 import torch
 from torch import nn
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoModelForSequenceClassification
 
 from peft import LoraConfig, get_peft_model
 
@@ -74,6 +74,23 @@ def test_modules_to_save_targets_module_dict_raises(cls):
     msg = "modules_to_save cannot be applied to modules of type"
     with pytest.raises(TypeError, match=msg):
         get_peft_model(model=model, peft_config=peft_config)
+
+
+def test_modules_to_save_targets_tuner_layer_raises():
+    # See e.g. issue 2027
+    # Prevent users from (accidentally) targeting the same layer both with a tuner and modules_to_save. Normally, PEFT
+    # will not target the same layer with both a tuner and ModulesToSaveWrapper. However, if modules_to_save is
+    # automatically inferred, e.g. when using AutoModelForSequenceClassification, the ModulesToSaveWrapper is applied ex
+    # post, which can lead to the double wrapping.
+    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+    model = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+    # Note: target_modules="all-linear" would also work and is closer to the original issue, but let's explicitly target
+    # "score" here in case that "all-linear" will be fixed to no longer target the score layer.
+    peft_config = LoraConfig(target_modules=["score"], task_type="SEQ_CLS")
+    msg = "modules_to_save cannot be applied to modules of type"
+    with pytest.raises(TypeError, match=msg):
+        get_peft_model(model, peft_config)
 
 
 def test_get_peft_model_revision_warning(tmp_path):
