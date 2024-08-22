@@ -202,7 +202,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # ModuleList, even though their forward methods cannot be called
         forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
         if isinstance(self.original_module, forbidden_classes):
-            cls_name = self.original_module.__class__.__name__
+            cls_name = self.original_module.__class__
+            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
+
+        # local import to avoid circular import
+        from peft.tuners.tuners_utils import BaseTunerLayer
+
+        if isinstance(self.original_module, BaseTunerLayer):
+            # e.g. applying modules_to_save to a lora layer makes no sense
+            cls_name = self.original_module.__class__
             raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
 
     @property
