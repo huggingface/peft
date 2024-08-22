@@ -23,7 +23,13 @@ import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
-from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
+from transformers import (
+    AutoModel,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
+    BitsAndBytesConfig,
+)
 
 from peft import (
     AdaptionPromptConfig,
@@ -42,7 +48,7 @@ from peft.tuners.tuners_utils import (
     check_target_module_exists,
     inspect_matched_modules,
 )
-from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, infer_device
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 
 from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
 
@@ -329,6 +335,23 @@ class PeftCustomKwargsTester(unittest.TestCase):
             match="Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
+
+    def test_maybe_include_all_linear_does_not_target_classifier_head(self):
+        # See issue 2027
+        # Ensure that if a SEQ_CLS model is being used with target_modules="all-linear", the classification head is not
+        # targeted by the adapter layer.
+        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=10)
+        # sanity check
+        assert isinstance(model.score, nn.Linear)
+
+        config = LoraConfig(task_type="SEQ_CLS", target_modules="all-linear")
+        model = get_peft_model(model, config)
+        assert isinstance(model.base_model.score, ModulesToSaveWrapper)
+
+        # the bug was that these were lora.Linear instances
+        assert isinstance(model.base_model.score.original_module, nn.Linear)
+        assert isinstance(model.base_model.score.modules_to_save["default"], nn.Linear)
 
 
 class MLP(nn.Module):
