@@ -428,7 +428,13 @@ class BaseTuner(nn.Module, ABC):
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        self._warn_if_tied_embeddings_in_target_modules(model=model)
+        tied_target_modules = self._get_tied_target_modeules(model=model)
+        if tied_target_modules:
+            warnings.warn(
+                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
+                "This can lead to complications, for example when merging the adapter. "
+                f"See for example https://github.com/huggingface/peft/issues/2018."
+            )
 
         # Handle X-LoRA case.
         if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
@@ -495,22 +501,29 @@ class BaseTuner(nn.Module, ABC):
             raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
     @staticmethod
-    def get_model_config(model, default={"model_type": "custom"}):
+    def get_model_config(model: nn.Module, default: dict | None = {"model_type": "custom"}) -> dict:
+        """
+        This method gets the config from a model in dictionary form.
+
+        Args:
+            model (`nn.Module`):
+                Model to get the config from.
+            default (`dict|None`, *optional*)::
+                What to return if model does not have a config attribute.
+        """
         model_config = getattr(model, "config", default)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
         return model_config
 
-    def _warn_if_tied_embeddings_in_target_modules(self, model):
+    def _get_tied_target_modeules(self, model):
+        tied_target_modules = []
         model_config = self.get_model_config(model)
         if model_config.get("tie_word_embeddings"):
             for target_module in self.targeted_module_names:
                 if target_module in EMBEDDING_LAYER_NAMES:
-                    warnings.warn(
-                        f"{model_config.get('tie_word_embeddings')=} and the tied {target_module=} is part of the adapter. "
-                        "This can lead to complications, for example when merging the adapter. "
-                        f"See for example https://github.com/huggingface/peft/issues/2018."
-                    )
+                    tied_target_modules.append(target_module)
+        return tied_target_modules
 
 
 class BaseTunerLayer(ABC):
