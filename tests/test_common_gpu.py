@@ -54,8 +54,15 @@ from peft import (
 )
 from peft.import_utils import is_bnb_4bit_available, is_bnb_available
 from peft.tuners.lora.config import LoraRuntimeConfig
+from peft.utils import infer_device
 
-from .testing_utils import require_bitsandbytes, require_torch_gpu, require_torch_multi_gpu
+from .testing_utils import (
+    require_bitsandbytes,
+    require_multi_accelerator,
+    require_non_cpu,
+    require_torch_gpu,
+    require_torch_multi_gpu,
+)
 
 
 if is_bnb_available():
@@ -69,7 +76,7 @@ if is_bnb_available():
         from peft.tuners.lora import Linear4bit as LoraLinear4bit
 
 
-@require_torch_gpu
+@require_non_cpu
 class PeftGPUCommonTests(unittest.TestCase):
     r"""
     A common tester to run common operations that are performed on GPU such as generation, loading in 8bit, etc.
@@ -79,8 +86,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         self.seq2seq_model_id = "google/flan-t5-base"
         self.causal_lm_model_id = "facebook/opt-350m"
         self.audio_model_id = "openai/whisper-large"
-        if torch.cuda.is_available():
-            self.device = torch.device("cuda:0")
+        self.device = infer_device()
 
     def tearDown(self):
         r"""
@@ -893,14 +899,14 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_adapter0[1::3], out_mixed[1::3], atol=atol, rtol=rtol)
         assert torch.allclose(out_adapter1[2::3], out_mixed[2::3], atol=atol, rtol=rtol)
 
-    @require_torch_gpu
+    @require_non_cpu
     @pytest.mark.single_gpu_tests
     def test_serialization_shared_tensors(self):
         model_checkpoint = "roberta-base"
         peft_config = LoraConfig(
             task_type=TaskType.TOKEN_CLS, inference_mode=False, r=16, lora_alpha=16, lora_dropout=0.1, bias="all"
         )
-        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to("cuda")
+        model = AutoModelForTokenClassification.from_pretrained(model_checkpoint, num_labels=11).to(self.device)
         model = get_peft_model(model, peft_config)
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1088,7 +1094,6 @@ class PeftGPUCommonTests(unittest.TestCase):
         assert torch.allclose(out_dora, out_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(out_dora, out_unloaded, atol=atol, rtol=rtol)
 
-    @require_torch_gpu
     @pytest.mark.single_gpu_tests
     def test_dora_ephemeral_gpu_offload(self):
         torch.manual_seed(0)
@@ -1140,8 +1145,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         # The results should be the same
         assert torch.allclose(out_peft_model_cpu, out_peft_model_ego)
 
-    @require_torch_gpu
-    @require_torch_multi_gpu
+    @require_multi_accelerator
     @pytest.mark.multi_gpu_tests
     def test_dora_ephemeral_gpu_offload_multigpu(self):
         torch.manual_seed(0)
@@ -1162,7 +1166,7 @@ class PeftGPUCommonTests(unittest.TestCase):
         layer = peft_model.base_model.model.model.decoder.layers[0].self_attn.v_proj
         lora_A, lora_B = layer.lora_A, layer.lora_B
 
-        possible_combinations = ["cpu", "cuda", "cuda:0", "cuda:1"]
+        possible_combinations = ["cpu", self.device, f"{self.device}:0", f"{self.device}:1"]
         for device_A in possible_combinations:
             la = lora_A.to(device_A)
             for device_B in possible_combinations:
