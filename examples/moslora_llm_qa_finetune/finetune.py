@@ -131,6 +131,16 @@ def train(
         )
     model = get_peft_model(model, config)
 
+    if use_moslora == 2:
+        #! you need to modifiy the layer.py in lora first
+        print("using moslora_init, for test only!")
+        for name, module in model.named_parameters():
+            if "lora_mixer" in name:
+                module.requires_grad_(False)
+            print("*", end="")
+    
+    for param in model.parameters(): 
+        param.data = param.data.contiguous()
 
     if data_path.endswith(".json"):  # todo: support jsonl
         data = load_dataset("json", data_files=data_path)
@@ -185,12 +195,13 @@ def train(
     )
     model.config.use_cache = False
 
-    old_state_dict = model.state_dict
-    model.state_dict = (
-        lambda self, *_, **__: get_peft_model_state_dict(
-            self, old_state_dict()
-        )
-    ).__get__(model, type(model))
+    # https://blog.csdn.net/qq_16555103/article/details/136921779
+    # old_state_dict = model.state_dict
+    # model.state_dict = (
+    #     lambda self, *_, **__: get_peft_model_state_dict(
+    #         self, old_state_dict()
+    #     )
+    # ).__get__(model, type(model))
 
     # if torch.__version__ >= "2" and sys.platform != "win32":
     #     model = torch.compile(model) # python 3.12+
