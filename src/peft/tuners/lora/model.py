@@ -447,10 +447,10 @@ class LoraModel(BaseTuner):
 
         Currently gptq quantization and replicated layers do not support merging.
         """
-        tied_target_modeules = self._get_tied_target_modeules(self.model)
-        if tied_target_modeules:
+        tied_target_modules = self._get_tied_target_modules(self.model)
+        if tied_target_modules:
             warnings.warn(
-                f"Model with `tie_word_embeddings=True` and the {tied_target_modeules=} are part of the adapter. "
+                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
                 "This can lead to complications when merging the adapter. "
                 "You can opt to merge the adapter after cloning the weights (to untie the embeddings), "
                 "and then load the merged model with `tie_word_embeddings=False`: "

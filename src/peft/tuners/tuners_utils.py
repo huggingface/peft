@@ -428,7 +428,7 @@ class BaseTuner(nn.Module, ABC):
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
 
-        tied_target_modules = self._get_tied_target_modeules(model=model)
+        tied_target_modules = self._get_tied_target_modules(model=model)
         if tied_target_modules:
             warnings.warn(
                 f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
@@ -516,7 +516,7 @@ class BaseTuner(nn.Module, ABC):
             model_config = model_config.to_dict()
         return model_config
 
-    def _get_tied_target_modeules(self, model):
+    def _get_tied_target_modules(self, model):
         tied_target_modules = []
         model_config = self.get_model_config(model)
         if model_config.get("tie_word_embeddings"):
