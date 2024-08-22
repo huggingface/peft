@@ -453,7 +453,7 @@ class LoraModel(BaseTuner):
                 f"Model with `tie_word_embeddings=True` and the {tied_target_modeules=} are part of the adapter. "
                 "This can lead to complications when merging the adapter. "
                 "You can opt to merge the adapter after cloning the weights (to untie the embeddings), "
-                "and then load the merged model `tie_word_embeddings=False`: "
+                "and then load the merged model with `tie_word_embeddings=False`: "
                 "\n```python\nAutoModelForCausalLM.from_pretrained('path/to/merged/model', tie_word_embeddings=False)\n```\n"
             )
         if getattr(self.model, "quantization_method", None) == "gptq":
