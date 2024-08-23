@@ -107,6 +107,32 @@ class DoraLinearLayer(nn.Module):
         return "lora.dora." + rep
 
 
+class DoraEmbeddingLayer(DoraLinearLayer):
+    def forward(self, x, *, lora_A, lora_B, scaling, base_layer, embed_fn):
+        """
+        For DoRA, calculate the extra output from LoRA with DoRA applied. This should be added on top of the base layer
+        output.
+        """
+        lora_weight = (lora_A @ lora_B).T
+        magnitude = self.weight
+        weight = base_layer.weight
+        weight_norm = self.get_weight_norm(weight, lora_weight.detach(), scaling)
+        # see section 4.3 of DoRA (https://arxiv.org/abs/2402.09353)
+        # "[...] we suggest treating ||V +∆V ||_c in
+        # Eq. (5) as a constant, thereby detaching it from the gradient
+        # graph. This means that while ||V + ∆V ||_c dynamically
+        # reflects the updates of ∆V , it won’t receive any gradient
+        # during backpropagation"
+        weight_norm = weight_norm.detach()
+        mag_norm_scale = magnitude / weight_norm
+        result_dora = mag_norm_scale * (embed_fn(x, lora_A) @ lora_B) * scaling
+        return mag_norm_scale, result_dora
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora.dora." + rep
+
+
 class DoraConv2dLayer(DoraLinearLayer):
     def get_weight_norm(self, weight, lora_weight, scaling) -> torch.Tensor:
         # calculate L2 norm of weight matrix, column-wise
