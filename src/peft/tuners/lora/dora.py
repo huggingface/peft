@@ -125,10 +125,8 @@ class DoraEmbeddingLayer(DoraLinearLayer):
         # during backpropagation"
         weight_norm = weight_norm.detach()
         mag_norm_scale = magnitude / weight_norm
-        result_dora = (mag_norm_scale - 1) * embed_fn(x, weight) + mag_norm_scale * (
-            embed_fn(x, lora_A) @ lora_B
-        ) * scaling
-        return result_dora
+        result_dora = mag_norm_scale * (embed_fn(x, lora_A) @ lora_B) * scaling
+        return mag_norm_scale, result_dora
 
     def __repr__(self) -> str:
         rep = super().__repr__()

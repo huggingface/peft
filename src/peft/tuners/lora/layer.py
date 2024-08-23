@@ -805,7 +805,7 @@ class Embedding(nn.Module, LoraLayer):
                     after_A = self._embed(x, embedding_A)
                     result = result + (after_A @ embedding_B) * scaling
                 else:
-                    result = result + self.lora_magnitude_vector[active_adapter](
+                    mag_norm_scale, dora_result = self.lora_magnitude_vector[active_adapter](
                         x,
                         lora_A=embedding_A,
                         lora_B=embedding_B,
@@ -813,6 +813,7 @@ class Embedding(nn.Module, LoraLayer):
                         base_layer=self.get_base_layer(),
                         embed_fn=self._embed,
                     )
+                    result = mag_norm_scale * result + dora_result
             result = result.to(torch_result_dtype)
 
         return result
