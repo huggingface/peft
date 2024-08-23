@@ -30,7 +30,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_TARGET_MODULES
+from peft.utils.constants import DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -824,11 +824,13 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
         module_names_to_exclude.add(last_module_name)
     elif peft_config.task_type == TaskType.SEQ_CLS:
         # ignore classifier head for classification models (issue 2027)
-        # there is no fix name for the classifier head, "score" and "classifier" are most common
-        cls_head = getattr(model, "score", None) or getattr(model, "classifier", None)
-        if cls_head is not None:
-            last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
-            module_names_to_exclude.add(last_module_name)
+        # there is no fix name for the classifier head, so check the common ones
+        for name in SEQ_CLS_HEAD_NAMES:
+            cls_head = getattr(model, name, None)
+            if cls_head is not None:
+                last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
+                module_names_to_exclude.add(last_module_name)
+                break
 
     linear_module_names -= module_names_to_exclude
     peft_config.target_modules = linear_module_names
