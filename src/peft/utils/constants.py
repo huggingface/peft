@@ -257,6 +257,7 @@ WEIGHTS_NAME = "adapter_model.bin"
 SAFETENSORS_WEIGHTS_NAME = "adapter_model.safetensors"
 CONFIG_NAME = "adapter_config.json"
 EMBEDDING_LAYER_NAMES = ["embed_tokens", "lm_head"]
+SEQ_CLS_HEAD_NAMES = ["score", "classifier"]
 INCLUDE_LINEAR_LAYERS_SHORTHAND = "all-linear"
 TOKENIZER_CONFIG_NAME = "tokenizer_config.json"
 DUMMY_TARGET_MODULES = "dummy-target-modules"
