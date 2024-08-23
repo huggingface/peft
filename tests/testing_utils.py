@@ -60,6 +60,16 @@ def require_torch_multi_gpu(test_case):
         return test_case
 
 
+def require_multi_accelerator(test_case):
+    """
+    Decorator marking a test that requires multiple hardware accelerators. These tests are skipped on a machine without
+    multiple accelerators.
+    """
+    return unittest.skipUnless(
+        torch_device != "cpu" and device_count > 1, "test requires multiple hardware accelerators"
+    )(test_case)
+
+
 def require_bitsandbytes(test_case):
     """
     Decorator marking a test that requires the bitsandbytes library. Will be skipped when the library is not installed.
