@@ -20,6 +20,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from accelerate.utils.imports import is_xpu_available
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
@@ -266,11 +267,14 @@ class LoraLayer(BaseTunerLayer):
         lora_B = self.lora_B[adapter_name].weight
         place_on_cpu = self.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
         if self.ephemeral_gpu_offload:
-            if lora_A.device.type == "cuda":
+            if lora_A.device.type in ["cuda", "xpu"]:
                 lora_B = lora_B.to(lora_A.device)
             else:
-                if lora_B.device.type != "cuda":
-                    lora_B = lora_B.to("cuda")
+                if lora_B.device.type not in ["cuda", "xpu"]:
+                    if is_xpu_available():
+                        lora_B = lora_B.to("xpu")
+                    else:
+                        lora_B = lora_B.to("cuda")
                 lora_A = lora_A.to(lora_B.device)
         scaling = self.scaling[adapter_name]
         dora_layer.update_layer(
