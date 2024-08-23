@@ -30,8 +30,8 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_TARGET_MODULES
-from peft.utils.peft_types import PeftType
+from peft.utils.constants import DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES
+from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
 from ..utils import ModulesToSaveWrapper, _get_submodules
@@ -812,11 +812,25 @@ def _maybe_include_all_linear_layers(peft_config: PeftConfig, model: nn.Module) 
             names = name.rsplit(".", 1)[-1]  # get the base name
             linear_module_names.add(names)
 
-    # ignore the last classification head for text generation models
+    # Try to remove linear layers that should not be targeted as best as possible. We have to rely on convention as
+    # there are no hard rules to detect these modules.
+    module_names_to_exclude = set()
     output_emb = model.get_output_embeddings()
     if output_emb is not None:
+        # ignore the last classification head for text generation models
         last_module_name = [name for name, module in model.named_modules() if module is output_emb][0]
-        linear_module_names -= {last_module_name}
+        module_names_to_exclude.add(last_module_name)
+    elif peft_config.task_type == TaskType.SEQ_CLS:
+        # ignore classifier head for classification models (issue 2027)
+        # there is no fix name for the classifier head, so check the common ones
+        for name in SEQ_CLS_HEAD_NAMES:
+            cls_head = getattr(model, name, None)
+            if cls_head is not None:
+                last_module_name = [name for name, module in model.named_modules() if module is cls_head][0]
+                module_names_to_exclude.add(last_module_name)
+                break
+
+    linear_module_names -= module_names_to_exclude
     peft_config.target_modules = linear_module_names
     return peft_config
 
