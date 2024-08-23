@@ -23,7 +23,13 @@ import torch
 from diffusers import StableDiffusionPipeline
 from parameterized import parameterized
 from torch import nn
-from transformers import AutoModel, AutoModelForCausalLM, AutoModelForSeq2SeqLM, BitsAndBytesConfig
+from transformers import (
+    AutoModel,
+    AutoModelForCausalLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSequenceClassification,
+    BitsAndBytesConfig,
+)
 
 from peft import (
     AdaptionPromptConfig,
@@ -42,9 +48,9 @@ from peft.tuners.tuners_utils import (
     check_target_module_exists,
     inspect_matched_modules,
 )
-from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
+from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 
-from .testing_utils import require_bitsandbytes, require_torch_gpu
+from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
 
 
 # Implements tests for regex matching logic common for all BaseTuner subclasses, and
@@ -291,7 +297,7 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # compare the two models and assert that all layers are of the same type
         for name, actual_module in actual_model.named_modules():
             expected_module = expected_model_module_dict[name]
-            assert type(actual_module) == type(expected_module)
+            assert type(actual_module) is type(expected_module)
 
     def test_maybe_include_all_linear_layers_ia3_loha(self):
         model_id, initial_target_modules, expected_target_modules = (
@@ -329,6 +335,23 @@ class PeftCustomKwargsTester(unittest.TestCase):
             match="Only instances of PreTrainedModel support `target_modules='all-linear'`",
         ):
             model.unet = get_peft_model(model.unet, config)
+
+    def test_maybe_include_all_linear_does_not_target_classifier_head(self):
+        # See issue 2027
+        # Ensure that if a SEQ_CLS model is being used with target_modules="all-linear", the classification head is not
+        # targeted by the adapter layer.
+        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+        model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=10)
+        # sanity check
+        assert isinstance(model.score, nn.Linear)
+
+        config = LoraConfig(task_type="SEQ_CLS", target_modules="all-linear")
+        model = get_peft_model(model, config)
+        assert isinstance(model.base_model.score, ModulesToSaveWrapper)
+
+        # the bug was that these were lora.Linear instances
+        assert isinstance(model.base_model.score.original_module, nn.Linear)
+        assert isinstance(model.base_model.score.modules_to_save["default"], nn.Linear)
 
 
 class MLP(nn.Module):
@@ -394,6 +417,8 @@ class TestModelAndLayerStatus:
     corresponding features like merging).
 
     """
+
+    torch_device = infer_device()
 
     @pytest.fixture
     def small_model(self):
@@ -591,27 +616,27 @@ class TestModelAndLayerStatus:
         ]
         assert result == expected
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
-    def test_devices_all_cuda_large(self, large_model):
-        large_model.to("cuda")
+    @require_non_cpu
+    def test_devices_all_gpu_large(self, large_model):
+        large_model.to(self.torch_device)
         layer_status = large_model.get_layer_status()
         result = [status.devices for status in layer_status]
         expected = [
-            {"default": ["cuda"], "other": ["cuda"]},
-            {"default": ["cuda"]},
-            {"other": ["cuda"]},
-            {"default": ["cuda"]},
+            {"default": [self.torch_device], "other": [self.torch_device]},
+            {"default": [self.torch_device]},
+            {"other": [self.torch_device]},
+            {"default": [self.torch_device]},
         ]
         assert result == expected
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
-    def test_devices_cpu_and_cuda_large(self, large_model):
-        # move the embedding layer to CUDA
-        large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to("cuda")
+    @require_non_cpu
+    def test_devices_cpu_and_gpu_large(self, large_model):
+        # move the embedding layer to GPU
+        large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to(self.torch_device)
         layer_status = large_model.get_layer_status()
         result = [status.devices for status in layer_status]
         expected = [
-            {"default": ["cpu", "cuda"], "other": ["cpu"]},
+            {"default": ["cpu", self.torch_device], "other": ["cpu"]},
             {"default": ["cpu"]},
             {"other": ["cpu"]},
             {"default": ["cpu"]},
@@ -806,18 +831,18 @@ class TestModelAndLayerStatus:
         model_status = large_model.get_model_status()
         assert model_status.devices == {"default": ["cpu"], "other": ["cpu"]}
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
-    def test_model_devices_all_cuda_large(self, large_model):
-        large_model.to("cuda")
+    @require_non_cpu
+    def test_model_devices_all_gpu_large(self, large_model):
+        large_model.to(self.torch_device)
         model_status = large_model.get_model_status()
-        assert model_status.devices == {"default": ["cuda"], "other": ["cuda"]}
+        assert model_status.devices == {"default": [self.torch_device], "other": [self.torch_device]}
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
-    def test_model_devices_cpu_and_cuda_large(self, large_model):
-        # move the embedding layer to CUDA
-        large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to("cuda")
+    @require_non_cpu
+    def test_model_devices_cpu_and_gpu_large(self, large_model):
+        # move the embedding layer to GPU
+        large_model.model.lin0.lora_A["default"] = large_model.model.lin0.lora_A["default"].to(self.torch_device)
         model_status = large_model.get_model_status()
-        assert model_status.devices == {"default": ["cpu", "cuda"], "other": ["cpu"]}
+        assert model_status.devices == {"default": ["cpu", self.torch_device], "other": ["cpu"]}
 
     def test_loha_model(self):
         # ensure that this also works with non-LoRA, it's not necessary to test all tuners
@@ -858,7 +883,7 @@ class TestModelAndLayerStatus:
         assert layer_status0.available_adapters == ["default"]
         assert layer_status0.devices == {"default": ["cpu"]}
 
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device available.")
+    @require_non_cpu
     def test_vera_model(self):
         # let's also test VeRA because it uses BufferDict
         class SmallModel(nn.Module):
@@ -871,8 +896,8 @@ class TestModelAndLayerStatus:
         config = VeraConfig(target_modules=["lin0", "lin1"], init_weights=False)
         model = get_peft_model(base_model, config)
 
-        # move the buffer dict to CUDA
-        model.lin0.vera_A["default"] = model.lin0.vera_A["default"].to("cuda")
+        # move the buffer dict to GPU
+        model.lin0.vera_A["default"] = model.lin0.vera_A["default"].to(self.torch_device)
 
         model_status = model.get_model_status()
         layer_status = model.get_layer_status()
@@ -888,7 +913,7 @@ class TestModelAndLayerStatus:
         assert model_status.merged_adapters == []
         assert model_status.requires_grad == {"default": True}
         assert model_status.available_adapters == ["default"]
-        assert model_status.devices == {"default": ["cpu", "cuda"]}
+        assert model_status.devices == {"default": ["cpu", self.torch_device]}
 
         layer_status0 = layer_status[0]
         assert len(layer_status) == 2
@@ -899,7 +924,7 @@ class TestModelAndLayerStatus:
         assert layer_status0.merged_adapters == []
         assert layer_status0.requires_grad == {"default": True}
         assert layer_status0.available_adapters == ["default"]
-        assert layer_status0.devices == {"default": ["cpu", "cuda"]}
+        assert layer_status0.devices == {"default": ["cpu", self.torch_device]}
 
     ###################
     # non-PEFT models #
