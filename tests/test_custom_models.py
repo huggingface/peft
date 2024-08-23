@@ -887,7 +887,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        lr = 100.0 if config_kwargs.get("use_dora") else 0.5
+        # this high learning rate was found through testing to be necessary to avoid flakiness
+        lr = 100.0 if config_kwargs.get("use_dora") and model_id == "EmbConv1D" else 0.5
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
