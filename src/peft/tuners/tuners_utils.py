@@ -30,7 +30,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES
+from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES, EMBEDDING_LAYER_NAMES
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
