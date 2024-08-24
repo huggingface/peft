@@ -16,7 +16,7 @@ import inspect
 import os
 import warnings
 from contextlib import nullcontext
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import accelerate
 import torch
@@ -258,30 +258,50 @@ class ModulesToSaveWrapper(torch.nn.Module):
         new_hook = old_hook_cls(**filtered_old_hook_attr)
         return new_hook
 
-    def forward(self, *args, **kwargs):
-        if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
-            return self.original_module(*args, **kwargs)
-        if "adapter_names" not in kwargs.keys():
-            return self.modules_to_save[self.active_adapter](*args, **kwargs)
-        # Batches requests with similar LoRAs into microbatches
-        adapter_names = kwargs["adapter_names"]
-        kwargs = {}
-        batch = args[0] # Get the batch dimension
+    def _check_forward_args(self, x, *args, **kwargs):
+        """Check if the arguments are compatible with the configs and state of the model"""
+        adapter_names = kwargs.get("adapter_names", None)
+        if adapter_names is None:
+            return
+
+        if len(x) != len(adapter_names):
+            msg = (
+                "Length of `adapter_names` should be the same as the number of inputs, but got "
+                f"{len(adapter_names)} and {len(x)} respectively."
+            )
+            raise ValueError(msg)
+
+    def _mixed_batch_forward(
+        self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+    ) -> torch.Tensor:
+        # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
+        # extra argument that allows mixing different adapters in the same batch at inference time.
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
         for adapter in unique_adapters:
-            sub_batch_indices_list.append(
-                [index for index, item in enumerate(adapter_names) if item == adapter]
-            )
+            sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
 
-        results = [0 for i in range(len(batch))]
+        results = [0 for i in range(len(x))]
         for i, active_adapter in enumerate(unique_adapters):
-            sub_batch = batch[sub_batch_indices_list[i]]
-            output = self.modules_to_save[active_adapter](*(sub_batch,), **kwargs)
+            sub_batch = x[sub_batch_indices_list[i]]
+            if active_adapter == "__base__":
+                output = self.original_module(*(sub_batch,), **kwargs)
+            else:
+                output = self.modules_to_save[active_adapter](*(sub_batch,), **kwargs)
             for index, j in enumerate(sub_batch_indices_list[i]):
                 results[j] = output[index]
         return torch.stack(results)
 
+    def forward(self, x: torch.Tensor, *args, **kwargs):
+        self._check_forward_args(x, *args, **kwargs)
+        adapter_names = kwargs.pop("adapter_names", None)
+
+        if self.disable_adapters or (self.active_adapter not in self.modules_to_save):
+            return self.original_module(x, *args, **kwargs)
+        if adapter_names is None:
+            return self.modules_to_save[self.active_adapter](x, *args, **kwargs)
+        else:
+            return self._mixed_batch_forward(x, *args, adapter_names=adapter_names, **kwargs)
 
     def enable_adapters(self, enabled: bool):
         """Toggle the enabling and disabling of adapters
