@@ -37,6 +37,8 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
+from peft.utils.constants import DUMMY_MODEL_CONFIG
+
 from . import __version__
 from .config import PeftConfig
 from .tuners import (
@@ -1231,7 +1233,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         card.data["library_name"] = "peft"
 
-        model_config = BaseTuner.get_model_config(self, default=None)
+        model_config = BaseTuner.get_model_config(self)
+        model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
         if model_config is not None and "_name_or_path" in model_config:
             card.data["base_model"] = model_config["_name_or_path"]
 

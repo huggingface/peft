@@ -447,15 +447,7 @@ class LoraModel(BaseTuner):
 
         Currently gptq quantization and replicated layers do not support merging.
         """
-        tied_target_modules = self._get_tied_target_modules(self.model)
-        if tied_target_modules:
-            warnings.warn(
-                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
-                "This can lead to complications when merging the adapter. "
-                "You can opt to merge the adapter after cloning the weights (to untie the embeddings), "
-                "and then load the merged model with `tie_word_embeddings=False`: "
-                "\n```python\nAutoModelForCausalLM.from_pretrained('path/to/merged/model', tie_word_embeddings=False)\n```\n"
-            )
+        super()._check_merge_allowed()
         if getattr(self.model, "quantization_method", None) == "gptq":
             raise ValueError("Cannot merge LORA layers when the model is gptq quantized")
         if self.peft_config.get("layer_replication"):

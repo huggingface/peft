@@ -30,7 +30,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES
+from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -361,7 +361,15 @@ class BaseTuner(nn.Module, ABC):
 
         Raise a ValueError if it is not possible to merge the adapter with the given configuration.
         """
-        pass
+        tied_target_modules = self._get_tied_target_modules(self.model)
+        if tied_target_modules:
+            warnings.warn(
+                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
+                "This can lead to complications when merging the adapter. "
+                "You can opt to merge the adapter after cloning the weights (to untie the embeddings), "
+                "and then load the merged model with `tie_word_embeddings=False`: "
+                "\n```python\nAutoModelForCausalLM.from_pretrained('path/to/merged/model', tie_word_embeddings=False)\n```\n"
+            )
 
     def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         r"""
@@ -501,9 +509,10 @@ class BaseTuner(nn.Module, ABC):
             raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
 
     @staticmethod
-    def get_model_config(model: nn.Module, default: dict | None = {"model_type": "custom"}) -> dict:
+    def get_model_config(model: nn.Module) -> dict:
         """
         This method gets the config from a model in dictionary form.
+        If model has not attribute config, then this method returns a default config.
 
         Args:
             model (`nn.Module`):
@@ -511,12 +520,12 @@ class BaseTuner(nn.Module, ABC):
             default (`dict|None`, *optional*)::
                 What to return if model does not have a config attribute.
         """
-        model_config = getattr(model, "config", default)
+        model_config = getattr(model, "config", DUMMY_MODEL_CONFIG)
         if hasattr(model_config, "to_dict"):
             model_config = model_config.to_dict()
         return model_config
 
-    def _get_tied_target_modules(self, model):
+    def _get_tied_target_modules(self, model: nn.Module) -> list[str]:
         tied_target_modules = []
         model_config = self.get_model_config(model)
         if model_config.get("tie_word_embeddings"):
