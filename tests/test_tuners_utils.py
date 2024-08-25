@@ -1145,7 +1145,7 @@ class TestBaseTunerMethods(unittest.TestCase):
         with warnings.catch_warnings(record=True) as records_inject_not_tied:
             model_not_tied = get_peft_model(
                 AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=False),
-                LoraConfig(target_modules=["q_proj"]),
+                LoraConfig(target_modules=["lm_head"]),
             )
         with warnings.catch_warnings(record=True) as records_merge_not_tied:
             model_not_tied.merge_and_unload(safe_merge=True, adapter_names=["default"])
