@@ -1162,3 +1162,25 @@ class TestBaseTunerMethods(unittest.TestCase):
             warn_end=warn_end_merge,
             triggered=False,
         )
+
+        # No warning when loading model with tie_word_embeddings although but not relevant target module
+        with warnings.catch_warnings(record=True) as records_inject_tied_no_target:
+            model_not_tied = get_peft_model(
+                AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=False),
+                LoraConfig(target_modules=["q_proj"]),
+            )
+        with warnings.catch_warnings(record=True) as records_merge_tied_no_target:
+            model_not_tied.merge_and_unload(safe_merge=True, adapter_names=["default"])
+
+        assert_warning_triggered(
+            records_inject_tied_no_target,
+            warn_start=warn_start,
+            warn_end=warn_end_inject,
+            triggered=False,
+        )
+        assert_warning_triggered(
+            records_merge_tied_no_target,
+            warn_start=warn_start,
+            warn_end=warn_end_merge,
+            triggered=False,
+        )
