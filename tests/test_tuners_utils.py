@@ -16,6 +16,7 @@
 # limitations under the License.
 import re
 import unittest
+import warnings
 from copy import deepcopy
 
 import pytest
@@ -1103,3 +1104,58 @@ class TestBaseTunerMethods(unittest.TestCase):
     def test_get_model_config_with_no_config(self):
         config = BaseTuner.get_model_config(ModelWithNoConfig())
         assert config == DUMMY_MODEL_CONFIG
+
+    def test_warn_for_tied_embeddings_load_and_merge(self):
+        model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+
+        def assert_warning_triggered(records, warn_start, warn_end, triggered=True):
+            warning_triggered = False
+            for record in records:
+                if str(record.message).startswith(warn_start) and str(record.message).endswith(warn_end):
+                    warning_triggered = True
+            if triggered:
+                assert warning_triggered
+            else:
+                assert not warning_triggered
+
+        # Capture warning when loading model and merging with tie_word_embeddings and relevant target module
+        with pytest.warns(UserWarning) as records_load:
+            model = get_peft_model(
+                AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=True),
+                LoraConfig(target_modules=["lm_head"]),
+            )
+        with pytest.warns(UserWarning) as records_merge:
+            model.merge_and_unload(safe_merge=True, adapter_names=["default"])
+
+        assert_warning_triggered(
+            records_load,
+            warn_start="Model with `tie_word_embeddings=True` and the",
+            warn_end="huggingface/peft/issues/2018.",
+        )
+        assert_warning_triggered(
+            records_merge,
+            warn_start="Model with `tie_word_embeddings=True` and the",
+            warn_end="tie_word_embeddings=False)\n```\n",
+        )
+
+        # No warning when loading model with no tie_word_embeddings although a relevant target module
+        with warnings.catch_warnings(record=True) as records_load_not_tied:
+            model_not_tied = get_peft_model(
+                AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=False),
+                LoraConfig(target_modules=["q_proj"]),
+            )
+        with warnings.catch_warnings(record=True) as records_merge_not_tied:
+            model_not_tied.merge_and_unload(safe_merge=True, adapter_names=["default"])
+
+        assert_warning_triggered(
+            records_load_not_tied,
+            warn_start="Model with `tie_word_embeddings=True` and the",
+            warn_end="huggingface/peft/issues/2018.",
+            triggered=False,
+        )
+        assert_warning_triggered(
+            records_merge_not_tied,
+            warn_start="Model with `tie_word_embeddings=True` and the",
+            warn_end="tie_word_embeddings=False)\n```\n",
+            triggered=False,
+        )
