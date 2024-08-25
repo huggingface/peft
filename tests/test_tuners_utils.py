@@ -1163,7 +1163,7 @@ class TestBaseTunerMethods(unittest.TestCase):
             triggered=False,
         )
 
-        # No warning when loading model with tie_word_embeddings although but not relevant target module
+        # No warning when loading model with tie_word_embeddings but not relevant target module
         with warnings.catch_warnings(record=True) as records_inject_tied_no_target:
             model_not_tied = get_peft_model(
                 AutoModelForCausalLM.from_pretrained(model_id, tie_word_embeddings=False),
