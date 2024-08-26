@@ -30,7 +30,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES, EMBEDDING_LAYER_NAMES
+from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, EMBEDDING_LAYER_NAMES, SEQ_CLS_HEAD_NAMES
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -366,9 +366,9 @@ class BaseTuner(nn.Module, ABC):
             warnings.warn(
                 f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
                 "This can lead to complications when merging the adapter. "
-                "You can opt to merge the adapter after cloning the weights (to untie the embeddings), "
-                "and then load the merged model with `tie_word_embeddings=False`: "
-                "\n```python\nAutoModelForCausalLM.from_pretrained('path/to/merged/model', tie_word_embeddings=False)\n```\n"
+                "You can opt to merge the adapter after cloning the weights (to untie the embeddings). "
+                "You can untie the embeddings by loading the model with `tie_word_embeddings=False`: "
+                "\n```python\nAutoModelForCausalLM.from_pretrained('path/to/model', tie_word_embeddings=False)\n```\n"
             )
 
     def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
