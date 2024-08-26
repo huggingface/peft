@@ -143,4 +143,8 @@ wandb
 moslora_finetuning
 moslora_finetuning/
 log.out
-test.sh
+slurm-*
+trained_models/
+output_results/
+commonsense_170k.json
+log_*.txt

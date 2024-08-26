@@ -277,31 +277,31 @@ def load_instruction(args) -> str:
 def extract_answer(args, sentence: str) -> float:
     dataset = args.dataset
     if dataset == 'boolq':
-        sentence_ = sentence.strip()
+        sentence_ = sentence.strip().lower()
         pred_answers = re.findall(r'true|false', sentence_)
         if not pred_answers:
             return ""
         return pred_answers[0]
     elif dataset == 'piqa':
-        sentence_ = sentence.strip()
+        sentence_ = sentence.strip().lower()
         pred_answers = re.findall(r'solution1|solution2', sentence_)
         if not pred_answers:
             return ""
         return pred_answers[0]
     elif dataset in ['social_i_qa', 'ARC-Challenge', 'ARC-Easy', 'openbookqa']:
-        sentence_ = sentence.strip()
+        sentence_ = sentence.strip().lower()
         pred_answers = re.findall(r'answer1|answer2|answer3|answer4|answer5', sentence_)
         if not pred_answers:
             return ""
         return pred_answers[0]
     elif dataset == 'hellaswag':
-        sentence_ = sentence.strip()
+        sentence_ = sentence.strip().lower()
         pred_answers = re.findall(r'ending1|ending2|ending3|ending4', sentence_)
         if not pred_answers:
             return ""
         return pred_answers[0]
     elif dataset == 'winogrande':
-        sentence_ = sentence.strip()
+        sentence_ = sentence.strip().lower()
         pred_answers = re.findall(r'option1|option2', sentence_)
         if not pred_answers:
             return ""
