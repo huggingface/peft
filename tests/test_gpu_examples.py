@@ -58,7 +58,7 @@ from peft import (
     replace_lora_weights_loftq,
 )
 from peft.tuners import boft
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
 
@@ -69,6 +69,7 @@ from .testing_utils import (
     require_bitsandbytes,
     require_eetq,
     require_hqq,
+    require_non_cpu,
     require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
@@ -1379,7 +1380,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         assert n_total_default == n_total_other
 
 
-@require_torch_gpu
+@require_non_cpu
 class OffloadSaveTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "gpt2"
@@ -1424,7 +1425,6 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(output, offloaded_output, atol=1e-5)
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
     def test_offload_merge(self):
         r"""
         Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
@@ -2158,7 +2158,7 @@ class MultiprocessTester(unittest.TestCase):
             run_command(cmd, env=os.environ.copy())
 
 
-@require_torch_gpu
+@require_non_cpu
 class MixedPrecisionTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "facebook/opt-125m"
@@ -3020,8 +3020,10 @@ class SimpleConv2DModel(torch.nn.Module):
         return conv_output
 
 
-@require_torch_gpu
+@require_non_cpu
 class TestAutoCast(unittest.TestCase):
+    device = infer_device()
+
     # This test makes sure, that Lora dtypes are consistent with the types
     # infered by torch.autocast under tested PRECISIONS
     @parameterized.expand(PRECISIONS)
@@ -3067,16 +3069,18 @@ class TestAutoCast(unittest.TestCase):
 
     def _test_model(self, model, precision):
         # Move model to GPU
-        model = model.cuda()
+        model = model.to(self.device)
 
         # Prepare dummy inputs
-        input_ids = torch.randint(0, 1000, (2, 10)).cuda()
+        input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
-            if not torch.cuda.is_bf16_supported():
+            is_xpu = self.device == "xpu"
+            is_cuda_bf16 = self.device == "cuda" and torch.cuda.is_bf16_supported()
+            if not (is_xpu or is_cuda_bf16):
                 self.skipTest("Bfloat16 not supported on this device")
 
         # Forward pass with test precision
-        with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
+        with torch.autocast(enabled=True, dtype=precision, device_type=self.device):
             outputs = model(input_ids)
             assert outputs.dtype == precision
 
