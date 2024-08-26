@@ -24,6 +24,21 @@ from transformers.utils import PushToHubMixin
 from .utils import CONFIG_NAME, PeftType, TaskType
 
 
+def _check_and_remove_unused_kwargs(cls, kwargs):
+    """Make PEFT configs forward-compatible by removing unused kwargs that were added in later PEFT versions.
+
+    This assumes that removing the unused kwargs will not affect the default behavior.
+
+    Returns the filtered kwargs and the set of removed keys.
+    """
+    # it's not pretty but eh
+    signature_parameters = inspect.signature(cls.__init__).parameters
+    unexpected_kwargs = set(kwargs.keys()) - set(signature_parameters.keys())
+    for key in unexpected_kwargs:
+        del kwargs[key]
+    return kwargs, unexpected_kwargs
+
+
 @dataclass
 class PeftConfigMixin(PushToHubMixin):
     r"""
@@ -116,7 +131,23 @@ class PeftConfigMixin(PushToHubMixin):
         else:
             config_cls = cls
 
-        return config_cls(**kwargs)
+        try:
+            config = config_cls(**kwargs)
+        except TypeError as exc:
+            # First check if the error is due to unexpected keyword arguments, we don't want to accidentally catch
+            # other TypeErrors.
+            if "got an unexpected keyword argument" not in str(exc):
+                raise exc
+            filtered_kwargs, unexpected_kwargs = _check_and_remove_unused_kwargs(cls, kwargs)
+            warnings.warn(
+                f"Unexpected keyword arguments {sorted(unexpected_kwargs)} for class {cls.__name__}, these are "
+                "ignored. This probably means that you're loading a configuration file that was saved using a "
+                "higher version of the library and additional parameters have been introduced since. It is "
+                "highly recommended to upgrade the PEFT version before continuing (e.g. by running `pip install "
+                "-U peft`)."
+            )
+            config = config_cls.from_peft_type(**filtered_kwargs)
+        return config
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: str, subfolder: Optional[str] = None, **kwargs):
