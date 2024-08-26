@@ -184,6 +184,27 @@ def get_peft_model_state_dict(
         to_return = {k: state_dict[k] for k in state_dict if "internal_xlora_classifier" in k}
     elif config.peft_type == PeftType.HRA:
         to_return = {k: state_dict[k] for k in state_dict if "hra_" in k}
+    elif config.peft_type == PeftType.VBLORA:
+        to_return = {}
+        if config.num_vectors < 2**8:
+            indices_dtype = torch.uint8
+        elif config.num_vectors < 2**15:
+            indices_dtype = torch.int16
+        elif config.num_vectors < 2**31:
+            indices_dtype = torch.int32
+        else:
+            indices_dtype = torch.int64
+        if config.save_topk_weights:
+            for k in state_dict:
+                if "vblora_logits" in k:
+                    logits, indices = state_dict[k].topk(config.topk)
+                    to_return.update({k + "_topk_indices": indices.to(dtype=indices_dtype)})
+                    to_return.update({k + "_topk_weights": torch.softmax(logits, dim=-1)[:, :, :-1].contiguous()})
+        else:
+            to_return = {k: state_dict[k] for k in state_dict if "vblora_logits" in k}
+        to_return["base_model.vblora_vector_bank." + adapter_name] = state_dict[
+            "base_model.vblora_vector_bank." + adapter_name
+        ]
     else:
         raise ValueError(f"Unknown PEFT type passed: {config.peft_type}")
 
@@ -323,6 +344,7 @@ def set_peft_model_state_dict(
         PeftType.VERA,
         PeftType.FOURIERFT,
         PeftType.HRA,
+        PeftType.VBLORA,
     ):
         peft_model_state_dict = {}
         parameter_prefix = {
@@ -338,7 +360,30 @@ def set_peft_model_state_dict(
             PeftType.VERA: "vera_lambda_",
             PeftType.FOURIERFT: "fourierft_",
             PeftType.HRA: "hra_",
+            PeftType.VBLORA: "vblora_",
         }[config.peft_type]
+        if config.peft_type == PeftType.VBLORA and config.save_topk_weights:
+            b, _ = model.vblora_vector_bank[adapter_name].shape
+            keys = list(state_dict.keys())
+            for k in keys:
+                if "_topk_indices" in k:
+                    v = state_dict[k].to(torch.long)
+                    new_key = k.replace("_topk_indices", "")
+                    if k.replace("_topk_indices", "_topk_weights") in state_dict:
+                        topk_weights = state_dict[k.replace("_topk_indices", "_topk_weights")]
+                        topk_weights = torch.cat([topk_weights, 1 - topk_weights.sum(-1, keepdim=True)], dim=-1)
+                        topk_logits = torch.log(topk_weights)
+                    else:
+                        raise ValueError("TopK weights were missing!")
+                    matrix = (
+                        torch.zeros([*(topk_logits.shape[:-1]), b])
+                        .fill_(float("-inf"))
+                        .to(topk_logits.device)
+                        .scatter(-1, v, topk_logits)
+                    )
+                    state_dict[new_key] = matrix
+                    del state_dict[k]
+                    del state_dict[k.replace("_topk_indices", "_topk_weights")]
         for k, v in state_dict.items():
             if parameter_prefix in k:
                 suffix = k.split(parameter_prefix)[1]
