@@ -149,6 +149,7 @@ class PeftConfigMixin(PushToHubMixin):
 
         loaded_attributes = cls.from_json_file(config_file)
         kwargs = {**class_kwargs, **loaded_attributes}
+        kwargs = cls.check_kwargs(**kwargs)
         return cls.from_peft_type(**kwargs)
 
     @classmethod
@@ -212,6 +213,21 @@ class PeftConfigMixin(PushToHubMixin):
 
         loaded_attributes = cls.from_json_file(config_file)
         return loaded_attributes["peft_type"]
+
+    @classmethod
+    def check_kwargs(cls, **kwargs):
+        r"""
+        Check if the kwargs are valid for the configuration.
+
+        Args:
+            kwargs (additional keyword arguments, *optional*):
+                Additional keyword arguments passed along to the child class initialization.
+        """
+        if "oft_block_size" in kwargs:
+            warnings.warn(
+                'OFT has been updated since 0.12.1.dev0. Your trained adapter weights may not be compatible with the latest version of OFT. Please retrain your adapter weights.')
+            )
+        return kwargs
 
     @property
     def is_prompt_learning(self) -> bool:
