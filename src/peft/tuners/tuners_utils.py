@@ -376,11 +376,11 @@ from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained("google/gemma-2-2b-it", tie_word_embeddings=False)
 
 # Set the randomly initialized lm_head to the previously tied embeddings
-model.lm_head.weight.data = model.model.embed_tokens.weight.data
+model.lm_head.weight.data = model.model.embed_tokens.weight.data.clone()
 
 # Save the untied model
 untied_model_dir = "dir/for/untied/model"
-model.save_pretrained(untied_model_dir, safe_serialization=True)
+model.save_pretrained(untied_model_dir)
 model.config.save_pretrained(untied_model_dir)
 
 # Now use the original model but in untied format
