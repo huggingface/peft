@@ -636,9 +636,7 @@ class Embedding(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        if use_dora:
-            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
-        
+
         if use_moslora:
             raise ValueError(f"{self.__class__.__name__} does not support MoSLoRA yet, please set it to False")
 
