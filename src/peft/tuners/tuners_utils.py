@@ -367,8 +367,26 @@ class BaseTuner(nn.Module, ABC):
                 f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
                 "This can lead to complications when merging the adapter. "
                 "You can opt to merge the adapter after cloning the weights (to untie the embeddings). "
-                "You can untie the embeddings by loading the model with `tie_word_embeddings=False`: "
-                "\n```python\nAutoModelForCausalLM.from_pretrained('path/to/model', tie_word_embeddings=False)\n```\n"
+                "You can untie the embeddings by loading the model with `tie_word_embeddings=False`. For example:"
+                """
+```python
+from transformers import AutoModelForCausalLM
+
+# Load original tied model
+model = AutoModelForCausalLM.from_pretrained("google/gemma-2-2b-it", tie_word_embeddings=False)
+
+# Set the randomly initialized lm_head to the previously tied embeddings
+model.lm_head.weight.data = model.model.embed_tokens.weight.data
+
+# Save the untied model
+untied_model_dir = "dir/for/untied/model"
+model.save_pretrained(untied_model_dir, safe_serialization=True)
+model.config.save_pretrained(untied_model_dir)
+
+# Now use the original model but in untied format
+model = AutoModelForCausalLM.from_pretrained(untied_model_dir)
+```
+"""
             )
 
     def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:

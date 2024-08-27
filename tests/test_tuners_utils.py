@@ -1108,7 +1108,10 @@ class TestBaseTunerGetModelConfig(unittest.TestCase):
 class TestBaseTunerWarnForTiedEmbeddings:
     model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
     warn_end_inject = "huggingface/peft/issues/2018."
-    warn_end_merge = "tie_word_embeddings=False)\n```\n"
+    warn_end_merge = (
+        "# Now use the original model but in untied format\n"
+        "model = AutoModelForCausalLM.from_pretrained(untied_model_dir)\n```\n"
+    )
 
     def _get_peft_model(self, tie_word_embeddings, target_module):
         model = get_peft_model(
