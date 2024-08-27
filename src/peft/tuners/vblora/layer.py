@@ -111,7 +111,6 @@ class VBLoRALayer(BaseTunerLayer):
 
 
 class Linear(nn.Linear, VBLoRALayer):
-    # Vera implemented in a dense layer
     def __init__(
         self,
         base_layer,

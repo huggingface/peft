@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This test file is for tests specific to VeRA, since VeRA has some specific challenges due to the shared weights.
 
 import os
 
