@@ -216,17 +216,11 @@ class PeftConfigMixin(PushToHubMixin):
 
     @classmethod
     def check_kwargs(cls, **kwargs):
-        r"""
-        Check if the kwargs are valid for the configuration.
+        """Check kwargs before initializing the config instance.
 
-        Args:
-            kwargs (additional keyword arguments, *optional*):
-                Additional keyword arguments passed along to the child class initialization.
+        Subclasses can override this method to add specific checks.
+
         """
-        if "oft_block_size" in kwargs:
-            warnings.warn(
-                'OFT has been updated since 0.12.1.dev0. Your trained adapter weights may not be compatible with the latest version of OFT. Please retrain your adapter weights.')
-            )
         return kwargs
 
     @property

@@ -18,6 +18,8 @@ from typing import List, Optional, Union
 from peft.config import PeftConfig
 from peft.utils import PeftType
 
+import warnings
+
 
 @dataclass
 class OFTConfig(PeftConfig):
@@ -162,3 +164,20 @@ class OFTConfig(PeftConfig):
             raise ValueError(
                 f"You can only specify either r ({self.r}) or oft_block_size ({self.oft_block_size}), but not both simultaneously, because r x oft_block_size == in_features."
             )
+
+    @classmethod
+    def check_kwargs(cls, **kwargs):
+        r"""
+        Check if the kwargs are valid for the configuration.
+
+        Args:
+            kwargs (additional keyword arguments, *optional*):
+                Additional keyword arguments passed along to the child class initialization.
+        """
+        if "oft_block_size" not in kwargs:
+            raise ValueError(
+                'OFT has been updated since PEFT 0.13.0. Your trained adapter weights is incompatible with the latest version of OFT. Please retrain your adapter weights with newer PEFT versions.'
+                'Downgrade PEFT to version 0.12.0 to merge the old adapter weights.'
+            )
+        return super().check_kwargs(**kwargs)
+

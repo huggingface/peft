@@ -169,12 +169,16 @@ class OFTLayer(BaseTunerLayer):
         self.oft_dropout.update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
 
         if r == 0 and oft_block_size != 0:
-            if self.in_features % oft_block_size != 0:
-                raise ValueError(f"Input features ({self.in_features}) should be divisible by `oft_block_size` ({oft_block_size})")
+            if self.in_features % oft_block_size != 0 or oft_block_size > self.in_features:
+                warnings.warn(f"Invalid `oft_block_size` ({oft_block_size})!")
+                oft_block_size = self.adjust_oft_parameters(self.in_features, oft_block_size)
+                warnings.warn(f"Adjusted `oft_block_size` to ({oft_block_size}).")
             r = int(self.in_features // oft_block_size)
         elif r != 0 and oft_block_size == 0:
-            if self.in_features % r != 0:
-                raise ValueError(f"Input features ({self.in_features}) should be divisible by `r` ({r})!")
+            if self.in_features % r != 0 or r > self.in_features:
+                warnings.warn(f"Invalid `r` ({r})!")
+                r = self.adjust_oft_parameters(self.in_features, r)
+                warnings.warn(f"Adjusted `r` to ({r}).")
             oft_block_size = int(self.in_features // r)
         else:
             raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
@@ -262,6 +266,26 @@ class OFTLayer(BaseTunerLayer):
         mask = (norm_diff <= eps).bool()
         out = torch.where(mask, oft_r, I + eps * (diff / norm_diff))
         return out
+
+    def adjust_oft_parameters(self, in_features, params):
+        """
+        Adjust the OFT parameters to be divisible by the in_features dimension.
+        """
+        if params < in_features:
+            higher_params = params
+            while higher_params <= in_features and in_features % higher_params != 0:
+                higher_params += 1
+        else:
+            return in_features
+
+        lower_params = params
+        while lower_params > 1 and in_features % lower_params != 0:
+            lower_params -= 1
+
+        if (params - lower_params) <= (higher_params - params):
+            return lower_params
+        else:
+            return higher_params
 
 
 class Linear(nn.Module, OFTLayer):
@@ -490,16 +514,16 @@ class Conv2d(nn.Module, OFTLayer):
         conv_filter_dim = self.in_features * base_layer.kernel_size[0] * base_layer.kernel_size[0]
 
         if r == 0 and oft_block_size != 0:
-            if conv_filter_dim % oft_block_size != 0:
-                raise ValueError(
-                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by conv_filter_dim ({conv_filter_dim})!"
-                )
+            if conv_filter_dim % oft_block_size != 0 or oft_block_size > conv_filter_dim:
+                warnings.warn(f"Invalid `oft_block_size` ({oft_block_size})!")
+                oft_block_size = self.adjust_oft_parameters(conv_filter_dim, oft_block_size)
+                warnings.warn(f"Adjusted `oft_block_size` to ({oft_block_size}).")
             r = int(conv_filter_dim // oft_block_size)
         elif r != 0 and oft_block_size == 0:
-            if conv_filter_dim % r != 0:
-                raise ValueError(
-                    f"Convolutional kernel dimension ({conv_filter_dim}) must be divisible by r ({r})!"
-                )
+            if conv_filter_dim % r != 0 or r > conv_filter_dim:
+                warnings.warn(f"Invalid `r` ({r})!")
+                r = self.adjust_oft_parameters(conv_filter_dim, r)
+                warnings.warn(f"Adjusted `r` to ({r}).")
             oft_block_size = int(conv_filter_dim // r)
         else:
             raise ValueError("Something went wrong, please report this error: https://github.com/huggingface/peft/issues")
