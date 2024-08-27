@@ -144,7 +144,7 @@ class TestXlora:
 
         model.disable_scalings_logging()
 
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt", clean_up_tokenization_spaces=False)
         outputs = model.generate(
             input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
