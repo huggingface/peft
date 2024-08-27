@@ -365,7 +365,7 @@ class BaseTuner(nn.Module, ABC):
         if tied_target_modules:
             warnings.warn(
                 f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
-                "This can lead to complications when merging the adapter. "
+                "This can lead to complications. "
                 "You can opt to merge the adapter after cloning the weights (to untie the embeddings). "
                 "You can untie the embeddings by loading the model with `tie_word_embeddings=False`. For example:"
                 """
@@ -458,8 +458,9 @@ model = AutoModelForCausalLM.from_pretrained(untied_model_dir)
         if tied_target_modules:
             warnings.warn(
                 f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
-                "This can lead to complications, for example when merging the adapter. "
-                f"See for example https://github.com/huggingface/peft/issues/2018."
+                "This can lead to complications, for example when merging the adapter "
+                "or converting your model to formats other than safetensors. "
+                "See for example https://github.com/huggingface/peft/issues/2018."
             )
 
         # Handle X-LoRA case.
