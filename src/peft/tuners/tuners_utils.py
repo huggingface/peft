@@ -17,6 +17,7 @@ import copy
 import logging
 import os
 import re
+import textwrap
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -361,6 +362,27 @@ class BaseTuner(nn.Module, ABC):
 
         Raise a ValueError if it is not possible to merge the adapter with the given configuration.
         """
+        example_code = textwrap.dedent(
+            """
+            ```python
+            from transformers import AutoModelForCausalLM
+
+            # Load original tied model
+            model = AutoModelForCausalLM.from_pretrained("google/gemma-2-2b-it", tie_word_embeddings=False)
+
+            # Set the randomly initialized lm_head to the previously tied embeddings
+            model.lm_head.weight.data = model.model.embed_tokens.weight.data.clone()
+
+            # Save the untied model
+            untied_model_dir = "dir/for/untied/model"
+            model.save_pretrained(untied_model_dir)
+            model.config.save_pretrained(untied_model_dir)
+
+            # Now use the original model but in untied format
+            model = AutoModelForCausalLM.from_pretrained(untied_model_dir)
+            ```
+            """
+        )
         tied_target_modules = self._get_tied_target_modules(self.model)
         if tied_target_modules:
             warnings.warn(
@@ -368,25 +390,7 @@ class BaseTuner(nn.Module, ABC):
                 "This can lead to complications. "
                 "You can opt to merge the adapter after cloning the weights (to untie the embeddings). "
                 "You can untie the embeddings by loading the model with `tie_word_embeddings=False`. For example:"
-                """
-```python
-from transformers import AutoModelForCausalLM
-
-# Load original tied model
-model = AutoModelForCausalLM.from_pretrained("google/gemma-2-2b-it", tie_word_embeddings=False)
-
-# Set the randomly initialized lm_head to the previously tied embeddings
-model.lm_head.weight.data = model.model.embed_tokens.weight.data.clone()
-
-# Save the untied model
-untied_model_dir = "dir/for/untied/model"
-model.save_pretrained(untied_model_dir)
-model.config.save_pretrained(untied_model_dir)
-
-# Now use the original model but in untied format
-model = AutoModelForCausalLM.from_pretrained(untied_model_dir)
-```
-"""
+                + example_code
             )
 
     def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
