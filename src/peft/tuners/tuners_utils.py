@@ -530,8 +530,8 @@ model = AutoModelForCausalLM.from_pretrained(untied_model_dir)
     @staticmethod
     def get_model_config(model: nn.Module) -> dict:
         """
-        This method gets the config from a model in dictionary form.
-        If model has not attribute config, then this method returns a default config.
+        This method gets the config from a model in dictionary form. If model has not attribute config, then this
+        method returns a default config.
 
         Args:
             model (`nn.Module`):
