@@ -144,7 +144,7 @@ class TestXlora:
 
         model.disable_scalings_logging()
 
-        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt", clean_up_tokenization_spaces=True)
+        inputs = tokenizer.encode("Python is a", add_special_tokens=False, return_tensors="pt")
         outputs = model.generate(
             input_ids=inputs.to(self.torch_device),
             max_new_tokens=32,
@@ -155,16 +155,13 @@ class TestXlora:
 
         bucketed = model.get_bucketed_scalings_log()
         keys = bucketed.keys()
-        # One bucket for prompt (seqlen=...) and one for the completion (seqlen=1)
-        assert len(bucketed) == 2
-        # One bucket for prompt (which has 1 elem)
-        assert len(bucketed[max(keys)][0]) == 1
-        assert len(bucketed[max(keys)][1]) == 1
-        assert bucketed[max(keys)][0][0] == 0
-        # One bucket for completions with bucket name 1
-        assert len(bucketed[1][0]) > 1
-        assert len(bucketed[1][1]) > 1
-        assert bucketed[1][0][0] > 0
+        # Once bucket for each token as we aren't using cache
+        assert len(bucketed) == 32 == len(keys)
+        seq_len = inputs.shape[1]
+        for key in keys:
+            assert len(bucketed[key][0]) == 1
+            assert len(bucketed[key][1]) == 1
+            assert bucketed[key][0][0] == key - seq_len
 
         model.clear_scalings_log()
         assert len(model.get_scalings_log()) == 0
