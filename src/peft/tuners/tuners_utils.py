@@ -17,6 +17,7 @@ import copy
 import logging
 import os
 import re
+import textwrap
 import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -30,7 +31,7 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_TARGET_MODULES, SEQ_CLS_HEAD_NAMES
+from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, EMBEDDING_LAYER_NAMES, SEQ_CLS_HEAD_NAMES
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -361,7 +362,36 @@ class BaseTuner(nn.Module, ABC):
 
         Raise a ValueError if it is not possible to merge the adapter with the given configuration.
         """
-        pass
+        example_code = textwrap.dedent(
+            """
+            ```python
+            from transformers import AutoModelForCausalLM
+
+            # Load original tied model
+            model = AutoModelForCausalLM.from_pretrained("google/gemma-2-2b-it", tie_word_embeddings=False)
+
+            # Set the randomly initialized lm_head to the previously tied embeddings
+            model.lm_head.weight.data = model.model.embed_tokens.weight.data.clone()
+
+            # Save the untied model
+            untied_model_dir = "dir/for/untied/model"
+            model.save_pretrained(untied_model_dir)
+            model.config.save_pretrained(untied_model_dir)
+
+            # Now use the original model but in untied format
+            model = AutoModelForCausalLM.from_pretrained(untied_model_dir)
+            ```
+            """
+        )
+        tied_target_modules = self._get_tied_target_modules(self.model)
+        if tied_target_modules:
+            warnings.warn(
+                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
+                "This can lead to complications. "
+                "You can opt to merge the adapter after cloning the weights (to untie the embeddings). "
+                "You can untie the embeddings by loading the model with `tie_word_embeddings=False`. For example:"
+                + example_code
+            )
 
     def inject_adapter(self, model: nn.Module, adapter_name: str, autocast_adapter_dtype: bool = True) -> None:
         r"""
@@ -387,9 +417,7 @@ class BaseTuner(nn.Module, ABC):
         _check_for_modules_to_save = getattr(peft_config, "modules_to_save", None) is not None
         _has_modules_to_save = False
 
-        model_config = getattr(model, "config", {"model_type": "custom"})
-        if hasattr(model_config, "to_dict"):
-            model_config = model_config.to_dict()
+        model_config = self.get_model_config(model)
 
         peft_config = self._prepare_adapter_config(peft_config, model_config)
 
@@ -429,6 +457,15 @@ class BaseTuner(nn.Module, ABC):
             is_target_modules_in_base_model = True
             parent, target, target_name = _get_submodules(model, key)
             self._create_and_replace(peft_config, adapter_name, target, target_name, parent, current_key=key)
+
+        tied_target_modules = self._get_tied_target_modules(model=model)
+        if tied_target_modules:
+            warnings.warn(
+                f"Model with `tie_word_embeddings=True` and the {tied_target_modules=} are part of the adapter. "
+                "This can lead to complications, for example when merging the adapter "
+                "or converting your model to formats other than safetensors. "
+                "See for example https://github.com/huggingface/peft/issues/2018."
+            )
 
         # Handle X-LoRA case.
         if not is_target_modules_in_base_model and hasattr(peft_config, "target_modules"):
@@ -493,6 +530,32 @@ class BaseTuner(nn.Module, ABC):
         )
         if is_modules_to_save_available and len(adapters_to_consider) > 1:
             raise ValueError("Cannot unload multiple adapters that specify `modules_to_save`.")
+
+    @staticmethod
+    def get_model_config(model: nn.Module) -> dict:
+        """
+        This method gets the config from a model in dictionary form. If model has not attribute config, then this
+        method returns a default config.
+
+        Args:
+            model (`nn.Module`):
+                Model to get the config from.
+            default (`dict|None`, *optional*)::
+                What to return if model does not have a config attribute.
+        """
+        model_config = getattr(model, "config", DUMMY_MODEL_CONFIG)
+        if hasattr(model_config, "to_dict"):
+            model_config = model_config.to_dict()
+        return model_config
+
+    def _get_tied_target_modules(self, model: nn.Module) -> list[str]:
+        tied_target_modules = []
+        model_config = self.get_model_config(model)
+        if model_config.get("tie_word_embeddings"):
+            for target_module in self.targeted_module_names:
+                if target_module in EMBEDDING_LAYER_NAMES:
+                    tied_target_modules.append(target_module)
+        return tied_target_modules
 
 
 class BaseTunerLayer(ABC):
