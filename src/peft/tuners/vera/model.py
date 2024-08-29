@@ -107,9 +107,7 @@ class VeraModel(BaseTuner):
 
         This will be used for determining the size of the shared vera_A and vera_B matrices.
         """
-        model_config = getattr(self.model, "config", {"model_type": "custom"})
-        if hasattr(model_config, "to_dict"):
-            model_config = model_config.to_dict()
+        model_config = self.get_model_config(self.model)
 
         peft_config = self._prepare_adapter_config(config, model_config)
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)

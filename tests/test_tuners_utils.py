@@ -43,12 +43,14 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import (
+    BaseTuner,
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
     inspect_matched_modules,
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
+from peft.utils.constants import DUMMY_MODEL_CONFIG
 
 from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
 
@@ -1065,3 +1067,85 @@ class TestModelAndLayerStatus:
 
         with pytest.raises(TypeError, match="get_model_status is not supported for PeftMixedModel"):
             model.get_model_status()
+
+
+# Tests for BaseTuner
+class MockModelConfig:
+    config = {"mock_key": "mock_value"}
+
+    def to_dict(self):
+        return self.config
+
+
+class ModelWithConfig(nn.Module):
+    def __init__(self):
+        self.config = MockModelConfig()
+
+
+class ModelWithDictConfig(nn.Module):
+    def __init__(self):
+        self.config = MockModelConfig.config
+
+
+class ModelWithNoConfig(nn.Module):
+    pass
+
+
+class TestBaseTunerGetModelConfig(unittest.TestCase):
+    def test_get_model_config_use_to_dict(self):
+        config = BaseTuner.get_model_config(ModelWithConfig())
+        assert config == MockModelConfig.config
+
+    def test_get_model_config_as_dict(self):
+        config = BaseTuner.get_model_config(ModelWithDictConfig())
+        assert config == MockModelConfig.config
+
+    def test_get_model_config_with_no_config(self):
+        config = BaseTuner.get_model_config(ModelWithNoConfig())
+        assert config == DUMMY_MODEL_CONFIG
+
+
+class TestBaseTunerWarnForTiedEmbeddings:
+    model_id = "HuggingFaceH4/tiny-random-LlamaForCausalLM"
+    warn_end_inject = "huggingface/peft/issues/2018."
+    warn_end_merge = (
+        "# Now use the original model but in untied format\n"
+        "model = AutoModelForCausalLM.from_pretrained(untied_model_dir)\n```\n"
+    )
+
+    def _get_peft_model(self, tie_word_embeddings, target_module):
+        model = get_peft_model(
+            AutoModelForCausalLM.from_pretrained(self.model_id, tie_word_embeddings=tie_word_embeddings),
+            LoraConfig(target_modules=[target_module]),
+        )
+        return model
+
+    def _is_warn_triggered(self, warning_list, endswith):
+        return any(str(warning.message).endswith(endswith) for warning in warning_list)
+
+    def test_warn_for_tied_embeddings_inject(self, recwarn):
+        self._get_peft_model(tie_word_embeddings=True, target_module="lm_head")
+        assert self._is_warn_triggered(recwarn.list, self.warn_end_inject)
+
+    def test_warn_for_tied_embeddings_merge(self, recwarn):
+        model = self._get_peft_model(tie_word_embeddings=True, target_module="lm_head")
+        model.merge_and_unload()
+        assert self._is_warn_triggered(recwarn.list, self.warn_end_merge)
+
+    def test_no_warn_for_untied_embeddings_inject(self, recwarn):
+        self._get_peft_model(tie_word_embeddings=False, target_module="lm_head")
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_inject)
+
+    def test_no_warn_for_untied_embeddings_merge(self, recwarn):
+        model_not_tied = self._get_peft_model(tie_word_embeddings=False, target_module="lm_head")
+        model_not_tied.merge_and_unload()
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_merge)
+
+    def test_no_warn_for_no_target_module_inject(self, recwarn):
+        self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_inject)
+
+    def test_no_warn_for_no_target_module_merge(self, recwarn):
+        model_no_target_module = self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
+        model_no_target_module.merge_and_unload()
+        assert not self._is_warn_triggered(recwarn.list, self.warn_end_merge)
