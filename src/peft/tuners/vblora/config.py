@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import warnings
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
 
@@ -25,27 +24,48 @@ class VBLoRAConfig(PeftConfig):
     """
     This is the configuration class to store the configuration of a [`VBLoRAConfig`].
 
-    Paper: https://arxiv.org/abs/.
+    Paper: https://arxiv.org/abs/2405.15179
 
     Args:
-        r (`int`, *optional*, defaults to `4`):
-            VBLoRA parameter dimension ("rank").
+        r (`int`):
+            The rank of incremental matrices.
+        num_vectors (`int`):
+            Number of vectors in the vector bank. Use higher values when the model size increases.
+        vector_length (`int`):
+            The length of the vectors in the vector bank. The length of the vectors should be divisible by the hidden
+            dimension of the model.
+        topk (`int`):
+            K value for topk selection.
         target_modules (`Union[List[str], str]`):
-            The names of the modules to apply Vera to. Only linear layers are supported.
+            The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
+            names will be replaced. When passing a string, a regex match will be performed. When passing a list of
+            strings, either an exact match will be performed or it is checked if the name of the module ends with any
+            of the passed strings. If this is specified as 'all-linear', then all linear/Conv1D modules are chosen,
+            excluding the output layer. If this is not specified, modules will be chosen according to the model
+            architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
+            the target modules manually.
+        save_only_topk_weights (`bool`):
+            Whether to only save the topk weights. Models saved in this mode can be used for merging or inference only,
+            not for resuming training.
         vblora_dropout (`float`):
-            The dropout probability for Vera layers.
+            The dropout probability for VBLoRA layers.
         fan_in_fan_out (`bool`):
             Set this to True if the layer to replace stores weight like (fan_in, fan_out). For example, gpt-2 uses
             `Conv1D` which stores weights like (fan_in, fan_out) and hence this should be set to `True`.
         bias (`str`):
-            Bias type for Vera. Can be 'none', 'all' or 'vera_only'. If 'all' or 'vera_only', the corresponding biases
-            will be updated during training. Be aware that this means that, even when disabling the adapters, the model
-            will not produce the same output as the base model would have without adaptation.
+            Bias type for VBLoRA. Can be 'none', 'all' or 'vblora_only'. If 'all' or 'vblora_only', the corresponding
+            biases will be updated during training. Be aware that this means that, even when disabling the adapters,
+            the model will not produce the same output as the base model would have without adaptation.
         modules_to_save (`List[str]`):
-            List of modules apart from Vera layers to be set as trainable and saved in the final checkpoint.
-        init_weights (`bool`):
-            Whether to initialize the weights of the vblora layers with their default initialization. Don't change this
-            setting, except if you know exactly what you're doing.
+            List of modules apart from VBLoRA layers to be set as trainable and saved in the final checkpoint.
+        init_vector_bank_bound (`float`):
+            The vector bank is initialized with a uniform distribution between -init_vector_bank_bound and
+            init_vector_bank_bound. Avoid initializing the vector bank with all zeros to prevent zero gradients. A
+            small value, such as 0.02, is typically effective. Initializing with a large value may cause training
+            instability.
+        init_logits_std (`float`):
+            The logits are initialized with a normal distribution with a standard deviation of init_logits_std. Default
+            is 0.1.
         layers_to_transform (`Union[List[int],int]`):
             The layer indices to transform. If a list of ints is passed, it will apply the adapter to the layer indices
             that are specified in this list. If a single integer is passed, it will apply the transformations on the
@@ -54,26 +74,36 @@ class VBLoRAConfig(PeftConfig):
             The layer pattern name, used only if `layers_to_transform` is different from `None`.
     """
 
-    r: int = field(default=4, metadata={"help": "Rank."})
-    num_vectors: int = field(default=256, metadata={"help": "Number of vectors in the vector bank."})
-    vector_length: int = field(default=256, metadata={"help": "The lentgh of the vectors in the vector bank."})
+    r: int = field(default=4, metadata={"help": "The rank of incremental matrices."})
+    num_vectors: int = field(
+        default=256,
+        metadata={"help": "Number of vectors in the vector bank. Use higher values when the model size increases."},
+    )
+    vector_length: int = field(
+        default=256,
+        metadata={
+            "help": "The length of the vectors in the vector bank. The length of the vectors should be divisible by "
+            "the hidden dimension of the model."
+        },
+    )
     topk: int = field(default=2, metadata={"help": "K value for topk selection."})
-
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
             "help": (
-                "List of module names or regex expression of the module names to replace with VBLoRA."
-                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'. "
-                "Only linear layers are supported."
+                "List of module names or regex expression of the module names to replace with LoRA."
+                "For example, ['q', 'v'] or '.*decoder.*(SelfAttention|EncDecAttention).*(q|v)$'."
+                "This can also be a wildcard 'all-linear' which matches all linear/Conv1D layers except the output layer."
+                "If not specified, modules will be chosen according to the model architecture, If the architecture is "
+                "not known, an error will be raised -- in this case, you should specify the target modules manually."
             )
         },
     )
-    save_topk_weights: bool = field(
+    save_only_topk_weights: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether to only save the topk weights.  Models saved in this mode can be used for merging"
+                "Whether to only save the topk weights. Models saved in this mode can be used for merging"
                 " or inference only, not for resuming training."
             )
         },
@@ -83,7 +113,7 @@ class VBLoRAConfig(PeftConfig):
         default=False,
         metadata={"help": "Set this to True if the layer to replace stores weight like (fan_in, fan_out)"},
     )
-    bias: str = field(default="none", metadata={"help": "Bias type for Vera. Can be 'none', 'all' or 'vera_only'"})
+    bias: str = field(default="none", metadata={"help": "Bias type for VBLoRA. Can be 'none', 'all' or 'vblora_only'"})
     modules_to_save: Optional[List[str]] = field(
         default=None,
         metadata={
@@ -99,7 +129,9 @@ class VBLoRAConfig(PeftConfig):
         metadata={
             "help": (
                 "The vector bank is initialized with a uniform distribution between -init_vector_bank_bound and"
-                " init_vector_bank_bound."
+                " init_vector_bank_bound. Avoid initializing the vector bank with all zeros to prevent zero gradients."
+                " A small value, such as 0.02, is typically effective. Initializing with a large value may cause"
+                " training instability."
             ),
         },
     )
@@ -107,7 +139,8 @@ class VBLoRAConfig(PeftConfig):
         default=0.1,
         metadata={
             "help": (
-                "The logits are initialized with a normal distribution with a standard deviation of init_logits_std."
+                "The logits are initialized with a normal distribution with a standard deviation of init_logits_std. "
+                "Default value 0.1 typically works well."
             ),
         },
     )
@@ -131,9 +164,3 @@ class VBLoRAConfig(PeftConfig):
         self.target_modules = (
             set(self.target_modules) if isinstance(self.target_modules, list) else self.target_modules
         )
-        if self.save_topk_weights:
-            warnings.warn(
-                "Warning: The `save_topk_weights` mode is enabled. Models saved in this mode can be used for merging"
-                " or inference only, not for resuming training.",
-                UserWarning,
-            )

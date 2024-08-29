@@ -935,7 +935,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # this high learning rate was found through testing to be necessary to avoid flakiness
         lr = (
             100.0
-            if config_kwargs.get("use_dora") and model_id == "EmbConv1D" or issubclass(config_cls, VBLoRAConfig)
+            if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig)
             else 0.5
         )
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
@@ -1016,12 +1016,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             **config_kwargs,
         )
         model = get_peft_model(model, config)
+        if issubclass(config_cls, VBLoRAConfig):
+            # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
+            torch.nn.init.zeros_(model.vblora_vector_bank["default"])
         model.eval()
         outputs_before = model(**X)
-        if not issubclass(config_cls, VBLoRAConfig):
-            # The VBLoRA adaptor is not initialized to zero; therefore, outputs_before will not be equal to outputs_base
-            assert torch.allclose(outputs_base, outputs_before)
+        assert torch.allclose(outputs_base, outputs_before)
 
+        if issubclass(config_cls, VBLoRAConfig):
+            # initialize `vblora_vector_bank` so it can be trained
+            model._init_vblora_vector_bank(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -1070,12 +1074,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             base_model_name_or_path=model_id,
             **config_kwargs,
         )
-        model.eval()
-        outputs_base = model(**X)
         model = get_peft_model(model, config)
+        if issubclass(config_cls, VBLoRAConfig):
+            # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
+            torch.nn.init.zeros_(model.vblora_vector_bank["default"])
         model.eval()
         outputs_before = model(**X)
 
+        if issubclass(config_cls, VBLoRAConfig):
+            # initialize `vblora_vector_bank` so it can be trained
+            model._init_vblora_vector_bank(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
@@ -1124,8 +1132,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         # unmerged or merged should make no difference
         assert torch.allclose(outputs_after, outputs_unmerged, atol=atol, rtol=rtol)
 
-        # check that disabling adapters gives the same results as base model
-        assert torch.allclose(outputs_base, outputs_disabled, atol=atol, rtol=rtol)
+        # check that disabling adapters gives the same results as before training
+        assert torch.allclose(outputs_before, outputs_disabled, atol=atol, rtol=rtol)
 
         # check that enabling + disabling adapters does not change the results
         assert torch.allclose(outputs_after, outputs_enabled_after_disable, atol=atol, rtol=rtol)

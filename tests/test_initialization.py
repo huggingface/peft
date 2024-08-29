@@ -36,6 +36,7 @@ from peft import (
     PeftModelForSequenceClassification,
     PeftModelForTokenClassification,
     PromptTuningConfig,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
 )
@@ -1168,6 +1169,37 @@ class TestVeraInitialization:
         msg = f"vera_A has a size of {rank0} but {rank1} or greater is required"
         with pytest.raises(ValueError, match=msg):
             model.add_adapter("other", config1)
+
+
+class TestVBLoraInitialization:
+    torch_device = infer_device()
+
+    def get_model(self):
+        class MLP(nn.Module):
+            def __init__(self, bias=True):
+                super().__init__()
+                self.lin0 = nn.Linear(10, 30, bias=bias)
+                self.lin1 = nn.Linear(30, 2, bias=bias)
+
+            def forward(self, X):
+                X = self.lin0(X)
+                X = self.lin1(X)
+                return X
+
+        return MLP().to(self.torch_device)
+
+    def test_vblora_with_incompatible_vector_length(self):
+        vector_length = 3
+        config1 = VBLoRAConfig(target_modules=["lin0"], vector_length=vector_length)
+        model = self.get_model()
+        msg = f"`in_features` {model.lin0.in_features} must be divisible by `vector_length` {vector_length}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config1)
+
+        config2 = VBLoRAConfig(target_modules=["lin1"], vector_length=vector_length)
+        msg = f"`out_features` {model.lin1.out_features} must be divisible by `vector_length` {vector_length}"
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config2)
 
 
 class TestNoInfiniteRecursionDeepspeed:

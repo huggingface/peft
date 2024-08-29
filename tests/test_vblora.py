@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import os
 
 import pytest
@@ -45,28 +44,33 @@ class MLP(nn.Module):
 
 
 class TestVBLoRA:
-    @pytest.fixture
-    def mlp(self):
+    def get_mlp(self):
         model = MLP()
         return model
 
-    def test_vblora_parameters(self, mlp):
-        config = VBLoRAConfig(target_modules=["lin0", "lin1", "lin3"], vector_length=2, num_vectors=10)
+    def test_vblora_parameters(self):
+        mlp = self.get_mlp()
+        vector_length = 2
+        num_vectors = 10
+        config = VBLoRAConfig(
+            target_modules=["lin0", "lin1", "lin3"], vector_length=vector_length, num_vectors=num_vectors
+        )
         mlp_vblora = get_peft_model(mlp, config)
 
         vector_bank = mlp_vblora.vblora_vector_bank["default"]
 
         vblora_lin0_logits_B = mlp_vblora.lin0.vblora_logits_B["default"]
-        assert vblora_lin0_logits_B.shape == (mlp.lin0.out_features // 2, config.r, 10)
+        assert vblora_lin0_logits_B.shape == (mlp.lin0.out_features // vector_length, config.r, num_vectors)
 
         vblora_lin1_logits_A = mlp_vblora.lin1.vblora_logits_A["default"]
-        assert vblora_lin1_logits_A.shape == (config.r, mlp.lin1.in_features // 2, 10)
+        assert vblora_lin1_logits_A.shape == (config.r, mlp.lin1.in_features // vector_length, num_vectors)
 
         vblora_lin3_logits_A = mlp_vblora.lin3.vblora_logits_A["default"]
-        assert vblora_lin3_logits_A.shape == (config.r, mlp.lin3.in_features // 2, 10)
+        assert vblora_lin3_logits_A.shape == (config.r, mlp.lin3.in_features // vector_length, num_vectors)
 
-        assert vector_bank.shape == (10, 2)
+        assert vector_bank.shape == (num_vectors, vector_length)
 
+        # test if the vector bank is shared across the layers
         assert (
             mlp_vblora.lin0.vblora_vector_bank["default"].data_ptr()
             == mlp_vblora.lin3.vblora_vector_bank["default"].data_ptr()
@@ -77,45 +81,73 @@ class TestVBLoRA:
         input = torch.randn(5, 10)
         mlp_vblora(input)
 
-    def test_save_load_save(self, mlp, tmp_path):
+    def test_save_load_save(self, tmp_path):
+        mlp = self.get_mlp()
         config = VBLoRAConfig(target_modules=["lin0", "lin1", "lin3"], vector_length=2, num_vectors=10)
         mlp_vblora = get_peft_model(mlp, config)
         save_path = tmp_path / "vblora"
         mlp_vblora.save_pretrained(save_path)
-
         assert os.path.exists(save_path / "adapter_config.json")
 
         mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
-
         input = torch.randn(5, 10)
         output = mlp_vblora(input)
         output_loaded = mlp_vblora_loaded(input)
-        assert torch.allclose(output, output_loaded, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(output, output_loaded, atol=1e-8, rtol=1e-5)
 
-    def test_save_load_save_topk_only(self, mlp, tmp_path):
+    def test_resume_training_model_with_topk_weights(self, tmp_path):
+        mlp = self.get_mlp()
         config = VBLoRAConfig(
-            target_modules=["lin0", "lin1", "lin3"], topk=2, vector_length=2, num_vectors=10, save_topk_weights=True
+            target_modules=["lin0", "lin1", "lin3"],
+            topk=2,
+            vector_length=2,
+            num_vectors=10,
+            save_only_topk_weights=True,
         )
         mlp_vblora = get_peft_model(mlp, config)
         save_path = tmp_path / "vblora"
         mlp_vblora.save_pretrained(save_path)
-        print("save_path", save_path)
+
+        input = torch.randn(5, 10)
+        mlp_vblora.train()
+        # should not raise
+        mlp_vblora(input)
+
+        mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
+        mlp_vblora_loaded.train()
+        msg = "Found infinity values in logits. Ensure training was not resumed from a `save_only_topk_weights` model."
+        with pytest.raises(RuntimeError, match=msg):
+            mlp_vblora_loaded(input)
+
+    def test_save_load_save_topk_only(self, tmp_path):
+        mlp = self.get_mlp()
+        config = VBLoRAConfig(
+            target_modules=["lin0", "lin1", "lin3"],
+            topk=2,
+            vector_length=2,
+            num_vectors=10,
+            save_only_topk_weights=True,
+        )
+        mlp_vblora = get_peft_model(mlp, config)
+        input = torch.randn(5, 10)
+        output = mlp_vblora(input)
+
+        save_path = tmp_path / "vblora"
+        mlp_vblora.save_pretrained(save_path)
         assert os.path.exists(save_path / "adapter_config.json")
 
         mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
-
-        input = torch.randn(5, 10)
-        output = mlp_vblora(input)
         output_loaded = mlp_vblora_loaded(input)
-        assert torch.allclose(output, output_loaded, atol=1e-3, rtol=1e-3)
+        assert torch.allclose(output, output_loaded, atol=1e-8, rtol=1e-5)
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
-    def test_vblora_dtypes(self, mlp, dtype):
+    def test_vblora_dtypes(self, dtype):
+        mlp = self.get_mlp()
         if (dtype == torch.bfloat16) and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
             pytest.skip("bfloat16 not supported on this system, skipping the test")
 
         config = VBLoRAConfig(
-            target_modules=["lin0", "lin1", "lin3"], vector_length=2, num_vectors=10, save_topk_weights=True
+            target_modules=["lin0", "lin1", "lin3"], vector_length=2, num_vectors=10, save_only_topk_weights=False
         )
         mlp_vblora = get_peft_model(mlp.to(dtype), config)
         inputs = torch.randn(5, 10).to(dtype)

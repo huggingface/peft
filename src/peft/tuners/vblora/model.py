@@ -1,4 +1,4 @@
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ class VBLoRAModel(BaseTuner):
 
         ```py
         >>> from transformers import AutoModelForCausalLM
-        >>> from peft import VeraConfig, get_peft_model
+        >>> from peft import VBLoRAConfig, get_peft_model
 
         >>> base_model = AutoModelForCausalLM.from_pretrained("facebook/opt-125m")
         >>> config = VBLoRAConfig(
@@ -57,14 +57,14 @@ class VBLoRAModel(BaseTuner):
         ...     target_modules=["fc1", "fc2", "k_proj", "out_proj", "q_proj", "v_proj"],
         ...     num_vectors=60,
         ...     vector_length=256,
-        ...     save_topk_weights=True,
+        ...     save_only_topk_weights=True,
         ... )
         >>> model = get_peft_model(base_model, config)
         ```
 
     **Attributes**:
         - **model** ([`~transformers.PreTrainedModel`]) -- The model to be adapted.
-        - **peft_config** ([`VeraConfig`]): The configuration of the Vera model.
+        - **peft_config** ([`VBLoRAConfig`]): The configuration of the VBLoRAConfig model.
     """
 
     prefix: str = "vblora_"
@@ -97,8 +97,8 @@ class VBLoRAModel(BaseTuner):
             )
 
     @staticmethod
-    def _check_target_module_exists(vera_config, key):
-        return check_target_module_exists(vera_config, key)
+    def _check_target_module_exists(vblora_config, key):
+        return check_target_module_exists(vblora_config, key)
 
     def _create_and_replace(
         self,
@@ -112,11 +112,8 @@ class VBLoRAModel(BaseTuner):
         if current_key is None:
             raise ValueError("Current Key shouldn't be `None`")
 
-        r = vblora_config.r
         bias = hasattr(target, "bias") and target.bias is not None
         kwargs = {
-            "r": r,
-            "vblora_dropout": vblora_config.vblora_dropout,
             "fan_in_fan_out": vblora_config.fan_in_fan_out,
             "bias": bias,
         }
@@ -127,7 +124,7 @@ class VBLoRAModel(BaseTuner):
             target.update_layer(
                 adapter_name=adapter_name,
                 vblora_vector_bank=self.vblora_vector_bank,
-                r=r,
+                r=vblora_config.r,
                 topk=vblora_config.topk,
                 num_vectors=vblora_config.num_vectors,
                 vector_length=vblora_config.vector_length,
@@ -136,13 +133,10 @@ class VBLoRAModel(BaseTuner):
             )
         else:
             new_module = self._create_new_module(
-                vblora_config,
-                self.vblora_vector_bank,
-                vblora_config.num_vectors,
-                vblora_config.vector_length,
-                vblora_config.topk,
-                adapter_name,
-                target,
+                vblora_config=vblora_config,
+                vblora_vector_bank=self.vblora_vector_bank,
+                adapter_name=adapter_name,
+                target=target,
                 **kwargs,
             )
             if adapter_name not in self.active_adapter:
@@ -186,7 +180,6 @@ class VBLoRAModel(BaseTuner):
             bias = self.peft_config[active_adapter].bias
             if bias == "none":
                 continue
-
             if bias == "all":
                 for n, p in model.named_parameters():
                     if "bias" in n:
@@ -199,11 +192,7 @@ class VBLoRAModel(BaseTuner):
                 raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     @staticmethod
-    def _create_new_module(
-        vblora_config, vblora_vector_bank, num_vectors, vector_length, topk, adapter_name, target, **kwargs
-    ):
-        bias = kwargs.pop("bias", False)
-
+    def _create_new_module(vblora_config, vblora_vector_bank, adapter_name, target, **kwargs):
         if isinstance(target, BaseTunerLayer):
             target_base_layer = target.get_base_layer()
         else:
@@ -229,9 +218,17 @@ class VBLoRAModel(BaseTuner):
                 f"Target module {target} is not supported. Currently, only the following modules are supported: "
                 "`torch.nn.Linear`, `transformers.pytorch_utils.Conv1D`."
             )
-        r = kwargs.pop("r")
         new_module = Linear(
-            target, vblora_vector_bank, adapter_name, r, num_vectors, vector_length, topk, bias=bias, **kwargs
+            base_layer=target,
+            vblora_vector_bank=vblora_vector_bank,
+            adapter_name=adapter_name,
+            r=vblora_config.r,
+            num_vectors=vblora_config.num_vectors,
+            vector_length=vblora_config.vector_length,
+            topk=vblora_config.topk,
+            vblora_dropout=vblora_config.vblora_dropout,
+            init_logits_std=vblora_config.init_logits_std,
+            **kwargs,
         )
 
         return new_module
@@ -366,7 +363,7 @@ class VBLoRAModel(BaseTuner):
         self, progressbar: bool = False, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
     ) -> torch.nn.Module:
         r"""
-        This method merges the Vera layers into the base model. This is needed if someone wants to use the base model
+        This method merges the VBLoRA layers into the base model. This is needed if someone wants to use the base model
         as a standalone model.
 
         Args:
