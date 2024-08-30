@@ -976,6 +976,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         model.train()
         lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
+        lr = 0.01 if issubclass(config_cls, VBLoRAConfig) else lr
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
