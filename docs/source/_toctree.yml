@@ -115,7 +115,7 @@
     - local: package_reference/fourierft
       title: FourierFT
     - local: package_reference/vblora
-      title: VBLoRA
+      title: VB-LoRA
 
     title: Adapters
   - sections:
