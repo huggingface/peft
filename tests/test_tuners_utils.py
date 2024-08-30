@@ -1158,10 +1158,10 @@ class TestFindMinimalTargetModules:
         [
             (["bar"], [], {"bar"}),
             (["foo"], ["bar"], {"foo"}),
-            (["1.foo", "2.foo"], ["3.foo", "4.foo"], {'1.foo', '2.foo'}),
+            (["1.foo", "2.foo"], ["3.foo", "4.foo"], {"1.foo", "2.foo"}),
             # Could also return "bar.baz" but we want the shorter one
             (["bar.baz"], ["foo.bar"], {"baz"}),
-            (["1.foo", "2.foo", "bar.baz"], ["3.foo", "bar.bla"], {'1.foo', '2.foo', 'baz'}),
+            (["1.foo", "2.foo", "bar.baz"], ["3.foo", "bar.bla"], {"1.foo", "2.foo", "baz"}),
             # Case with longer suffix chains and nested suffixes
             (["a.b.c", "d.e.f", "g.h.i"], ["j.k.l", "m.n.o"], {"c", "f", "i"}),
             (["a.b.c", "d.e.f", "g.h.i"], ["a.b.x", "d.x.f", "x.h.i"], {"c", "e.f", "g.h.i"}),
@@ -1232,7 +1232,7 @@ class TestFindMinimalTargetModules:
             (["foo.bar", "spam", "eggs"], ["foo.bar"]),
             (["foo.bar", "spam"], ["foo.bar", "eggs"]),
             (["foo.bar"], ["foo.bar", "spam", "eggs"]),
-         ],
+        ],
     )
     def test_find_minimal_target_modules_not_disjoint_raises(self, target_modules, other_module_names):
         msg = (

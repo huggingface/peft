@@ -796,8 +796,9 @@ class BaseTunerLayer(ABC):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
 
 
-
-def find_minimal_target_modules(target_modules: list[str] | set[str], other_module_names: list[str] | set[str]) -> set[str]:
+def find_minimal_target_modules(
+    target_modules: list[str] | set[str], other_module_names: list[str] | set[str]
+) -> set[str]:
     """Find the minimal set of target modules that is sufficient to separate them from the other modules.
 
     Sometimes, a very large list of target_modules could be passed, which can slow down loading of adapters (e.g. when
@@ -807,6 +808,7 @@ def find_minimal_target_modules(target_modules: list[str] | set[str], other_modu
     Example:
         ```py
         >>> from peft.tuners.tuners_utils import find_minimal_target_modules
+
         >>> target_modules = [f"model.decoder.layers.{i}.self_attn.q_proj" for i in range(100)]
         >>> target_modules += [f"model.decoder.layers.{i}.self_attn.v_proj" for i in range(100)]
         >>> other_module_names = [f"model.encoder.layers.{i}.self_attn.k_proj" for i in range(100)]
@@ -872,7 +874,6 @@ def find_minimal_target_modules(target_modules: list[str] | set[str], other_modu
     if not required_suffixes:
         return set(target_modules)
     return required_suffixes
-
 
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
