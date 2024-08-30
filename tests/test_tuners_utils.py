@@ -47,6 +47,7 @@ from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
+    find_minimal_target_modules,
     inspect_matched_modules,
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
@@ -1149,3 +1150,94 @@ class TestBaseTunerWarnForTiedEmbeddings:
         model_no_target_module = self._get_peft_model(tie_word_embeddings=True, target_module="q_proj")
         model_no_target_module.merge_and_unload()
         assert not self._is_warn_triggered(recwarn.list, self.warn_end_merge)
+
+
+class TestFindMinimalTargetModules:
+    @pytest.mark.parametrize(
+        "target_modules, other_module_names, expected",
+        [
+            (["bar"], [], {"bar"}),
+            (["foo"], ["bar"], {"foo"}),
+            (["1.foo", "2.foo"], ["3.foo", "4.foo"], {'1.foo', '2.foo'}),
+            # Could also return "bar.baz" but we want the shorter one
+            (["bar.baz"], ["foo.bar"], {"baz"}),
+            (["1.foo", "2.foo", "bar.baz"], ["3.foo", "bar.bla"], {'1.foo', '2.foo', 'baz'}),
+            # Case with longer suffix chains and nested suffixes
+            (["a.b.c", "d.e.f", "g.h.i"], ["j.k.l", "m.n.o"], {"c", "f", "i"}),
+            (["a.b.c", "d.e.f", "g.h.i"], ["a.b.x", "d.x.f", "x.h.i"], {"c", "e.f", "g.h.i"}),
+            # Case with multiple items that can be covered by a single suffix
+            (["foo.bar.baz", "qux.bar.baz"], ["baz.bar.foo"], {"baz"}),
+            # Realistic examples
+            # Only match k_proj
+            (
+                ["model.decoder.layers.{i}.self_attn.k_proj" for i in range(12)],
+                (
+                    ["model.decoder.layers.{i}.self_attn" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.v_proj" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.q_proj" for i in range(12)]
+                ),
+                {"k_proj"},
+            ),
+            # Match all k_proj except the one in layer 5 => no common suffix
+            (
+                ["model.decoder.layers.{i}.self_attn.k_proj" for i in range(12) if i != 5],
+                (
+                    ["model.decoder.layers.5.self_attn.k_proj"]
+                    + ["model.decoder.layers.{i}.self_attn" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.v_proj" for i in range(12)]
+                    + ["model.decoder.layers.{i}.self_attn.q_proj" for i in range(12)]
+                ),
+                {"{i}.self_attn.k_proj" for i in range(12) if i != 5},
+            ),
+        ],
+    )
+    def test_find_minimal_target_modules(self, target_modules, other_module_names, expected):
+        # check all possible combinations of list and set
+        result = find_minimal_target_modules(target_modules, other_module_names)
+        assert result == expected
+
+        result = find_minimal_target_modules(set(target_modules), other_module_names)
+        assert result == expected
+
+        result = find_minimal_target_modules(target_modules, set(other_module_names))
+        assert result == expected
+
+        result = find_minimal_target_modules(set(target_modules), set(other_module_names))
+        assert result == expected
+
+    def test_find_minimal_target_modules_empty_raises(self):
+        with pytest.raises(ValueError, match="target_modules should be a list or set of strings"):
+            find_minimal_target_modules([], ["foo"])
+
+        with pytest.raises(ValueError, match="target_modules should be a list or set of strings"):
+            find_minimal_target_modules(set(), ["foo"])
+
+    def test_find_minimal_target_modules_contains_empty_string_raises(self):
+        target_modules = ["", "foo", "bar.baz"]
+        other_module_names = ["bar"]
+        with pytest.raises(ValueError, match="target_modules should not contain an empty string"):
+            find_minimal_target_modules(target_modules, other_module_names)
+
+    def test_find_minimal_target_modules_string_raises(self):
+        target_modules = "foo"
+        other_module_names = ["bar"]
+        with pytest.raises(ValueError, match="target_modules should be a list or set of strings"):
+            find_minimal_target_modules(target_modules, other_module_names)
+
+    @pytest.mark.parametrize(
+        "target_modules, other_module_names",
+        [
+            (["foo"], ["foo"]),
+            (["foo.bar"], ["foo.bar"]),
+            (["foo.bar", "spam", "eggs"], ["foo.bar"]),
+            (["foo.bar", "spam"], ["foo.bar", "eggs"]),
+            (["foo.bar"], ["foo.bar", "spam", "eggs"]),
+         ],
+    )
+    def test_find_minimal_target_modules_not_disjoint_raises(self, target_modules, other_module_names):
+        msg = (
+            "target_modules and other_module_names contain common elements, this should not happen, please "
+            "open a GitHub issue at https://github.com/huggingface/peft/issues with the code to reproduce this issue"
+        )
+        with pytest.raises(ValueError, match=msg):
+            find_minimal_target_modules(target_modules, other_module_names)
