@@ -261,3 +261,4 @@ SEQ_CLS_HEAD_NAMES = ["score", "classifier"]
 INCLUDE_LINEAR_LAYERS_SHORTHAND = "all-linear"
 TOKENIZER_CONFIG_NAME = "tokenizer_config.json"
 DUMMY_TARGET_MODULES = "dummy-target-modules"
+DUMMY_MODEL_CONFIG = {"model_type": "custom"}
