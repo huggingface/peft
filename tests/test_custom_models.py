@@ -1061,7 +1061,7 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         else:
             rtol, atol = 1e-5, 1e-8
         assert not torch.allclose(outputs_before, outputs_after, rtol=rtol, atol=atol)
-        assert torch.allclose(outputs_base, outputs_disabled)
+        assert torch.allclose(outputs_before, outputs_disabled)
         assert torch.allclose(outputs_after, outputs_enabled_after_disable)
 
     @parameterized.expand(TEST_CASES)
