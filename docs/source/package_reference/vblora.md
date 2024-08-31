@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # VB-LoRA: Extreme Parameter Efficient Fine-Tuning with Vector Banks
 
-[VB-LoRA](https://arxiv.org/abs/2405.15179) is a parameter-efficient fine-tuning technique that extends LoRA by achieving significantly higher parameter efficiency through fine-grained parameter sharing at the sub-vector level. This makes VB-LoRA especially useful in scenarios where storage and transmission costs are critical. It works by decomposing low-rank matrices from different modules (such as K, Q, V, and FFN) and layers into sub-vectors, which are then globally shared through a vector bank.
+[VB-LoRA](https://arxiv.org/abs/2405.15179) is a parameter-efficient fine-tuning technique that extends LoRA by learning a fine-grained parameter-sharing scheme at the sub-vector level, achieving significantly higher parameter efficiency. This makes VB-LoRA especially useful in scenarios where storage and transmission costs are critical. It works by decomposing low-rank matrices—from different layers and modules such as K, Q, V, and FFN—into sub-vectors, which are then globally shared through a vector bank.
 
 The abstract from the paper is:
 
