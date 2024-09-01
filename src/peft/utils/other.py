@@ -272,24 +272,35 @@ class ModulesToSaveWrapper(torch.nn.Module):
             raise ValueError(msg)
 
     def _mixed_batch_forward(
-        self, x: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
+        self, input: torch.Tensor, *args: Any, adapter_names: list[str], **kwargs: Any
     ) -> torch.Tensor:
         # This is a special method that handles the case when users pass the argument `adapter_names`. This is an
         # extra argument that allows mixing different adapters in the same batch at inference time.
+
+        SUPPORTED_MODULES = (torch.nn.Linear, torch.nn.Embedding, torch.nn.Conv2d, torch.nn.Conv1d)
+
+        if not isinstance(self.original_module, SUPPORTED_MODULES):
+            raise TypeError("Mixed batching is only supported for Linear, Embedding, Conv2d, and Conv1D modules.")
+
         unique_adapters = set(adapter_names)
         sub_batch_indices_list = []
+
         for adapter in unique_adapters:
             sub_batch_indices_list.append([index for index, item in enumerate(adapter_names) if item == adapter])
 
-        results = [0 for i in range(len(x))]
+        results = [0 for _ in range(len(input))]
+
         for i, active_adapter in enumerate(unique_adapters):
-            sub_batch = x[sub_batch_indices_list[i]]
+            sub_batch = input[sub_batch_indices_list[i]]
+
             if active_adapter == "__base__":
-                output = self.original_module(*(sub_batch,), **kwargs)
+                output = self.original_module(sub_batch, *args, **kwargs)
             else:
-                output = self.modules_to_save[active_adapter](*(sub_batch,), **kwargs)
+                output = self.modules_to_save[active_adapter](sub_batch, *args, **kwargs)
+
             for index, j in enumerate(sub_batch_indices_list[i]):
                 results[j] = output[index]
+
         return torch.stack(results)
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
