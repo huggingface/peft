@@ -3187,8 +3187,8 @@ class TestMixedAdapterBatches:
 
     def test_mixed_adapter_batches_lora_different_classifiers(self, mlp_lora):
         base_model = MLP().to(self.torch_device).eval()
-        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["sm"], init_lora_weights=False)
-        config1 = LoraConfig(target_modules=["lin1"], modules_to_save=["sm"], init_lora_weights=False)
+        config0 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
+        config1 = LoraConfig(target_modules=["lin0"], modules_to_save=["lin1"], init_lora_weights=False)
         peft_model = get_peft_model(base_model, config0, "adapter0").eval()
         peft_model.add_adapter("adapter1", config1)
         inputs = {"X": torch.arange(90).view(-1, 10).to(self.torch_device)}
