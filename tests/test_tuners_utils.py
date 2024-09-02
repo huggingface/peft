@@ -42,6 +42,7 @@ from peft import (
     get_model_status,
     get_peft_model,
 )
+from peft.tuners.lora.layer import LoraLayer
 from peft.tuners.tuners_utils import (
     BaseTuner,
     BaseTunerLayer,
@@ -53,7 +54,7 @@ from peft.tuners.tuners_utils import (
     _find_minimal_target_modules as find_minimal_target_modules,
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
-from peft.utils.constants import DUMMY_MODEL_CONFIG
+from peft.utils.constants import DUMMY_MODEL_CONFIG, MIN_TARGET_MODULES_FOR_OPTIMIZATION
 
 from .testing_utils import require_bitsandbytes, require_non_cpu, require_torch_gpu
 
@@ -1243,3 +1244,41 @@ class TestFindMinimalTargetModules:
         )
         with pytest.raises(ValueError, match=msg):
             find_minimal_target_modules(target_modules, other_module_names)
+
+    def test_get_peft_model_applies_find_target_modules(self):
+        # Check that when calling get_peft_model, the target_module optimization is indeed applied if the lenght of
+        # target_modules is big enough. The resulting model itself should be unaffected.
+        torch.manual_seed(0)
+        model_id = "facebook/opt-125m"  # must be big enough for optimization to trigger
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+
+        # base case: specify target_modules in a minimal fashion
+        config = LoraConfig(init_lora_weights=False, target_modules=["q_proj", "v_proj"])
+        model = get_peft_model(model, config)
+
+        # this list contains all targeted modules listed separately
+        big_target_modules = [name for name, module in model.named_modules() if isinstance(module, LoraLayer)]
+        # sanity check
+        assert len(big_target_modules) > MIN_TARGET_MODULES_FOR_OPTIMIZATION
+
+        # make a "checksum" of the model for comparison
+        model_check_sum_before = sum(p.sum() for p in model.parameters())
+
+        # strip prefix so that the names they can be used as new target_modules
+        prefix_to_strip = "base_model.model.model."
+        big_target_modules = [name[len(prefix_to_strip) :] for name in big_target_modules]
+
+        del model
+
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id)
+        # pass the big target_modules to config
+        config = LoraConfig(init_lora_weights=False, target_modules=big_target_modules)
+        model = get_peft_model(model, config)
+
+        # check that target modules have been condensed
+        assert model.peft_config["default"].target_modules == {"q_proj", "v_proj"}
+
+        # check that the resulting model is still the same
+        model_check_after = sum(p.sum() for p in model.parameters())
+        assert model_check_sum_before == model_check_after

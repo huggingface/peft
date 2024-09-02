@@ -31,7 +31,13 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, EMBEDDING_LAYER_NAMES, SEQ_CLS_HEAD_NAMES
+from peft.utils.constants import (
+    DUMMY_MODEL_CONFIG,
+    DUMMY_TARGET_MODULES,
+    EMBEDDING_LAYER_NAMES,
+    MIN_TARGET_MODULES_FOR_OPTIMIZATION,
+    SEQ_CLS_HEAD_NAMES,
+)
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -442,9 +448,14 @@ class BaseTuner(nn.Module, ABC):
         # quite a lot. See: https://github.com/huggingface/diffusers/issues/9297
         # As there is a small chance for undiscovered bugs, we apply this optimization only if the list of
         # target_modules is sufficiently big.
-        if isinstance(peft_config.target_modules, (list, set)) and len(peft_config.target_modules) >= 20:
-            names_not_match = [n for n in key_list if n not in peft_config.target_modules]
-            new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_not_match)
+        if (
+            isinstance(peft_config.target_modules, (list, set))
+            and len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION
+        ):
+            names_no_target = [
+                name for name in key_list if not any(name.endswith(suffix) for suffix in peft_config.target_modules)
+            ]
+            new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_no_target)
             if len(new_target_modules) < len(peft_config.target_modules):
                 peft_config.target_modules = new_target_modules
 

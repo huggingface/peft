@@ -262,3 +262,9 @@ INCLUDE_LINEAR_LAYERS_SHORTHAND = "all-linear"
 TOKENIZER_CONFIG_NAME = "tokenizer_config.json"
 DUMMY_TARGET_MODULES = "dummy-target-modules"
 DUMMY_MODEL_CONFIG = {"model_type": "custom"}
+
+# If users specify more than this number of target modules, we apply an optimization to try to reduce the target modules
+# to a minimal set of suffixes, which makes loading faster. We only apply this when exceeding a certain size since
+# otherwise there is no point in optimizing and there is a small chance of bugs in the optimization algorithm, so no
+# point in taking unnecessary risks. See #2045 for more context.
+MIN_TARGET_MODULES_FOR_OPTIMIZATION = 20
