@@ -610,6 +610,10 @@ class PeftCommonTester:
         if (config.peft_type == "IA3") and (model_id == "Conv2d"):
             # for some reason, the IA³ Conv2d introduces a larger error
             atol, rtol = 0.3, 0.01
+        if quant_method := getattr(model, "quantization_method", None):
+            if quant_method.value == "quanto":
+                atol, rtol = 5e-3, 5e-3
+
         assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
         assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)

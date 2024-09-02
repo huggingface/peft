@@ -123,7 +123,7 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
                     raise ValueError(
                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
                     )
-            quantized = quantize_weight(new_weight_data, qtype=orig_weight.qtype, axis=orig_weight.axis)
+            quantized = quantize_weight(new_weight_data, qtype=base_layer.qweight.qtype, axis=base_layer.qweight.axis)
             base_layer.weight._data = quantized._data
             base_layer.weight._scale = quantized._scale
             self.merged_adapters.append(active_adapter)
@@ -143,7 +143,7 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
             base_layer = self.get_base_layer()
             orig_weight = base_layer.weight
             new_weight_data = orig_weight - self.get_delta_weight(active_adapter)
-            quantized = quantize_weight(new_weight_data, qtype=orig_weight.qtype, axis=orig_weight.axis)
+            quantized = quantize_weight(new_weight_data, qtype=base_layer.qweight.qtype, axis=base_layer.qweight.axis)
             base_layer.weight._data = quantized._data
             base_layer.weight._scale = quantized._scale
 
