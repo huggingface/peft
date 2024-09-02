@@ -190,7 +190,7 @@ class Linear(nn.Linear, VBLoRALayer):
         # Check for infinity values when training. If found, training was likely resumed from a `save_only_topk_weights` model.
         if self.training and vblora_logits_A[0, 0].isinf().any():
             raise RuntimeError(
-                "Found infinity values in logits. Ensure training was not resumed from a `save_only_topk_weights` model."
+                "Found infinity values in VB-LoRA logits. Ensure training was not resumed from a `save_only_topk_weights` model."
             )
 
         vblora_vector_bank = self.vblora_vector_bank[adapter].to(vblora_logits_A.device)

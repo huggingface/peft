@@ -1188,18 +1188,21 @@ class TestVBLoraInitialization:
 
         return MLP().to(self.torch_device)
 
-    def test_vblora_with_incompatible_vector_length(self):
+    def test_vblora_with_incompatible_vector_length_with_in_features(self):
         vector_length = 3
-        config1 = VBLoRAConfig(target_modules=["lin0"], vector_length=vector_length)
         model = self.get_model()
+        config = VBLoRAConfig(target_modules=["lin0"], vector_length=vector_length)
         msg = f"`in_features` {model.lin0.in_features} must be divisible by `vector_length` {vector_length}"
         with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config1)
+            get_peft_model(model, config)
 
-        config2 = VBLoRAConfig(target_modules=["lin1"], vector_length=vector_length)
+    def test_vblora_with_incompatible_vector_length_with_out_features(self):
+        vector_length = 3
+        model = self.get_model()
+        config = VBLoRAConfig(target_modules=["lin1"], vector_length=vector_length)
         msg = f"`out_features` {model.lin1.out_features} must be divisible by `vector_length` {vector_length}"
         with pytest.raises(ValueError, match=msg):
-            get_peft_model(model, config2)
+            get_peft_model(model, config)
 
 
 class TestNoInfiniteRecursionDeepspeed:

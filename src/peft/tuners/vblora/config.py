@@ -35,7 +35,9 @@ class VBLoRAConfig(PeftConfig):
             The length of the vectors in the vector bank. The length of the vectors should be divisible by the hidden
             dimension of the model.
         topk (`int`):
-            K value for topk selection.
+            The K value for top-K selection. A larger value of K increases the size of the saved model. In practice,
+            setting K=2 typically provides the best performance and parameter efficiency. For more details, refer to
+            the discussion in the paper.
         target_modules (`Union[List[str], str]`):
             The names of the modules to apply the adapter to. If this is specified, only the modules with the specified
             names will be replaced. When passing a string, a regex match will be performed. When passing a list of
@@ -45,8 +47,9 @@ class VBLoRAConfig(PeftConfig):
             architecture. If the architecture is not known, an error will be raised -- in this case, you should specify
             the target modules manually.
         save_only_topk_weights (`bool`):
-            Whether to only save the topk weights. Models saved in this mode can be used for merging or inference only,
-            not for resuming training.
+            Whether to only save the topk weights. Setting `save_only_topk_weights = True` significantly reduces
+            storage space. However, models saved in this mode can be used for merging or inference only, not for
+            resuming training.
         vblora_dropout (`float`):
             The dropout probability for VBLoRA layers.
         fan_in_fan_out (`bool`):
@@ -86,7 +89,14 @@ class VBLoRAConfig(PeftConfig):
             "the hidden dimension of the model."
         },
     )
-    topk: int = field(default=2, metadata={"help": "K value for topk selection."})
+    topk: int = field(
+        default=2,
+        metadata={
+            "help": "The K value for top-K selection. A larger value of K increases the size of the saved model. "
+            "In practice, setting K=2 typically provides the best performance and parameter efficiency. "
+            "For more details, refer to the discussion in the paper."
+        },
+    )
     target_modules: Optional[Union[List[str], str]] = field(
         default=None,
         metadata={
@@ -103,8 +113,9 @@ class VBLoRAConfig(PeftConfig):
         default=False,
         metadata={
             "help": (
-                "Whether to only save the topk weights. Models saved in this mode can be used for merging"
-                " or inference only, not for resuming training."
+                "Whether to only save the topk weights. Setting `save_only_topk_weights = True` significantly reduces "
+                "storage space. However, models saved in this mode can be used for merging or inference only, not for "
+                "resuming training."
             )
         },
     )
