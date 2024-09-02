@@ -52,6 +52,7 @@ from peft import (
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PromptEncoderConfig,
     TaskType,
     get_peft_model,
     prepare_model_for_kbit_training,
@@ -3147,3 +3148,43 @@ class TestBOFT:
         conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
         x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
         conv(x)  # does not raise
+
+
+@require_torch_gpu
+class TestPTuningReproducibility:
+    device = infer_device()
+
+    def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
+        # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
+        # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were
+        # only _almost_ identical).
+
+        # The model must be sufficiently large for the effect to be measurable, which is why this test requires is not
+        # run on CPU.
+        model_id = "facebook/opt-125m"
+        inputs = torch.arange(10).view(-1, 1).to(self.device)
+
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        peft_config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
+        model = get_peft_model(model, peft_config).eval()
+
+        with torch.inference_mode():
+            output_peft = model(inputs).logits
+            gen_peft = model.generate(inputs, min_new_tokens=10, max_new_tokens=10)
+
+        model.save_pretrained(tmp_path)
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        model = PeftModel.from_pretrained(model, tmp_path)
+
+        with torch.inference_mode():
+            output_loaded = model(inputs).logits
+            gen_loaded = model.generate(inputs, min_new_tokens=10, max_new_tokens=10)
+
+        torch.testing.assert_close(output_loaded, output_peft)
+        torch.testing.assert_close(gen_loaded, gen_peft)
