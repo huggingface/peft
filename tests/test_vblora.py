@@ -115,7 +115,7 @@ class TestVBLoRA:
 
         mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
         mlp_vblora_loaded.train()
-        msg = "Found infinity values in logits. Ensure training was not resumed from a `save_only_topk_weights` model."
+        msg = "Found infinity values in VB-LoRA logits. Ensure training was not resumed from a `save_only_topk_weights` model."
         with pytest.raises(RuntimeError, match=msg):
             mlp_vblora_loaded(input)
 
@@ -153,3 +153,69 @@ class TestVBLoRA:
         inputs = torch.randn(5, 10).to(dtype)
         output = mlp_vblora(inputs)  # should not raise
         assert output.dtype == dtype
+
+    def test_vblora_nb_savable_params_only_topk_weights(self):
+        mlp = self.get_mlp()
+        vector_length = 2
+        num_vectors = 10
+        topk = 2
+        r = 4
+        config = VBLoRAConfig(
+            target_modules=["lin0", "lin1"],
+            vector_length=vector_length,
+            num_vectors=num_vectors,
+            topk=topk,
+            r=r,
+            save_only_topk_weights=True,
+        )
+        mlp_vblora = get_peft_model(mlp, config)
+
+        mlp_vblora.lin3.requires_grad_(True)  # set lin3 to trainable
+
+        adapter_params, other_params = mlp_vblora.get_nb_savable_parameters()
+        factor = 0.25  # dtype of index is uint8
+        topk_indices_parameter = int(
+            (mlp.lin0.out_features + mlp.lin0.in_features + mlp.lin1.out_features + mlp.lin1.in_features)
+            / vector_length
+            * r
+            * topk
+            * factor
+        )
+        topk_weights_parameter = int(
+            (mlp.lin0.out_features + mlp.lin0.in_features + mlp.lin1.out_features + mlp.lin1.in_features)
+            / vector_length
+            * r
+            * (topk - 1)
+        )
+        vector_bank_parameter = num_vectors * vector_length
+        assert adapter_params == topk_indices_parameter + topk_weights_parameter + vector_bank_parameter
+        assert other_params == (mlp.lin3.in_features + 1) * mlp.lin3.out_features
+
+    def test_vblora_nb_savable_params_all_logits(self):
+        mlp = self.get_mlp()
+        vector_length = 2
+        num_vectors = 10
+        topk = 2
+        r = 4
+        config = VBLoRAConfig(
+            target_modules=["lin0", "lin1"],
+            vector_length=vector_length,
+            num_vectors=num_vectors,
+            topk=topk,
+            r=r,
+            save_only_topk_weights=False,
+        )
+        mlp_vblora = get_peft_model(mlp, config)
+
+        mlp_vblora.lin3.requires_grad_(True)  # set lin3 to trainable
+
+        adapter_params, other_params = mlp_vblora.get_nb_savable_parameters()
+        logits_parameter = int(
+            (mlp.lin0.out_features + mlp.lin0.in_features + mlp.lin1.out_features + mlp.lin1.in_features)
+            / vector_length
+            * r
+            * num_vectors
+        )
+        vector_bank_parameter = num_vectors * vector_length
+        assert adapter_params == logits_parameter + vector_bank_parameter
+        assert other_params == (mlp.lin3.in_features + 1) * mlp.lin3.out_features

@@ -398,3 +398,49 @@ class VBLoRAModel(BaseTuner):
         model.
         """
         return self._unload_and_optionally_merge(merge=False)
+
+    def get_nb_savable_parameters(self, adapter="default") -> tuple[int, int]:
+        r"""
+        Returns the number of savable VB-LoRA parameters and other savable parameters.
+        """
+        logits_params = 0
+        vector_bank_params = 0
+        other_params = 0
+        for name, param in self.named_parameters():
+            if "vblora_logits" in name:
+                logits_params += param.numel()
+            elif "vblora_vector_bank" in name:
+                vector_bank_params += param.numel()
+            elif param.requires_grad:
+                other_params += param.numel()
+        if self.peft_config[adapter].save_only_topk_weights:
+            num_vectors = self.peft_config[adapter].num_vectors
+            factor = 1  # factor to count float32-equivalent parameters
+            if num_vectors < 2**8:
+                factor = 0.25
+            elif num_vectors < 2**15:
+                factor = 0.5
+            elif num_vectors < 2**31:
+                factor = 1
+            else:
+                factor = 2
+            topk_weight_params = (
+                logits_params / self.peft_config[adapter].num_vectors * (self.peft_config[adapter].topk - 1)
+            )
+            topk_indices_params = (
+                logits_params / self.peft_config[adapter].num_vectors * self.peft_config[adapter].topk * factor
+            )
+            vblora_params = int(vector_bank_params + topk_weight_params + topk_indices_params)
+        else:
+            vblora_params = vector_bank_params + logits_params
+        return vblora_params, other_params
+
+    def print_savable_parameters(self) -> None:
+        r"""
+        Prints the number of savable VB-LoRA parameters and total savable parameters.
+        """
+        vblora_params, other_params = self.get_nb_savable_parameters()
+        print(
+            f"VB-LoRA params to-be-saved (float32-equivalent): {vblora_params:,d} "
+            f"|| total params to-be-saved: {(vblora_params + other_params):,d}"
+        )
