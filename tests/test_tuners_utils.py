@@ -47,8 +47,10 @@ from peft.tuners.tuners_utils import (
     BaseTunerLayer,
     _maybe_include_all_linear_layers,
     check_target_module_exists,
-    find_minimal_target_modules,
     inspect_matched_modules,
+)
+from peft.tuners.tuners_utils import (
+    _find_minimal_target_modules as find_minimal_target_modules,
 )
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND, ModulesToSaveWrapper, infer_device
 from peft.utils.constants import DUMMY_MODEL_CONFIG

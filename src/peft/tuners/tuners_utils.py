@@ -444,7 +444,7 @@ class BaseTuner(nn.Module, ABC):
         # target_modules is sufficiently big.
         if isinstance(peft_config.target_modules, (list, set)) and len(peft_config.target_modules) >= 20:
             names_not_match = [n for n in key_list if n not in peft_config.target_modules]
-            new_target_modules = find_minimal_target_modules(peft_config.target_modules, names_not_match)
+            new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_not_match)
             if len(new_target_modules) < len(peft_config.target_modules):
                 peft_config.target_modules = new_target_modules
 
@@ -796,7 +796,7 @@ class BaseTunerLayer(ABC):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
 
 
-def find_minimal_target_modules(
+def _find_minimal_target_modules(
     target_modules: list[str] | set[str], other_module_names: list[str] | set[str]
 ) -> set[str]:
     """Find the minimal set of target modules that is sufficient to separate them from the other modules.
@@ -807,12 +807,12 @@ def find_minimal_target_modules(
 
     Example:
         ```py
-        >>> from peft.tuners.tuners_utils import find_minimal_target_modules
+        >>> from peft.tuners.tuners_utils import _find_minimal_target_modules
 
         >>> target_modules = [f"model.decoder.layers.{i}.self_attn.q_proj" for i in range(100)]
         >>> target_modules += [f"model.decoder.layers.{i}.self_attn.v_proj" for i in range(100)]
         >>> other_module_names = [f"model.encoder.layers.{i}.self_attn.k_proj" for i in range(100)]
-        >>> find_minimal_target_modules(target_modules, other_module_names)
+        >>> _find_minimal_target_modules(target_modules, other_module_names)
         {"q_proj", "v_proj"}
         ```
 
