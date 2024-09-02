@@ -29,7 +29,9 @@ from peft import (
     FourierFTConfig,
     HRAConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
     OFTConfig,
@@ -47,21 +49,23 @@ from peft import (
 PEFT_MODELS_TO_TEST = [("lewtun/tiny-random-OPTForCausalLM-delta", "v1")]
 
 ALL_CONFIG_CLASSES = (
-    AdaptionPromptConfig,
     AdaLoraConfig,
+    AdaptionPromptConfig,
+    BOFTConfig,
+    FourierFTConfig,
+    HRAConfig,
     IA3Config,
+    LNTuningConfig,
     LoHaConfig,
+    LoKrConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
+    OFTConfig,
+    PolyConfig,
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
-    OFTConfig,
-    PolyConfig,
-    BOFTConfig,
     VeraConfig,
-    FourierFTConfig,
-    HRAConfig,
 )
 
 

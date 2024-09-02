@@ -22,6 +22,7 @@ from safetensors import safe_open
 from torch import nn
 
 from peft import PeftModel, VeraConfig, get_peft_model
+from peft.utils import infer_device
 
 
 class MLP(nn.Module):
@@ -284,9 +285,12 @@ class TestVera:
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_vera_dtypes(self, dtype):
-        # 1872
-        if (dtype == torch.bfloat16) and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
-            pytest.skip("bfloat16 not supported on this system, skipping the test")
+        if dtype == torch.bfloat16:
+            # skip if bf16 is not supported on hardware, see #1872
+            is_xpu = infer_device() == "xpu"
+            is_cuda_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+            if not (is_xpu or is_cuda_bf16):
+                pytest.skip("bfloat16 not supported on this system, skipping the test")
 
         model = MLP().to(dtype)
         config = VeraConfig(target_modules=["lin1", "lin2"], init_weights=False)

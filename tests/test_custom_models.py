@@ -49,10 +49,10 @@ from peft import (
     get_peft_model,
 )
 from peft.tuners.tuners_utils import BaseTunerLayer
-from peft.utils import ModulesToSaveWrapper, infer_device
+from peft.utils import infer_device
 
 from .testing_common import PeftCommonTester
-from .testing_utils import get_state_dict, require_torch_gpu
+from .testing_utils import get_state_dict, require_non_cpu
 
 
 # MLP is a vanilla FF network with only linear layers
@@ -88,6 +88,19 @@ TEST_CASES = [
     ("Embedding + transformers Conv1D 1 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["conv1d"]}),
     ("Embedding + transformers Conv1D 2 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"]}),
     ("Embedding + transformers Conv1D 3 LoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb", "conv1d"]}),
+    (
+        "Embedding + transformers Conv1D 1 DoRA",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["conv1d"], "use_dora": True},
+    ),
+    ("Embedding + transformers Conv1D 2 DoRA", "EmbConv1D", LoraConfig, {"target_modules": ["emb"], "use_dora": True}),
+    (
+        "Embedding + transformers Conv1D 3 DoRA",
+        "EmbConv1D",
+        LoraConfig,
+        {"target_modules": ["emb", "conv1d"], "use_dora": True},
+    ),
     ("Conv2d 1 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"]}),
     ("Conv2d 2 LoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d", "lin0"]}),
     ("Conv2d 1 LoRA with DoRA", "Conv2d", LoraConfig, {"target_modules": ["conv2d"], "use_dora": True}),
@@ -874,7 +887,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        # this high learning rate was found through testing to be necessary to avoid flakiness
+        lr = 100.0 if config_kwargs.get("use_dora") and model_id == "EmbConv1D" else 0.5
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
         # breaking of some LoRA layers that are initialized with constants)
@@ -943,7 +958,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
     def test_disable_adapters(self, test_name, model_id, config_cls, config_kwargs):
         X = self.prepare_inputs_for_testing()
         model = self.transformers_class.from_pretrained(model_id).to(self.torch_device).eval()
-
         outputs_base = model(**X)
         if issubclass(config_cls, FourierFTConfig):
             config_kwargs = config_kwargs.copy()
@@ -1045,6 +1059,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         if issubclass(config_cls, IA3Config) and model_id == "Conv2d":  # more instability with Conv2d + IA3
             atol, rtol = 1e-3, 1e-3
+
+        if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
+            atol, rtol = 1e-4, 1e-4
 
         # check that there is a difference in results after training
         assert not torch.allclose(outputs_before, outputs_after, atol=atol, rtol=rtol)
@@ -1529,29 +1546,6 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         assert not torch.allclose(output_base, output_custom2)
         assert torch.allclose(output_custom1, output_custom2)
         assert torch.allclose(output_default, output_custom1)
-
-    @parameterized.expand(["merge_and_unload", "unload"])
-    def test_double_wrapping_merge_and_unload(self, method):
-        # see issue #1485
-        from transformers import AutoModelForTokenClassification
-
-        model = AutoModelForTokenClassification.from_pretrained("hf-internal-testing/tiny-random-RobertaModel")
-        config = LoraConfig(task_type="TOKEN_CLS", target_modules="all-linear")
-        model = get_peft_model(model, config)
-
-        # first check that double-wrapping happened
-        # Note: this may get fixed in a future PR, in which case this test can be removed
-        assert isinstance(model.base_model.model.classifier, ModulesToSaveWrapper)
-        assert hasattr(model.base_model.model.classifier.original_module, "lora_A")
-        assert hasattr(model.base_model.model.classifier.modules_to_save.default, "lora_A")
-
-        # after unloading, despite double wrapping, the classifier module should be a normal nn.Linear layer
-        if method == "merge_and_unload":
-            unloaded = model.merge_and_unload()
-        else:
-            unloaded = model.unload()
-
-        assert isinstance(unloaded.classifier, nn.Linear)
 
     def test_gpt2_dora_merge_and_unload(self):
         # see https://github.com/huggingface/peft/pull/1588#discussion_r1537914207
@@ -3276,7 +3270,7 @@ class TestMixedAdapterBatches:
         with pytest.raises(ValueError, match=msg):
             peft_model.forward(**inputs)
 
-    @require_torch_gpu
+    @require_non_cpu
     def test_mixed_adapter_batches_lora_opt_timing(self):
         # Use a more realistic model (opt-125m) and do a simple runtime check to ensure that mixed adapter batches
         # don't add too much overhead. These types of tests are inherently flaky, so we try to add in some robustness.

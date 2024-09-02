@@ -20,6 +20,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from accelerate.utils.imports import is_xpu_available
 from torch import svd_lowrank
 from transformers.pytorch_utils import Conv1D
 
@@ -28,7 +29,7 @@ from peft.utils.integrations import dequantize_module_weight, gather_params_ctx
 from peft.utils.other import transpose
 
 from .config import LoraConfig
-from .dora import DoraConv2dLayer, DoraLinearLayer
+from .dora import DoraConv2dLayer, DoraEmbeddingLayer, DoraLinearLayer
 
 
 class LoraLayer(BaseTunerLayer):
@@ -254,11 +255,14 @@ class LoraLayer(BaseTunerLayer):
         lora_B = self.lora_B[adapter_name].weight
         place_on_cpu = self.ephemeral_gpu_offload and (lora_A.device.type == "cpu" or lora_B.device.type == "cpu")
         if self.ephemeral_gpu_offload:
-            if lora_A.device.type == "cuda":
+            if lora_A.device.type in ["cuda", "xpu"]:
                 lora_B = lora_B.to(lora_A.device)
             else:
-                if lora_B.device.type != "cuda":
-                    lora_B = lora_B.to("cuda")
+                if lora_B.device.type not in ["cuda", "xpu"]:
+                    if is_xpu_available():
+                        lora_B = lora_B.to("xpu")
+                    else:
+                        lora_B = lora_B.to("cuda")
                 lora_A = lora_A.to(lora_B.device)
         scaling = self.scaling[adapter_name]
         dora_layer.update_layer(
@@ -590,9 +594,6 @@ class Embedding(nn.Module, LoraLayer):
         super().__init__()
         LoraLayer.__init__(self, base_layer)
 
-        if use_dora:
-            raise ValueError(f"{self.__class__.__name__} does not support DoRA yet, please set it to False")
-
         self._active_adapter = adapter_name
         self.update_layer(
             adapter_name,
@@ -631,8 +632,30 @@ class Embedding(nn.Module, LoraLayer):
         elif init_lora_weights:
             self.reset_lora_parameters(adapter_name, init_lora_weights)
 
+        # call this before dora_init
         self._move_adapter_to_device_of_base_layer(adapter_name)
+
+        if use_dora:
+            self.dora_init(adapter_name)
+            self.use_dora[adapter_name] = True
+        else:
+            self.use_dora[adapter_name] = False
+
         self.set_adapter(self.active_adapters)
+
+    def dora_init(self, adapter_name: str) -> None:
+        if self.lora_magnitude_vector is None:
+            # first dora layer being added, add lora_magnitude_vector to the list of learnable parameters
+            self.adapter_layer_names = self.adapter_layer_names[:] + ("lora_magnitude_vector",)
+
+        dora_layer = DoraEmbeddingLayer(fan_in_fan_out=True)
+        lora_embedding_A = self.lora_embedding_A[adapter_name]
+        lora_embedding_B = self.lora_embedding_B[adapter_name]
+        scaling = self.scaling[adapter_name]
+        dora_layer.update_layer(
+            base_layer=self.get_base_layer(), lora_A=lora_embedding_A, lora_B=lora_embedding_B, scaling=scaling
+        )
+        self.lora_magnitude_vector[adapter_name] = dora_layer
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         """
@@ -781,8 +804,20 @@ class Embedding(nn.Module, LoraLayer):
                 embedding_A = self.lora_embedding_A[active_adapter].T
                 embedding_B = self.lora_embedding_B[active_adapter].T
                 scaling = self.scaling[active_adapter]
-                after_A = self._embed(x, embedding_A)
-                result = result + (after_A @ embedding_B) * scaling
+
+                if not self.use_dora[active_adapter]:
+                    after_A = self._embed(x, embedding_A)
+                    result = result + (after_A @ embedding_B) * scaling
+                else:
+                    mag_norm_scale, dora_result = self.lora_magnitude_vector[active_adapter](
+                        x,
+                        lora_A=embedding_A,
+                        lora_B=embedding_B,
+                        scaling=scaling,
+                        base_layer=self.get_base_layer(),
+                        embed_fn=self._embed,
+                    )
+                    result = mag_norm_scale * result + dora_result
             result = result.to(torch_result_dtype)
 
         return result
