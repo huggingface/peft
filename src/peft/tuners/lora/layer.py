@@ -192,12 +192,20 @@ class LoraLayer(BaseTunerLayer):
 
         weight_tensor.data -= scale_factor * self.lora_B[adapter_name].weight @ self.lora_A[adapter_name].weight
         if bnb_param_type == "4bit":
-            weight_tensor = orig_weight.__class__(weight_tensor, quant_type=orig_weight.quant_type).to(
-                orig_weight.device
-            )
+            weight_tensor = orig_weight.__class__(
+                weight_tensor,
+                quant_type=orig_weight.quant_type,
+                quant_storage=orig_weight.quant_storage,
+                compress_statistics=orig_weight.compress_statistics,
+                module=orig_weight.module,
+            ).to(orig_weight.device)
             base_layer.weight = weight_tensor
         elif bnb_param_type == "8bit":
-            weight_tensor = orig_weight.__class__(weight_tensor, requires_grad=False).to(orig_weight.device)
+            weight_tensor = orig_weight.__class__(
+                weight_tensor,
+                requires_grad=orig_weight.requires_grad,
+                has_fp16_weights=orig_weight.has_fp16_weights,
+            ).to(orig_weight.device)
             base_layer.weight = weight_tensor
         else:
             weight_tensor = weight_tensor.to(dtype)
