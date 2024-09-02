@@ -31,7 +31,13 @@ from transformers import PreTrainedModel
 from transformers.pytorch_utils import Conv1D
 
 from peft.utils import INCLUDE_LINEAR_LAYERS_SHORTHAND
-from peft.utils.constants import DUMMY_MODEL_CONFIG, DUMMY_TARGET_MODULES, EMBEDDING_LAYER_NAMES, SEQ_CLS_HEAD_NAMES
+from peft.utils.constants import (
+    DUMMY_MODEL_CONFIG,
+    DUMMY_TARGET_MODULES,
+    EMBEDDING_LAYER_NAMES,
+    MIN_TARGET_MODULES_FOR_OPTIMIZATION,
+    SEQ_CLS_HEAD_NAMES,
+)
 from peft.utils.peft_types import PeftType, TaskType
 
 from ..config import PeftConfig
@@ -433,6 +439,26 @@ class BaseTuner(nn.Module, ABC):
         # update peft_config.target_modules if required
         peft_config = _maybe_include_all_linear_layers(peft_config, model)
 
+        # This is an optimization to reduce the number of entries in the target_modules list. The reason is that in some
+        # circumstances, target_modules can contain hundreds of entries. Since each target module is checked against
+        # each module of the net (which can be thousands), this can become quite expensive when many adapters are being
+        # added. Often, the target_modules can be condensed in such a case, which speeds up the process.
+        # A context in which this can happen is when diffusers loads non-PEFT LoRAs. As there is no meta info on
+        # target_modules in that case, they are just inferred by listing all keys from the state_dict, which can be
+        # quite a lot. See: https://github.com/huggingface/diffusers/issues/9297
+        # As there is a small chance for undiscovered bugs, we apply this optimization only if the list of
+        # target_modules is sufficiently big.
+        if (
+            isinstance(peft_config.target_modules, (list, set))
+            and len(peft_config.target_modules) >= MIN_TARGET_MODULES_FOR_OPTIMIZATION
+        ):
+            names_no_target = [
+                name for name in key_list if not any(name.endswith(suffix) for suffix in peft_config.target_modules)
+            ]
+            new_target_modules = _find_minimal_target_modules(peft_config.target_modules, names_no_target)
+            if len(new_target_modules) < len(peft_config.target_modules):
+                peft_config.target_modules = new_target_modules
+
         for key in key_list:
             # Check for modules_to_save in case
             if _check_for_modules_to_save and any(
@@ -779,6 +805,86 @@ class BaseTunerLayer(ABC):
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device, dtype=dtype)
             else:
                 adapter_layer[adapter_name] = adapter_layer[adapter_name].to(device)
+
+
+def _find_minimal_target_modules(
+    target_modules: list[str] | set[str], other_module_names: list[str] | set[str]
+) -> set[str]:
+    """Find the minimal set of target modules that is sufficient to separate them from the other modules.
+
+    Sometimes, a very large list of target_modules could be passed, which can slow down loading of adapters (e.g. when
+    loaded from diffusers). It may be possible to condense this list from hundreds of items to just a handful of
+    suffixes that are sufficient to distinguish the target modules from the other modules.
+
+    Example:
+        ```py
+        >>> from peft.tuners.tuners_utils import _find_minimal_target_modules
+
+        >>> target_modules = [f"model.decoder.layers.{i}.self_attn.q_proj" for i in range(100)]
+        >>> target_modules += [f"model.decoder.layers.{i}.self_attn.v_proj" for i in range(100)]
+        >>> other_module_names = [f"model.encoder.layers.{i}.self_attn.k_proj" for i in range(100)]
+        >>> _find_minimal_target_modules(target_modules, other_module_names)
+        {"q_proj", "v_proj"}
+        ```
+
+    Args:
+        target_modules (`list[str]` | `set[str]`):
+            The list of target modules.
+        other_module_names (`list[str]` | `set[str]`):
+            The list of other module names. They must not overlap with the target modules.
+
+    Returns:
+        `set[str]`:
+            The minimal set of target modules that is sufficient to separate them from the other modules.
+
+    Raises:
+        ValueError:
+            If `target_modules` is not a list or set of strings or if it contains an empty string. Also raises an error
+            if `target_modules` and `other_module_names` contain common elements.
+    """
+    if isinstance(target_modules, str) or not target_modules:
+        raise ValueError("target_modules should be a list or set of strings.")
+
+    target_modules = set(target_modules)
+    if "" in target_modules:
+        raise ValueError("target_modules should not contain an empty string.")
+
+    other_module_names = set(other_module_names)
+    if not target_modules.isdisjoint(other_module_names):
+        msg = (
+            "target_modules and other_module_names contain common elements, this should not happen, please "
+            "open a GitHub issue at https://github.com/huggingface/peft/issues with the code to reproduce this issue"
+        )
+        raise ValueError(msg)
+
+    # it is assumed that module name parts are separated by a "."
+    def generate_suffixes(s):
+        parts = s.split(".")
+        return [".".join(parts[i:]) for i in range(len(parts))][::-1]
+
+    # Create a reverse lookup for other_module_names to quickly check suffix matches
+    other_module_suffixes = {suffix for item in other_module_names for suffix in generate_suffixes(item)}
+
+    # Find all potential suffixes from target_modules
+    target_modules_suffix_map = {item: generate_suffixes(item) for item in target_modules}
+
+    # Initialize a set for required suffixes
+    required_suffixes = set()
+
+    for item, suffixes in target_modules_suffix_map.items():
+        # Go through target_modules items, shortest suffixes first
+        for suffix in suffixes:
+            # If the suffix is already in required_suffixes or matches other_module_names, skip it
+            if suffix in required_suffixes or suffix in other_module_suffixes:
+                continue
+            # Check if adding this suffix covers the item
+            if not any(item.endswith(req_suffix) for req_suffix in required_suffixes):
+                required_suffixes.add(suffix)
+                break
+
+    if not required_suffixes:
+        return set(target_modules)
+    return required_suffixes
 
 
 def check_target_module_exists(config, key: str) -> bool | re.Match[str] | None:
