@@ -7,7 +7,7 @@ class PCLoraConfig(LoraConfig):
     decay_schedule: str = field(default="linear", metadata={"help": "Decay schedule for LoRA."})
     q: int = field(default=None, metadata={"help": "Hyperparameter for decay schedule. Steps after q will have lambda=0."})
     task_loss_alpha: float =field(default=0.1, metadata={"help": "Weighting of the task loss. Feature distillation and task loss will be convexly combined"})
-    k: int = field(default=1, metadata={"help": "Make a decay step at every k-th step."})
+    keep_constant_for_k_steps: int  = field(default=10, metadata={"help": "Keep the lambda constant for k steps."})
     
     def __post_init__(self):
         self.peft_type = PeftType.PCLORA

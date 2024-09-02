@@ -22,53 +22,57 @@ def kld_loss(teacher_logits: to.Tensor, student_logits: to.Tensor) -> to.Tensor:
     return to.nn.functional.kl_div(student_probs, teacher_probs, reduction="batchmean", log_target=True)
 
 class DecaySchedule:
-    def __init__(self, decay_schedule: str, keep_constant_for_k_steps: int = 10) -> None:
-        self._decay_schedule = getattr(self, f"_{decay_schedule}") 
-        self._keep_constant_for_k_steps = keep_constant_for_k_steps
-        self._last_value = 0
+    def __init__(self, decay_schedule: str,
+                 q: int,
+                 keep_constant_for_k_steps: int = 10) -> None:
+        self._decay_schedule = getattr(self, f"_{decay_schedule}")  # Get the function by name
+        self._keep_constant_for_k_steps = keep_constant_for_k_steps # Keep the value constant for k steps
+        self._last_value = 0 # Last value of the decay schedule used as a cache
+        self._q = q # End of the decay schedule
         
-    def _linear(self, step: int, q: int) -> float:
-        return 1 - step / q if step < q else 0
+    def _linear(self, step: int) -> float:
+        return 1 - step / self._q if step <= self._q else 0
     
-    def _cosine(self, step: int, q: int) -> float:
-        return np.sin(np.pi/2 * (1 + step / q)) if step < q else 0
+    def _cosine(self, step: int) -> float:
+        return np.sin(np.pi/2 * (1 + step / self._q)) if step <= self._q else 0
     
     def _sine(self, step: int, q: int) -> float:
-        return 1 - np.sin(np.pi/2 * (step / q)) if step < q else 0
+        return 1 - np.sin(np.pi/2 * (step / q)) if step <= self._q else 0
     
-    def _identity(self, step: int, q: int) -> float:
-        return 1 if step < q else 0
+    def _identity(self, step: int) -> float:
+        return 1 if step < self._q else 0
     
-    def _linear_cutoff(self, step: int, q: int) -> float:
-        return max(1 - step / q, 0.9) 
+    def _linear_cutoff(self, step: int) -> float:
+        return max(1 - step / self._q, 0.9) 
     
         
-    def step(self, step: int, q: int) -> float:
+    def step(self, step: int) -> float:
         """ Compute the decay schedule value for the current step """
-        if step % self._keep_constant_for_k_steps == 0 or step == q:
-            self._last_value = self._decay_schedule(step, q)
+        if self._keep_constant_for_k_steps > 0 and step % self._keep_constant_for_k_steps == 0 or step == self._q:
+            # Update the last value
+            self._last_value = self._decay_schedule(step)
             return self._last_value
         else:
+            # Return the last value, i.e. keep the value constant
             return self._last_value
 
 class PCLoraModel(LoraModel):
     def __init__(self, model, lora_config: Union[LoraConfig, Dict], adapter_name: str) -> None:        
         super().__init__(model, lora_config, adapter_name)
         try:
-            self._decay_schedule = DecaySchedule(self.peft_config[adapter_name].decay_schedule)
+            self._decay_schedule = DecaySchedule(decay_schedule=self.peft_config[adapter_name].decay_schedule,
+                                                 q=self.peft_config[adapter_name].q,
+                                                 keep_constant_for_k_steps=self.peft_config[adapter_name].keep_constant_for_k_steps)
         except AttributeError:
             raise AttributeError(f"Invalid decay schedule: {self.peft_config[adapter_name].decay_schedule}")
         
         self._task_loss_alpha = self.peft_config[adapter_name].task_loss_alpha
         self._q = self.peft_config[adapter_name].q
-        self._k = self.peft_config[adapter_name].k
         
     def update_lora(self, step: int, **kwargs) -> None:
-        lambda_ft_distill = self._decay_schedule.step(step, self._q)
-        for name, module in self._get_lora_modules():
-            
-            if step % self._k == 0 or step == self._q:
-                module.update(lambda_ft_distill, **kwargs)
+        lambda_ft_distill = self._decay_schedule.step(step)
+        for name, module in self._get_lora_modules():    
+            module.update(lambda_ft_distill, **kwargs)
             
     def forward(self, *args, **kwargs):
         kwargs["output_hidden_states"] = False
@@ -81,6 +85,8 @@ class PCLoraModel(LoraModel):
         student_out: CausalLMOutput = self.model.forward(*args, **kwargs)
         
         if not self.training:
+            for name, module in self._get_lora_modules():
+                module.update(lambda_ft_distil=0.0) # set base weights to 0 during inference
             student_out: CausalLMOutput = self.model.forward(*args, **kwargs)
             return student_out
         else:
