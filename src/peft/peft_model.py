@@ -690,9 +690,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 prompts = prompt_encoder(prompt_tokens, task_ids)
             else:
                 if peft_config.inference_mode:
-                    prompts = prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
+                    prompts = prompt_encoder.embedding.weight
                 else:
+                    # Take only one prompt token sample and expand the output instead of expanding the input, see:
+                    # https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
+                    prompt_tokens = prompt_tokens[:1]
                     prompts = prompt_encoder(prompt_tokens)
+                prompts = prompts.repeat(batch_size, 1, 1)
             return prompts
 
     def get_nb_trainable_parameters(self) -> tuple[int, int]:
