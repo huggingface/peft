@@ -118,11 +118,10 @@ class QuantoLoraLinear(torch.nn.Module, LoraLayer):
             delta_weight = self.get_delta_weight(active_adapter)
             # note: no in-place for safe_merge=False
             new_weight_data = orig_weight + delta_weight
-            if safe_merge:
-                if torch.isfinite(new_weight_data).all():
-                    raise ValueError(
-                        f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-                    )
+            if safe_merge and not torch.isfinite(new_weight_data).all():
+                raise ValueError(
+                    f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+                )
             quantized = quantize_weight(new_weight_data, qtype=base_layer.qweight.qtype, axis=base_layer.qweight.axis)
             base_layer.weight._data = quantized._data
             base_layer.weight._scale = quantized._scale
