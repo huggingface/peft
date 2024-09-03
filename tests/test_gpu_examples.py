@@ -3178,7 +3178,6 @@ class TestPTuningReproducibility:
         torch.cuda.empty_cache()
         gc.collect()
 
-        torch.manual_seed(0)
         model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         model = PeftModel.from_pretrained(model, tmp_path)
 
