@@ -6,6 +6,7 @@ target-version = ['py38']
 [tool.ruff]
 target-version = "py38"
 line-length = 119
+extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
 extend-select = [

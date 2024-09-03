@@ -16,6 +16,7 @@ import json
 import os
 import pickle
 import re
+import shutil
 import tempfile
 from collections import OrderedDict
 from dataclasses import replace
@@ -25,6 +26,7 @@ import torch
 import yaml
 from diffusers import StableDiffusionPipeline
 from packaging import version
+from safetensors.torch import save_file
 
 from peft import (
     AdaLoraConfig,
@@ -621,9 +623,17 @@ class PeftCommonTester:
         # test that the logits are identical after a save-load-roundtrip
         if hasattr(model, "save_pretrained"):
             # model is a transformers model
-            with tempfile.TemporaryDirectory() as tmp_dirname:
+            tmp_dirname = tempfile.mkdtemp()
+            # note: not using the context manager here because it fails on Windows CI for some reason
+            try:
                 model.save_pretrained(tmp_dirname)
                 model_from_pretrained = self.transformers_class.from_pretrained(tmp_dirname).to(self.torch_device)
+            finally:
+                try:
+                    shutil.rmtree(tmp_dirname)
+                except PermissionError:
+                    # windows error
+                    pass
         else:
             # model is not a transformers model
             model_from_pretrained = pickle.loads(pickle.dumps(model))
@@ -753,6 +763,14 @@ class PeftCommonTester:
             atol, rtol = 1e-3, 1e-3  # MLU
         # check that the logits are the same after unloading
         assert torch.allclose(logits_peft, logits_unloaded, atol=atol, rtol=rtol)
+
+        # Ensure that serializing with safetensors works, there was an error when weights were not contiguous
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            # serializing with torch.save works
+            torch.save(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.bin"))
+
+            # serializing with safetensors works
+            save_file(model_unloaded.state_dict(), os.path.join(tmp_dirname, "model.safetensors"))
 
     def _test_mixed_adapter_batches(self, model_id, config_cls, config_kwargs):
         # Test for mixing different adapters in a single batch by passing the adapter_names argument

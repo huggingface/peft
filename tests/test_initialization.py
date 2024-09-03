@@ -13,12 +13,16 @@
 # limitations under the License.
 
 import re
+from contextlib import contextmanager
 from copy import deepcopy
+from unittest.mock import patch
 
 import pytest
 import torch
+from huggingface_hub.utils import reset_sessions
 from scipy import stats
 from torch import nn
+from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
@@ -1278,3 +1282,78 @@ class TestNoInfiniteRecursionDeepspeed:
         finally:
             # ensure there are no side effects of this test
             cls.__init__ = original_init
+
+
+class TestLoadAdapterOfflineMode:
+    # make sure that PEFT honors offline mode
+
+    @contextmanager
+    def hub_offline_ctx(self):
+        # this is required to simulate offline mode, setting the env var dynamically inside the test does not work
+        # because the value is checked only once at the start of the session
+        with patch("huggingface_hub.constants.HF_HUB_OFFLINE", True):
+            reset_sessions()
+            yield
+        reset_sessions()
+
+    def test_load_from_hub_then_offline_model(self):
+        # this uses LoRA but it's the same mechanism for other methods
+        peft_model_id = "peft-internal-testing/gpt2-lora-random"
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+
+        # first ensure that the adapter model has been downloaded
+        PeftModel.from_pretrained(base_model, peft_model_id)
+
+        del base_model
+
+        base_model = AutoModelForCausalLM.from_pretrained("gpt2")
+        with self.hub_offline_ctx():
+            # does not raise
+            PeftModel.from_pretrained(base_model, peft_model_id)
+
+
+class TestCustomModelConfigWarning:
+    # Check potential warnings when the user provided base_model_name_or_path is overridden by PEFT. See #2001 for
+    # context. We use LoRA for this test but the same applies to other methods
+    @pytest.fixture
+    def custom_module(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(10, 10)
+
+        return MyModule()
+
+    def test_no_warning_by_default_transformers_model(self, recwarn):
+        # first a sanity test that there is no warning by default when using a model from transformers
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        get_peft_model(model, LoraConfig())
+        for warning in recwarn.list:
+            assert "renamed" not in str(warning.message)
+
+    def test_no_warning_by_default_custom_model(self, custom_module, recwarn):
+        # same as above but with a custom model
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"]))
+        for warning in recwarn.list:
+            assert "renamed" not in str(warning.message)
+
+    def test_warning_name_transformers_model(self, recwarn):
+        # The base_model_name_or_path provided by the user is overridden.
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-OPTForCausalLM")
+        custom_name = "custom_name"
+        get_peft_model(model, LoraConfig(base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'hf-internal-testing/tiny-random-OPTForCausalLM'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+    def test_warning_name_custom_model(self, custom_module, recwarn):
+        custom_name = "custom_name"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'None'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)
+
+    def test_warning_name_custom_model_with_custom_name(self, custom_module, recwarn):
+        custom_name = "custom_name"
+        custom_module.name_or_path = "foobar"
+        get_peft_model(custom_module, LoraConfig(target_modules=["lin"], base_model_name_or_path=custom_name))
+        msg = f"was renamed from '{custom_name}' to 'foobar'"
+        assert any(msg in str(warning.message) for warning in recwarn.list)

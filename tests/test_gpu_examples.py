@@ -52,12 +52,14 @@ from peft import (
     LoftQConfig,
     LoraConfig,
     PeftModel,
+    PromptEncoderConfig,
     TaskType,
     get_peft_model,
     prepare_model_for_kbit_training,
     replace_lora_weights_loftq,
 )
-from peft.utils import SAFETENSORS_WEIGHTS_NAME
+from peft.tuners import boft
+from peft.utils import SAFETENSORS_WEIGHTS_NAME, infer_device
 from peft.utils.loftq_utils import NFQuantizer
 from peft.utils.other import fsdp_auto_wrap_policy
 
@@ -68,6 +70,7 @@ from .testing_utils import (
     require_bitsandbytes,
     require_eetq,
     require_hqq,
+    require_non_cpu,
     require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
@@ -1378,7 +1381,7 @@ class PeftGPTQGPUTests(unittest.TestCase):
         assert n_total_default == n_total_other
 
 
-@require_torch_gpu
+@require_non_cpu
 class OffloadSaveTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "gpt2"
@@ -1423,7 +1426,6 @@ class OffloadSaveTests(unittest.TestCase):
         assert torch.allclose(output, offloaded_output, atol=1e-5)
 
     @pytest.mark.single_gpu_tests
-    @require_torch_gpu
     def test_offload_merge(self):
         r"""
         Test merging, unmerging, and unloading of a model with CPU- and disk- offloaded modules.
@@ -1785,6 +1787,41 @@ class TestOLoRA:
         # Same test as test_bloomz_olora_4bit but with 8 bits.
         self.get_errors(bits=8, device=device, tmp_path=tmp_path)
 
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_olora_with_quantized_model(self, bits):
+        import bitsandbytes as bnb
+
+        # issue 1999
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        if bits == 4:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_storage=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+        elif bits == 8:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("bits must be 4 or 8")
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
+        model = prepare_model_for_kbit_training(model)
+        config = LoraConfig(init_lora_weights="olora")
+        model = get_peft_model(model, config)
+
+        # check that the correct type is used for the weights
+        base_layer = model.base_model.model.model.decoder.layers[0].self_attn.v_proj.base_layer.weight
+        if bits == 4:
+            assert isinstance(base_layer, bnb.nn.modules.Params4bit)
+        else:
+            assert isinstance(base_layer, bnb.nn.modules.Int8Params)
+
+        inputs = torch.arange(10).unsqueeze(0).to(model.device)
+        logits = model(inputs).logits  # does not raise
+        assert torch.isfinite(logits).all()
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 class TestLoftQ:
@@ -2107,6 +2144,45 @@ class TestLoftQ:
             torch.cuda.empty_cache()
         gc.collect()
 
+    def test_replace_lora_weights_with_local_model(self):
+        # see issue 2020
+        torch.manual_seed(0)
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        device = "cuda"
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # save base model locally
+            model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
+            model.save_pretrained(tmp_dir)
+            del model
+
+            # load in 4bit
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+            )
+
+            # load the base model from local directory
+            model = AutoModelForCausalLM.from_pretrained(tmp_dir, quantization_config=bnb_config)
+            model = get_peft_model(model, LoraConfig())
+
+            # passing the local path directly works
+            replace_lora_weights_loftq(model, model_path=tmp_dir)
+            del model
+
+            # load the base model from local directory
+            model = AutoModelForCausalLM.from_pretrained(tmp_dir, quantization_config=bnb_config)
+            model = get_peft_model(model, LoraConfig())
+
+            # when not passing, ensure that users are made aware of the `model_path` argument
+            with pytest.raises(ValueError, match="model_path"):
+                replace_lora_weights_loftq(model)
+
+        del model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
 
 @require_bitsandbytes
 @require_torch_gpu
@@ -2118,7 +2194,7 @@ class MultiprocessTester(unittest.TestCase):
             run_command(cmd, env=os.environ.copy())
 
 
-@require_torch_gpu
+@require_non_cpu
 class MixedPrecisionTests(unittest.TestCase):
     def setUp(self):
         self.causal_lm_model_id = "facebook/opt-125m"
@@ -2980,8 +3056,10 @@ class SimpleConv2DModel(torch.nn.Module):
         return conv_output
 
 
-@require_torch_gpu
+@require_non_cpu
 class TestAutoCast(unittest.TestCase):
+    device = infer_device()
+
     # This test makes sure, that Lora dtypes are consistent with the types
     # infered by torch.autocast under tested PRECISIONS
     @parameterized.expand(PRECISIONS)
@@ -3027,16 +3105,18 @@ class TestAutoCast(unittest.TestCase):
 
     def _test_model(self, model, precision):
         # Move model to GPU
-        model = model.cuda()
+        model = model.to(self.device)
 
         # Prepare dummy inputs
-        input_ids = torch.randint(0, 1000, (2, 10)).cuda()
+        input_ids = torch.randint(0, 1000, (2, 10)).to(self.device)
         if precision == torch.bfloat16:
-            if not torch.cuda.is_bf16_supported():
+            is_xpu = self.device == "xpu"
+            is_cuda_bf16 = self.device == "cuda" and torch.cuda.is_bf16_supported()
+            if not (is_xpu or is_cuda_bf16):
                 self.skipTest("Bfloat16 not supported on this device")
 
         # Forward pass with test precision
-        with torch.autocast(enabled=True, dtype=precision, device_type="cuda"):
+        with torch.autocast(enabled=True, dtype=precision, device_type=self.device):
             outputs = model(input_ids)
             assert outputs.dtype == precision
 
@@ -3080,3 +3160,65 @@ class TestFSDPWrap:
         init_process_group(world_size=1, rank=0)
         # check that this does not raise:
         FSDP(model, auto_wrap_policy=fsdp_auto_wrap_policy(model), use_orig_params=False, sync_module_states=True)
+
+
+class TestBOFT:
+    """
+    Test that we can correctly use half-precision models with BOFT.
+    """
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_boft_half_linear(self):
+        # Check that we can use BoFT with model loaded in half precision
+        layer = torch.nn.Linear(160, 160).cuda()
+        layer = boft.layer.Linear(layer, "layer", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        x = torch.randn(160, 160, device="cuda", dtype=torch.bfloat16)
+        layer(x)  # does not raise
+
+    @require_torch_gpu
+    @pytest.mark.single_gpu_tests
+    def test_boft_half_conv(self):
+        conv = torch.nn.Conv2d(1, 1, 4).cuda()
+        conv = boft.layer.Conv2d(conv, "conv", boft_n_butterfly_factor=2).to(dtype=torch.bfloat16)
+        x = torch.randn(1, 160, 160, device="cuda", dtype=torch.bfloat16)
+        conv(x)  # does not raise
+
+
+@require_torch_gpu
+class TestPTuningReproducibility:
+    device = infer_device()
+
+    def test_p_tuning_exactly_reproducible_after_loading(self, tmp_path):
+        # See: https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
+        # Ensure that after loading a p-tuning checkpoint, results are exactly reproducible (before the patch, they were
+        # only _almost_ identical).
+
+        # The model must be sufficiently large for the effect to be measurable, which is why this test requires is not
+        # run on CPU.
+        model_id = "facebook/opt-125m"
+        inputs = torch.arange(10).view(-1, 1).to(self.device)
+
+        torch.manual_seed(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        peft_config = PromptEncoderConfig(task_type="CAUSAL_LM", num_virtual_tokens=20, encoder_hidden_size=128)
+        model = get_peft_model(model, peft_config).eval()
+
+        with torch.inference_mode():
+            output_peft = model(inputs).logits
+            gen_peft = model.generate(inputs, min_new_tokens=10, max_new_tokens=10)
+
+        model.save_pretrained(tmp_path)
+        del model
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
+        model = PeftModel.from_pretrained(model, tmp_path)
+
+        with torch.inference_mode():
+            output_loaded = model(inputs).logits
+            gen_loaded = model.generate(inputs, min_new_tokens=10, max_new_tokens=10)
+
+        torch.testing.assert_close(output_loaded, output_peft)
+        torch.testing.assert_close(gen_loaded, gen_peft)
