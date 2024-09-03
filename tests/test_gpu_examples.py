@@ -1786,6 +1786,41 @@ class TestOLoRA:
         # Same test as test_bloomz_olora_4bit but with 8 bits.
         self.get_errors(bits=8, device=device, tmp_path=tmp_path)
 
+    @pytest.mark.parametrize("bits", [4, 8])
+    def test_olora_with_quantized_model(self, bits):
+        import bitsandbytes as bnb
+
+        # issue 1999
+        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+        if bits == 4:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_quant_storage=torch.float16,
+                bnb_4bit_use_double_quant=True,
+            )
+        elif bits == 8:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        else:
+            raise ValueError("bits must be 4 or 8")
+
+        model = AutoModelForCausalLM.from_pretrained(model_id, quantization_config=bnb_config)
+        model = prepare_model_for_kbit_training(model)
+        config = LoraConfig(init_lora_weights="olora")
+        model = get_peft_model(model, config)
+
+        # check that the correct type is used for the weights
+        base_layer = model.base_model.model.model.decoder.layers[0].self_attn.v_proj.base_layer.weight
+        if bits == 4:
+            assert isinstance(base_layer, bnb.nn.modules.Params4bit)
+        else:
+            assert isinstance(base_layer, bnb.nn.modules.Int8Params)
+
+        inputs = torch.arange(10).unsqueeze(0).to(model.device)
+        logits = model(inputs).logits  # does not raise
+        assert torch.isfinite(logits).all()
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="test requires a GPU")
 class TestLoftQ:
