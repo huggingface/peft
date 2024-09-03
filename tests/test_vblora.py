@@ -17,7 +17,7 @@ import os
 import pytest
 import torch
 from torch import nn
-
+from safetensors import safe_open
 from peft import PeftModel, VBLoRAConfig, get_peft_model
 
 
@@ -81,21 +81,84 @@ class TestVBLoRA:
         input = torch.randn(5, 10)
         mlp_vblora(input)
 
-    def test_save_load_save(self, tmp_path):
+    def test_save_with_topk_weights(self, tmp_path):
+        torch.manual_seed(0)
         mlp = self.get_mlp()
-        config = VBLoRAConfig(target_modules=["lin0", "lin1", "lin3"], vector_length=2, num_vectors=10)
+        vector_length = 2
+        num_vectors = 10
+        topk = 2
+        config = VBLoRAConfig(
+            target_modules=["lin0", "lin3"],
+            topk=topk,
+            vector_length=vector_length,
+            num_vectors=num_vectors,
+            save_only_topk_weights=True,
+        )
+        mlp_vblora = get_peft_model(mlp, config)
+        save_path = tmp_path / "vblora"
+        mlp_vblora.save_pretrained(save_path)
+        assert os.path.exists(save_path / "adapter_model.safetensors")
+
+        adapter_model_dict = {}
+        with safe_open(save_path / "adapter_model.safetensors", framework="pt") as f:
+            for k in f.keys():
+                adapter_model_dict[k] = f.get_tensor(k)
+        assert "base_model.model.lin0.vblora_logits_A_topk_indices" in adapter_model_dict
+        assert "base_model.model.lin0.vblora_logits_A_topk_weights" in adapter_model_dict
+        assert "base_model.model.lin3.vblora_logits_B_topk_indices" in adapter_model_dict
+        assert "base_model.model.lin3.vblora_logits_B_topk_weights" in adapter_model_dict
+        assert "base_model.model.lin0.vblora_logits_A" not in adapter_model_dict
+        assert "base_model.model.lin3.vblora_logits_B" not in adapter_model_dict
+
+        assert adapter_model_dict["base_model.model.lin0.vblora_logits_B_topk_indices"].shape == (
+            mlp.lin0.out_features // vector_length,
+            config.r,
+            topk,
+        )
+        assert adapter_model_dict["base_model.model.lin0.vblora_logits_B_topk_weights"].shape == (
+            mlp.lin0.out_features // vector_length,
+            config.r,
+            topk - 1,
+        )
+        assert adapter_model_dict["base_model.model.lin3.vblora_logits_A_topk_indices"].shape == (
+            config.r,
+            mlp.lin3.in_features // vector_length,
+            topk,
+        )
+        assert adapter_model_dict["base_model.model.lin3.vblora_logits_A_topk_weights"].shape == (
+            config.r,
+            mlp.lin3.in_features // vector_length,
+            topk - 1,
+        )
+
+    @pytest.mark.parametrize("save_only_topk_weights", [True, False])
+    def test_save_load(self, save_only_topk_weights, tmp_path):
+        torch.manual_seed(0)
+        mlp = self.get_mlp()
+        config = VBLoRAConfig(
+            target_modules=["lin0", "lin1", "lin3"],
+            topk=2,
+            vector_length=2,
+            num_vectors=10,
+            save_only_topk_weights=save_only_topk_weights,
+        )
         mlp_vblora = get_peft_model(mlp, config)
         save_path = tmp_path / "vblora"
         mlp_vblora.save_pretrained(save_path)
         assert os.path.exists(save_path / "adapter_config.json")
 
+        del mlp
+        torch.manual_seed(0)  # make sure the base model has the same weights
+        mlp = self.get_mlp()
         mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
+
         input = torch.randn(5, 10)
         output = mlp_vblora(input)
         output_loaded = mlp_vblora_loaded(input)
         assert torch.allclose(output, output_loaded, atol=1e-8, rtol=1e-5)
 
     def test_resume_training_model_with_topk_weights(self, tmp_path):
+        torch.manual_seed(1)
         mlp = self.get_mlp()
         config = VBLoRAConfig(
             target_modules=["lin0", "lin1", "lin3"],
@@ -113,32 +176,14 @@ class TestVBLoRA:
         # should not raise
         mlp_vblora(input)
 
+        del mlp
+        torch.manual_seed(1)
+        mlp = self.get_mlp()
         mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
         mlp_vblora_loaded.train()
         msg = "Found infinity values in VB-LoRA logits. Ensure training was not resumed from a `save_only_topk_weights` model."
         with pytest.raises(RuntimeError, match=msg):
             mlp_vblora_loaded(input)
-
-    def test_save_load_save_topk_only(self, tmp_path):
-        mlp = self.get_mlp()
-        config = VBLoRAConfig(
-            target_modules=["lin0", "lin1", "lin3"],
-            topk=2,
-            vector_length=2,
-            num_vectors=10,
-            save_only_topk_weights=True,
-        )
-        mlp_vblora = get_peft_model(mlp, config)
-        input = torch.randn(5, 10)
-        output = mlp_vblora(input)
-
-        save_path = tmp_path / "vblora"
-        mlp_vblora.save_pretrained(save_path)
-        assert os.path.exists(save_path / "adapter_config.json")
-
-        mlp_vblora_loaded = PeftModel.from_pretrained(mlp, save_path)
-        output_loaded = mlp_vblora_loaded(input)
-        assert torch.allclose(output, output_loaded, atol=1e-8, rtol=1e-5)
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_vblora_dtypes(self, dtype):
