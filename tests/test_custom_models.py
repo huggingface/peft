@@ -45,6 +45,7 @@ from peft import (
     OFTConfig,
     PeftModel,
     TaskType,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
 )
@@ -402,6 +403,30 @@ TEST_CASES = [
             "modules_to_save": ["lin1"],
         },
     ),
+    ##########
+    # VBLoRA #
+    ##########
+    ("Vanilla MLP 1 VBLoRA", "MLP", VBLoRAConfig, {"target_modules": "lin0", "vector_length": 1, "num_vectors": 5}),
+    ("Vanilla MLP 2 VBLoRA", "MLP", VBLoRAConfig, {"target_modules": ["lin0"], "vector_length": 1, "num_vectors": 5}),
+    ("Vanilla MLP 3 VBLoRA", "MLP", VBLoRAConfig, {"target_modules": ["lin1"], "vector_length": 2, "num_vectors": 5}),
+    (
+        "Vanilla MLP 4 VBLoRA",
+        "MLP",
+        VBLoRAConfig,
+        {"target_modules": ["lin0", "lin1"], "vector_length": 1, "num_vectors": 5},
+    ),
+    (
+        "Vanilla MLP 5 VBLoRA",
+        "MLP",
+        VBLoRAConfig,
+        {"target_modules": ["lin0"], "modules_to_save": ["lin1"], "vector_length": 1, "num_vectors": 5},
+    ),
+    (
+        "Embedding + transformers Conv1D 1 VBLoRA",
+        "EmbConv1D",
+        VBLoRAConfig,
+        {"target_modules": ["conv1d"], "vector_length": 1, "num_vectors": 2},
+    ),
 ]
 
 # For this test matrix, each tuple consists of:
@@ -508,6 +533,20 @@ MULTIPLE_ACTIVE_ADAPTERS_TEST_CASES = [
         {"target_modules": ["lin0"], "init_weights": False},
         {"target_modules": ["lin1"], "init_weights": False},
     ),
+    (
+        "VBLoRA Same",
+        "vblora",
+        VBLoRAConfig,
+        {"target_modules": ["lin0"], "vector_length": 2, "init_vector_bank_bound": 0.1},
+        {"target_modules": ["lin0"], "vector_length": 2, "init_vector_bank_bound": 0.1},
+    ),
+    (
+        "VBLoRA Different",
+        "vblora",
+        VBLoRAConfig,
+        {"target_modules": ["lin0"], "vector_length": 2, "init_vector_bank_bound": 0.1},
+        {"target_modules": ["lin1"], "vector_length": 2, "init_vector_bank_bound": 0.1},
+    ),
 ]
 
 PREFIXES = {
@@ -521,6 +560,7 @@ PREFIXES = {
     VeraConfig: "vera_lambda_",
     FourierFTConfig: "fourierft_",
     HRAConfig: "hra_",
+    VBLoRAConfig: "vblora_",
 }
 
 
@@ -789,6 +829,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_ia3_weights"] = False
         elif issubclass(config_cls, LNTuningConfig):
             pass
+        elif issubclass(config_cls, VBLoRAConfig):
+            pass
         else:
             config_kwargs["init_weights"] = False
         self._test_merge_layers(model_id, config_cls, config_kwargs)
@@ -822,6 +864,9 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             config_kwargs["init_ia3_weights"] = False
         elif issubclass(config_cls, LNTuningConfig):
             # LNTuning do not take init_weights
+            pass
+        elif issubclass(config_cls, VBLoRAConfig):
+            # VBLoRA do not take init_weights
             pass
         else:
             config_kwargs["init_weights"] = False
@@ -888,7 +933,11 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
 
         model.train()
         # this high learning rate was found through testing to be necessary to avoid flakiness
-        lr = 100.0 if config_kwargs.get("use_dora") and model_id == "EmbConv1D" else 0.5
+        lr = (
+            100.0
+            if (config_kwargs.get("use_dora") and model_id == "EmbConv1D") or issubclass(config_cls, VBLoRAConfig)
+            else 0.5
+        )
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -927,6 +976,8 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model = get_peft_model(model, config)
         model.train()
         lr = 0.5 if not config_kwargs.get("use_dora") else 0.1  # otherwise we get nan
+        if issubclass(config_cls, VBLoRAConfig):
+            lr = 0.01  # otherwise we get nan
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
@@ -967,11 +1018,16 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             **config_kwargs,
         )
         model = get_peft_model(model, config)
+        if issubclass(config_cls, VBLoRAConfig):
+            # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
+            torch.nn.init.zeros_(model.vblora_vector_bank["default"])
         model.eval()
         outputs_before = model(**X)
-
         assert torch.allclose(outputs_base, outputs_before)
 
+        if issubclass(config_cls, VBLoRAConfig):
+            # initialize `vblora_vector_bank` so it can be trained
+            model._init_vblora_vector_bank(config, "default")
         model.train()
         # EmbConv1D is slow to learn for some reason
         lr = 0.01 if model_id != "EmbConv1D" else 1.0
@@ -1021,9 +1077,15 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
             **config_kwargs,
         )
         model = get_peft_model(model, config)
+        if issubclass(config_cls, VBLoRAConfig):
+            # Manually set the `vblora_vector_bank` to zero so that VB-LoRA functions as an identity operation.
+            torch.nn.init.zeros_(model.vblora_vector_bank["default"])
         model.eval()
         outputs_before = model(**X)
 
+        if issubclass(config_cls, VBLoRAConfig):
+            # initialize `vblora_vector_bank` so it can be trained
+            model._init_vblora_vector_bank(config, "default")
         model.train()
         if isinstance(config_cls, LNTuningConfig):
             # LayerNorm tuning is slow to learn
@@ -3037,6 +3099,98 @@ class RequiresGradTester(unittest.TestCase):
             "base_model.model.lin1.vera_lambda_d.adapter1",
             "base_model.model.lin2.vera_lambda_b.adapter1",
             "base_model.model.lin2.vera_lambda_d.adapter1",
+        )
+
+    def test_requires_grad_vblora_different_targets(self):
+        # test two different VBLoRA adapters that target different modules
+        config0 = VBLoRAConfig(target_modules=["lin0"], vector_length=1, num_vectors=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = VBLoRAConfig(target_modules=["lin1"], vector_length=1, num_vectors=2)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.vblora_logits_A.default",
+            "base_model.model.lin0.vblora_logits_B.default",
+            "base_model.model.lin0.vblora_vector_bank.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.vblora_logits_A.default",
+            "base_model.model.lin0.vblora_logits_B.default",
+            "base_model.model.lin0.vblora_vector_bank.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vblora_logits_A.adapter1",
+            "base_model.model.lin1.vblora_logits_B.adapter1",
+            "base_model.model.lin0.vblora_vector_bank.adapter1",  # vblora_vector_bank is shared
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin1.vblora_logits_A.adapter1",
+            "base_model.model.lin1.vblora_logits_B.adapter1",
+            "base_model.model.lin0.vblora_vector_bank.adapter1",  # vblora_vector_bank is shared
+        )
+
+    def test_requires_grad_vblora_same_targets(self):
+        # same as previous test, except that VBLoRA adapters target the same layer
+        config0 = VBLoRAConfig(target_modules=["lin0"], vector_length=1, num_vectors=2)
+        peft_model = get_peft_model(MLP(), config0)
+
+        config1 = VBLoRAConfig(target_modules=["lin0"], vector_length=1, num_vectors=2)
+        peft_model.add_adapter("adapter1", config1)
+
+        # active adapter is still "default"
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.vblora_logits_A.default",
+            "base_model.model.lin0.vblora_logits_B.default",
+            "base_model.model.lin0.vblora_vector_bank.default",
+        )
+
+        # set config0 as active, should not change anything
+        peft_model.set_adapter("default")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.vblora_logits_A.default",
+            "base_model.model.lin0.vblora_logits_B.default",
+            "base_model.model.lin0.vblora_vector_bank.default",
+        )
+
+        # change activate adapter to adapter1
+        peft_model.set_adapter("adapter1")
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.vblora_logits_A.adapter1",
+            "base_model.model.lin0.vblora_logits_B.adapter1",
+            "base_model.model.lin0.vblora_vector_bank.adapter1",
+        )
+
+        # disable all adapters
+        with peft_model.disable_adapter():
+            self.check_requires_grad(peft_model)
+
+        # after context is exited, return to the previous state
+        self.check_requires_grad(
+            peft_model,
+            "base_model.model.lin0.vblora_logits_A.adapter1",
+            "base_model.model.lin0.vblora_logits_B.adapter1",
+            "base_model.model.lin0.vblora_vector_bank.adapter1",
         )
 
     def test_requires_grad_fourierft_different_targets(self):

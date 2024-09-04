@@ -60,6 +60,8 @@ from .tuners import (
     PrefixTuningConfig,
     PromptEncoderConfig,
     PromptTuningConfig,
+    VBLoRAConfig,
+    VBLoRAModel,
     VeraConfig,
     VeraModel,
     XLoraConfig,
@@ -101,6 +103,7 @@ PEFT_TYPE_TO_CONFIG_MAPPING: dict[str, type[PeftConfig]] = {
     "FOURIERFT": FourierFTConfig,
     "XLORA": XLoraConfig,
     "HRA": HRAConfig,
+    "VBLORA": VBLoRAConfig,
 }
 
 PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[BaseTuner]] = {
@@ -117,6 +120,7 @@ PEFT_TYPE_TO_TUNER_MAPPING: dict[str, type[BaseTuner]] = {
     "FOURIERFT": FourierFTModel,
     "XLORA": XLoraModel,
     "HRA": HRAModel,
+    "VBLORA": VBLoRAModel,
 }
 
 
