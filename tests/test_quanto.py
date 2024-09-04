@@ -25,9 +25,6 @@ from parameterized import parameterized
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
-    AdaLoraConfig,
-    BOFTConfig,
-    HRAConfig,
     LoraConfig,
     PrefixTuningConfig,
     PromptTuningConfig,
@@ -36,6 +33,14 @@ from peft import (
 )
 
 from .testing_common import PeftCommonTester, PeftTestConfigManager
+
+
+# only the PEFT methods that are explicitly supported will be tested
+PEFT_METHODS_SUPPORTING_MERGING = [LoraConfig]
+
+
+def filter_supported_methods_supporting_merging(test_list):
+    return [test for test in test_list if any(test[2] is cls for cls in PEFT_METHODS_SUPPORTING_MERGING)]
 
 
 PEFT_DECODER_MODELS_TO_TEST = [
@@ -49,29 +54,6 @@ FULL_GRID = {
     "model_ids": PEFT_DECODER_MODELS_TO_TEST,
     "task_type": "CAUSAL_LM",
 }
-
-
-def skip_adalora_and_gpt2(test_list):
-    return [test for test in test_list if not (("GPT2LMHeadModel" in test[1]) and (test[2] == AdaLoraConfig))]
-
-
-def skip_boft_or_hra_and_gpt2(test_list):
-    return [
-        test
-        for test in test_list
-        if not (("GPT2LMHeadModel" in test[1]) and ((test[2] == BOFTConfig) or (test[2] == HRAConfig)))
-    ]
-
-
-def skip_adalora_or_boft_or_hra_and_gpt2(test_list):
-    return [
-        test
-        for test in test_list
-        if not (
-            ("GPT2LMHeadModel" in test[1])
-            and ((test[2] == AdaLoraConfig) or (test[2] == BOFTConfig) or (test[2] == HRAConfig))
-        )
-    ]
 
 
 def make_automodel_proxy(weights: str):
@@ -125,21 +107,15 @@ class BasePeftQuantoModelTester:
 
         return input_dict
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_attributes_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_model_attr(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_adapter_name(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adapter_name(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_prepare_for_training_parametrized(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prepare_for_training(model_id, config_cls, config_kwargs)
 
@@ -197,33 +173,23 @@ class BasePeftQuantoModelTester:
                 tokenizer_kwargs={"trust_remote_code": True, "foo": "bar"},
             )
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained_selected_adapters(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_save_pretrained_selected_adapters_pickle(self, test_name, model_id, config_cls, config_kwargs):
         self._test_save_pretrained_selected_adapters(model_id, config_cls, config_kwargs, safe_serialization=False)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
@@ -243,6 +209,7 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
@@ -286,7 +253,7 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_boft_or_hra_and_gpt2,
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     # TODO: enable if/when deepcopy-ing is supported
@@ -360,6 +327,7 @@ class BasePeftQuantoModelTester:
                 "boft_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     def test_merge_layers_nan(self, test_name, model_id, config_cls, config_kwargs):
@@ -431,6 +399,7 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
+            filter_params_func=filter_supported_methods_supporting_merging,
         )
     )
     @pytest.mark.xfail(strict=True)
@@ -488,20 +457,19 @@ class BasePeftQuantoModelTester:
     # def test_mixed_adapter_batches(self, test_name, model_id, config_cls, config_kwargs):
     #     self._test_mixed_adapter_batches(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate(self, test_name, model_id, config_cls, config_kwargs):
         self._test_generate(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_generate_pos_args(self, test_name, model_id, config_cls, config_kwargs):
         # positional args are supported for PeftModelForCausalLM
         self._test_generate_pos_args(model_id, config_cls, config_kwargs, raises_err=False)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(FULL_GRID),
+        filter_params_func=filter_supported_methods_supporting_merging,
+    )
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
@@ -514,9 +482,7 @@ class BasePeftQuantoModelTester:
     def test_prefix_tuning_half_prec_conversion(self, test_name, model_id, config_cls, config_kwargs):
         self._test_prefix_tuning_half_prec_conversion(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_training_decoders(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training(model_id, config_cls, config_kwargs)
 
@@ -524,15 +490,11 @@ class BasePeftQuantoModelTester:
     def test_training_decoders_layer_indexing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_layer_indexing(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_training_decoders_gradient_checkpointing(self, test_name, model_id, config_cls, config_kwargs):
         self._test_training_gradient_checkpointing(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_inference_safetensors(self, test_name, model_id, config_cls, config_kwargs):
         self._test_inference_safetensors(model_id, config_cls, config_kwargs)
 
@@ -540,21 +502,15 @@ class BasePeftQuantoModelTester:
     def test_peft_model_device_map(self, test_name, model_id, config_cls, config_kwargs):
         self._test_peft_model_device_map(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_delete_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_delete_inactive_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_delete_inactive_adapter(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_adding_multiple_adapters_with_bias_raises(self, test_name, model_id, config_cls, config_kwargs):
         self._test_adding_multiple_adapters_with_bias_raises(model_id, config_cls, config_kwargs)
 
@@ -571,7 +527,6 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_adalora_or_boft_or_hra_and_gpt2,
         )
     )
     def test_unload_adapter(self, test_name, model_id, config_cls, config_kwargs):
@@ -608,25 +563,12 @@ class BasePeftQuantoModelTester:
                 "hra_kwargs": {"init_weights": [False]},
                 "task_type": "CAUSAL_LM",
             },
-            filter_params_func=skip_boft_or_hra_and_gpt2,
         )
     )
     def test_disable_adapter(self, test_name, model_id, config_cls, config_kwargs):
         self._test_disable_adapter(model_id, config_cls, config_kwargs)
 
-    def test_generate_adalora_no_dropout(self):
-        # test for issue #730
-        model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        config_kwargs = {
-            "target_modules": None,
-            "task_type": "CAUSAL_LM",
-            "lora_dropout": 0.0,
-        }
-        self._test_generate(model_id, AdaLoraConfig, config_kwargs)
-
-    @parameterized.expand(
-        PeftTestConfigManager.get_grid_parameters(FULL_GRID, filter_params_func=skip_boft_or_hra_and_gpt2)
-    )
+    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     def test_passing_input_embeds_works(self, test_name, model_id, config_cls, config_kwargs):
         self._test_passing_input_embeds_works(test_name, model_id, config_cls, config_kwargs)
 
