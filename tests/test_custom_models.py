@@ -907,10 +907,13 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         model_before = copy.deepcopy(model)
 
         model.train()
-        # we get exploding gradients with MHA when learning rate is too high
-        lr = 0.5 if "mha" not in model_id.lower() else 1e-3
-        # this high learning rate was found through testing to be necessary to avoid flakiness
-        lr = 100.0 if config_kwargs.get("use_dora") and model_id == "EmbConv1D" else 0.5
+        lr = 0.5
+        if config_kwargs.get("use_dora") and model_id == "EmbConv1D":
+            # this high learning rate was found through testing to be necessary to avoid flakiness
+            lr = 100
+        elif "mha" in model_id.lower():
+            # we get exploding gradients with MHA when learning rate is too high
+            lr = 1e-3
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
 
         # train at least 3 steps for all parameters to be updated (probably this is required because of symmetry
