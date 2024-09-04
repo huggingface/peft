@@ -19,6 +19,7 @@ import pytest
 import torch
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import transformers
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
@@ -128,6 +129,8 @@ class TestXlora:
         )
         assert torch.isfinite(outputs[: inputs.shape[1] :]).all()
 
+    # TODO: remove the skip when 4.45 is released!
+    @pytest.mark.skipif(int(transformers.__version__.split(".")[1]) < 45, reason="Requires transformers >= 4.45")
     def test_scalings_logging_methods(self, tokenizer, model):
         model.enable_scalings_logging()
 
