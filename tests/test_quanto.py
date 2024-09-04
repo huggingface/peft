@@ -94,7 +94,8 @@ class BasePeftQuantoModelTester:
     r"""TODO"""
 
     # expected minimum correlation between logits before and after merging
-    min_correlation = 0.95
+    # subclasses should override this with a float between 0 and 1
+    min_correlation = "missing"
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -215,6 +216,8 @@ class BasePeftQuantoModelTester:
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
         # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking
         # torch.allclose of logits, we calculate the coeffcient of correlation. This has some precedence, like for HQQ.
+        torch.manual_seed(0)
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -261,8 +264,9 @@ class BasePeftQuantoModelTester:
     def test_merge_layers_multi(self, test_name, model_id, config_cls, config_kwargs):
         # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking
         # torch.allclose of logits, we calculate the coeffcient of correlation. This has some precedence, like for HQQ.
-
         # NOTE: don't use with `torch.inference_mode()`, see: https://github.com/huggingface/optimum-quanto/issues/304
+        torch.manual_seed(0)
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -333,6 +337,8 @@ class BasePeftQuantoModelTester:
     def test_merge_layers_nan(self, test_name, model_id, config_cls, config_kwargs):
         # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking
         # torch.allclose of logits, we calculate the coeffcient of correlation. This has some precedence, like for HQQ.
+        torch.manual_seed(0)
+
         config = config_cls(
             base_model_name_or_path=model_id,
             **config_kwargs,
@@ -412,6 +418,8 @@ class BasePeftQuantoModelTester:
         # users need to pass the PretrainedModel instance to get_peft_model, thus we don't have the modified
         # save_pretrained, thus loading the merged and unloaded model does not work.
         from optimum.quanto import QuantizedModelForCausalLM
+
+        torch.manual_seed(0)
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -624,16 +632,16 @@ class BasePeftQuantoModelTester:
         model(x)
 
 
-class PeftQuanto4bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
-    r"""TODO"""
+class PeftQuanto2bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
+    transformers_class = make_automodel_proxy(weights="int2")
+    min_correlation = 0.9
 
+
+class PeftQuanto4bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
     transformers_class = make_automodel_proxy(weights="int4")
+    min_correlation = 0.95
 
 
 class PeftQuanto8bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
-    r"""TODO"""
-
     transformers_class = make_automodel_proxy(weights="int8")
-
-
-# TODO: qint2, qfloat8
+    min_correlation = 0.95
