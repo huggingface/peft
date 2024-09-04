@@ -1629,11 +1629,19 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         for k in state_dict:
             assert torch.allclose(state_dict[k], state_dict_loaded[k])
 
-    def test_mha_gradients_set_correctly(self):
+    @parameterized.expand([False, True])
+    def test_mha_gradients_set_correctly(self, with_forward_call):
         # check for this bug: https://github.com/huggingface/peft/issues/761#issuecomment-1893804738
         base_model = ModelMha()
         config = LoraConfig(target_modules=["mha"])
         model = get_peft_model(base_model, config)
+        model = model.to(self.torch_device)
+
+        if with_forward_call:
+            # after the merge-unmerge roundtrip happening in forward of lora MHA, the base weights should be set to
+            # requires_grad=False
+            inputs = self.prepare_inputs_for_testing()
+            model(**inputs)
 
         assert model.base_model.model.mha.base_layer.out_proj.base_layer.weight.requires_grad is False
         assert model.base_model.model.mha.base_layer.in_proj_weight.requires_grad is False

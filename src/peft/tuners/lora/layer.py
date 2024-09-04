@@ -1251,14 +1251,25 @@ class MultiheadAttention(nn.Module, LoraLayer):
             return
 
         # TODO work with separate weights
+        base_layer = self.get_base_layer()
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
             if active_adapter in self.lora_A.keys():
+                # Ensure that requires_grad=False for the base weights after unmerging. This may not matter since
+                # requires_grad was False when the optimizer was initialized, but still let's try to be correct here.
+
                 # in_proj
-                self.get_base_layer().in_proj_weight.data -= self.get_delta_weight(active_adapter)
+                old_weight = base_layer.in_proj_weight.data - self.get_delta_weight(active_adapter)
+                del base_layer.in_proj_weight
+                base_layer.register_parameter("in_proj_weight", nn.Parameter(old_weight, requires_grad=False))
+
                 # out_proj
-                self.get_base_layer().out_proj.weight.data -= self.get_base_layer().out_proj.get_delta_weight(
+                old_weight = base_layer.out_proj.base_layer.weight.data - base_layer.out_proj.get_delta_weight(
                     active_adapter
+                )
+                del base_layer.out_proj.base_layer.weight
+                base_layer.out_proj.base_layer.register_parameter(
+                    "weight", nn.Parameter(old_weight, requires_grad=False)
                 )
 
         self.get_base_layer().out_proj.unmerge()
