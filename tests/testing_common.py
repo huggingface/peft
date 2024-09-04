@@ -44,6 +44,7 @@ from peft import (
     PromptEncoderConfig,
     PromptLearningConfig,
     PromptTuningConfig,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
     get_peft_model_state_dict,
@@ -109,6 +110,8 @@ CONFIG_TESTING_KWARGS = (
     {
         "target_modules": None,
     },
+    # VBLoRA
+    {"target_modules": None, "vblora_dropout": 0.05, "vector_length": 1, "num_vectors": 2},
 )
 
 CLASSES_MAPPING = {
@@ -122,6 +125,7 @@ CLASSES_MAPPING = {
     "vera": (VeraConfig, CONFIG_TESTING_KWARGS[7]),
     "fourierft": (FourierFTConfig, CONFIG_TESTING_KWARGS[8]),
     "hra": (HRAConfig, CONFIG_TESTING_KWARGS[9]),
+    "vblora": (VBLoRAConfig, CONFIG_TESTING_KWARGS[10]),
 }
 
 
@@ -473,7 +477,7 @@ class PeftCommonTester:
             assert model_from_pretrained.peft_config["default"] is config
 
     def _test_merge_layers_fp16(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig):
+        if config_cls not in (LoraConfig, IA3Config, AdaLoraConfig, LoHaConfig, LoKrConfig, VBLoRAConfig):
             # Merge layers only supported for LoRA and IA³
             return pytest.skip(f"Test not applicable for {config_cls}")
 
@@ -1058,7 +1062,7 @@ class PeftCommonTester:
                 assert param.grad is None
 
     def _test_peft_model_device_map(self, model_id, config_cls, config_kwargs):
-        if config_cls not in (LoraConfig,):
+        if config_cls not in (LoraConfig, VBLoRAConfig):
             return pytest.skip(f"Test not applicable for {config_cls}")
 
         config = config_cls(
@@ -1113,6 +1117,7 @@ class PeftCommonTester:
             PeftType.VERA,
             PeftType.FOURIERFT,
             PeftType.HRA,
+            PeftType.VBLORA,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1160,6 +1165,7 @@ class PeftCommonTester:
             PeftType.BOFT,
             PeftType.FOURIERFT,
             PeftType.HRA,
+            PeftType.VBLORA,
         ]
         # IA3 does not support deleting adapters yet, but it just needs to be added
         # AdaLora does not support multiple adapters
@@ -1205,7 +1211,7 @@ class PeftCommonTester:
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "FOURIERFT", "HRA"):
+        if config.peft_type not in ("LORA", "ADALORA", "IA3", "BOFT", "VERA", "FOURIERFT", "HRA", "VBLORA"):
             with pytest.raises(AttributeError):
                 model = model.unload()
         else:
