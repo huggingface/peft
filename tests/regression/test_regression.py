@@ -73,6 +73,7 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     PeftModel,
+    VBLoRAConfig,
     VeraConfig,
     get_peft_model,
 )
@@ -405,6 +406,16 @@ class TestMlp(RegressionTester):
         config = VeraConfig(target_modules=["lin0"])
         model = get_peft_model(base_model, config)
         self.assert_results_equal_or_store(model, "vera_tuning_mlp")
+
+    def test_vblora_tuning(self):
+        base_model = self.load_base_model()
+        config = VBLoRAConfig(
+            vector_length=1,
+            num_vectors=2,
+            target_modules=["lin0"],
+        )
+        model = get_peft_model(base_model, config)
+        self.assert_results_equal_or_store(model, "vblora_tuning_mlp")
 
 
 class TestLoraEmbConv1D(RegressionTester):

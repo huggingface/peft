@@ -114,6 +114,8 @@
       title: VeRA
     - local: package_reference/fourierft
       title: FourierFT
+    - local: package_reference/vblora
+      title: VB-LoRA
 
     title: Adapters
   - sections:

@@ -58,6 +58,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VBLoRAModel,
     VeraModel,
     XLoraConfig,
     XLoraModel,
@@ -100,6 +101,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.FOURIERFT: FourierFTModel,
     PeftType.XLORA: XLoraModel,
     PeftType.HRA: HRAModel,
+    PeftType.VBLORA: VBLoRAModel,
 }
 
 
@@ -2647,10 +2649,9 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     devices_dd[key].extend([param.device.type for param in submodule.parameters()])
-            elif (
-                isinstance(adapter_module, torch.nn.ParameterDict)
-                or (adapter_module.__class__.__name__ == "BufferDict")  # VeRA
-            ):
+            elif isinstance(adapter_module, torch.nn.ParameterDict) or (
+                adapter_module.__class__.__name__ == "BufferDict"
+            ):  # VeRA
                 for key, param in adapter_module.items():
                     devices_dd[key].append(param.device.type)
         devices = {key: sorted(set(val)) for key, val in devices_dd.items()}
