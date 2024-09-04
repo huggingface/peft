@@ -22,6 +22,7 @@ from unittest.mock import Mock, call, patch
 import pytest
 import torch
 from parameterized import parameterized
+from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from peft import (
@@ -630,6 +631,72 @@ class BasePeftQuantoModelTester:
         x = torch.tensor([[1, 2, 3]])
         # does not raise
         model(x)
+
+    @parameterized.expand(
+        PeftTestConfigManager.get_grid_parameters(
+            {
+                "model_ids": PEFT_DECODER_MODELS_TO_TEST,
+                "lora_kwargs": {"init_lora_weights": [False]},
+                "adalora_kwargs": {"init_lora_weights": [False]},
+                "ia3_kwargs": {"init_ia3_weights": [False]},
+                "boft_kwargs": {"init_weights": [False]},
+                "vera_kwargs": {"init_weights": [False]},
+                "fourierft_kwargs": {"init_weights": [False]},
+                "hra_kwargs": {"init_weights": [False]},
+                "task_type": "CAUSAL_LM",
+            },
+            filter_params_func=filter_supported_methods_supporting_merging,
+        )
+    )
+    def test_quanto_merge_conv2d(self, test_name, model_id, config_cls, config_kwargs):
+        torch.manual_seed(0)
+
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        if config.is_prompt_learning:
+            pytest.skip("Prompt learning models do not support merging.")
+
+        config.target_modules = {"conv2d"}
+        config.task_type = None
+
+        class ModelConv2D(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d = nn.Conv2d(5, 10, 3)
+                self.relu = nn.ReLU()
+                self.flat = nn.Flatten()
+                self.lin0 = nn.Linear(10, 2)
+                self.sm = nn.LogSoftmax(dim=-1)
+
+            def forward(self, X):
+                X = X.float().reshape(-1, 5, 3, 3)
+                X = self.conv2d(X)
+                X = self.relu(X)
+                X = self.flat(X)
+                X = self.lin0(X)
+                X = self.sm(X)
+                return X
+
+        model = ModelConv2D()
+        model = get_peft_model(model, config)
+        model = model.to(self.torch_device)
+
+        dummy_input = torch.arange(90).view(9, 10).to(self.torch_device)
+        model.eval()
+        logits = model(dummy_input)[0]
+
+        model.merge_adapter()
+        logits_merged = model(dummy_input)[0]
+        model.unmerge_adapter()
+        logits_unmerged = model(dummy_input)[0]
+
+        model = model.merge_and_unload()
+        logits_merged_unloaded = model(dummy_input)[0]
+
+        cc_matrix = self.get_correlation_matrix(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
+        assert cc_matrix.min() > self.min_correlation
 
 
 class PeftQuanto2bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
