@@ -17,9 +17,9 @@ import os
 import huggingface_hub
 import pytest
 import torch
+import transformers
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import transformers
 
 from peft import LoraConfig, PeftType, TaskType, XLoraConfig, get_peft_model
 from peft.peft_model import PeftModel
