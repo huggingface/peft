@@ -11,8 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-# TODO describe this test module
 import copy
 import shutil
 import tempfile
@@ -36,7 +34,7 @@ from peft import (
 from .testing_common import PeftCommonTester, PeftTestConfigManager
 
 
-# only the PEFT methods that are explicitly supported will be tested
+# only the PEFT methods that are explicitly supported will be tested for merging
 PEFT_METHODS_SUPPORTING_MERGING = [LoraConfig]
 
 
@@ -67,7 +65,7 @@ def make_automodel_proxy(weights: str):
     # TODO: Can't use `from transformers import QuantoConfig` because it checks for the quanto package, but quanto is
     # now part of optimum, resulting in the check to fail.
     # Switch to QuantoConfig once https://github.com/huggingface/transformers/pull/31732 is merged
-    from optimum.quanto import QuantizedModelForCausalLM, qfloat8, qint2, qint4, qint8
+    from optimum.quanto import QuantizedModelForCausalLM, qint2, qint4, qint8
     from transformers.utils.quantization_config import QuantizationMethod
 
     class QuantoModelProxy:
@@ -80,9 +78,8 @@ def make_automodel_proxy(weights: str):
                 QuantizedModelForCausalLM.quantize(model, weights=qint4)
             elif weights == "int8":
                 QuantizedModelForCausalLM.quantize(model, weights=qint8)
-            elif weights == "float8":
-                QuantizedModelForCausalLM.quantize(model, weights=qfloat8)
             else:
+                # float8 was tried but was producing NaNs
                 raise ValueError(f"Invalid quantization dtype for quanto: {weights}")
 
             model.quantization_method = QuantizationMethod.QUANTO
@@ -92,11 +89,42 @@ def make_automodel_proxy(weights: str):
 
 
 class BasePeftQuantoModelTester:
-    r"""TODO"""
+    r"""Base class implementing tests for quanto-quantized models.
 
+    This class is based on PeftDecoderModelTester with some quanto-specific edits, especially for the merging tests,
+    which are less precise due to the quantization.
+
+    Subclasses should implement the attributes below.
+    """
+
+    # The weights argument for quanto, should be "int2", "int4", or "int8"
+    weights = "MISSING"
+    # transformers class should be make_automodel_proxy(weights=weights)
+    transformers_class = "MISSING"
     # expected minimum correlation between logits before and after merging
     # subclasses should override this with a float between 0 and 1
-    min_correlation = "missing"
+    min_correlation = "MISSING"
+    # the allowed tolerance for comparing the output tensors
+    tol = "MISSING"
+
+    def _get_correlation_matrix(self, *tensors):
+        return torch.corrcoef(torch.stack([t.flatten() for t in tensors]))
+
+    def check_tensors_approximately_equal(self, *tensors):
+        # Strict equality checks will fail due to the quantization, so we check:
+        # 1. The correlation between the tensors is high
+        # 2. Tensor equality after removing 1% of highest and lowest outliers
+        cc_matrix = self._get_correlation_matrix(*tensors)
+        assert cc_matrix.min() > self.min_correlation
+
+        for tensor0, tensor1 in zip(tensors, tensors[1:]):
+            tensor0, tensor1 = tensor0.flatten(), tensor1.flatten()
+            diff = tensor0 - tensor1
+            indices = torch.argsort(diff)
+            # remove 1% outliers on both ends
+            indices = indices[len(indices) // 100 : -len(indices) // 100]
+            tensor0, tensor1 = tensor0[indices], tensor1[indices]
+            assert torch.allclose(tensor0, tensor1, atol=self.tol, rtol=self.tol)
 
     def prepare_inputs_for_testing(self):
         input_ids = torch.tensor([[1, 1, 1], [1, 2, 1]]).to(self.torch_device)
@@ -195,9 +223,6 @@ class BasePeftQuantoModelTester:
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 
-    def get_correlation_matrix(self, *tensors):
-        return torch.corrcoef(torch.stack([t.flatten() for t in tensors]))
-
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
             {
@@ -215,8 +240,8 @@ class BasePeftQuantoModelTester:
         )
     )
     def test_merge_layers(self, test_name, model_id, config_cls, config_kwargs):
-        # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking
-        # torch.allclose of logits, we calculate the coeffcient of correlation. This has some precedence, like for HQQ.
+        # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking we use a
+        # custom check that relies on correlation and outlier removal
         torch.manual_seed(0)
 
         config = config_cls(
@@ -242,8 +267,7 @@ class BasePeftQuantoModelTester:
         model = model.merge_and_unload()
         logits_merged_unloaded = model(**dummy_input)[0]
 
-        cc_matrix = self.get_correlation_matrix(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
 
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
@@ -263,8 +287,8 @@ class BasePeftQuantoModelTester:
     # TODO: enable if/when deepcopy-ing is supported
     @pytest.mark.skip("Quanto does not work (yet) with deepcopy-ing")
     def test_merge_layers_multi(self, test_name, model_id, config_cls, config_kwargs):
-        # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking
-        # torch.allclose of logits, we calculate the coeffcient of correlation. This has some precedence, like for HQQ.
+        # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking we use a
+        # custom check that relies on correlation and outlier removal
         # NOTE: don't use with `torch.inference_mode()`, see: https://github.com/huggingface/optimum-quanto/issues/304
         torch.manual_seed(0)
 
@@ -297,8 +321,7 @@ class BasePeftQuantoModelTester:
 
         logits_adapter_1_after_set = model(**dummy_input)[0]
 
-        cc_matrix = self.get_correlation_matrix(logits_adapter_1, logits_adapter_1_after_set)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits_adapter_1, logits_adapter_1_after_set)
 
         model_copy = copy.deepcopy(model)
         model_copy_2 = copy.deepcopy(model)
@@ -313,15 +336,12 @@ class BasePeftQuantoModelTester:
 
         logits_merged_adapter_2 = model_merged_adapter_2(**dummy_input)[0]
 
-        cc_matrix = self.get_correlation_matrix(logits_adapter_2, logits_merged_adapter_2)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits_adapter_2, logits_merged_adapter_2)
 
         model_merged_adapter_default = model_copy_2.merge_and_unload(adapter_names=["default"])
-
         logits_merged_adapter_default = model_merged_adapter_default(**dummy_input)[0]
 
-        cc_matrix = self.get_correlation_matrix(logits_adapter_1, logits_merged_adapter_default)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits_adapter_1, logits_merged_adapter_default)
 
     @parameterized.expand(
         PeftTestConfigManager.get_grid_parameters(
@@ -336,8 +356,8 @@ class BasePeftQuantoModelTester:
         )
     )
     def test_merge_layers_nan(self, test_name, model_id, config_cls, config_kwargs):
-        # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking
-        # torch.allclose of logits, we calculate the coeffcient of correlation. This has some precedence, like for HQQ.
+        # Not using PeftCommonTester for merging tests as merging is too imprecise. So instead of checking we use a
+        # custom check that relies on correlation and outlier removal
         torch.manual_seed(0)
 
         config = config_cls(
@@ -361,8 +381,7 @@ class BasePeftQuantoModelTester:
         model = model.merge_and_unload()
         logits_merged = model(**dummy_input)[0]
 
-        cc_matrix = self.get_correlation_matrix(logits_unmerged, logits_merged)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits_unmerged, logits_merged)
 
         model = self.transformers_class.from_pretrained(model_id)
         config = config_cls(
@@ -450,8 +469,7 @@ class BasePeftQuantoModelTester:
                 pass
 
         logits_merged_from_pretrained = model_from_pretrained(**dummy_input)[0]
-        cc_matrix = self.get_correlation_matrix(logits, logits_merged_from_pretrained)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits, logits_merged_from_pretrained)
 
     # TODO: enable if/when mixed batch inference is supported
     # @parameterized.expand(
@@ -482,9 +500,10 @@ class BasePeftQuantoModelTester:
     def test_merge_layers_fp16(self, test_name, model_id, config_cls, config_kwargs):
         self._test_merge_layers_fp16(model_id, config_cls, config_kwargs)
 
-    @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
-    def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
-        self._test_generate_half_prec(model_id, config_cls, config_kwargs)
+    # TODO: segfault
+    # @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
+    # def test_generate_half_prec(self, test_name, model_id, config_cls, config_kwargs):
+    #     self._test_generate_half_prec(model_id, config_cls, config_kwargs)
 
     @parameterized.expand(PeftTestConfigManager.get_grid_parameters(FULL_GRID))
     @pytest.mark.skip("Quanto raises an error when trying to convert the dtype, skipping test.")
@@ -658,32 +677,31 @@ class BasePeftQuantoModelTester:
         if config.is_prompt_learning:
             pytest.skip("Prompt learning models do not support merging.")
 
-        config.target_modules = {"conv2d"}
+        config.target_modules = {"seq.0", "seq.2", "seq.4"}
         config.task_type = None
 
         class ModelConv2D(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv2d = nn.Conv2d(5, 10, 3)
-                self.relu = nn.ReLU()
-                self.flat = nn.Flatten()
-                self.lin0 = nn.Linear(10, 2)
-                self.sm = nn.LogSoftmax(dim=-1)
+                self.seq = nn.Sequential(
+                    nn.Conv2d(3, 8, 3),
+                    nn.ReLU(),
+                    nn.Conv2d(8, 8, 3),
+                    nn.ReLU(),
+                    nn.Conv2d(8, 8, 3),
+                    nn.ReLU(),
+                    nn.Flatten(),
+                    nn.Linear(800, 64),
+                )
 
             def forward(self, X):
-                X = X.float().reshape(-1, 5, 3, 3)
-                X = self.conv2d(X)
-                X = self.relu(X)
-                X = self.flat(X)
-                X = self.lin0(X)
-                X = self.sm(X)
-                return X
+                return self.seq(X)
 
         model = ModelConv2D()
         model = get_peft_model(model, config)
         model = model.to(self.torch_device)
 
-        dummy_input = torch.arange(90).view(9, 10).to(self.torch_device)
+        dummy_input = torch.randn(5, 3, 16, 16).to(self.torch_device)
         model.eval()
         logits = model(dummy_input)[0]
 
@@ -695,20 +713,25 @@ class BasePeftQuantoModelTester:
         model = model.merge_and_unload()
         logits_merged_unloaded = model(dummy_input)[0]
 
-        cc_matrix = self.get_correlation_matrix(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
-        assert cc_matrix.min() > self.min_correlation
+        self.check_tensors_approximately_equal(logits, logits_merged, logits_unmerged, logits_merged_unloaded)
 
 
 class PeftQuanto2bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
-    transformers_class = make_automodel_proxy(weights="int2")
+    weights = "int2"
+    transformers_class = make_automodel_proxy(weights=weights)
     min_correlation = 0.9
+    tol = 0.3
 
 
 class PeftQuanto4bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
-    transformers_class = make_automodel_proxy(weights="int4")
+    weights = "int4"
+    transformers_class = make_automodel_proxy(weights=weights)
     min_correlation = 0.95
+    tol = 1e-2
 
 
 class PeftQuanto8bitModelTester(unittest.TestCase, PeftCommonTester, BasePeftQuantoModelTester):
-    transformers_class = make_automodel_proxy(weights="int8")
+    weights = "int8"
+    transformers_class = make_automodel_proxy(weights=weights)
     min_correlation = 0.95
+    tol = 1e-2
