@@ -11,9 +11,9 @@ from transformers.modeling_outputs import CausalLMOutput, CausalLMOutputWithPast
 @dataclass
 class PCLoRACausalLLMOutput(CausalLMOutputWithPast):
     feature_distillation_loss: to.FloatTensor = None
-    kld_loss: to.FloatTensor = None
+    # kld_loss: to.FloatTensor = None
     task_loss: to.FloatTensor = None
-    all_disitllation_losses: Dict[str, to.FloatTensor] = None
+    # all_disitllation_losses: Dict[str, to.FloatTensor] = None
 
 def kld_loss(teacher_logits: to.Tensor, student_logits: to.Tensor) -> to.Tensor:
     """ Compute the Kullback-Leibler divergence between two distributions => Knowledge distillation loss"""
@@ -36,8 +36,8 @@ class DecaySchedule:
     def _cosine(self, step: int) -> float:
         return np.sin(np.pi/2 * (1 + step / self._q)) if step <= self._q else 0
     
-    def _sine(self, step: int, q: int) -> float:
-        return 1 - np.sin(np.pi/2 * (step / q)) if step <= self._q else 0
+    def _sine(self, step: int) -> float:
+        return 1 - np.sin(np.pi/2 * (step / self._q)) if step <= self._q else 0
     
     def _identity(self, step: int) -> float:
         return 1 if step < self._q else 0
@@ -68,54 +68,38 @@ class PCLoraModel(LoraModel):
         
         self._task_loss_alpha = self.peft_config[adapter_name].task_loss_alpha
         self._q = self.peft_config[adapter_name].q
-        
-    def update_lora(self, step: int, **kwargs) -> None:
-        lambda_ft_distill = self._decay_schedule.step(step)
-        for name, module in self._get_lora_modules():    
-            module.update(lambda_ft_distill, **kwargs)
-            
+        self._set_inference_mode(self.peft_config[adapter_name].inference_mode)
+                    
     def forward(self, *args, **kwargs):
-        kwargs["output_hidden_states"] = False
+        kwargs["output_hidden_states"] = False        
+        out: CausalLMOutput = self.model.forward(*args, **kwargs)
+        # kld_loss_v = kld_loss(teacher_out.logits, student_out.logits)
         
-        with to.no_grad():
-            self.disable_adapter_layers()
-            teacher_out: CausalLMOutput = self.model.forward(*args, **kwargs)
+        ft_dist_losses = {}
+        for name, module in self._get_lora_modules():
+            teacher_activations: to.Tensor = module.teacher_activations
+            student_activations: to.Tensor = module.student_activations
+            ft_dist_losses[name] = to.nn.functional.mse_loss(student_activations, teacher_activations)    
             
-        self.enable_adapter_layers()
-        student_out: CausalLMOutput = self.model.forward(*args, **kwargs)
+        ft_dist_loss_list = list(ft_dist_losses.values())
+        my_logger.info(f"ft_distil_losses: {ft_dist_losses}") 
         
-        if not self.training:
-            for name, module in self._get_lora_modules():
-                module.update(lambda_ft_distil=0.0) # set base weights to 0 during inference
-            student_out: CausalLMOutput = self.model.forward(*args, **kwargs)
-            return student_out
-        else:
-
-            ft_dist_losses = {}
-            for name, module in self._get_lora_modules():
-                teacher_activations: to.Tensor = module.teacher_activations
-                student_activations: to.Tensor = module.student_activations
-                
-                if teacher_activations.requires_grad:
-                    my_logger.warning(f"Teacher activations for {name} require grad. Disabling grad for teacher activations.")
-                    teacher_activations.requires_grad = False
-                ft_dist_losses[name] = to.nn.functional.mse_loss(student_activations, teacher_activations)    
-            
-            ft_dist_loss = to.mean(ft_dist_losses.values())    
-            task_loss = student_out.loss 
-            kld_loss_v = kld_loss(teacher_out.logits, student_out.logits)
-            
-            ft_dist_losses = {k: v.detach() for k, v in ft_dist_losses.items()}
-            
-            total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
-            student_out = PCLoRACausalLLMOutput(**student_out,
-                                                feature_distillation_loss=ft_dist_loss.detach(),
-                                                task_loss=task_loss.detach(),
-                                                kld_loss=kld_loss_v.detach(),
-                                                all_disitllation_losses=ft_dist_losses
-                                                )
-            student_out.loss = total_loss
-            return student_out 
+        ft_dist_loss = to.mean(to.tensor(ft_dist_loss_list))    
+        task_loss = out["loss"]
+        
+        ft_dist_losses = {k: v.detach() for k, v in ft_dist_losses.items()}
+        
+        total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
+        
+        my_logger.info(f"out keys: {out.keys()}")
+        
+        out = PCLoRACausalLLMOutput(**out,
+                                    feature_distillation_loss=ft_dist_loss.detach(),
+                                    task_loss=task_loss.detach(),
+                                    # all_disitllation_losses=ft_dist_losses
+                                    )
+        out.loss = total_loss
+        return out
         
     def _get_lora_modules(self):
         for name, module in self.model.named_modules():
@@ -128,4 +112,14 @@ class PCLoraModel(LoraModel):
         return new_module
     
     def schedule_parameters(self, step: int, **kwargs):
-        return {"q": self._q, "step": step, "lambda_ft_distill": self._decay_schedule(step, self._q)}
+        return {"q": self._q, "step": step, "lambda_ft_distill": self._decay_schedule.step(step)}
+    
+    def update_lora(self, step: int, **kwargs) -> None:
+        lambda_ft_distill = self._decay_schedule.step(step)
+        for name, module in self._get_lora_modules():    
+            module.update(lambda_ft_distill, **kwargs)
+            
+    def _set_inference_mode(self, mode: bool):
+        """ Set the inference mode for all the LoRA layers. In inference mode the base layer is inactive """
+        for name, module in self._get_lora_modules():
+            module._inference_mode = mode

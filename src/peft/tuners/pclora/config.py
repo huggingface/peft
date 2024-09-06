@@ -8,6 +8,7 @@ class PCLoraConfig(LoraConfig):
     q: int = field(default=None, metadata={"help": "Hyperparameter for decay schedule. Steps after q will have lambda=0."})
     task_loss_alpha: float =field(default=0.1, metadata={"help": "Weighting of the task loss. Feature distillation and task loss will be convexly combined"})
     keep_constant_for_k_steps: int  = field(default=10, metadata={"help": "Keep the lambda constant for k steps."})
+    inference_mode: bool = field(default=False, metadata={"help": "Inference mode for PCLoRA. In inference mode the base layer is inactive."})
     
     def __post_init__(self):
         self.peft_type = PeftType.PCLORA
