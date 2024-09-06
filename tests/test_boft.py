@@ -1,7 +1,4 @@
-#!/usr/bin/env python3
-
-# coding=utf-8
-# Copyright 2023-present the HuggingFace Inc. team.
+# Copyright 2024-present the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -57,7 +54,6 @@ class TestBoft:
         output_loaded = model(inputs).logits
         assert torch.allclose(output_peft, output_loaded, atol=atol, rtol=rtol)
 
-
     def test_boft_old_checkpoint_including_boft_P(self, tmp_path):
         # see #2050
         # This test exists to ensure that after the boft_P buffer was made non-persistent, old checkpoints can still be
@@ -83,4 +79,3 @@ class TestBoft:
 
         atol, rtol = 1e-9, 1e-9
         assert torch.allclose(output_peft, output_old, atol=atol, rtol=rtol)
-
