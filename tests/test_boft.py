@@ -17,18 +17,21 @@ from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM
 
 from peft import BOFTConfig, PeftModel, get_peft_model
+from peft.utils import infer_device
 
 
 class TestBoft:
+    torch_device = infer_device()
+
     def test_boft_state_dict(self, tmp_path):
         # see #2050
         # ensure that the boft_P buffer is not stored in the checkpoint file and is not necessary to load the model
         # correctly
         torch.manual_seed(0)
 
-        inputs = torch.arange(10).view(-1, 1).to(0)
+        inputs = torch.arange(10).view(-1, 1).to(self.device)
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         model.eval()
         output_base = model(inputs).logits
 
@@ -49,7 +52,7 @@ class TestBoft:
         assert not any("boft_P" in key for key in state_dict)
 
         # sanity check: the model still produces the same output after loading
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         model = PeftModel.from_pretrained(model, tmp_path)
         output_loaded = model(inputs).logits
         assert torch.allclose(output_peft, output_loaded, atol=atol, rtol=rtol)
@@ -60,9 +63,9 @@ class TestBoft:
         # loaded successfully.
         torch.manual_seed(0)
 
-        inputs = torch.arange(10).view(-1, 1).to(0)
+        inputs = torch.arange(10).view(-1, 1).to(self.device)
         model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
 
         # first create the expected output
         config = BOFTConfig(init_weights=False)
@@ -71,7 +74,7 @@ class TestBoft:
         output_peft = model(inputs).logits
         del model
 
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(0)
+        model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)
         # checkpoint from before the PR whose state_dict still contains boft_P
         hub_id = "peft-internal-testing/boft-tiny-opt-peft-v0.12"
         model = PeftModel.from_pretrained(model, hub_id)
