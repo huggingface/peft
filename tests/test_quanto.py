@@ -68,6 +68,14 @@ def make_automodel_proxy(weights: str):
     from optimum.quanto import QuantizedModelForCausalLM, qint2, qint4, qint8
     from transformers.utils.quantization_config import QuantizationMethod
 
+    # dummy objects to imitate transformers
+    class QuantizationConfig:
+        quant_method = QuantizationMethod.QUANTO
+
+    class HfQuantizer:
+        is_trainable = False
+        quantization_config = QuantizationConfig()
+
     class QuantoModelProxy:
         @classmethod
         def from_pretrained(self, *args, **kwargs):
@@ -82,7 +90,8 @@ def make_automodel_proxy(weights: str):
                 # float8 was tried but was producing NaNs
                 raise ValueError(f"Invalid quantization dtype for quanto: {weights}")
 
-            model.quantization_method = QuantizationMethod.QUANTO
+            model.is_quantized = True
+            model.hf_quantizer = HfQuantizer()
             return model
 
     return QuantoModelProxy
