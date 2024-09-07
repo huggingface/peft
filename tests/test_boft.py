@@ -21,7 +21,7 @@ from peft.utils import infer_device
 
 
 class TestBoft:
-    torch_device = infer_device()
+    device = infer_device()
 
     def test_boft_state_dict(self, tmp_path):
         # see #2050
