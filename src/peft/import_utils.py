@@ -87,3 +87,8 @@ def is_eetq_available():
 @lru_cache
 def is_hqq_available():
     return importlib.util.find_spec("hqq") is not None
+
+
+@lru_cache
+def is_torchao_available():
+    return importlib.util.find_spec("torchao") is not None
