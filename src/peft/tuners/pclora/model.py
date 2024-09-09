@@ -87,7 +87,7 @@ class PCLoraModel(LoraModel):
         ft_dist_loss = to.mean(to.tensor(ft_dist_loss_list))    
         task_loss = out["loss"]
         
-        ft_dist_losses = {k: v.detach() for k, v in ft_dist_losses.items()}
+        # ft_dist_losses = {k: v.detach() for k, v in ft_dist_losses.items()}
         
         total_loss = self._task_loss_alpha * task_loss + (1- self._task_loss_alpha) * ft_dist_loss
         
