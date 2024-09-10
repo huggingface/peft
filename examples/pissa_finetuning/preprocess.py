@@ -15,10 +15,9 @@
 import argparse
 import os
 
+from peft import LoraConfig, get_peft_model
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
-from peft import LoraConfig, get_peft_model
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
