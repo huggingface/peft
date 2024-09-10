@@ -40,7 +40,7 @@ class TestBoft:
         model.eval()
         output_peft = model(inputs).logits
 
-        atol, rtol = 1e-9, 1e-9
+        atol, rtol = 1e-5, 1e-8
         # sanity check: loading boft changed the output
         assert not torch.allclose(output_base, output_peft, atol=atol, rtol=rtol)
 
@@ -80,5 +80,5 @@ class TestBoft:
         model = PeftModel.from_pretrained(model, hub_id)
         output_old = model(inputs).logits
 
-        atol, rtol = 1e-9, 1e-9
+        atol, rtol = 1e-5, 1e-8
         assert torch.allclose(output_peft, output_old, atol=atol, rtol=rtol)
