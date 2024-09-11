@@ -205,6 +205,7 @@ model = get_peft_model(base_model, peft_config)
 ### Caveats:
 
 - Use the most recent versions of torchao and transformers for best results.
+- Only linear layers are currently supported.
 - `quant_type = "int4_weight_only"` is currently not supported.
 - `NF4` is not implemented in transformers as of yet and is thus also not supported.
 - DoRA only works with `quant_type = "int8_weight_only"` at the moment.
