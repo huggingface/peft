@@ -17,8 +17,8 @@ import warnings
 from typing import Any, Optional
 
 import torch
-# from torch import nn
 
+# from torch import nn
 from peft.import_utils import is_torchao_available
 from peft.tuners.tuners_utils import BaseTunerLayer, check_adapters_to_merge
 
@@ -28,11 +28,20 @@ from .layer import Linear
 
 class TorchaoLoraLinear(Linear):
     """LoRA layer implementation for torchao QLinear"""
+
     def __init__(self, *args, get_apply_tensor_subclass, **kwargs):
         # this is not strictly necessary, as kwargs are stored either way, but we want to error early if
         # get_apply_tensor_subclass is missing.
         super().__init__(*args, **kwargs)
         self.get_apply_tensor_subclass = get_apply_tensor_subclass
+        self._check_dtype_supported()
+
+    def _check_dtype_supported(self):
+        # TODO: Not required once int4_weight_only is properly supported by torchao
+        base_layer = self.get_base_layer()
+        weight = base_layer.weight
+        if hasattr(weight, "layout_tensor") and (weight.layout_tensor.data.dtype != torch.int8):
+            raise ValueError(f"{type(self).__name__} only supports int8 weights for now.")
 
     def merge(self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None) -> None:
         from torchao import quantize_
@@ -42,13 +51,10 @@ class TorchaoLoraLinear(Linear):
             # no adapter to merge
             return
 
+        self._check_dtype_supported()
+
         base_layer = self.get_base_layer()
         weight = base_layer.weight
-
-        class Dummy(torch.nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.weight = weight
 
         for active_adapter in adapter_names:
             try:
@@ -66,14 +72,10 @@ class TorchaoLoraLinear(Linear):
                 )
 
             weight += self.get_delta_weight(active_adapter)
-            # We go through a dummy module because overriding the weight.data does not work, the tensor retains the old
-            # data. Therefore, we need to go through quantize_, which takes a module as input, and we need to delete and
-            # re-assign the weight.
             # TODO: once (if) torchao supports directly mutating the data, use that instead.
-            dummy = Dummy(weight)
-            quantize_(dummy, self.get_apply_tensor_subclass())
             del base_layer.weight
-            base_layer.weight = dummy.weight
+            base_layer.weight = weight
+            quantize_(base_layer, self.get_apply_tensor_subclass())
             del weight
 
             self.merged_adapters.append(active_adapter)
@@ -84,11 +86,6 @@ class TorchaoLoraLinear(Linear):
         if not self.merged:
             warnings.warn("Already unmerged. Nothing to do.")
             return
-
-        class Dummy(torch.nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.weight = weight
 
         while len(self.merged_adapters) > 0:
             active_adapter = self.merged_adapters.pop()
@@ -107,14 +104,13 @@ class TorchaoLoraLinear(Linear):
                 raise NotImplementedError(msg) from exc
 
             weight -= self.get_delta_weight(active_adapter)
-            dummy = Dummy(weight)
             # We go through a dummy module because overriding the weight.data does not work, the tensor retains the old
             # data. Therefore, we need to go through quantize_, which takes a module as input, and we need to delete and
             # re-assign the weight.
             # TODO: once (if) torchao supports directly mutating the data, use that instead.
-            quantize_(dummy, self.get_apply_tensor_subclass())
             del base_layer.weight
-            base_layer.weight = dummy.weight
+            base_layer.weight = weight
+            quantize_(base_layer, self.get_apply_tensor_subclass())
             del weight
 
     def __repr__(self) -> str:

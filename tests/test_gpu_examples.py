@@ -74,6 +74,7 @@ from .testing_utils import (
     require_optimum,
     require_torch_gpu,
     require_torch_multi_gpu,
+    require_torchao,
 )
 
 
@@ -3009,7 +3010,7 @@ class PeftEetqGPUTests(unittest.TestCase):
 
 
 @require_torch_gpu
-#@require_torchao
+@require_torchao
 class PeftTorchaoGPUTests(unittest.TestCase):
     r"""
     torchao + peft tests
@@ -3018,7 +3019,9 @@ class PeftTorchaoGPUTests(unittest.TestCase):
     supported_quant_types = [
         "int8_weight_only",
         "int8_dynamic_activation_int8_weight",
-        "int4_weight_only",
+        # int4_weight_only raises an error:
+        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # "int4_weight_only",
     ]
 
     def setUp(self):
@@ -3032,14 +3035,6 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         """
         gc.collect()
         torch.cuda.empty_cache()
-
-    def _check_inference_finite(self, model, batch):
-        # try inference without Trainer class
-        training = model.training
-        model.eval()
-        output = model(**batch.to(model.device))
-        assert torch.isfinite(output.logits).all()
-        model.train(training)
 
     @parameterized.expand(supported_quant_types)
     @pytest.mark.single_gpu_tests
@@ -3093,14 +3088,114 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_weight_only(self):
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            quantization_config = TorchAoConfig(quant_type="int8_weight_only")
+            model = AutoModelForCausalLM.from_pretrained(
+                self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+            )
+            model = prepare_model_for_kbit_training(model)
+
+            config = LoraConfig(
+                r=16,
+                lora_alpha=32,
+                target_modules=["q_proj", "v_proj"],
+                lora_dropout=0.05,
+                bias="none",
+                task_type="CAUSAL_LM",
+                use_dora=True,
+            )
+            model = get_peft_model(model, config)
+
+            data = load_dataset("ybelkada/english_quotes_copy")
+            data = data.map(lambda samples: self.tokenizer(samples["quote"]), batched=True)
+
+            trainer = Trainer(
+                model=model,
+                train_dataset=data["train"],
+                args=TrainingArguments(
+                    per_device_train_batch_size=4,
+                    gradient_accumulation_steps=4,
+                    warmup_steps=2,
+                    max_steps=3,
+                    learning_rate=2e-4,
+                    logging_steps=1,
+                    output_dir=tmp_dir,
+                ),
+                data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False),
+            )
+            trainer.model.config.use_cache = False
+            trainer.train()
+
+            model.save_pretrained(tmp_dir)
+
+            assert "adapter_config.json" in os.listdir(tmp_dir)
+            assert SAFETENSORS_WEIGHTS_NAME in os.listdir(tmp_dir)
+
+            # assert loss is not None
+            assert trainer.state.log_history[-1]["train_loss"] is not None
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao_dora_int8_dynamic_activation_int8_weight_raises(self):
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type="int8_dynamic_activation_int8_weight")
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        )
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+            use_dora=True,
+        )
+        with pytest.raises(NotImplementedError):
+            get_peft_model(model, config)
+
+    @pytest.mark.single_gpu_tests
+    def test_causal_lm_training_single_gpu_torchao_int4_raises(self):
+        # int4_weight_only raises an error:
+        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
+        from transformers import TorchAoConfig
+
+        device = 0
+
+        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
+        )
+        model = prepare_model_for_kbit_training(model)
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
     @parameterized.expand(supported_quant_types)
     @pytest.mark.multi_gpu_tests
     @require_torch_multi_gpu
     def test_causal_lm_training_multi_gpu_torchao(self, quant_type):
-        r"""
-        Test the CausalLM training on a multi-GPU device. The test would simply fail if the adapters are not set
-        correctly.
-        """
         from transformers import TorchAoConfig
 
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -3156,8 +3251,44 @@ class PeftTorchaoGPUTests(unittest.TestCase):
             # assert loss is not None
             assert trainer.state.log_history[-1]["train_loss"] is not None
 
+    @pytest.mark.multi_gpu_tests
+    @require_torch_multi_gpu
+    def test_causal_lm_training_multi_gpu_torchao_int4_raises(self):
+        # int4_weight_only raises an error:
+        # RuntimeError: derivative for aten::_weight_int4pack_mm is not implemented
+        # TODO: Once proper torchao support for int4 is added, remove this test and add int4 to supported_quant_types
+        from transformers import TorchAoConfig
+
+        quantization_config = TorchAoConfig(quant_type="int4_weight_only")
+        model = AutoModelForCausalLM.from_pretrained(
+            self.causal_lm_model_id,
+            device_map="auto",
+            quantization_config=quantization_config,
+            torch_dtype=torch.bfloat16,
+        )
+
+        assert set(model.hf_device_map.values()) == set(range(torch.cuda.device_count()))
+
+        model = prepare_model_for_kbit_training(model)
+        model.model_parallel = True
+        model.is_parallelizable = True
+
+        config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+
+        msg = re.escape("TorchaoLoraLinear only supports int8 weights for now")
+        with pytest.raises(ValueError, match=msg):
+            get_peft_model(model, config)
+
     @pytest.mark.single_gpu_tests
     def test_torchao_merge_layers_int8_weight_only(self):
+        from torchao.dtypes import AffineQuantizedTensor
         from transformers import TorchAoConfig
 
         quant_type = "int8_weight_only"
@@ -3186,13 +3317,21 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         logits = model(dummy_input)[0]
 
         # sanity check: outputs changed
-        atol, rtol = 1e-2, 1e-2
+        # precision is quite low, so we need to use high atol and rtol
+        atol, rtol = 1e-1, 1e-1
         assert not torch.allclose(logits, logits_base, atol=atol, rtol=rtol)
 
         model.merge_adapter()
         logits_merged = model(dummy_input)[0]
+        for name, module in model.named_modules():
+            if "base_layer" in name:
+                assert isinstance(module.weight, AffineQuantizedTensor)
+
         model.unmerge_adapter()
         logits_unmerged = model(dummy_input)[0]
+        for name, module in model.named_modules():
+            if "base_layer" in name:
+                assert isinstance(module.weight, AffineQuantizedTensor)
 
         model = model.merge_and_unload()
         logits_merged_unloaded = model(dummy_input)[0]
@@ -3202,7 +3341,7 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
 
     @pytest.mark.single_gpu_tests
-    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight(self):
+    def test_torchao_merge_layers_int8_dynamic_activation_int8_weight_raises(self):
         # int8_dynamic_activation_int8_weight does not support dequantize, thus merging does not work
         from transformers import TorchAoConfig
 
@@ -3232,52 +3371,6 @@ class PeftTorchaoGPUTests(unittest.TestCase):
         )
         with pytest.raises(NotImplementedError, match=msg):
             model.merge_adapter()
-
-    @pytest.mark.single_gpu_tests
-    #@pytest.mark.xfail(reason="int4_weight_only changes shape after dequantizing", strict=True)
-    def test_torchao_merge_layers_int4_weight_only(self):
-        from transformers import TorchAoConfig
-
-        quant_type = "int4_weight_only"
-        torch.manual_seed(0)
-        device = 0
-        dummy_input = torch.arange(10).view(-1, 1).to(device)
-
-        quantization_config = TorchAoConfig(quant_type=quant_type)
-        model = AutoModelForCausalLM.from_pretrained(
-            self.causal_lm_model_id, device_map=device, quantization_config=quantization_config
-        ).eval()
-        logits_base = model(dummy_input)[0]
-
-        config = LoraConfig(
-            r=16,
-            lora_alpha=32,
-            target_modules=["q_proj", "v_proj"],
-            lora_dropout=0.05,
-            bias="none",
-            task_type="CAUSAL_LM",
-            init_lora_weights=False,
-        )
-        model = get_peft_model(model, config)
-
-        model.eval()
-        logits = model(dummy_input)[0]
-
-        # sanity check: outputs changed
-        atol, rtol = 1e-2, 1e-2
-        assert not torch.allclose(logits, logits_base, atol=atol, rtol=rtol)
-
-        model.merge_adapter()
-        logits_merged = model(dummy_input)[0]
-        model.unmerge_adapter()
-        logits_unmerged = model(dummy_input)[0]
-
-        model = model.merge_and_unload()
-        logits_merged_unloaded = model(dummy_input)[0]
-
-        assert torch.allclose(logits, logits_merged, atol=atol, rtol=rtol)
-        assert torch.allclose(logits, logits_unmerged, atol=atol, rtol=rtol)
-        assert torch.allclose(logits, logits_merged_unloaded, atol=atol, rtol=rtol)
 
 
 PRECISIONS = [(torch.float32), (torch.float16), (torch.bfloat16)]
