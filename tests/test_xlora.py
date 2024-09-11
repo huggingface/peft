@@ -36,15 +36,15 @@ class TestXlora:
     model_id = "facebook/opt-125m"
     num_loras = 4
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def lora_dir(self, tmp_path_factory):
         return tmp_path_factory.mktemp("lora")
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def lora_embedding_dir(self, tmp_path_factory):
         return tmp_path_factory.mktemp("lora_embedding")
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def saved_lora_adapters(self, lora_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -57,7 +57,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def saved_lora_embedding_adapters(self, lora_embedding_dir):
         file_names = []
         for i in range(1, self.num_loras + 1):
@@ -70,7 +70,7 @@ class TestXlora:
             file_names.append(file_name)
         return file_names
 
-    @pytest.fixture(scope="function")
+    @pytest.fixture(scope="class")
     def tokenizer(self):
         tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True, device_map=self.torch_device)
         return tokenizer
