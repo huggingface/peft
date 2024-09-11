@@ -27,7 +27,7 @@ from .layer import Linear
 
 
 class TorchaoLoraLinear(Linear):
-    """LoRA layer implementation for torchao QLinear"""
+    """LoRA layer implementation for Linear layers using torchao data"""
 
     def __init__(self, *args, get_apply_tensor_subclass, **kwargs):
         # this is not strictly necessary, as kwargs are stored either way, but we want to error early if
