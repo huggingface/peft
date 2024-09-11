@@ -764,6 +764,10 @@ class PeftCustomModelTester(unittest.TestCase, PeftCommonTester):
         self._test_save_pretrained(model_id, config_cls, config_kwargs, safe_serialization=False)
 
     @parameterized.expand(TEST_CASES)
+    def test_load_model_empty_weights(self, test_name, model_id, config_cls, config_kwargs):
+        self._test_load_model_empty_weights(model_id, config_cls, config_kwargs)
+
+    @parameterized.expand(TEST_CASES)
     def test_from_pretrained_config_construction(self, test_name, model_id, config_cls, config_kwargs):
         self._test_from_pretrained_config_construction(model_id, config_cls, config_kwargs)
 

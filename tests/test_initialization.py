@@ -19,6 +19,7 @@ import pytest
 import torch
 from scipy import stats
 from torch import nn
+from transformers import AutoModelForCausalLM
 
 from peft import (
     AdaLoraConfig,
@@ -1216,3 +1217,82 @@ class TestNoInfiniteRecursionDeepspeed:
         finally:
             # ensure there are no side effects of this test
             cls.__init__ = original_init
+
+
+class TestEmptyInitialization:
+    """Test for the empty initialization option for loading PEFT models.
+
+    Note that we have `test_load_model_empty_weights` in the custom model tests. This is a a broad test (i.e. testing
+    all the PEFT methods) but not very deep (only tests if loading works and the device is correctly set). This test
+    class goes deeper but only tests LoRA, as checking all PEFT methods would be too much.
+
+    """
+    # test on CPU and optionally on accelerator device
+    devices = ["cpu"]
+    _device = infer_device()
+    if _device != "cpu":
+        devices.append(_device)
+
+    model_id = "hf-internal-testing/tiny-random-OPTForCausalLM"
+
+    def get_model(self):
+        return AutoModelForCausalLM.from_pretrained(self.model_id)
+
+    @pytest.fixture(scope="class")
+    def lora_path(self, tmp_path_factory):
+        torch.manual_seed(0)
+        tmp_path = tmp_path_factory.mktemp("lora")
+        model = self.get_model()
+        config = LoraConfig(init_lora_weights=False, target_modules="all-linear")
+        model = get_peft_model(model, config)
+        model.save_pretrained(tmp_path)
+        return tmp_path
+
+    @pytest.fixture(scope="class")
+    def inputs(self):
+        return {"input_ids": torch.randint(0, 100, (1, 10)), "attention_mask": torch.ones(1, 10)}
+
+    @pytest.mark.parametrize("device", devices)
+    def test_from_pretrained_empty_init_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = PeftModel.from_pretrained(model, lora_path, torch_device=device).eval()
+        device_set_not_empty = {p.device for p in model.parameters()}
+        logits_not_empty = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        model = PeftModel.from_pretrained(model, lora_path, init_empty=True, torch_device=device).eval()
+        device_set_empty = {p.device for p in model.parameters()}
+        logits_empty = model(**inputs).logits
+
+        assert device_set_empty == device_set_not_empty
+        assert torch.allclose(logits_empty, logits_not_empty)
+
+    @pytest.mark.parametrize("device", devices)
+    def test_load_adapter_empty_init_works(self, device, inputs, lora_path):
+        model = self.get_model().to(device)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+
+        torch.manual_seed(0)
+        model = get_peft_model(model, LoraConfig(init_lora_weights=False, target_modules="all-linear"))
+        model.load_adapter(lora_path, adapter_name="other", torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_not_empty = {p.device for p in model.parameters()}
+        logits_not_empty = model(**inputs).logits
+
+        del model
+
+        model = self.get_model().to(device)
+        torch.manual_seed(0)
+        model = get_peft_model(model, LoraConfig(init_lora_weights=False, target_modules="all-linear"))
+        model.load_adapter(lora_path, adapter_name="other", init_empty=True, torch_device=device)
+        model.set_adapter("other")
+        model.eval()
+        device_set_empty = {p.device for p in model.parameters()}
+        logits_empty = model(**inputs).logits
+
+        assert device_set_empty == device_set_not_empty
+        assert torch.allclose(logits_empty, logits_not_empty)

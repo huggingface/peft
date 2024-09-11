@@ -298,6 +298,26 @@ class PeftCommonTester:
 
         assert dummy_output.requires_grad
 
+    def _test_load_model_empty_weights(self, model_id, config_cls, config_kwargs):
+        # Ensure that init_empty=True works for from_pretrained and load_adapter and that the resulting model's
+        # parameters are on the correct device.
+        model = self.transformers_class.from_pretrained(model_id)
+        config = config_cls(
+            base_model_name_or_path=model_id,
+            **config_kwargs,
+        )
+        model = get_peft_model(model, config)
+
+        with tempfile.TemporaryDirectory() as tmp_dirname:
+            model.save_pretrained(tmp_dirname)
+
+            model = self.transformers_class.from_pretrained(model_id).to(self.torch_device)
+            model = PeftModel.from_pretrained(model, tmp_dirname, torch_device=self.torch_device, init_empty=True)
+            assert {p.device.type for p in model.parameters()} == {self.torch_device}
+
+            model.load_adapter(tmp_dirname, adapter_name="other")
+            assert {p.device.type for p in model.parameters()} == {self.torch_device}
+
     def _test_save_pretrained(self, model_id, config_cls, config_kwargs, safe_serialization=True):
         # ensure that the weights are randomly initialized
         if issubclass(config_cls, LoraConfig):
