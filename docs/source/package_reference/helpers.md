@@ -2,11 +2,16 @@
 rendered properly in your Markdown viewer.
 -->
 
-# Document Title
+# Helper methods
 
 A collection of helper functions for PEFT.
 
 ## Checking if a model is a PEFT model
 
 [[autodoc]] helpers.check_if_peft_model
+    - all
+
+## Temporarily Rescaling Adapter Scale in LoraLayer Modules
+
+[[autodoc]] helpers.rescale_adapter_scale
     - all

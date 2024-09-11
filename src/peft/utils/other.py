@@ -40,6 +40,7 @@ from .constants import (
     TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING,
+    TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING,
     TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING,
     WEIGHTS_NAME,
     bloom_model_postprocess_past_key_value,
@@ -65,6 +66,7 @@ __all__ = [
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
     "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
     "INCLUDE_LINEAR_LAYERS_SHORTHAND",
@@ -202,7 +204,15 @@ class ModulesToSaveWrapper(torch.nn.Module):
         # ModuleList, even though their forward methods cannot be called
         forbidden_classes = (torch.nn.ModuleDict, torch.nn.ModuleList, torch.nn.ParameterDict, torch.nn.ParameterList)
         if isinstance(self.original_module, forbidden_classes):
-            cls_name = self.original_module.__class__.__name__
+            cls_name = self.original_module.__class__
+            raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
+
+        # local import to avoid circular import
+        from peft.tuners.tuners_utils import BaseTunerLayer
+
+        if isinstance(self.original_module, BaseTunerLayer):
+            # e.g. applying modules_to_save to a lora layer makes no sense
+            cls_name = self.original_module.__class__
             raise TypeError(f"modules_to_save cannot be applied to modules of type {cls_name}")
 
     @property

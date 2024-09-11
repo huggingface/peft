@@ -37,6 +37,8 @@ from transformers import PreTrainedModel
 from transformers.modeling_outputs import QuestionAnsweringModelOutput, SequenceClassifierOutput, TokenClassifierOutput
 from transformers.utils import PushToHubMixin
 
+from peft.utils.constants import DUMMY_MODEL_CONFIG
+
 from . import __version__
 from .config import PeftConfig
 from .tuners import (
@@ -56,6 +58,7 @@ from .tuners import (
     PrefixEncoder,
     PromptEmbedding,
     PromptEncoder,
+    VBLoRAModel,
     VeraModel,
     XLoraConfig,
     XLoraModel,
@@ -98,6 +101,7 @@ PEFT_TYPE_TO_MODEL_MAPPING = {
     PeftType.FOURIERFT: FourierFTModel,
     PeftType.XLORA: XLoraModel,
     PeftType.HRA: HRAModel,
+    PeftType.VBLORA: VBLoRAModel,
 }
 
 
@@ -182,6 +186,15 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
     def active_adapters(self) -> list[str]:
         try:
             adapters = self.base_model.active_adapters
+            if not isinstance(adapters, list):
+                # Base model is probably a transformers model, see:
+                # https://github.com/huggingface/transformers/pull/30790#issuecomment-2253808249
+                # Unfortunately, transformers models also have an active_adapters method but it's 1) not a property and
+                # 2) calling it fails because the base model (usually) has no loaded adapter. The base model can be a
+                # transformers model for prompt learning, where the base model is not wrapped in a LoraModel or similar.
+                adapters = self.active_adapter
+                if isinstance(adapters, str):
+                    adapters = [adapters]
         except AttributeError:
             adapters = self.active_adapter
             if isinstance(adapters, str):
@@ -690,9 +703,13 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 prompts = prompt_encoder(prompt_tokens, task_ids)
             else:
                 if peft_config.inference_mode:
-                    prompts = prompt_encoder.embedding.weight.repeat(batch_size, 1, 1)
+                    prompts = prompt_encoder.embedding.weight
                 else:
+                    # Take only one prompt token sample and expand the output instead of expanding the input, see:
+                    # https://github.com/huggingface/peft/issues/2043#issuecomment-2321522577
+                    prompt_tokens = prompt_tokens[:1]
                     prompts = prompt_encoder(prompt_tokens)
+                prompts = prompts.repeat(batch_size, 1, 1)
             return prompts
 
     def get_nb_trainable_parameters(self) -> tuple[int, int]:
@@ -1238,9 +1255,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
 
         card.data["library_name"] = "peft"
 
-        model_config = getattr(self, "config", None)
-        if hasattr(model_config, "to_dict"):
-            model_config = model_config.to_dict()
+        model_config = BaseTuner.get_model_config(self)
+        model_config = None if model_config == DUMMY_MODEL_CONFIG else model_config
         if model_config is not None and "_name_or_path" in model_config:
             card.data["base_model"] = model_config["_name_or_path"]
 
@@ -1624,10 +1640,9 @@ class PeftModelForCausalLM(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
-            return self.base_model(
-                input_ids=input_ids, inputs_embeds=inputs_embeds, past_key_values=past_key_values, **kwargs
-            )
+            # overwrite past_kv in kwargs
+            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            return self.base_model(input_ids=input_ids, inputs_embeds=inputs_embeds, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -1671,6 +1686,10 @@ class PeftModelForCausalLM(PeftModel):
         uses_transformers_4_38 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.38.0")
         uses_transformers_4_36 = packaging.version.parse(transformers.__version__) >= packaging.version.parse("4.36.0")
         transformers_new_cache_archs = ["llama", "mistral", "persimmon", "phi"]
+        if packaging.version.parse(transformers.__version__) > packaging.version.parse("4.43.3"):
+            # https://github.com/huggingface/transformers/pull/31445
+            transformers_new_cache_archs.append("bloom")
+
         uses_cache = uses_transformers_4_38 or (
             uses_transformers_4_36 and self.base_model.config.model_type in transformers_new_cache_archs
         )
@@ -1707,16 +1726,20 @@ class PeftModelForCausalLM(PeftModel):
                 )
                 kwargs["token_type_ids"] = None
 
-            if model_kwargs["past_key_values"] is None and peft_config.peft_type == PeftType.PREFIX_TUNING:
-                past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
-                model_kwargs["past_key_values"] = past_key_values
-            else:
-                if model_kwargs["past_key_values"] is None:
-                    inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
-                    prompts = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0], task_ids=task_ids)
-                    prompts = prompts.to(inputs_embeds.dtype)
-                    model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
-                    model_kwargs["input_ids"] = None
+            # no past_key_values or past_key_values empty cache
+            requires_prompt_injection = (model_kwargs["past_key_values"] is None) or (
+                isinstance(model_kwargs["past_key_values"], transformers.Cache) and not model_kwargs["past_key_values"]
+            )
+
+            if requires_prompt_injection and peft_config.peft_type == PeftType.PREFIX_TUNING:
+                new_past_key_values = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0])
+                model_kwargs["past_key_values"] = new_past_key_values
+            elif requires_prompt_injection:
+                inputs_embeds = self.word_embeddings(model_kwargs["input_ids"])
+                prompts = self.get_prompt(batch_size=model_kwargs["input_ids"].shape[0], task_ids=task_ids)
+                prompts = prompts.to(inputs_embeds.dtype)
+                model_kwargs["inputs_embeds"] = torch.cat((prompts, inputs_embeds), dim=1)
+                model_kwargs["input_ids"] = None
 
         # For transformers>=4.38.0 - for some architectures such as Llama, `cache_position` is
         # passed in the forward pass to keep track of the position ids of the cache. We have to
@@ -1839,12 +1862,12 @@ class PeftModelForSeq2SeqLM(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
+            # overwrite past_kv in kwargs
+            kwargs["past_key_values"] = self.get_prompt(batch_size)
             return self.base_model(
                 input_ids=input_ids,
                 decoder_input_ids=decoder_input_ids,
                 decoder_inputs_embeds=decoder_inputs_embeds,
-                past_key_values=past_key_values,
                 **kwargs,
             )
         elif peft_config.peft_type in [PeftType.PROMPT_TUNING, PeftType.P_TUNING]:
@@ -2539,8 +2562,9 @@ class PeftModelForFeatureExtraction(PeftModel):
         )
 
         if peft_config.peft_type == PeftType.PREFIX_TUNING:
-            past_key_values = self.get_prompt(batch_size)
-            return self.base_model(input_ids=input_ids, past_key_values=past_key_values, **kwargs)
+            # overwrite past_kv in kwargs
+            kwargs["past_key_values"] = self.get_prompt(batch_size)
+            return self.base_model(input_ids=input_ids, **kwargs)
         else:
             if inputs_embeds is None:
                 inputs_embeds = self.word_embeddings(input_ids)
@@ -2641,10 +2665,9 @@ def get_layer_status(model: torch.nn.Module) -> list[TunerLayerStatus]:
             if isinstance(adapter_module, torch.nn.ModuleDict):
                 for key, submodule in adapter_module.items():
                     devices_dd[key].extend([param.device.type for param in submodule.parameters()])
-            elif (
-                isinstance(adapter_module, torch.nn.ParameterDict)
-                or (adapter_module.__class__.__name__ == "BufferDict")  # VeRA
-            ):
+            elif isinstance(adapter_module, torch.nn.ParameterDict) or (
+                adapter_module.__class__.__name__ == "BufferDict"
+            ):  # VeRA
                 for key, param in adapter_module.items():
                     devices_dd[key].append(param.device.type)
         devices = {key: sorted(set(val)) for key, val in devices_dd.items()}
