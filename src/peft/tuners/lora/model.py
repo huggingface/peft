@@ -72,6 +72,8 @@ class LoraModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LoraConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        init_empty (`bool`, `optional``, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
         `torch.nn.Module`: The Lora model.

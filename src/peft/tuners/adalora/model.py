@@ -42,6 +42,8 @@ class AdaLoraModel(LoraModel):
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`AdaLoraConfig`]): The configuration of the AdaLora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        init_empty (`bool`, `optional``, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
         `torch.nn.Module`: The AdaLora model.

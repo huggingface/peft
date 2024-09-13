@@ -417,7 +417,9 @@ class BaseTuner(nn.Module, ABC):
                 The adapter name.
             autocast_adapter_dtype (`bool`, *optional*):
                 Whether to autocast the adapter dtype. Defaults to `True`.
-            init_empty TODO
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process.
+
         """
         peft_config = self.peft_config[adapter_name]
         # Note: If possible, all checks should be performed *at the start of this method*.

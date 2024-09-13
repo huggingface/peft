@@ -49,7 +49,8 @@ class BOFTModel(BaseTuner):
         model ([`transformers.PreTrainedModel`]): The model to be adapted.
         config ([`BOFTConfig`]): The configuration of the BOFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        TODO
+        init_empty (`bool`, `optional``, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
         `torch.nn.Module`: The BOFT model.

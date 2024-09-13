@@ -37,7 +37,8 @@ class LNTuningModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`LNTuningConfig`]): The configuration of the Lora model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        TODO
+        init_empty (`bool`, `optional``, defaults to `False`):
+            This option has no effect on LN tuning but exists for consistency with other PEFT methods.
 
     Returns:
         'torch.nn.Module': The adapted model with LayerNorm tuned on.

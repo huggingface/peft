@@ -187,6 +187,14 @@ class LycorisLayer(BaseTunerLayer):
 class LycorisTuner(BaseTuner):
     r"""
     A base tuner for LyCORIS like adapters
+
+    Args:
+        model ([`torch.nn.Module`]): The model to be adapted.
+        config ([`LoraConfig`]): The configuration of the Lora model.
+        adapter_name (`str`): The name of the adapter, defaults to `"default"`.
+        init_empty (`bool`, `optional``, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
+
     """
 
     prefix: str

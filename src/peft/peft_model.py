@@ -117,6 +117,8 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
             Whether to autocast the adapter dtype. Defaults to `True`. Right now, this will only cast adapter weights
             using float16 and bfloat16 to float32, as this is typically required for stable training, and only affect
             select PEFT tuners.
+        init_empty (`bool`, `optional``, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
 
     **Attributes**:
         - **base_model** ([`torch.nn.Module`]) -- The base transformer model used for Peft.
@@ -457,6 +459,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 are needed. Rather than perform expensive operations on small data, the data is transferred to the GPU
                 on-demand, the operation(s) performed, and the results moved back to CPU memory. This brings a slight
                 momentary VRAM overhead but gives orders of magnitude speedup in certain cases.
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
+                process.
             torch_device (`str`, *optional*, defaults to None):
                 The device to load the adapter on. If `None`, the device will be inferred.
             kwargs: (`optional`):
@@ -876,6 +881,10 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 The name of the adapter to be added.
             peft_config ([`PeftConfig`]):
                 The configuration of the adapter to be added.
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device. Useful to speed up the process when loading saved
+                adapters. Don't use this option when creating a new PEFT adapter for training.
+
         """
         if peft_config.peft_type != self.peft_type:
             raise ValueError(
@@ -1085,7 +1094,7 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
         torch_device: Optional[str] = None,
         autocast_adapter_dtype: bool = True,
         ephemeral_gpu_offload: bool = False,
-        init_empty: bool = False,  # TODO could be True since we're loading anyway?
+        init_empty: bool = False,
         **kwargs: Any,
     ):
         """
@@ -1112,6 +1121,9 @@ class PeftModel(PushToHubMixin, torch.nn.Module):
                 only affect select PEFT tuners.
             ephemeral_gpu_offload (`bool`, *optional*, defaults to `False`):
                 Whether to use ephemeral GPU offloading for partially loaded modules. Defaults to `False`.
+            init_empty (`bool`, `optional``, defaults to `False`):
+                Create empty adapter weights on meta device before loading the saved weights. Useful to speed up the
+                process.
             kwargs: (`optional`):
                 Additional arguments to modify the way the adapter is loaded, e.g. the token for Hugging Face Hub.
         """

@@ -45,7 +45,8 @@ class FourierFTModel(BaseTuner):
         model ([`torch.nn.Module`]): The model to be adapted.
         config ([`FourierFTConfig`]): The configuration of the FourierFT model.
         adapter_name (`str`): The name of the adapter, defaults to `"default"`.
-        TODO
+        init_empty (`bool`, `optional``, defaults to `False`):
+            Create empty adapter weights on meta device. Useful to speed up the process.
 
     Returns:
         `torch.nn.Module`: The FourierFT model.

@@ -250,6 +250,19 @@ TunerModelStatus(
 )
 ```
 
+## Speed
+
+### Loading adapter weights is slow
+
+Loading adapters like LoRA weights should generally be fast compared to loading the base model. However, there can be use cases where the adapter weights are quite large or where users need to load a large number of adapters -- the loading time can add up in this case. To speed up the loading time, you can pass the `init_empty=True` argument to [`~PeftModel.from_pretrained`] and [`~PeftModel.load_adapter`].
+
+<Tip>
+
+If this option works well across different use casese, it may become the default for adapter loading in the future.
+
+</Tip>
+
+
 ## Reproducibility
 
 ### Models using batch norm
