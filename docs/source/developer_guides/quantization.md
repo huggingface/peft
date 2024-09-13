@@ -204,7 +204,7 @@ model = get_peft_model(base_model, peft_config)
 
 ### Caveats:
 
-- Use the most recent versions of torchao and transformers for best results.
+- Use the most recent versions of torchao (>= v0.4.0) and transformers (> 4.42).
 - Only linear layers are currently supported.
 - `quant_type = "int4_weight_only"` is currently not supported.
 - `NF4` is not implemented in transformers as of yet and is thus also not supported.

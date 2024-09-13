@@ -114,7 +114,6 @@ class TorchaoLoraLinear(Linear):
             del weight
 
     def __repr__(self) -> str:
-        # TODO
         rep = super().__repr__()
         return rep.replace("lora.Linear", f"lora.{self.__class__.__name__}")
 
